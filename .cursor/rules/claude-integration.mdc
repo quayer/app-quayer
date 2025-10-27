@@ -1,0 +1,279 @@
+# Claude Integration with Igniter.js
+
+## Overview
+
+This guide establishes how Claude AI should be configured and used as an effective code agent for developing Igniter.js applications, leveraging its strong reasoning and code generation capabilities.
+
+## Integration Methods
+
+### Method 1: Framework Training via llms.txt
+
+**Purpose**: Give Claude deep, foundational understanding of the entire Igniter.js framework
+**Best for**: Existing projects not created from official templates
+
+#### Setup Process
+
+1. **Create Context File**
+   - Location: Project root
+   - Filename: `AGENT.md`
+   - Purpose: Claude Code CLI automatically uses this for context
+
+2. **Add Framework Knowledge**
+   ```markdown
+   # Igniter.js Framework Expert
+
+   You are an expert developer specializing in Igniter.js. Your primary source of knowledge for all framework-related questions and code generation is the official documentation, which can be found in its entirety at: https://igniterjs.com/llms.txt.
+
+   Always adhere to the patterns and best practices described in that document.
+   ```
+
+3. **Start Interactive Session**
+   ```bash
+   # Install CLI globally
+   npm install -g @anthropic-ai/claude-code
+
+   # Start agent in project root
+   claude
+   ```
+
+### Method 2: Official Templates (Recommended)
+
+**Purpose**: Start with pre-configured environment
+**Best for**: New projects or greenfield development
+
+**Advantages**:
+- Pre-configured `AGENT.md` files
+- Automatic context detection
+- Integrated MCP Server capabilities
+- Best practices built-in
+
+## MCP Server Integration
+
+### What MCP Server Provides
+
+The Model Context Protocol (MCP) Server gives Claude direct access to your project through standardized tools:
+
+1. **Codebase Analysis**
+   - Deep understanding of project structure
+   - Type-safe analysis of Igniter.js patterns
+   - Feature and controller comprehension
+
+2. **Development Commands**
+   - Start/stop development server
+   - Run tests and validation
+   - Execute build processes
+
+3. **Code Scaffolding**
+   - Generate features with proper structure
+   - Create controllers following patterns
+   - Scaffold procedures with validation
+
+4. **Project Management**
+   - Built-in task management tools
+   - Progress tracking and monitoring
+   - Agent delegation capabilities
+
+5. **Contextual Memory**
+   - Remember architectural decisions
+   - Store code patterns and insights
+   - Maintain project knowledge graph
+
+### Installing MCP Server
+
+```bash
+# Add Igniter.js MCP Server to Claude Code
+claude mcp add igniter npx @igniter-js/mcp-server
+
+# Verify installation
+claude mcp list
+
+# Restart Claude Desktop to activate
+```
+
+### MCP Server Capabilities
+
+Once installed, Claude gains access to:
+
+**File Analysis Tools**:
+- `analyze_file` - Deep file health and type analysis
+- `analyze_feature` - Feature-level architectural analysis
+- `analyze_project` - Comprehensive project overview
+
+**Code Investigation**:
+- `find_implementation` - Locate definitions and implementations
+- `explore_source` - Navigate source code intelligently
+- `trace_dependency_chain` - Understand dependency relationships
+
+**Development Operations**:
+- `get_openapi_spec` - Access API specifications
+- `make_api_request` - Test API endpoints
+- `run_command` - Execute project commands
+
+**Knowledge Management**:
+- `store_memory` - Persist architectural decisions
+- `search_memories` - Retrieve contextual knowledge
+- `relate_memories` - Build knowledge relationships
+
+**Task Coordination**:
+- `create_task` - Define development tasks
+- `list_tasks` - View task status
+- `update_task_status` - Track progress
+- `delegate_to_agent` - Distribute work to specialized agents
+
+## Claude Integration Best Practices
+
+### 1. Context Management
+
+**Always provide**:
+- Current project structure understanding
+- Relevant documentation references
+- Architectural decision context
+- Related pattern examples
+
+**Use llms.txt as source of truth** for:
+- Framework patterns and conventions
+- API structure and best practices
+- Type definitions and validation patterns
+- Real-time and async operations
+
+### 2. Development Workflow
+
+**Before starting work**:
+1. Search memories for existing patterns
+2. Analyze target files with `analyze_file`
+3. Check OpenAPI spec if working with API
+4. Review related tasks and dependencies
+
+**During development**:
+1. Follow framework conventions from llms.txt
+2. Use MCP tools for validation and testing
+3. Store insights and decisions in memory
+4. Update task status regularly
+
+**After completion**:
+1. Validate with `make_api_request` for APIs
+2. Run tests to ensure quality
+3. Store patterns as memories
+4. Update documentation if needed
+
+### 3. Agent Delegation
+
+**Leverage MCP Server for**:
+- Complex feature development (delegate to specialized agents)
+- Parallel task execution
+- Independent component development
+- Specialized domain tasks (API, UI, testing)
+
+**Delegation decision framework**:
+- Complex but independent → Delegate
+- Requires deep context → Execute directly
+- Parallel execution beneficial → Delegate
+- Strategic decision needed → Execute directly
+
+### 4. Quality Assurance
+
+**Use MCP tools to ensure**:
+- TypeScript compilation success (`analyze_file`)
+- API contract validation (`get_openapi_spec`, `make_api_request`)
+- Pattern consistency (`search_memories` for similar code)
+- Test coverage and execution
+
+## Configuration Files
+
+### AGENT.md Structure for Igniter.js Projects
+
+```markdown
+# [Your Agent Name] - Igniter.js Project
+
+## Identity and Mission
+[Define agent's role and purpose]
+
+## Project Context
+- Framework: Igniter.js with Next.js
+- Architecture: [Describe your architecture]
+- Key Technologies: [List stack]
+
+## Framework Knowledge Source
+Primary documentation: https://igniterjs.com/llms.txt
+
+## Development Protocols
+[Reference rule files from .cursor/rules/]
+
+## MCP Server Integration
+Enabled: Yes
+Capabilities: [List enabled MCP tools]
+
+## Quality Standards
+[Define your quality gates]
+```
+
+### MCP Server Configuration
+
+Located in: `.cursor/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "igniter": {
+      "command": "npx",
+      "args": ["@igniter-js/mcp-server"]
+    }
+  }
+}
+```
+
+## Integration with Existing Rules
+
+This Claude integration works in conjunction with:
+
+- **[core-principles.mdc](./core-principles.mdc)** - Identity and mission alignment
+- **[development-workflow.mdc](./development-workflow.mdc)** - Mandatory file analysis protocol
+- **[tools-reference.mdc](./tools-reference.mdc)** - Complete MCP tool reference
+- **[tools-usage-patterns.mdc](./tools-usage-patterns.mdc)** - Standardized tool workflows
+- **[agents.mdc](./agents.mdc)** - Delegation strategies
+- **[memory.mdc](./memory.mdc)** - Knowledge management
+
+## Troubleshooting
+
+### MCP Server Not Loading
+
+1. Verify installation: `claude mcp list`
+2. Check configuration: `.cursor/mcp.json`
+3. Restart Claude Desktop
+4. Check logs: `~/.claude/logs/mcp.log`
+
+### Context Not Being Used
+
+1. Verify `AGENT.md` exists in project root
+2. Ensure proper formatting and structure
+3. Restart Claude Code CLI session
+4. Check for syntax errors in markdown
+
+### Tools Not Available
+
+1. Confirm MCP server is running: `claude mcp status`
+2. Verify network connectivity to npm registry
+3. Check Node.js version compatibility
+4. Reinstall: `claude mcp remove igniter && claude mcp add igniter npx @igniter-js/mcp-server`
+
+## References
+
+- **Official Documentation**: https://igniterjs.com/llms.txt
+- **Claude Code CLI**: https://github.com/anthropics/claude-code
+- **MCP Server Package**: https://www.npmjs.com/package/@igniter-js/mcp-server
+- **Next.js Starter Template**: https://github.com/igniter-js/igniter/tree/main/apps/starter-nextjs
+
+## Continuous Improvement
+
+As you work with Claude on Igniter.js projects:
+
+1. **Store successful patterns** in memory system
+2. **Update AGENT.md** with project-specific conventions
+3. **Refine delegation strategies** based on outcomes
+4. **Share insights** with team through documentation
+5. **Contribute improvements** back to framework community
+
+---
+
+**Last Updated**: 2025-09-29
+**Lia Version**: Enhanced with MCP Server Integration

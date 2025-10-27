@@ -1,0 +1,57 @@
+# ==================================
+# EditorConfig
+# ==================================
+# Padronização de código entre IDEs e editores
+# https://editorconfig.org
+
+root = true
+
+# Defaults for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# TypeScript, JavaScript, JSX, TSX
+[*.{ts,tsx,js,jsx,mjs,cjs}]
+indent_size = 2
+max_line_length = 100
+
+# JSON
+[*.json]
+indent_size = 2
+
+# YAML
+[*.{yml,yaml}]
+indent_size = 2
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+
+# SQL
+[*.sql]
+indent_size = 2
+
+# Docker
+[Dockerfile]
+indent_size = 2
+
+[docker-compose*.yml]
+indent_size = 2
+
+# Makefiles
+[Makefile]
+indent_style = tab
+
+# Package files
+[{package.json,package-lock.json}]
+indent_size = 2

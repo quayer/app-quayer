@@ -1,0 +1,54 @@
+---
+id: architectural-decision-shareable-link-system-implementation
+type: architectural_decision
+confidence: 0.95
+created_at: '2025-09-30T09:11:57.039Z'
+updated_at: '2025-09-30T09:11:57.039Z'
+tags:
+  - share-system
+  - client-onboarding
+  - qr-code
+  - security
+  - prisma
+  - igniter
+source: user_input
+project_root: 'c:\Users\Administrator\CascadeProjects\app-quayer'
+relationships: []
+---
+Implemented complete shareable link system for client onboarding:
+
+## Architecture
+- **Database**: ShareToken model with Prisma (token, instanceId, expiresAt, usedAt)
+- **Backend**: Share controller with 4 endpoints (generate, validate, generateQR, checkStatus)
+- **Frontend**: Client guidance page at /connect/[token] with QR code display
+- **Integration**: Share modal in dashboard, share action in instance card dropdown
+
+## Key Features
+1. Token-based sharing with 24-hour expiration (configurable)
+2. Public client guidance page with step-by-step WhatsApp connection instructions
+3. Real-time connection status polling (3-second intervals)
+4. QR code timer with auto-refresh capability
+5. Professional UI inspired by ShadcnUIKit design
+
+## API Endpoints
+- POST /api/v1/share/generate - Generate share token and URL
+- GET /api/v1/share/validate/:token - Validate token and get instance info
+- POST /api/v1/share/qr - Generate QR code for client connection
+- GET /api/v1/share/status/:token - Check connection status
+
+## Security
+- UUID-based tokens with database persistence
+- Expiration checks on all operations
+- Token usage tracking (usedAt timestamp)
+- Instance ownership validation
+- Cascade delete on instance removal
+
+## UX Flow
+1. Admin clicks "Compartilhar" on instance card
+2. ShareModal generates shareable link
+3. Admin copies/sends link to client
+4. Client opens /connect/[token] page
+5. Page validates token and displays QR code
+6. Client scans QR with WhatsApp
+7. Page polls status and shows success message
+8. Token is marked as used

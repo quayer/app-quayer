@@ -1,0 +1,16 @@
+{
+  "status": "commited",
+  "type": "frontend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:3000",
+  "executionArgs": {
+    "projectName": "app-quayer",
+    "projectPath": "C:\\Users\\gabri\\OneDrive\\Documentos\\app-quayer",
+    "testIds": [],
+    "additionalInstruction": "",
+    "envs": {
+      "API_KEY": "sk-user-7ISDoikTkNGDGuRJm-64s-9_a5dXXuUCuwW1jATp-_pQwWDPNYFn0FzYMBqGBXA-Tj30_D5trWqsny94MN9yZVyKqvmXCsZUYZAdHl92PJsdqKkNbcIFDwAWFFXtPV3SfzA"
+    }
+  },
+  "proxy": "http://167d9260-d6c4-4da1-ada6-bc659c5b2421:fMeTsWDuvAmqp4ia5zSmSCZbszp3Byt4@tun.testsprite.com:8080"
+}

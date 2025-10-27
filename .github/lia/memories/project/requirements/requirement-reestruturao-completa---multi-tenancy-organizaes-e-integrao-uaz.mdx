@@ -1,0 +1,177 @@
+---
+id: requirement-reestruturao-completa---multi-tenancy-organizaes-e-integrao-uaz
+type: requirement
+confidence: 0.9
+created_at: '2025-10-01T16:58:47.089Z'
+updated_at: '2025-10-01T16:58:47.089Z'
+tags:
+  - requirements
+  - multi-tenancy
+  - uaz-api
+  - organizations
+  - permissions
+  - restructure
+source: user_input
+project_root: 'c:\Users\Administrator\CascadeProjects\app-quayer'
+relationships: []
+---
+# Reestruturação Completa do app-quayer
+
+## Escopo do Projeto
+
+### 1. Arquitetura Multi-tenancy
+- **Organizações:** Entidade principal de agrupamento
+- **Usuários:** Vinculados a organizações com níveis de acesso
+- **Permissões:** Sistema granular de controle de acesso
+
+### 2. Tipos de Usuários
+1. **Admin:** Acesso total ao sistema (super admin)
+2. **Master:** Dono da organização, acesso completo à sua org
+3. **Usuário Regular:** Acesso apenas à página de integrações (conectar WhatsApp, enviar mensagens)
+
+### 3. Integração com UAZ API
+- Migrar de API própria para UAZ API como backend principal
+- Implementar todas as rotas do UAZ spec
+- Manter compatibilidade com funcionalidades existentes
+
+### 4. Páginas a Criar
+
+#### Autenticação (Público)
+- `/auth/register/pf` - Registro Pessoa Física
+- `/auth/register/pj` - Registro Pessoa Jurídica (Organização)
+- `/auth/login` - Login
+- `/auth/verify-email/[token]` - Verificação de email
+- `/auth/forgot-password` - Recuperação de senha
+- `/auth/reset-password/[token]` - Reset de senha
+
+#### Dashboard Admin (apenas Admin)
+- `/admin/dashboard` - Overview geral do sistema
+- `/admin/customers` - Gerenciar clientes (organizações)
+- `/admin/organizations` - Gerenciar organizações
+- `/admin/access-levels` - Gerenciar níveis de acesso
+- `/admin/permissions` - Gerenciar permissões
+- `/admin/configurations` - Configurações do sistema
+
+#### Dashboard Master (Dono da Org)
+- `/dashboard` - Dashboard da organização
+- `/dashboard/instances` - Gerenciar instâncias WhatsApp
+- `/dashboard/users` - Gerenciar usuários da org
+- `/dashboard/invitations` - Convites enviados
+- `/dashboard/levels` - Níveis de acesso da org
+- `/dashboard/billing` - Informações de cobrança
+- `/dashboard/settings` - Configurações da org
+
+#### Área de Integrações (Usuário Regular)
+- `/integracoes` - Página única para conectar WhatsApp e enviar mensagens
+- Acesso restrito apenas às suas próprias instâncias
+
+### 5. Funcionalidades a Implementar
+
+#### Sistema de Autenticação Completo
+- Registro PF/PJ
+- Login com JWT
+- Verificação de email
+- Recuperação de senha
+- Troca de senha
+- Switch entre organizações (para usuários multi-org)
+
+#### Gerenciamento de Usuários
+- CRUD de usuários
+- Sistema de convites
+- Níveis de acesso customizados
+- Permissões granulares
+
+#### Gerenciamento de Organizações
+- CRUD de organizações
+- Vincular usuários a organizações
+- Tipo de cobrança (billing type)
+- Configurações específicas por org
+
+#### Gerenciamento de Instâncias (atual + UAZ)
+- Criar instância via UAZ API
+- Conectar/Desconectar
+- QR Code / Pairing Code
+- Webhooks
+- Status em tempo real
+- Envio de mensagens
+
+#### Sistema de Projetos (novo)
+- Agrupar instâncias por projeto
+- Compartilhamento de projetos
+- Permissões por projeto
+
+### 6. Rotas UAZ API a Integrar
+
+#### Auth
+- POST /api/v1/auth/register/pf
+- POST /api/v1/auth/register/pj
+- POST /api/v1/auth/login
+- GET /api/v1/auth/verify-token
+- GET /api/v1/auth/verify-email/:token
+- POST /api/v1/auth/resend-verification
+- POST /api/v1/auth/forgot-password
+- POST /api/v1/auth/reset-password
+- POST /api/v1/auth/update-password
+- PATCH /api/v1/auth/switch-organization
+
+#### Users
+- GET /api/v1/users/invitations
+- POST /api/v1/users/invite
+- POST /api/v1/users/link-organization
+- GET /api/v1/users/access-levels
+- GET /api/v1/users/permissions
+
+#### Organizations
+- GET /api/v1/organizations
+- POST /api/v1/organizations
+- PUT /api/v1/organizations/:id/billing-type
+- GET /api/v1/organizations/levels
+- POST /api/v1/organizations/levels
+
+#### Admin
+- GET /api/v1/admin/customers
+- GET /api/v1/admin/organizations
+- POST /api/v1/admin/configurations
+- POST /api/v1/admin/access-levels/initialize
+- POST /api/v1/admin/access-levels/:id
+
+### 7. Melhorias de UX
+- Dashboard moderno e intuitivo
+- Navegação clara por nível de acesso
+- Feedback visual de ações
+- Loading states apropriados
+- Tratamento de erros amigável
+- Responsividade mobile
+
+### 8. Prioridades de Implementação
+
+**Fase 1:** Sistema de Autenticação e Organizações
+- Models Prisma
+- Auth controllers
+- Páginas de registro/login
+- Middleware de permissões
+
+**Fase 2:** Dashboard Admin
+- CRUD de organizações
+- Gerenciamento de usuários
+- Níveis de acesso e permissões
+
+**Fase 3:** Dashboard Master
+- Gerenciamento de instâncias
+- Sistema de convites
+- Configurações da org
+
+**Fase 4:** Integração UAZ API
+- Migrar endpoints de instâncias
+- Webhooks
+- Envio de mensagens
+
+**Fase 5:** Sistema de Projetos
+- CRUD de projetos
+- Vinculação com instâncias
+- Compartilhamento
+
+**Fase 6:** UX/UI Polish
+- Design system
+- Animações
+- Responsividade

@@ -1,0 +1,9 @@
+@echo off
+echo Matando todos os processos node...
+taskkill /F /IM node.exe /T 2>nul
+timeout /t 3 /nobreak >nul
+echo Limpando cache...
+cd /d "C:\Users\gabri\OneDrive\Documentos\app-quayer"
+rmdir /s /q .next 2>nul
+echo Iniciando servidor na porta 3000...
+npm run dev

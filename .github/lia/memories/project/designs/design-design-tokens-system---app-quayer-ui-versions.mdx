@@ -1,0 +1,374 @@
+---
+id: design-design-tokens-system---app-quayer-ui-versions
+type: design
+confidence: 0.98
+created_at: '2025-09-30T03:19:24.617Z'
+updated_at: '2025-09-30T03:19:24.617Z'
+tags:
+  - design-tokens
+  - design-system
+  - ui-versions
+  - theming
+  - app-quayer
+source: user_input
+project_root: 'c:\Users\Administrator\CascadeProjects\app-quayer'
+relationships: []
+---
+# Design Tokens System - app-quayer
+
+## Estratégia de Implementação Multi-Versão
+
+### Objetivo
+Criar 4 versões distintas de UI para o app-quayer, cada uma com características específicas, mantendo consistência através de um sistema de design tokens centralizado.
+
+---
+
+## Sistema de Design Tokens Base
+
+### Color Palette (Dark Theme Primary)
+```css
+:root {
+  /* Background Layers */
+  --bg-primary: #0a0a0a;      /* Main background */
+  --bg-secondary: #1a1a1a;    /* Card backgrounds */
+  --bg-tertiary: #2a2a2a;     /* Hover states */
+  
+  /* WhatsApp Brand Colors */
+  --whatsapp-green: #25d366;
+  --whatsapp-dark: #075e54;
+  --whatsapp-light: #dcf8c6;
+  
+  /* Accent Colors */
+  --accent-blue: #3b82f6;
+  --accent-purple: #a855f7;
+  --accent-emerald: #10b981;
+  --accent-red: #ef4444;
+  --accent-yellow: #f59e0b;
+  
+  /* Text Colors */
+  --text-primary: #ffffff;
+  --text-secondary: #a3a3a3;
+  --text-tertiary: #737373;
+  --text-disabled: #525252;
+  
+  /* Border Colors */
+  --border-primary: #404040;
+  --border-secondary: #262626;
+  --border-focus: var(--accent-blue);
+  
+  /* Status Colors */
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #ef4444;
+  --status-info: #3b82f6;
+  
+  /* Shadow System */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.2);
+  --shadow-xl: 0 20px 25px rgba(0,0,0,0.3);
+}
+```
+
+### Typography Scale
+```css
+:root {
+  /* Font Families */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', 'Courier New', monospace;
+  
+  /* Font Sizes */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-base: 1rem;     /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 1.875rem;  /* 30px */
+  --text-4xl: 2.25rem;   /* 36px */
+  
+  /* Font Weights */
+  --font-light: 300;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* Line Heights */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+}
+```
+
+### Spacing Scale
+```css
+:root {
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+}
+```
+
+### Border Radius
+```css
+:root {
+  --radius-sm: 0.25rem;   /* 4px */
+  --radius-md: 0.375rem;  /* 6px */
+  --radius-lg: 0.5rem;    /* 8px */
+  --radius-xl: 0.75rem;   /* 12px */
+  --radius-2xl: 1rem;     /* 16px */
+  --radius-full: 9999px;
+}
+```
+
+### Animation Timings
+```css
+:root {
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+```
+
+---
+
+## Estrutura de Pastas Proposta
+
+```
+src/
+├── components/
+│   ├── ui/                       # shadcn/ui base (já existe)
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   └── ...
+│   │
+│   ├── ui-magic/                 # Magic UI components
+│   │   ├── globe.tsx
+│   │   ├── bento-grid.tsx
+│   │   ├── animated-list.tsx
+│   │   └── ...
+│   │
+│   ├── ui-21st/                  # 21st.dev components
+│   │   ├── ai-chat.tsx
+│   │   ├── file-upload.tsx
+│   │   ├── advanced-table.tsx
+│   │   └── ...
+│   │
+│   ├── ui-aceternity/            # Aceternity UI (se necessário)
+│   │   ├── hero-section.tsx
+│   │   ├── pricing-card.tsx
+│   │   └── ...
+│   │
+│   └── whatsapp/                 # Componentes específicos (já existe)
+│       ├── instance-card.tsx
+│       ├── connection-modal.tsx
+│       └── ...
+│
+├── styles/
+│   ├── tokens/
+│   │   ├── colors.css           # Design tokens de cores
+│   │   ├── typography.css       # Design tokens de tipografia
+│   │   ├── spacing.css          # Design tokens de espaçamento
+│   │   └── animations.css       # Design tokens de animações
+│   │
+│   ├── themes/
+│   │   ├── theme-v1-base.css    # Tema Versão 1
+│   │   ├── theme-v2-pro.css     # Tema Versão 2
+│   │   ├── theme-v3-premium.css # Tema Versão 3
+│   │   └── theme-v4-marketing.css # Tema Versão 4
+│   │
+│   └── globals.css              # Estilos globais (já existe)
+│
+└── lib/
+    ├── utils.ts                 # Utilities (já existe)
+    └── theme-switcher.ts        # Sistema de troca de temas
+```
+
+---
+
+## Versão 1: Base - shadcn/ui + Magic UI
+
+### Tema Visual
+- **Estilo:** Moderno, minimalista, dark-first
+- **Cores:** Azul profundo + Verde WhatsApp
+- **Animações:** Suaves e funcionais
+- **Foco:** Usabilidade e performance
+
+### Componentes Prioritários
+
+#### De Magic UI (Gratuitos):
+1. **Bento Grid** - Layout do dashboard
+2. **Animated List** - Lista de instâncias
+3. **Number Ticker** - Estatísticas animadas
+4. **Blur Fade** - Transições de entrada
+5. **Globe** - Mapa de conexões globais
+6. **Marquee** - Notificações/updates
+7. **Terminal** - Logs de sistema
+
+#### De shadcn/ui Kit (Gratuitos):
+1. **Cards** - Product Card, Stat Card, Task Card
+2. **Forms** - Auth forms, Settings forms
+3. **Charts** - Line charts para analytics
+4. **Skeleton** - Loading states
+5. **Theme Switcher** - Light/dark mode
+
+### Paleta de Cores V1
+```css
+.theme-v1 {
+  --primary: #3b82f6;      /* Blue */
+  --secondary: #25d366;    /* WhatsApp Green */
+  --accent: #a855f7;       /* Purple */
+  --background: #0a0a0a;
+  --foreground: #ffffff;
+}
+```
+
+---
+
+## Versão 2: Pro - 21st.dev Components
+
+### Tema Visual
+- **Estilo:** Profissional, rico em features
+- **Cores:** Roxo + Ciano + Verde WhatsApp
+- **Animações:** Mais elaboradas, micro-interações
+- **Foco:** Features avançadas e produtividade
+
+### Componentes Prioritários (21st.dev):
+1. **AI Chat** - Chatbot de suporte integrado
+2. **File Upload** - Upload de mídias WhatsApp
+3. **Advanced Tables** - Listagens complexas
+4. **Notifications** - Sistema de notificações
+5. **Sidebars** - Navegação avançada
+6. **File Tree** - Explorador de arquivos
+7. **Advanced Forms** - Formulários complexos
+8. **Date Pickers** - Seleção de datas/horários
+9. **Empty States** - Estados vazios elegantes
+10. **Toasts** - Notificações toast
+
+### Paleta de Cores V2
+```css
+.theme-v2 {
+  --primary: #a855f7;      /* Purple */
+  --secondary: #06b6d4;    /* Cyan */
+  --accent: #25d366;       /* WhatsApp Green */
+  --background: #0f0f0f;
+  --foreground: #fafafa;
+}
+```
+
+---
+
+## Versão 3: Premium - shadcn/ui Kit PRO
+
+### Tema Visual
+- **Estilo:** Premium, polido, corporativo
+- **Cores:** Dourado + Azul escuro + Verde WhatsApp
+- **Animações:** Sofisticadas e premium
+- **Foco:** Enterprise features
+
+### Componentes Prioritários (PRO):
+1. **Advanced Charts** - Analytics detalhados
+2. **Premium Cards** - Cards com designs elaborados
+3. **Advanced Forms** - Formulários multi-step
+4. **Premium Dropdowns** - Menus complexos
+5. **Advanced Date Pickers** - Seleção de períodos
+
+### Paleta de Cores V3
+```css
+.theme-v3 {
+  --primary: #fbbf24;      /* Gold */
+  --secondary: #1e3a8a;    /* Deep Blue */
+  --accent: #25d366;       /* WhatsApp Green */
+  --background: #050505;
+  --foreground: #f5f5f5;
+}
+```
+
+---
+
+## Versão 4: Marketing - Aceternity UI
+
+### Tema Visual
+- **Estilo:** Marketing, impactante, moderno
+- **Cores:** Gradientes vibrantes + Verde WhatsApp
+- **Animações:** Chamativas e envolventes
+- **Foco:** Conversão e impacto visual
+
+### Componentes Prioritários (Aceternity):
+1. **Hero Sections** - Landing page principal
+2. **Pricing Tables** - Planos e preços
+3. **Testimonials** - Depoimentos de clientes
+4. **CTA Sections** - Call-to-actions
+5. **Feature Grids** - Grid de features
+6. **Stats Sections** - Estatísticas impactantes
+7. **Logo Cloud** - Clientes/partners
+8. **FAQ Sections** - Perguntas frequentes
+
+### Paleta de Cores V4
+```css
+.theme-v4 {
+  --primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --accent: #25d366;       /* WhatsApp Green */
+  --background: #0a0a0a;
+  --foreground: #ffffff;
+}
+```
+
+---
+
+## Plano de Implementação
+
+### Fase 1: Setup (Semana 1)
+1. ✅ Instalar Magic UI
+2. ✅ Criar estrutura de pastas
+3. ✅ Configurar design tokens base
+4. ✅ Implementar sistema de temas
+
+### Fase 2: Versão 1 - Base (Semana 2-3)
+1. Instalar componentes Magic UI selecionados
+2. Implementar componentes shadcn/ui Kit gratuitos
+3. Aplicar tema V1
+4. Refatorar dashboard atual
+5. Testes e ajustes
+
+### Fase 3: Versão 2 - Pro (Semana 4-5)
+1. Implementar componentes 21st.dev
+2. Criar AI Chat integration
+3. Advanced tables e file uploads
+4. Aplicar tema V2
+5. Testes e validação
+
+### Fase 4: Versão 3 - Premium (Semana 6)
+1. Avaliar ROI dos componentes PRO
+2. Implementar apenas se necessário
+3. Foco em analytics e enterprise features
+
+### Fase 5: Versão 4 - Marketing (Semana 7-8)
+1. Criar landing page pública
+2. Implementar Aceternity components
+3. Páginas de pricing e features
+4. Marketing site completo
+
+---
+
+## Próximos Passos Imediatos
+
+1. ✅ Instalar Magic UI CLI
+2. ✅ Criar arquivo de design tokens (`src/styles/tokens/`)
+3. ✅ Implementar sistema de troca de temas
+4. ⏳ Selecionar primeiro componente Magic UI para teste
+5. ⏳ Documentar padrões de uso

@@ -1,0 +1,43 @@
+---
+id: bug-pattern-critical-bugs-found-in-whatsapp-instance-manager
+type: bug_pattern
+confidence: 0.9
+created_at: '2025-09-30T08:37:48.343Z'
+updated_at: '2025-09-30T08:37:48.343Z'
+tags:
+  - connection-modal
+  - qr-code
+  - error-handling
+  - ux-issues
+source: user_input
+project_root: 'c:\Users\Administrator\CascadeProjects\app-quayer'
+relationships: []
+---
+## Problems Identified:
+
+1. **QR Code Error Shows "{}"**: 
+   - Error object not being properly serialized
+   - console.error shows object instead of message
+   - Line 99: `console.error('Erro ao gerar QR Code:', error)` logs entire object
+
+2. **Connecting Loop Issue**:
+   - useEffect on line 57 checks `statusData?.status === 'connected'`
+   - Status polling (useGetInstanceStatus) continues even when not connected
+   - No handling for intermediate states or errors
+   - Modal doesn't close on connection failure
+
+3. **Configurar Not Working**:
+   - Need to check if configuration modal exists
+   - Likely missing implementation
+
+4. **Theme System Issues**:
+   - Current themes not professional
+   - Need ShadcnUIKit inspired design
+   - Colors need complete overhaul
+
+## Solutions:
+
+1. Fix error logging: `console.error('Erro ao gerar QR Code:', error?.message || error)`
+2. Add proper status handling with timeout
+3. Implement configuration modal
+4. Complete theme redesign

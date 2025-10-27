@@ -1,0 +1,71 @@
+/**
+ * Theme V3 - Emerald Pro
+ * Nature-inspired emerald green with professional blue
+ * Fresh, trustworthy, and growth-oriented
+ */
+
+[data-theme='v3-premium'] {
+  /* ===== Primary Colors ===== */
+  --theme-primary: #10B981; /* Emerald 500 - Growth and prosperity */
+  --theme-primary-hover: #059669; /* Emerald 600 */
+  --theme-primary-light: #34D399; /* Emerald 400 */
+  --theme-primary-dark: #047857; /* Emerald 700 */
+
+  /* ===== Secondary Colors ===== */
+  --theme-secondary: #3B82F6; /* Blue 500 - Trust and reliability */
+  --theme-secondary-hover: #2563EB; /* Blue 600 */
+  --theme-secondary-light: #60A5FA; /* Blue 400 */
+  --theme-secondary-dark: #1E40AF; /* Blue 700 */
+
+  /* ===== Accent Colors ===== */
+  --theme-accent: #F59E0B; /* Amber 500 - Warm highlight */
+  --theme-accent-hover: #D97706; /* Amber 600 */
+  --theme-accent-light: #FBBF24; /* Amber 400 */
+
+  /* ===== Background System ===== */
+  --background: #0C1F1B; /* Dark Emerald - Rich forest depth */
+  --background-secondary: #1A2F2A; /* Emerald-tinted gray */
+  --surface: #284039; /* Elevated emerald surface */
+  --surface-hover: #365248; /* Hover state */
+  --surface-elevated: #446357; /* Maximum elevation */
+
+  /* ===== Borders ===== */
+  --border: #284039;
+  --border-hover: #365248;
+  --border-focus: #10B981; /* Emerald 500 */
+  --border-subtle: #1A2F2A;
+
+  /* ===== Text Colors ===== */
+  --text-primary: #F0FDF4; /* Emerald-tinted white */
+  --text-secondary: #A7F3D0; /* Emerald 200 */
+  --text-muted: #6EE7B7; /* Emerald 300 */
+  --text-placeholder: #34D399; /* Emerald 400 */
+
+  /* ===== Status Colors ===== */
+  --success: #10B981; /* Emerald 500 */
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-border: rgba(16, 185, 129, 0.2);
+
+  --warning: #F59E0B; /* Amber 500 */
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-border: rgba(245, 158, 11, 0.2);
+
+  --error: #EF4444; /* Red 500 */
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.2);
+
+  --info: #3B82F6; /* Blue 500 */
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-border: rgba(59, 130, 246, 0.2);
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 2px 0 rgba(16, 185, 129, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(16, 185, 129, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(16, 185, 129, 0.15);
+  --shadow-glow: 0 0 20px rgba(16, 185, 129, 0.4);
+
+  /* ===== Gradients ===== */
+  --gradient-primary: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  --gradient-secondary: linear-gradient(135deg, #3B82F6 0%, #10B981 100%);
+  --gradient-accent: linear-gradient(135deg, #F59E0B 0%, #10B981 100%);
+}

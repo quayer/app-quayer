@@ -1,0 +1,32 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import DashboardPage from '../src/app/(dashboard)/page'
+import { server } from './mocks/server'
+import { http, HttpResponse } from 'msw'
+
+describe('Dashboard Page', () => {
+  it('deve renderizar o estado vazio corretamente', async () => {
+    server.use(
+      http.get('/api/v1/dashboard', () => {
+        return HttpResponse.json({ instances: [] })
+      })
+    )
+
+    render(<DashboardPage />)
+    
+    await waitFor(() => {
+      expect(screen.getByText('Nenhuma instância criada')).toBeInTheDocument()
+      expect(screen.getByText('Crie sua primeira instância')).toBeInTheDocument()
+    })
+  })
+
+  it('deve mostrar loading durante o fetch', async () => {
+    server.use(
+      http.get('/api/v1/dashboard', () => {
+        return new Promise(() => {})
+      })
+    )
+
+    render(<DashboardPage />)
+    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument()
+  })
+})

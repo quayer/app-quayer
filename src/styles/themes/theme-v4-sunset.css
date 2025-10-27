@@ -1,0 +1,96 @@
+/**
+ * Theme V4 - Sunset Gradient
+ * Vibrant sunset-inspired gradients
+ * Bold, energetic, and eye-catching
+ */
+
+[data-theme='v4-marketing'] {
+  /* ===== Primary Colors (Gradient-based) ===== */
+  --theme-primary: #F59E0B; /* Amber 500 - Sunset warmth */
+  --theme-primary-hover: #D97706; /* Amber 600 */
+  --theme-primary-light: #FBBF24; /* Amber 400 */
+  --theme-primary-dark: #B45309; /* Amber 700 */
+
+  /* ===== Secondary Colors ===== */
+  --theme-secondary: #EC4899; /* Pink 500 - Vibrant energy */
+  --theme-secondary-hover: #DB2777; /* Pink 600 */
+  --theme-secondary-light: #F472B6; /* Pink 400 */
+  --theme-secondary-dark: #BE185D; /* Pink 700 */
+
+  /* ===== Accent Colors ===== */
+  --theme-accent: #8B5CF6; /* Violet 500 - Creative spark */
+  --theme-accent-hover: #7C3AED; /* Violet 600 */
+  --theme-accent-light: #A78BFA; /* Violet 400 */
+
+  /* ===== Background System ===== */
+  --background: #18181B; /* Zinc 900 - Neutral dark base */
+  --background-secondary: #27272A; /* Zinc 800 */
+  --surface: #3F3F46; /* Zinc 700 - Elevated surfaces */
+  --surface-hover: #52525B; /* Zinc 600 */
+  --surface-elevated: #71717A; /* Zinc 500 */
+
+  /* ===== Borders ===== */
+  --border: #3F3F46; /* Zinc 700 */
+  --border-hover: #52525B; /* Zinc 600 */
+  --border-focus: #F59E0B; /* Amber 500 */
+  --border-subtle: #27272A; /* Zinc 800 */
+
+  /* ===== Text Colors ===== */
+  --text-primary: #FAFAF9; /* Stone 50 */
+  --text-secondary: #D4D4D8; /* Zinc 300 */
+  --text-muted: #A1A1AA; /* Zinc 400 */
+  --text-placeholder: #71717A; /* Zinc 500 */
+
+  /* ===== Status Colors ===== */
+  --success: #10B981; /* Emerald 500 */
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-border: rgba(16, 185, 129, 0.2);
+
+  --warning: #F59E0B; /* Amber 500 */
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-border: rgba(245, 158, 11, 0.2);
+
+  --error: #EF4444; /* Red 500 */
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.2);
+
+  --info: #3B82F6; /* Blue 500 */
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-border: rgba(59, 130, 246, 0.2);
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 2px 0 rgba(245, 158, 11, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(245, 158, 11, 0.15);
+  --shadow-glow: 0 0 25px rgba(245, 158, 11, 0.5);
+
+  /* ===== Vibrant Gradients ===== */
+  --gradient-primary: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+  --gradient-secondary: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+  --gradient-accent: linear-gradient(135deg, #EC4899 0%, #EF4444 100%);
+  --gradient-sunset: linear-gradient(135deg, #FBBF24 0%, #F97316 50%, #EC4899 100%);
+
+  /* ===== Special Gradient Backgrounds ===== */
+  --gradient-surface: linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%);
+  --gradient-border: linear-gradient(135deg, #F59E0B 0%, #EC4899 100%);
+}
+
+/* ===== Special Gradient Text Effect ===== */
+[data-theme='v4-marketing'] .text-gradient {
+  background: var(--gradient-sunset);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== Glowing Border Effect ===== */
+[data-theme='v4-marketing'] .glow-border {
+  position: relative;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--surface), var(--surface)) padding-box,
+              var(--gradient-border) border-box;
+}
+
+[data-theme='v4-marketing'] .glow-border:hover {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+}

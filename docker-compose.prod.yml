@@ -1,0 +1,180 @@
+# ==================================
+# 🐳 DOCKER COMPOSE - PRODUÇÃO
+# ==================================
+# Stack completa para produção: App + PostgreSQL + Redis
+# Comando: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # ==================================
+  # 🚀 APPLICATION
+  # ==================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    container_name: quayer-app
+    image: quayer-app:latest
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      # Application
+      - NODE_ENV=production
+      - PORT=3000
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+
+      # Database
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+
+      # Redis
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+      # Auth
+      - JWT_SECRET=${JWT_SECRET}
+      - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
+
+      # Igniter.js
+      - IGNITER_APP_NAME=quayer
+      - NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_APP_URL}/
+      - NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
+      - IGNITER_JOBS_QUEUE_PREFIX=igniter
+      - IGNITER_LOG_LEVEL=info
+
+      # Email
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mock}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+
+      # WhatsApp
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_TOKEN=${UAZAPI_TOKEN}
+
+      # Rate Limiting
+      - UPSTASH_REDIS_REST_URL=${UPSTASH_REDIS_REST_URL}
+      - UPSTASH_REDIS_REST_TOKEN=${UPSTASH_REDIS_REST_TOKEN}
+
+      # Monitoring
+      - SENTRY_DSN=${SENTRY_DSN}
+      - LOG_LEVEL=info
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quayer-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==================================
+  # 🗄️ POSTGRESQL
+  # ==================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: quayer-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-docker}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-docker}
+      POSTGRES_DB: ${DB_NAME:-docker}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./prisma/schema.prisma:/docker-entrypoint-initdb.d/schema.prisma:ro
+    networks:
+      - quayer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-docker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c max_connections=200
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2621kB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # ==================================
+  # 🔴 REDIS
+  # ==================================
+  redis:
+    image: redis:7-alpine
+    container_name: quayer-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - quayer-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+
+# ==================================
+# 📦 VOLUMES
+# ==================================
+volumes:
+  postgres_data:
+    driver: local
+    name: quayer-postgres-data
+  redis_data:
+    driver: local
+    name: quayer-redis-data
+
+# ==================================
+# 🌐 NETWORKS
+# ==================================
+networks:
+  quayer-network:
+    driver: bridge
+    name: quayer-network

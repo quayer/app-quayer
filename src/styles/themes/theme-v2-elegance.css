@@ -1,0 +1,71 @@
+/**
+ * Theme V2 - Purple Elegance
+ * Sophisticated purple and cyan palette
+ * Modern, creative, and eye-catching
+ */
+
+[data-theme='v2-pro'] {
+  /* ===== Primary Colors ===== */
+  --theme-primary: #8B5CF6; /* Violet 500 - Creative and elegant */
+  --theme-primary-hover: #7C3AED; /* Violet 600 */
+  --theme-primary-light: #A78BFA; /* Violet 400 */
+  --theme-primary-dark: #6D28D9; /* Violet 700 */
+
+  /* ===== Secondary Colors ===== */
+  --theme-secondary: #06B6D4; /* Cyan 500 - Fresh and modern */
+  --theme-secondary-hover: #0891B2; /* Cyan 600 */
+  --theme-secondary-light: #22D3EE; /* Cyan 400 */
+  --theme-secondary-dark: #0E7490; /* Cyan 700 */
+
+  /* ===== Accent Colors ===== */
+  --theme-accent: #F59E0B; /* Amber 500 - Warm accent */
+  --theme-accent-hover: #D97706; /* Amber 600 */
+  --theme-accent-light: #FBBF24; /* Amber 400 */
+
+  /* ===== Background System ===== */
+  --background: #1E1B29; /* Deep Purple - Rich, elegant base */
+  --background-secondary: #2D2838; /* Purple-Gray mix */
+  --surface: #3D3848; /* Elevated purple surfaces */
+  --surface-hover: #4D4858; /* Hover state */
+  --surface-elevated: #5D5868; /* Maximum elevation */
+
+  /* ===== Borders ===== */
+  --border: #3D3848;
+  --border-hover: #4D4858;
+  --border-focus: #8B5CF6; /* Violet 500 */
+  --border-subtle: #2D2838;
+
+  /* ===== Text Colors ===== */
+  --text-primary: #FAF5FF; /* Purple-tinted white */
+  --text-secondary: #C4B5FD; /* Violet 300 */
+  --text-muted: #A78BFA; /* Violet 400 */
+  --text-placeholder: #7C3AED; /* Violet 600 */
+
+  /* ===== Status Colors ===== */
+  --success: #10B981; /* Emerald 500 */
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-border: rgba(16, 185, 129, 0.2);
+
+  --warning: #F59E0B; /* Amber 500 */
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-border: rgba(245, 158, 11, 0.2);
+
+  --error: #EF4444; /* Red 500 */
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.2);
+
+  --info: #06B6D4; /* Cyan 500 */
+  --info-bg: rgba(6, 182, 212, 0.1);
+  --info-border: rgba(6, 182, 212, 0.2);
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 2px 0 rgba(139, 92, 246, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(139, 92, 246, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(139, 92, 246, 0.15);
+  --shadow-glow: 0 0 20px rgba(139, 92, 246, 0.4);
+
+  /* ===== Gradients ===== */
+  --gradient-primary: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+  --gradient-secondary: linear-gradient(135deg, #06B6D4 0%, #8B5CF6 100%);
+  --gradient-accent: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+}

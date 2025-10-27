@@ -1,0 +1,494 @@
+---
+id: design-arquitetura-multi-tenancy-completa---app-quayer-v20
+type: design
+confidence: 0.9
+created_at: '2025-10-01T17:12:30.859Z'
+updated_at: '2025-10-01T17:12:30.859Z'
+tags:
+  - architecture
+  - multi-tenancy
+  - design
+  - prisma
+  - auth
+  - permissions
+source: user_input
+project_root: 'c:\Users\Administrator\CascadeProjects\app-quayer'
+relationships: []
+---
+# Arquitetura Multi-tenancy - app-quayer v2.0
+
+## 1. Estrutura de Dados (Prisma Schema)
+
+### Models Base
+
+```prisma
+// Organização (Multi-tenant principal)
+model Organization {
+  id              String    @id @default(uuid())
+  name            String
+  slug            String    @unique
+  type            String    @default("pj") // pf, pj
+  document        String?   @unique // CPF/CNPJ
+  billingType     String    @default("monthly") // monthly, annual, prepaid
+  isActive        Boolean   @default(true)
+  plan            String    @default("free") // free, basic, pro, enterprise
+  maxInstances    Int       @default(1)
+  maxUsers        Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  users           User[]
+  instances       Instance[]
+  projects        Project[]
+  invitations     Invitation[]
+  accessLevels    AccessLevel[]
+  configurations  OrgConfiguration[]
+  
+  @@index([slug])
+}
+
+// Usuário
+model User {
+  id                String        @id @default(uuid())
+  email             String        @unique
+  password          String
+  name              String
+  role              String        @default("user") // admin, master, user
+  isActive          Boolean       @default(true)
+  emailVerified     Boolean       @default(false)
+  emailVerifiedAt   DateTime?
+  currentOrgId      String?       // Organização ativa no momento
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  organizations     UserOrganization[]
+  sessions          Session[]
+  invitations       Invitation[]   @relation("InvitedBy")
+  receivedInvites   Invitation[]   @relation("InvitedUser")
+  
+  @@index([email])
+}
+
+// Relacionamento User <-> Organization (Many-to-Many)
+model UserOrganization {
+  id              String    @id @default(uuid())
+  userId          String
+  organizationId  String
+  role            String    @default("user") // master, manager, user
+  accessLevelId   String?
+  isActive        Boolean   @default(true)
+  joinedAt        DateTime  @default(now())
+  
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accessLevel     AccessLevel?  @relation(fields: [accessLevelId], references: [id])
+  
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+// Níveis de Acesso (Permissões Customizadas por Org)
+model AccessLevel {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  slug            String
+  permissions     Json      // { instances: ['read', 'write'], projects: ['read'], ... }
+  isDefault       Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users           UserOrganization[]
+  
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+}
+
+// Convites
+model Invitation {
+  id              String    @id @default(uuid())
+  email           String
+  token           String    @unique @default(uuid())
+  organizationId  String
+  role            String    @default("user")
+  accessLevelId   String?
+  invitedById     String
+  acceptedByUserId String?
+  usedAt          DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy       User         @relation("InvitedBy", fields: [invitedById], references: [id])
+  acceptedBy      User?        @relation("InvitedUser", fields: [acceptedByUserId], references: [id])
+  
+  @@index([token])
+  @@index([organizationId])
+}
+
+// Projetos (Agrupamento de Instâncias)
+model Project {
+  id              String    @id @default(uuid())
+  name            String
+  description     String?
+  organizationId  String
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  instances       Instance[]
+  
+  @@index([organizationId])
+}
+
+// Instâncias (UAZ API Integration)
+model Instance {
+  id              String    @id @default(uuid())
+  name            String
+  organizationId  String
+  projectId       String?
+  
+  // UAZ API Fields
+  uazToken        String?   @unique // Token da instância no UAZ
+  uazInstanceId   String?   @unique // ID da instância no UAZ
+  uazAdminField01 String?
+  uazAdminField02 String?
+  
+  // Status
+  status          String    @default("disconnected")
+  phoneNumber     String?
+  profileName     String?
+  profilePicUrl   String?
+  isBusiness      Boolean   @default(false)
+  
+  // Configurações
+  webhookUrl      String?
+  qrCode          String?
+  pairingCode     String?
+  
+  // Chatbot
+  chatbotEnabled  Boolean   @default(false)
+  openaiApiKey    String?
+  
+  // Metadata
+  lastConnected   DateTime?
+  lastDisconnect  DateTime?
+  lastDisconnectReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project         Project?     @relation(fields: [projectId], references: [id])
+  shareTokens     ShareToken[]
+  webhooks        Webhook[]
+  
+  @@index([organizationId])
+  @@index([projectId])
+}
+
+// Webhooks (UAZ API Integration)
+model Webhook {
+  id              String    @id @default(uuid())
+  instanceId      String
+  enabled         Boolean   @default(true)
+  url             String
+  events          Json      // Array de eventos
+  excludeMessages Json?     // Filtros
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  instance        Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  
+  @@index([instanceId])
+}
+
+// Configurações da Organização
+model OrgConfiguration {
+  id              String    @id @default(uuid())
+  organizationId  String
+  key             String
+  value           String
+  isPublic        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+```
+
+## 2. Sistema de Permissões
+
+### Hierarquia de Roles
+
+```typescript
+// src/lib/auth/roles.ts
+
+export enum SystemRole {
+  ADMIN = 'admin',      // Super admin do sistema
+  MASTER = 'master',    // Dono da organização
+  MANAGER = 'manager',  // Gerente (pode gerenciar usuários)
+  USER = 'user',        // Usuário regular (apenas integrações)
+}
+
+export interface Permission {
+  resource: string;
+  actions: string[];
+}
+
+export const DEFAULT_PERMISSIONS: Record<SystemRole, Permission[]> = {
+  [SystemRole.ADMIN]: [
+    { resource: '*', actions: ['*'] }, // Acesso total
+  ],
+  [SystemRole.MASTER]: [
+    { resource: 'organizations', actions: ['read', 'update'] },
+    { resource: 'users', actions: ['*'] },
+    { resource: 'instances', actions: ['*'] },
+    { resource: 'projects', actions: ['*'] },
+    { resource: 'webhooks', actions: ['*'] },
+    { resource: 'invitations', actions: ['*'] },
+    { resource: 'accessLevels', actions: ['*'] },
+  ],
+  [SystemRole.MANAGER]: [
+    { resource: 'instances', actions: ['read', 'create', 'update'] },
+    { resource: 'projects', actions: ['read', 'create', 'update'] },
+    { resource: 'users', actions: ['read', 'invite'] },
+  ],
+  [SystemRole.USER]: [
+    { resource: 'instances', actions: ['read'] }, // Apenas visualizar
+    { resource: 'messages', actions: ['send'] },  // Enviar mensagens
+  ],
+};
+```
+
+## 3. Middleware de Autenticação e Permissões
+
+```typescript
+// src/middleware.ts
+
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { verifyToken } from '@/lib/auth/jwt';
+
+// Rotas públicas (não requerem autenticação)
+const PUBLIC_ROUTES = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/verify-email',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/connect', // Página de guidance para clientes
+];
+
+// Rotas que requerem permissões específicas
+const PROTECTED_ROUTES: Record<string, { role: string[] }> = {
+  '/admin': { role: ['admin'] },
+  '/dashboard': { role: ['admin', 'master', 'manager', 'user'] },
+  '/integracoes': { role: ['user', 'manager', 'master'] },
+};
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  
+  // Permitir rotas públicas
+  if (PUBLIC_ROUTES.some(route => pathname.startsWith(route))) {
+    return NextResponse.next();
+  }
+  
+  // Verificar token de autenticação
+  const token = request.cookies.get('auth-token')?.value;
+  
+  if (!token) {
+    return NextResponse.redirect(new URL('/auth/login', request.url));
+  }
+  
+  try {
+    const payload = await verifyToken(token);
+    
+    // Verificar permissões por rota
+    for (const [route, config] of Object.entries(PROTECTED_ROUTES)) {
+      if (pathname.startsWith(route)) {
+        if (!config.role.includes(payload.role)) {
+          return NextResponse.redirect(new URL('/unauthorized', request.url));
+        }
+      }
+    }
+    
+    return NextResponse.next();
+  } catch (error) {
+    return NextResponse.redirect(new URL('/auth/login', request.url));
+  }
+}
+
+export const config = {
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+};
+```
+
+## 4. Estrutura de Páginas
+
+```
+src/app/
+├── (public)/
+│   ├── auth/
+│   │   ├── login/page.tsx
+│   │   ├── register/
+│   │   │   ├── pf/page.tsx
+│   │   │   └── pj/page.tsx
+│   │   ├── verify-email/[token]/page.tsx
+│   │   ├── forgot-password/page.tsx
+│   │   └── reset-password/[token]/page.tsx
+│   └── connect/[token]/page.tsx (já existe)
+│
+├── (admin)/
+│   └── admin/
+│       ├── layout.tsx (AdminLayout com sidebar específica)
+│       ├── page.tsx (Dashboard admin)
+│       ├── customers/page.tsx
+│       ├── organizations/page.tsx
+│       ├── access-levels/page.tsx
+│       ├── permissions/page.tsx
+│       └── configurations/page.tsx
+│
+├── (dashboard)/
+│   ├── layout.tsx (DashboardLayout com sidebar dinâmica)
+│   └── dashboard/
+│       ├── page.tsx (Dashboard da org - master/manager)
+│       ├── instances/page.tsx
+│       ├── projects/page.tsx
+│       ├── users/page.tsx
+│       ├── invitations/page.tsx
+│       ├── levels/page.tsx
+│       ├── billing/page.tsx
+│       └── settings/page.tsx
+│
+└── (integrations)/
+    └── integracoes/
+        └── page.tsx (Página simplificada - apenas user)
+```
+
+## 5. Features Backend (Igniter.js)
+
+```
+src/features/
+├── auth/
+│   ├── controllers/
+│   │   └── auth.controller.ts
+│   ├── auth.repository.ts
+│   ├── auth.interfaces.ts
+│   └── index.ts
+│
+├── organizations/
+│   ├── controllers/
+│   │   └── organizations.controller.ts
+│   ├── organizations.repository.ts
+│   ├── organizations.interfaces.ts
+│   └── index.ts
+│
+├── users/
+│   ├── controllers/
+│   │   └── users.controller.ts
+│   ├── users.repository.ts
+│   ├── users.interfaces.ts
+│   └── index.ts
+│
+├── projects/
+│   ├── controllers/
+│   │   └── projects.controller.ts
+│   ├── projects.repository.ts
+│   ├── projects.interfaces.ts
+│   └── index.ts
+│
+├── instances/ (atualizar para UAZ API)
+│   ├── controllers/
+│   │   └── instances.controller.ts
+│   ├── instances.repository.ts
+│   ├── instances.interfaces.ts
+│   ├── uaz-client.ts (Cliente HTTP para UAZ API)
+│   └── index.ts
+│
+└── admin/
+    ├── controllers/
+    │   └── admin.controller.ts
+    ├── admin.repository.ts
+    ├── admin.interfaces.ts
+    └── index.ts
+```
+
+## 6. Integração com UAZ API
+
+```typescript
+// src/features/instances/uaz-client.ts
+
+export class UAZClient {
+  private baseUrl: string;
+  private adminToken: string;
+  
+  constructor() {
+    this.baseUrl = process.env.UAZ_API_URL!;
+    this.adminToken = process.env.UAZ_ADMIN_TOKEN!;
+  }
+  
+  // Criar instância
+  async createInstance(data: CreateInstanceDto) {
+    const response = await fetch(`${this.baseUrl}/instance/init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'admintoken': this.adminToken,
+      },
+      body: JSON.stringify(data),
+    });
+    
+    return response.json();
+  }
+  
+  // Obter status
+  async getStatus(instanceToken: string) {
+    const response = await fetch(`${this.baseUrl}/instance/status`, {
+      headers: { 'token': instanceToken },
+    });
+    
+    return response.json();
+  }
+  
+  // Gerar QR Code
+  async generateQR(instanceToken: string) {
+    const response = await fetch(`${this.baseUrl}/instance/connect`, {
+      method: 'POST',
+      headers: { 'token': instanceToken },
+    });
+    
+    return response.json();
+  }
+  
+  // ... outros métodos
+}
+```
+
+## 7. Fluxo de Autenticação
+
+### Registro PJ (Organização)
+1. Usuário preenche formulário com dados da empresa
+2. Sistema cria Organization + User (role: master)
+3. Envia email de verificação
+4. Após verificar, pode acessar dashboard completo
+
+### Registro PF (Pessoa Física)
+1. Usuário preenche formulário pessoal
+2. Sistema cria Organization (tipo: pf) + User (role: master)
+3. Fluxo igual ao PJ
+
+### Convite de Usuário
+1. Master/Manager envia convite com role específico
+2. Convite gerado com token único
+3. Usuário recebe email com link
+4. Ao aceitar, cria conta ou vincula conta existente
+5. Adicionado à organização com role definido
+
+## 8. Próximos Passos

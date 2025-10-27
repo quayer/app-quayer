@@ -1,0 +1,9 @@
+/**
+ * Design Tokens - Index
+ * Importa todos os design tokens do sistema
+ */
+
+@import './colors.css';
+@import './typography.css';
+@import './spacing.css';
+@import './animations.css';

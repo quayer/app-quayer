@@ -1,0 +1,70 @@
+/**
+ * Theme V1 - Professional Blue
+ * Clean, corporate aesthetic with professional blue tones
+ * Perfect for business and enterprise applications
+ */
+
+[data-theme='v1-base'] {
+  /* ===== Primary Colors ===== */
+  --theme-primary: #3B82F6; /* Blue 500 - Professional and trustworthy */
+  --theme-primary-hover: #2563EB; /* Blue 600 */
+  --theme-primary-light: #60A5FA; /* Blue 400 */
+  --theme-primary-dark: #1E40AF; /* Blue 700 */
+
+  /* ===== Secondary Colors ===== */
+  --theme-secondary: #10B981; /* Emerald 500 - Success and growth */
+  --theme-secondary-hover: #059669; /* Emerald 600 */
+  --theme-secondary-light: #34D399; /* Emerald 400 */
+  --theme-secondary-dark: #047857; /* Emerald 700 */
+
+  /* ===== Accent Colors ===== */
+  --theme-accent: #8B5CF6; /* Violet 500 - Modern accent */
+  --theme-accent-hover: #7C3AED; /* Violet 600 */
+  --theme-accent-light: #A78BFA; /* Violet 400 */
+
+  /* ===== Background System ===== */
+  --background: #0F172A; /* Slate 900 - Deep, rich background */
+  --background-secondary: #1E293B; /* Slate 800 */
+  --surface: #334155; /* Slate 700 - Card surfaces */
+  --surface-hover: #475569; /* Slate 600 */
+  --surface-elevated: #64748B; /* Slate 500 */
+
+  /* ===== Borders ===== */
+  --border: #334155; /* Slate 700 */
+  --border-hover: #475569; /* Slate 600 */
+  --border-focus: #3B82F6; /* Blue 500 */
+  --border-subtle: #1E293B; /* Slate 800 */
+
+  /* ===== Text Colors ===== */
+  --text-primary: #F8FAFC; /* Slate 50 */
+  --text-secondary: #CBD5E1; /* Slate 300 */
+  --text-muted: #94A3B8; /* Slate 400 */
+  --text-placeholder: #64748B; /* Slate 500 */
+
+  /* ===== Status Colors ===== */
+  --success: #10B981; /* Emerald 500 */
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --success-border: rgba(16, 185, 129, 0.2);
+
+  --warning: #F59E0B; /* Amber 500 */
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-border: rgba(245, 158, 11, 0.2);
+
+  --error: #EF4444; /* Red 500 */
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.2);
+
+  --info: #3B82F6; /* Blue 500 */
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-border: rgba(59, 130, 246, 0.2);
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
+
+  /* ===== Gradients ===== */
+  --gradient-primary: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+  --gradient-secondary: linear-gradient(135deg, #10B981 0%, #3B82F6 100%);
+}

@@ -1,0 +1,951 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ORGANIZATIONS & USERS (Multi-tenancy)
+// ============================================
+
+model Organization {
+  id           String  @id @default(uuid())
+  name         String
+  slug         String  @unique
+  document     String  @unique // CPF ou CNPJ
+  type         String // "pf" ou "pj"
+  maxInstances Int     @default(1)
+  maxUsers     Int     @default(1)
+  billingType  String  @default("free") // free, basic, pro
+  isActive     Boolean @default(true)
+
+  // Business hours configuration
+  businessHoursStart String? // Format: "09:00"
+  businessHoursEnd   String? // Format: "18:00"
+  businessDays       String? // Format: "1,2,3,4,5" (Segunda a Sexta)
+  timezone           String  @default("America/Sao_Paulo")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        UserOrganization[]
+  connections  Connection[]
+  projects     Project[]
+  webhooks     Webhook[]
+  auditLogs    AuditLog[]
+  chatSessions ChatSession[]
+  calls        Call[]
+
+  @@index([document])
+  @@index([slug])
+  @@index([billingType])
+}
+
+model UserOrganization {
+  id             String   @id @default(uuid())
+  userId         String
+  organizationId String
+  role           String // master, manager, user
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([role])
+}
+
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  password         String
+  name             String
+  emailVerified    DateTime?
+  currentOrgId     String? // Org ativa no momento
+  role             String    @default("user") // admin (sistema), user
+  isActive         Boolean   @default(true)
+  resetToken       String? // Token para recuperação de senha
+  resetTokenExpiry DateTime? // Expiração do token de recuperação
+
+  // Onboarding and organization management
+  onboardingCompleted Boolean @default(false)
+  lastOrganizationId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions            Session[]
+  refreshTokens       RefreshToken[]
+  invitations         Invitation[]         @relation("InvitedBy")
+  organizations       UserOrganization[]
+  auditLogs           AuditLog[]
+  verificationCodes   VerificationCode[]
+  contactObservations ContactObservation[]
+  files               File[]
+  calls               Call[]
+
+  @@index([email])
+  @@index([currentOrgId])
+  @@index([role])
+  @@index([resetToken])
+}
+
+// Temporary user for signup (before email verification)
+model TempUser {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([code])
+  @@index([expiresAt])
+}
+
+// Verification codes (OTP, Magic Link, etc)
+model VerificationCode {
+  id        String   @id @default(uuid())
+  userId    String?
+  email     String
+  code      String
+  type      String // OTP, MAGIC_LINK, RESET_PASSWORD, EMAIL_VERIFICATION
+  token     String? // For magic links (JWT token)
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email, type])
+  @@index([code])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model Invitation {
+  id             String    @id @default(uuid())
+  email          String
+  token          String    @unique @default(uuid())
+  role           String    @default("user")
+  organizationId String
+  invitedById    String
+  usedAt         DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  invitedBy User @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([invitedById])
+  @@index([organizationId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// ============================================
+// DEPARTMENTS (Hierarchical Organization)
+// ============================================
+
+model Department {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  type           String   @default("support") // support, sales, custom
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  chatSessions ChatSession[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([slug])
+  @@index([type])
+  @@index([isActive])
+}
+
+// ============================================
+// PROJECTS & INSTANCES
+// ============================================
+
+model Project {
+  id             String   @id @default(uuid())
+  name           String
+  description    String?
+  organizationId String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connections  Connection[]
+
+  @@index([organizationId])
+}
+
+// ============================================
+// CONNECTIONS (WhatsApp/Instagram/Telegram Integrations)
+// ============================================
+
+model Connection {
+  id   String @id @default(uuid())
+  name String
+
+  // Channel & Provider
+  channel  Channel  @default(WHATSAPP)
+  provider Provider @default(WHATSAPP_WEB)
+
+  // Connection Status
+  status            ConnectionStatus @default(DISCONNECTED)
+  phoneNumber       String?
+  profileName       String?
+  profilePictureUrl String?
+  isBusiness        Boolean          @default(false)
+
+  // uazapi Integration
+  uazapiInstanceId     String?   @unique // ID na uazapi
+  uazapiToken          String? // Token encriptado da instância
+  qrCode               String?   @db.Text
+  pairingCode          String?
+  lastConnected        DateTime?
+  lastDisconnect       DateTime?
+  lastDisconnectReason String?
+
+  // n8n Integration (AI Agent)
+  n8nWebhookUrl  String? // URL do workflow n8n
+  n8nWorkflowId  String? // ID do workflow
+  n8nFallbackUrl String? // URL de fallback
+  agentConfig    Json? // { prompt, tools, model, temperature }
+
+  // Organization & Project
+  organizationId String
+  projectId      String?
+
+  // Message Delay Config
+  msgDelayMin Int @default(2)
+  msgDelayMax Int @default(4)
+
+  // Share Token System
+  shareToken          String?   @unique
+  shareTokenExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project                Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  webhooks               Webhook[]
+  chatSessions           ChatSession[]
+  messages               Message[]
+  tabulationIntegrations TabulationIntegration[]
+  calls                  Call[]
+  n8nCallLogs            N8nCallLog[]
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([status])
+  @@index([channel])
+  @@index([provider])
+  @@index([uazapiInstanceId])
+  @@index([shareToken])
+  @@index([n8nWorkflowId])
+  @@map("connections")
+}
+
+enum Channel {
+  WHATSAPP
+  INSTAGRAM
+  TELEGRAM
+  EMAIL
+}
+
+enum Provider {
+  WHATSAPP_WEB
+  WHATSAPP_CLOUD_API
+  WHATSAPP_BUSINESS_API
+  INSTAGRAM_META
+  TELEGRAM_BOT
+  EMAIL_SMTP
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  CONNECTING
+  DISCONNECTED
+  ERROR
+}
+
+// ============================================
+// N8N CALL LOGS (Monitoring & Audit)
+// ============================================
+
+model N8nCallLog {
+  id           String @id @default(uuid())
+  connectionId String
+
+  // Request Info
+  url     String
+  payload Json
+
+  // Response Info
+  success    Boolean
+  statusCode Int?
+  response   Json?
+  error      String? @db.Text
+
+  // Performance
+  latency Int // Milliseconds
+
+  createdAt DateTime @default(now())
+
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId])
+  @@index([success])
+  @@index([createdAt])
+  @@map("n8n_call_logs")
+}
+
+// ============================================
+// WEBHOOKS & AUDIT LOGS
+// ============================================
+
+model Webhook {
+  id             String   @id @default(uuid())
+  url            String
+  events         String[] // ["connection.created", "message.received", etc]
+  description    String?
+  secret         String? // HMAC secret for signature verification
+  isActive       Boolean  @default(true)
+  connectionId   String?
+  organizationId String?
+
+  // Filtros avançados (inspirado em UAZ API)
+  excludeMessages     Boolean  @default(false) // Excluir mensagens do webhook
+  addUrlEvents        Boolean  @default(false) // Adicionar eventos específicos na URL
+  addUrlTypesMessages String[] @default([]) // Tipos de mensagem na URL: ["text", "image", "audio"]
+  pathParams          Json? // Path parameters dinâmicos {"{userId}": "123"}
+
+  // Retry configuration
+  maxRetries Int @default(3)
+  retryDelay Int @default(5000) // milliseconds
+  timeout    Int @default(30000) // milliseconds
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection   Connection?       @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organization Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([connectionId])
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+model WebhookDelivery {
+  id          String    @id @default(uuid())
+  webhookId   String
+  event       String
+  payload     Json
+  response    Json?
+  status      String    @default("pending") // pending, success, failure
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  action         String // create, update, delete, login, etc
+  resource       String // organization, instance, user, etc
+  resourceId     String?
+  userId         String
+  organizationId String?
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+}
+
+// ============================================
+// ACCESS LEVELS (Permissões Customizadas)
+// ============================================
+
+model AccessLevel {
+  id             String   @id @default(uuid())
+  name           String // "Custom Manager", "Limited User", etc
+  permissions    Json // { "instances": ["create", "read"], "users": ["read"] }
+  organizationId String? // null = global/system level
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+// ============================================
+// CHAT SESSIONS & MESSAGES (WhatsApp Conversations)
+// ============================================
+
+model Contact {
+  id            String  @id @default(uuid())
+  phoneNumber   String  @unique
+  name          String?
+  email         String? // ❌ ADDED: Contact email
+  profilePicUrl String?
+
+  // WhatsApp Info
+  isBusiness   Boolean @default(false)
+  verifiedName String?
+
+  // Organization & Source
+  organizationId String? // ❌ ADDED: Organization link
+  source         String? // ❌ ADDED: Integration/Instance ID que originou o contato
+  externalId     String? // ❌ ADDED: ID externo (ex: CRM ID)
+  bypassBots     Boolean @default(false) // ❌ ADDED: Bypass AI/Bots for this contact
+
+  // Metadata
+  tags         String[] @default([])
+  customFields Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chatSessions        ChatSession[]
+  messages            Message[]
+  contactTabulations  ContactTabulation[] // ❌ ADDED: Tabulations relation
+  contactAttributes   ContactAttribute[] // Contact-specific attribute values
+  contactObservations ContactObservation[]
+  calls               Call[]
+
+  @@index([phoneNumber])
+  @@index([name])
+  @@index([organizationId])
+  @@index([source])
+  @@index([externalId])
+}
+
+model ChatSession {
+  id             String @id @default(uuid())
+  contactId      String
+  connectionId   String
+  organizationId String
+
+  // Status
+  status       SessionStatus    @default(QUEUED)
+  startedBy    SessionStartedBy @default(CUSTOMER)
+  statusReason String?
+  endReason    String?
+  externalId   String?
+
+  // Assignment
+  assignedDepartmentId String?
+  assignedAgentId      String?
+  assignedCustomerId   String?
+
+  // IA Control
+  aiEnabled      Boolean   @default(true)
+  aiBlockedUntil DateTime?
+  aiBlockReason  String?
+
+  // Concatenação
+  lastMessageAt DateTime @default(now())
+  isConcat      Boolean  @default(false)
+  concatTimeout Int      @default(8)
+
+  // Metadata
+  tags         String[] @default([])
+  customFields Json?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  // Relacionamentos
+  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  connection         Connection          @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department         Department?         @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  messages           Message[]
+  sessionTabulations SessionTabulation[]
+
+  @@index([contactId])
+  @@index([connectionId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([aiBlockedUntil])
+  @@index([lastMessageAt])
+  @@index([assignedDepartmentId])
+  @@index([assignedAgentId])
+  @@index([externalId])
+}
+
+enum SessionStatus {
+  QUEUED // Aguardando atendimento
+  ACTIVE // Em atendimento
+  PAUSED // Pausada (aguardando resposta)
+  CLOSED // Encerrada
+}
+
+enum SessionStartedBy {
+  CUSTOMER // Iniciada pelo cliente
+  BUSINESS // Iniciada pela empresa
+  AGENT // Iniciada por agente
+}
+
+model Message {
+  id           String @id @default(uuid())
+  sessionId    String
+  contactId    String
+  connectionId String
+
+  // Mensagem
+  waMessageId String           @unique
+  direction   MessageDirection
+  type        MessageType
+  author      MessageAuthor    @default(CUSTOMER)
+  content     String           @db.Text
+
+  // Mídia
+  mediaUrl      String?
+  mediaType     String?
+  mimeType      String?
+  fileName      String?
+  mediaSize     Int?
+  mediaDuration Int?
+
+  // Transcrição
+  transcription            String?             @db.Text
+  transcriptionLanguage    String?
+  transcriptionConfidence  Float?
+  transcriptionStatus      TranscriptionStatus @default(pending)
+  transcriptionProcessedAt DateTime?
+  transcriptionError       String?
+
+  // Status WhatsApp
+  status      MessageStatus @default(pending)
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  // Concatenação
+  isConcatenated Boolean @default(false)
+  concatGroupId  String?
+
+  // Metadata
+  quotedMessageId String?
+  isForwarded     Boolean @default(false)
+  forwardedInfo   Json?
+
+  createdAt DateTime @default(now())
+
+  // Relacionamentos
+  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  connection Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([contactId])
+  @@index([connectionId])
+  @@index([waMessageId])
+  @@index([concatGroupId])
+  @@index([transcriptionStatus])
+  @@index([createdAt])
+}
+
+enum MessageDirection {
+  INBOUND // Recebida
+  OUTBOUND // Enviada
+}
+
+enum MessageType {
+  text
+  image
+  video
+  audio
+  voice // PTT - Push to Talk
+  document
+  location
+  contact
+  sticker
+  poll
+  list
+  buttons
+}
+
+enum MessageStatus {
+  pending
+  sent
+  delivered
+  read
+  failed
+}
+
+enum TranscriptionStatus {
+  pending // Aguardando processamento
+  processing // Em processamento
+  completed // Concluída com sucesso
+  failed // Falhou
+  skipped // Pulada (não aplicável)
+}
+
+enum MessageAuthor {
+  CUSTOMER // Cliente final
+  AGENT // Atendente humano
+  AI // IA/Bot
+  BUSINESS // Empresa/Sistema
+  SYSTEM // Sistema automático
+  AGENT_PLATFORM // Plataforma de agente
+}
+
+// ============================================
+// TABULATIONS (Contact & Session Tags/Labels)
+// ============================================
+
+model Tabulation {
+  id              String   @id @default(uuid())
+  organizationId  String
+  name            String
+  description     String?
+  backgroundColor String   @default("#ffffff")
+  labelId         String?  @default("NaN") // Compatibility with falecomigo.ai
+  autoTabulation  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contactTabulations     ContactTabulation[]
+  sessionTabulations     SessionTabulation[]
+  tabulationIntegrations TabulationIntegration[]
+  tabulationSettings     TabulationSetting[]
+  kanbanColumns          KanbanColumn[] // Link Kanban columns to tabulations
+
+  @@index([organizationId])
+  @@index([name])
+}
+
+model ContactTabulation {
+  id           String   @id @default(uuid())
+  contactId    String
+  tabulationId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contact    Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tabulationId])
+  @@index([contactId])
+  @@index([tabulationId])
+}
+
+model SessionTabulation {
+  id           String   @id @default(uuid())
+  sessionId    String
+  tabulationId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tabulation Tabulation  @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, tabulationId])
+  @@index([sessionId])
+  @@index([tabulationId])
+}
+
+// ============================================
+// TABULATION INTEGRATIONS (Link to Instances)
+// ============================================
+
+model TabulationIntegration {
+  id           String   @id @default(uuid())
+  tabulationId String
+  connectionId String
+  externalId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([tabulationId, connectionId])
+  @@index([tabulationId])
+  @@index([connectionId])
+}
+
+model TabulationSetting {
+  id           String   @id @default(uuid())
+  tabulationId String
+  key          String // Setting key (e.g., "webhookUrl", "autoAssign")
+  value        String   @db.Text // Setting value (JSON)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
+
+  @@unique([tabulationId, key])
+  @@index([tabulationId])
+}
+
+// ============================================
+// ATTRIBUTES (Custom Contact Fields)
+// ============================================
+
+model Attribute {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String // Field name (e.g., "Telefone alternativo")
+  description    String?
+  type           String // TEXT, DATE, DATETIME, INTEGER, FLOAT, DOCUMENT
+  isRequired     Boolean  @default(false)
+  defaultValue   String? // Default value for this attribute
+  options        Json? // For select/enum types: ["Option 1", "Option 2"]
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contactAttributes ContactAttribute[]
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([isActive])
+}
+
+model ContactAttribute {
+  id          String   @id @default(uuid())
+  contactId   String
+  attributeId String
+  value       String   @db.Text // Stored as string, cast based on Attribute.type
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contact   Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, attributeId])
+  @@index([contactId])
+  @@index([attributeId])
+}
+
+// ============================================
+// KANBAN (Sales & Leads Pipeline)
+// ============================================
+
+model KanbanBoard {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  columns KanbanColumn[]
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+model KanbanColumn {
+  id              String   @id @default(uuid())
+  boardId         String
+  name            String
+  position        Int // Order position in board
+  backgroundColor String   @default("#ffffff")
+  tabulationId    String? // Link to Tabulation for auto-assignment
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  board      KanbanBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tabulation Tabulation? @relation(fields: [tabulationId], references: [id], onDelete: SetNull)
+
+  @@index([boardId])
+  @@index([position])
+  @@index([tabulationId])
+}
+
+// ============================================
+// LABELS (Category System - Different from Tabulations)
+// ============================================
+
+model Label {
+  id              String   @id @default(uuid())
+  organizationId  String
+  name            String
+  slug            String
+  description     String?
+  backgroundColor String   @default("#ffffff")
+  icon            String? // Icon name or emoji
+  category        String? // Category grouping
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([category])
+  @@index([isActive])
+}
+
+// ============================================
+// CONTACT OBSERVATIONS (Notes for Contacts)
+// ============================================
+
+model ContactObservation {
+  id        String   @id @default(uuid())
+  contactId String
+  userId    String // Author of observation
+  content   String   @db.Text
+  type      String   @default("note") // note, warning, important
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([contactId])
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ============================================
+// FILES (File Management & Storage)
+// ============================================
+
+model File {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String // Uploader
+  fileName       String
+  fileSize       Int // Bytes
+  mimeType       String
+  url            String // S3/CDN URL or local path
+  thumbnail      String? // Thumbnail URL for images/videos
+  metadata       Json? // Additional metadata (dimensions, duration, etc)
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([mimeType])
+  @@index([createdAt])
+}
+
+// ============================================
+// CALLS (WhatsApp Call Management)
+// ============================================
+
+model Call {
+  id             String @id @default(uuid())
+  connectionId   String
+  contactId      String
+  organizationId String
+
+  // Call details
+  direction   CallDirection
+  status      CallStatus    @default(INITIATED)
+  externalId  String?       @unique
+  initiatedBy String?
+
+  // Timestamps
+  startedAt  DateTime  @default(now())
+  answeredAt DateTime?
+  endedAt    DateTime?
+  duration   Int?
+
+  // Metadata
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  connection   Connection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [initiatedBy], references: [id], onDelete: SetNull)
+
+  @@index([connectionId])
+  @@index([contactId])
+  @@index([organizationId])
+  @@index([initiatedBy])
+  @@index([status])
+  @@index([direction])
+  @@index([externalId])
+  @@index([startedAt])
+}
+
+enum CallDirection {
+  INCOMING // Chamada recebida
+  OUTGOING // Chamada feita
+}
+
+enum CallStatus {
+  INITIATED // Chamada iniciada
+  RINGING // Tocando
+  ANSWERED // Atendida
+  MISSED // Perdida
+  REJECTED // Rejeitada
+  BUSY // Ocupado
+  FAILED // Falhou
+  ENDED // Finalizada
+}

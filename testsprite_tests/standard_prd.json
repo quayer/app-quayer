@@ -1,0 +1,317 @@
+{
+  "meta": {
+    "project": "Quayer Multi-Tenant Organization Management System",
+    "date": "2025-10-20",
+    "prepared_by": "Lia AI Agent"
+  },
+  "product_overview": "Quayer is a robust multi-tenant SaaS platform that manages organizations, user authentication, WhatsApp and other channel integrations, CRM features, and administrative dashboards. It provides role-based access control, real-time event streaming, multi-organization context switching, and secure sharing features, all backed by PostgreSQL and Prisma ORM with a modern React/Next.js frontend.",
+  "core_goals": [
+    "Provide a secure, multi-role authentication and authorization system with OTP, magic link, Google OAuth and email verification.",
+    "Enable onboarding and full CRUD management of organizations with permission control and role contexts.",
+    "Support seamless switching between organizations with UI updates reflecting current organizational context.",
+    "Integrate robust WhatsApp connection management with QR code pairing, live status, and limits per organization.",
+    "Offer a comprehensive CRM with contact management, kanban pipeline, projects, and custom attributes.",
+    "Allow sharing of resource access via secure tokens with public-facing link validation and expiration.",
+    "Deliver administrative dashboards for monitoring users, organizations, logs, permissions, and webhooks.",
+    "Ensure real-time updates using Server-Sent Events and handle webhooks securely from external services.",
+    "Implement a clean, intuitive UI with reusable components and progressive onboarding UX improvements."
+  ],
+  "key_features": [
+    "Full Authentication & Authorization with OTP, Magic Link, Google OAuth, Email Verification, and Password Reset.",
+    "Multi-step Onboarding Wizard for creating first organization (physical or legal person).",
+    "Organization Management: CRUD, active context switching, and permission validation.",
+    "Invitation System for users to join organizations with role-based access rights.",
+    "Admin Dashboard with statistics, user/org management, logs, permissions, and webhook configuration.",
+    "WhatsApp & Telegram Integrations with real-time connection status, QR code scanning guidance, and connection limits.",
+    "Messaging System for chats, sessions, mass messaging, templates, and media handling.",
+    "CRM features including contact management, Kanban pipelines, project tracking, observations, and custom attributes.",
+    "Webhook support with secure endpoints for UAZapi events and n8n integration.",
+    "File uploads and media management with download and storage facilities.",
+    "Secure Share Tokens system enabling controlled public sharing and connection status validation.",
+    "Reusable UI components built atop Shadcn UI, Radix UI, Framer Motion, React Hook Form, and Tailwind CSS.",
+    "Dynamic Sidebar navigation adapting by user role and current organization, with real-time data from PostgreSQL."
+  ],
+  "user_flow_summary": [
+    "User login with OTP, magic link, or OAuth; followed by email verification and optional password reset.",
+    "New users onboard by creating their first organization (person or company) via a step-by-step wizard.",
+    "Admins manage organizations via CRUD pages and can switch active organization context through a dropdown, which reloads UI with fresh data.",
+    "Users access WhatsApp integration dashboard, initiate QR scan pairing with step-by-step visual instructions, and monitor connection status.",
+    "Users send, view, and manage chats and messages within active sessions and access CRM pipelines with drag and drop Kanban boards.",
+    "Admins invite users to organizations, assign roles, and manage permissions through the invitation system.",
+    "Users generate share tokens to provide selective public access to WhatsApp connections with time-bound links and QR codes.",
+    "Admins review system-wide dashboards with logs, webhooks, and statistical analytics, managing system health and user activity.",
+    "System handles webhook events from third parties for message processing and connection management with detailed error handling and rate limits."
+  ],
+  "validation_criteria": [
+    "All authentication flows validated with secure storage of tokens and appropriate error handling (e.g., 401 Unauthorized responses).",
+    "Onboarding wizard completes with organization created in PostgreSQL with correct attributes and user roles assigned.",
+    "Organization switching updates the access token, user context and triggers frontend refresh showing updated organization name and permissions.",
+    "WhatsApp connections limit per organization enforced; QR code modal includes countdown and illustrated step instructions for successful pairing.",
+    "No use of mock data in sidebar or organization data; all data fetched via authenticated API from PostgreSQL through Prisma ORM.",
+    "Creation and update operations are transactional and idempotent to prevent race conditions and orphaned data.",
+    "All user inputs including connection names and URLs validated to prevent injection, SSRF, or malformed data.",
+    "UI components show loading states and inline error feedback for a responsive and intuitive user experience.",
+    "System logs detailed context on errors for debugging without exposing sensitive information to users.",
+    "System supports real-time events using SSE and webhooks with secure tokens and validation mechanisms.",
+    "Sharing links and tokens invalidate correctly after expiration and unauthorized access is denied with correct HTTP status codes.",
+    "Admin dashboard pages return paginated results, and queries avoid N+1 issues for scalability."
+  ],
+  "code_summary": {
+    "tech_stack": [
+      "Next.js 15.3.5",
+      "React 19",
+      "TypeScript",
+      "Tailwind CSS 4",
+      "Prisma ORM",
+      "PostgreSQL",
+      "Redis (Upstash)",
+      "Igniter.js Core",
+      "BullMQ",
+      "Shadcn UI",
+      "Radix UI",
+      "TanStack Query",
+      "Zod",
+      "React Hook Form",
+      "Framer Motion",
+      "Winston Logger",
+      "Playwright (E2E)",
+      "Vitest (Unit Tests)"
+    ],
+    "features": [
+      {
+        "name": "Autenticação e Autorização",
+        "description": "Sistema completo de autenticação com login OTP, login mágico, signup, verificação de email, reset de senha e Google OAuth",
+        "files": [
+          "src/features/auth/controllers/auth.controller.ts",
+          "src/features/auth/repositories/auth.repository.ts",
+          "src/features/auth/procedures/auth.procedure.ts",
+          "src/features/auth/auth.interfaces.ts",
+          "src/features/auth/auth.schemas.ts",
+          "src/app/(auth)/login/page.tsx",
+          "src/app/(auth)/signup/page.tsx",
+          "src/app/(auth)/verify-email/page.tsx",
+          "src/app/(auth)/forgot-password/page.tsx",
+          "src/app/(auth)/reset-password/[token]/page.tsx",
+          "src/components/auth/login-form.tsx",
+          "src/components/auth/login-otp-form.tsx",
+          "src/components/auth/signup-form.tsx",
+          "src/components/auth/verify-email-form.tsx"
+        ]
+      },
+      {
+        "name": "Onboarding de Organizações",
+        "description": "Fluxo de onboarding para criação da primeira organização do usuário (Pessoa Física/Jurídica)",
+        "files": [
+          "src/features/onboarding/controllers/onboarding.controller.ts",
+          "src/features/onboarding/onboarding.schemas.ts",
+          "src/app/(auth)/onboarding/page.tsx",
+          "src/app/(auth)/onboarding/actions.ts",
+          "src/components/auth/onboarding-form.tsx",
+          "src/components/onboarding/onboarding-wizard.tsx"
+        ]
+      },
+      {
+        "name": "Gestão de Organizações",
+        "description": "CRUD completo de organizações, troca de contexto entre organizações, permissões baseadas em organização",
+        "files": [
+          "src/features/organizations/controllers/organizations.controller.ts",
+          "src/features/organizations/repositories/organizations.repository.ts",
+          "src/features/organizations/organizations.interfaces.ts",
+          "src/features/organizations/organizations.schemas.ts",
+          "src/app/admin/organizations/page.tsx",
+          "src/app/admin/organizations/create-organization-dialog.tsx",
+          "src/app/admin/organizations/edit-organization-dialog.tsx",
+          "src/components/organization-switcher.tsx"
+        ]
+      },
+      {
+        "name": "Sistema de Convites",
+        "description": "Sistema para convidar novos usuários para organizações, aceitar convites, gerenciar permissões de acesso",
+        "files": [
+          "src/features/invitations/controllers/invitations.controller.ts",
+          "src/features/invitations/invitations.repository.ts",
+          "src/features/invitations/invitations.interfaces.ts",
+          "src/features/invitations/invitations.schemas.ts",
+          "src/app/admin/invitations/page.tsx",
+          "src/app/admin/invitations/actions.ts"
+        ]
+      },
+      {
+        "name": "Dashboard Administrativo",
+        "description": "Painel administrativo com estatísticas, gestão de usuários, organizações, logs, permissões e webhooks",
+        "files": [
+          "src/features/dashboard/controllers/dashboard.controller.ts",
+          "src/app/admin/page.tsx",
+          "src/app/admin/layout.tsx",
+          "src/app/admin/organizations/page.tsx",
+          "src/app/admin/permissions/page.tsx",
+          "src/app/admin/logs/page.tsx",
+          "src/app/admin/webhooks/page.tsx",
+          "src/app/admin/actions.ts"
+        ]
+      },
+      {
+        "name": "Integrações e Conexões WhatsApp",
+        "description": "Sistema completo de integrações com WhatsApp via UAZapi, gerenciamento de instâncias, QR Code, status de conexão",
+        "files": [
+          "src/features/connections/controllers/connections.controller.ts",
+          "src/features/connections/controllers/connections-realtime.controller.ts",
+          "src/features/connections/controllers/connection-messages.controller.ts",
+          "src/features/instances/controllers/instances.controller.ts",
+          "src/features/instances/repositories/instances.repository.ts",
+          "src/features/instances/instances.interfaces.ts",
+          "src/app/integracoes/page.tsx",
+          "src/app/integracoes/layout.tsx",
+          "src/app/integracoes/dashboard/page.tsx",
+          "src/components/connections/ConnectionCard.tsx",
+          "src/components/connections/QRCodeModal.tsx",
+          "src/components/whatsapp/instance-card.tsx",
+          "src/components/whatsapp/create-instance-modal.tsx"
+        ]
+      },
+      {
+        "name": "Mensagens e Conversas",
+        "description": "Sistema de mensagens, chats, sessões, envio de mensagens em massa, templates, histórico de conversas",
+        "files": [
+          "src/features/messages/controllers/messages.controller.ts",
+          "src/features/messages/controllers/chats.controller.ts",
+          "src/features/messages/controllers/media.controller.ts",
+          "src/features/sessions/controllers/sessions.controller.ts",
+          "src/app/conversas/page.tsx",
+          "src/app/conversas/[sessionId]/page.tsx",
+          "src/app/integracoes/conversations/page.tsx",
+          "src/app/integracoes/messages/send-message-dialog.tsx",
+          "src/app/integracoes/messages/bulk-send-dialog.tsx",
+          "src/app/integracoes/messages/template-dialog.tsx"
+        ]
+      },
+      {
+        "name": "CRM - Gestão de Contatos",
+        "description": "Sistema CRM completo com gestão de contatos, pipeline Kanban, projetos, observações e atributos customizados",
+        "files": [
+          "src/features/contacts/controllers/contacts.controller.ts",
+          "src/features/kanban/controllers/kanban.controller.ts",
+          "src/features/projects/controllers/projects.controller.ts",
+          "src/features/observations/controllers/observations.controller.ts",
+          "src/features/attributes/controllers/attributes.controller.ts",
+          "src/app/crm/contatos/page.tsx",
+          "src/app/crm/contatos/[id]/page.tsx",
+          "src/app/crm/kanban/page.tsx",
+          "src/app/crm/kanban/[id]/page.tsx",
+          "src/components/kanban/KanbanCard.tsx",
+          "src/components/kanban/KanbanColumn.tsx"
+        ]
+      },
+      {
+        "name": "Webhooks",
+        "description": "Sistema de webhooks para receber eventos do UAZapi, processamento de mensagens, chamadas, status de conexão",
+        "files": [
+          "src/features/webhooks/controllers/webhooks.controller.ts",
+          "src/features/webhooks/controllers/uazapi-webhooks.controller.ts",
+          "src/features/webhooks/controllers/uazapi-webhooks-enhanced.controller.ts",
+          "src/features/webhooks/webhooks.repository.ts",
+          "src/features/webhooks/webhooks.service.ts",
+          "src/features/webhooks/webhooks.interfaces.ts",
+          "src/app/api/v1/webhooks/[provider]/route.ts",
+          "src/app/configuracoes/webhooks/page.tsx",
+          "src/app/integracoes/webhooks/create-webhook-dialog.tsx",
+          "src/app/integracoes/webhooks/edit-webhook-dialog.tsx"
+        ]
+      },
+      {
+        "name": "Configurações",
+        "description": "Painel de configurações com departamentos, labels, tabulações e webhooks customizados",
+        "files": [
+          "src/features/departments/controllers/departments.controller.ts",
+          "src/features/labels/controllers/labels.controller.ts",
+          "src/features/tabulations/controllers/tabulations.controller.ts",
+          "src/app/configuracoes/layout.tsx",
+          "src/app/configuracoes/departamentos/page.tsx",
+          "src/app/configuracoes/labels/page.tsx",
+          "src/app/configuracoes/tabulacoes/page.tsx",
+          "src/app/configuracoes/webhooks/page.tsx"
+        ]
+      },
+      {
+        "name": "Analytics e Relatórios",
+        "description": "Dashboard com métricas, gráficos, estatísticas de uso e performance",
+        "files": [
+          "src/features/analytics/controllers/analytics.controller.ts",
+          "src/components/ui/chart.tsx",
+          "src/components/ui/charts/area-chart.tsx",
+          "src/components/ui/charts/bar-chart.tsx",
+          "src/components/ui/charts/line-chart.tsx"
+        ]
+      },
+      {
+        "name": "Arquivos e Mídia",
+        "description": "Gerenciamento de upload e download de arquivos, mídias de mensagens",
+        "files": [
+          "src/features/files/controllers/files.controller.ts"
+        ]
+      },
+      {
+        "name": "Sistema de Compartilhamento",
+        "description": "Compartilhamento de recursos via token, acesso público controlado",
+        "files": [
+          "src/features/share/controllers/share.controller.ts",
+          "src/features/share/share.repository.ts",
+          "src/features/share/share.interfaces.ts",
+          "src/app/(public)/connect/page.tsx",
+          "src/app/(public)/connect/[token]/page.tsx",
+          "src/components/whatsapp/share-modal.tsx"
+        ]
+      },
+      {
+        "name": "Componentes UI Reutilizáveis",
+        "description": "Biblioteca completa de componentes UI baseados em Shadcn UI e Radix UI",
+        "files": [
+          "src/components/ui/button.tsx",
+          "src/components/ui/input.tsx",
+          "src/components/ui/card.tsx",
+          "src/components/ui/dialog.tsx",
+          "src/components/ui/form.tsx",
+          "src/components/ui/table.tsx",
+          "src/components/ui/sidebar.tsx",
+          "src/components/ui/badge.tsx",
+          "src/components/ui/alert.tsx",
+          "src/components/ui/toast.tsx",
+          "src/components/custom/empty-state.tsx",
+          "src/components/custom/status-badge.tsx"
+        ]
+      },
+      {
+        "name": "Sistema de Navegação",
+        "description": "Sidebar dinâmica com navegação contextual, menu de usuário, troca de organizações",
+        "files": [
+          "src/components/app-sidebar.tsx",
+          "src/components/nav-main.tsx",
+          "src/components/nav-user.tsx",
+          "src/components/nav-projects.tsx",
+          "src/components/nav-secondary.tsx"
+        ]
+      },
+      {
+        "name": "SSE (Server-Sent Events)",
+        "description": "Sistema de eventos em tempo real via Server-Sent Events",
+        "files": [
+          "src/features/sse/controllers/sse.controller.ts"
+        ]
+      },
+      {
+        "name": "Chamadas",
+        "description": "Gerenciamento de chamadas telefônicas e gravações",
+        "files": [
+          "src/features/calls/controllers/calls.controller.ts"
+        ]
+      },
+      {
+        "name": "Grupos",
+        "description": "Gestão de grupos de WhatsApp",
+        "files": [
+          "src/features/groups/controllers/groups.controller.ts"
+        ]
+      }
+    ]
+  }
+}
