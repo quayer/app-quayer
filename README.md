@@ -10,21 +10,23 @@
 [![Type Safety](https://img.shields.io/badge/Type%20Safety-100%25-green)](.)
 [![No Mocks](https://img.shields.io/badge/Mocks-0%25-success)](.)
 [![Quality](https://img.shields.io/badge/Quality-Enterprise-gold)](.)
+[![CI](https://github.com/quayer/app-quayer/actions/workflows/ci.yml/badge.svg)](https://github.com/quayer/app-quayer/actions/workflows/ci.yml)
 
 ---
 
 ## 🚀 Quick Start
 
 ### Pré-requisitos
-- Node.js 18+
+- Node.js 20+
 - PostgreSQL 14+
 - Conta SMTP (Gmail)
 - Conta UAZAPI (WhatsApp)
 
 ### Instalação
 ```bash
-# Clone o repositório
-git clone <repo-url>
+# Clone o repositório (HTTPS ou SSH)
+git clone https://github.com/quayer/app-quayer.git
+# ou: git clone git@github.com:quayer/app-quayer.git
 cd app-quayer
 
 # Instalar dependências
@@ -46,6 +48,8 @@ npm run dev
 - **App**: http://localhost:3000
 - **Admin**: http://localhost:3000/admin
 - **API Docs**: http://localhost:3000/api/v1/docs
+
+> Dica: copie `.env.example` para `.env` e preencha as variáveis (não faça commit de segredos).
 
 ---
 
@@ -108,6 +112,10 @@ npm run test:real:e2e      # 45 testes E2E
 npm run test:admin         # 8 testes Admin
 npm run test:uazapi        # 4 testes UAZAPI
 ```
+
+### CI
+O pipeline roda automaticamente em PRs e na `main`:
+- Lint, typecheck e testes (vitest + build) via [GitHub Actions](.github/workflows/ci.yml)
 
 ### Filosofia de Testes
 - ✅ **100% Real** - Zero mocks
@@ -187,14 +195,21 @@ Veja `src/app/globals.css` para todos os tokens.
 
 ---
 
-## 📧 E-mails de Teste
+## 🚢 Releases & Deploy
 
-Use para validação manual:
-- `gabrielrizzatto@hotmail.com`
-- `mart.gabrielrizzatto@gmail.com`
-- `contato.gabrielrizzatto@gmail.com`
+### Versão e Release
+- Adote Conventional Commits (feat:, fix:, chore:, docs:, refactor:, perf:, test:)
+- Crie uma tag `vX.Y.Z` para disparar release e deploy:
+  ```bash
+  git tag v1.0.1
+  git push origin v1.0.1
+  ```
+- A action cria a Release automaticamente: `.github/workflows/release-and-deploy.yml`
 
----
+### Deploy
+- Deploy por SSH (opcional) é executado se os segredos estiverem configurados no repositório:
+  - `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `SSH_DEST_PATH`
+  - O job faz upload do build (`.next`) via rsync
 
 ## 🐛 Issues Conhecidos
 
@@ -253,7 +268,7 @@ Use para validação manual:
 
 ## 📄 Licença
 
-Proprietary - Todos os direitos reservados
+MIT
 
 ---
 
