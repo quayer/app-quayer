@@ -466,20 +466,17 @@ async function main() {
   ];
 
   for (const instanceData of instances) {
-    const instance = await prisma.instance.create({
+    const instance = await prisma.connection.create({
       data: {
         name: instanceData.name,
         phoneNumber: instanceData.phoneNumber,
-        status: instanceData.status,
+        status: instanceData.status as any,
         organizationId: instanceData.organizationId,
         projectId: instanceData.projectId,
-        brokerType: 'uazapi',
-        msgDelayMin: 2,
-        msgDelayMax: 4,
         lastConnected: instanceData.status === 'connected' ? new Date() : null,
       },
     });
-    console.log(`✅ Instance created: ${instance.name} (${instanceData.status})`);
+    console.log(`✅ Connection created: ${instance.name} (${instanceData.status})`);
   }
   console.log();
 
@@ -556,6 +553,214 @@ async function main() {
   }
 
   // ============================================
+  // 9. PERMISSIONS (Dynamic permissions system)
+  // ============================================
+  console.log('🔐 Creating Default Permissions...');
+
+  const defaultPermissions: Record<string, { displayName: string; description: string; roles: Record<string, string[]> }> = {
+    organizations: {
+      displayName: 'Organizacoes',
+      description: 'Gerenciamento de organizacoes',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage'],
+        master: ['read', 'update', 'manage'],
+        manager: ['read'],
+        agent: [],
+        viewer: [],
+      },
+    },
+    users: {
+      displayName: 'Usuarios',
+      description: 'Gerenciamento de usuarios',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage', 'export'],
+        master: ['create', 'read', 'update', 'delete', 'manage'],
+        manager: ['create', 'read', 'update'],
+        agent: ['read'],
+        viewer: ['read'],
+      },
+    },
+    instances: {
+      displayName: 'Integracoes/Conexoes',
+      description: 'Gerenciamento de instancias WhatsApp',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage', 'import', 'export'],
+        master: ['create', 'read', 'update', 'delete', 'manage'],
+        manager: ['create', 'read', 'update'],
+        agent: ['read'],
+        viewer: ['read'],
+      },
+    },
+    messages: {
+      displayName: 'Mensagens/Conversas',
+      description: 'Envio e visualizacao de mensagens',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage', 'export'],
+        master: ['create', 'read', 'update', 'delete'],
+        manager: ['create', 'read', 'update'],
+        agent: ['create', 'read', 'update'],
+        viewer: ['read'],
+      },
+    },
+    sessions: {
+      displayName: 'Sessoes',
+      description: 'Gerenciamento de sessoes de atendimento',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage'],
+        master: ['create', 'read', 'update', 'delete', 'manage'],
+        manager: ['create', 'read', 'update', 'manage'],
+        agent: ['read', 'update'],
+        viewer: ['read'],
+      },
+    },
+    contacts: {
+      displayName: 'Contatos',
+      description: 'Gerenciamento de contatos',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'export', 'import'],
+        master: ['create', 'read', 'update', 'delete', 'export'],
+        manager: ['create', 'read', 'update', 'delete'],
+        agent: ['create', 'read', 'update'],
+        viewer: ['read'],
+      },
+    },
+    departments: {
+      displayName: 'Departamentos',
+      description: 'Gerenciamento de departamentos',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage'],
+        master: ['create', 'read', 'update', 'delete'],
+        manager: ['read'],
+        agent: [],
+        viewer: [],
+      },
+    },
+    labels: {
+      displayName: 'Labels/Etiquetas',
+      description: 'Gerenciamento de etiquetas',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete'],
+        master: ['create', 'read', 'update', 'delete'],
+        manager: ['create', 'read', 'update'],
+        agent: ['read'],
+        viewer: ['read'],
+      },
+    },
+    webhooks: {
+      displayName: 'Webhooks',
+      description: 'Configuracao de webhooks',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage'],
+        master: ['create', 'read', 'update', 'delete'],
+        manager: ['read'],
+        agent: [],
+        viewer: [],
+      },
+    },
+    projects: {
+      displayName: 'Projetos',
+      description: 'Gerenciamento de projetos',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete', 'manage'],
+        master: ['create', 'read', 'update', 'delete'],
+        manager: ['read'],
+        agent: [],
+        viewer: [],
+      },
+    },
+    invitations: {
+      displayName: 'Convites',
+      description: 'Gerenciamento de convites',
+      roles: {
+        admin: ['create', 'read', 'update', 'delete'],
+        master: ['create', 'read', 'delete'],
+        manager: ['create', 'read'],
+        agent: [],
+        viewer: [],
+      },
+    },
+    logs: {
+      displayName: 'Logs do Sistema',
+      description: 'Visualizacao e analise de logs',
+      roles: {
+        admin: ['read', 'analyze', 'export', 'stream'],
+        master: [],
+        manager: [],
+        agent: [],
+        viewer: [],
+      },
+    },
+    analytics: {
+      displayName: 'Analytics/Dashboard',
+      description: 'Visualizacao de metricas e dashboards',
+      roles: {
+        admin: ['read', 'analyze', 'export'],
+        master: ['read', 'analyze'],
+        manager: ['read'],
+        agent: ['read'],
+        viewer: ['read'],
+      },
+    },
+    settings: {
+      displayName: 'Configuracoes do Sistema',
+      description: 'Configuracoes globais do sistema',
+      roles: {
+        admin: ['read', 'update', 'manage'],
+        master: [],
+        manager: [],
+        agent: [],
+        viewer: [],
+      },
+    },
+  };
+
+  let resourceCount = 0;
+  let permissionCount = 0;
+
+  for (const [resource, config] of Object.entries(defaultPermissions)) {
+    // Create or update the permission resource
+    const permissionResource = await prisma.permissionResource.upsert({
+      where: { resource },
+      update: {
+        displayName: config.displayName,
+        description: config.description,
+      },
+      create: {
+        resource,
+        displayName: config.displayName,
+        description: config.description,
+        sortOrder: resourceCount,
+        isActive: true,
+      },
+    });
+    resourceCount++;
+
+    // Create or update role permissions
+    for (const [role, actions] of Object.entries(config.roles)) {
+      await prisma.rolePermission.upsert({
+        where: {
+          resourceId_role: {
+            resourceId: permissionResource.id,
+            role,
+          },
+        },
+        update: {
+          actions,
+        },
+        create: {
+          resourceId: permissionResource.id,
+          role,
+          actions,
+        },
+      });
+      permissionCount++;
+    }
+  }
+
+  console.log(`✅ ${resourceCount} Permission resources created`);
+  console.log(`✅ ${permissionCount} Role permissions configured\n`);
+
+  // ============================================
   // SUMMARY
   // ============================================
   console.log('✨ Seeding completed successfully!\n');
@@ -568,6 +773,7 @@ async function main() {
   console.log(`   • 10 WhatsApp Instances`);
   console.log(`   • 2 Invitations`);
   console.log(`   • 2 Audit Logs`);
+  console.log(`   • ${resourceCount} Permission resources (${permissionCount} role permissions)`);
   console.log();
   console.log('🔑 Login credentials (6 test users):');
   console.log('   1. admin@quayer.com / admin123456 (admin)');

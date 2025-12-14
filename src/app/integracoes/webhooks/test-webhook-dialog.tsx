@@ -174,7 +174,7 @@ export function TestWebhookDialog({ webhook, isOpen, onClose }: TestWebhookDialo
         <DialogHeader>
           <DialogTitle>Testar Webhook</DialogTitle>
           <DialogDescription>
-            Envie uma requisição de teste para o webhook: <strong>{webhook?.name}</strong>
+            Envie uma requisição de teste para o webhook: <strong>{webhook?.url}</strong>
           </DialogDescription>
         </DialogHeader>
 

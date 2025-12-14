@@ -266,7 +266,7 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
-      className={cn("size-7", className)}
+      className={cn("size-11 md:size-7", className)}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
@@ -374,7 +374,7 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden",
         className
       )}
       {...props}
@@ -561,12 +561,9 @@ function SidebarMenuAction({
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
       className={cn(
-        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground peer-hover/menu-button:text-sidebar-accent-foreground absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground peer-hover/menu-button:text-sidebar-accent-foreground absolute top-1/2 -translate-y-1/2 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
         // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 md:after:hidden",
-        "peer-data-[size=sm]/menu-button:top-1",
-        "peer-data-[size=default]/menu-button:top-1.5",
-        "peer-data-[size=lg]/menu-button:top-2.5",
         "group-data-[collapsible=icon]:hidden",
         showOnHover &&
           "peer-data-[active=true]/menu-button:text-sidebar-accent-foreground group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 data-[state=open]:opacity-100 md:opacity-0",

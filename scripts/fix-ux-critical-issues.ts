@@ -98,8 +98,9 @@ for (const fix of fixes) {
 
     console.log(`✅ ${fix.name}: Aplicado com sucesso`);
     successCount++;
-  } catch (error) {
-    console.log(`❌ ${fix.name}: Erro - ${error.message}`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`❌ ${fix.name}: Erro - ${message}`);
     errorCount++;
   }
 }

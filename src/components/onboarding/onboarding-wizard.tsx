@@ -67,8 +67,8 @@ export function OnboardingWizard() {
 
       setCurrentStep('complete')
     },
-    onError: (error) => {
-      toast.error(`Erro ao criar organização: ${error.message}`)
+    onError: (error: any) => {
+      toast.error(`Erro ao criar organização: ${error?.message || 'Erro desconhecido'}`)
     },
   })
 

@@ -1,0 +1,8 @@
+export { UAZapiSettings } from './UAZapiSettings'
+export { WebhookSettings } from './WebhookSettings'
+export { EmailSettings } from './EmailSettings'
+export { AISettings } from './AISettings'
+export { ConcatenationSettings } from './ConcatenationSettings'
+export { OAuthSettings } from './OAuthSettings'
+export { SecuritySettings } from './SecuritySettings'
+export { SystemInfo } from './SystemInfo'

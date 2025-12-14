@@ -47,8 +47,9 @@ export async function cleanupTestData(): Promise<void> {
     // Limpar na ordem correta (respeitando foreign keys)
     await prisma.$transaction([
       prisma.message.deleteMany(),
-      prisma.instance.deleteMany(),
-      prisma.organizationUser.deleteMany(),
+      prisma.chatSession.deleteMany(),
+      prisma.connection.deleteMany(),
+      prisma.userOrganization.deleteMany(),
       prisma.invitation.deleteMany(),
       prisma.organization.deleteMany(),
       prisma.refreshToken.deleteMany(),
@@ -98,7 +99,7 @@ export async function seedTestData() {
       name: 'Admin Test',
       password: '$2a$10$rZ1vG9X9X9X9X9X9X9X9XuZQ1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1Z1', // admin123456
       role: 'admin',
-      emailVerified: true,
+      emailVerified: new Date(),
     },
   })
 

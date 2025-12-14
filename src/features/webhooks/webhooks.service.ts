@@ -1,11 +1,22 @@
 /**
  * Webhooks Service
  * Handles webhook dispatching and delivery
+ *
+ * SISTEMA DE CALLBACK:
+ * Se o webhook do cliente responder com um JSON contendo:
+ * {
+ *   "messages": [{ "type": "text", "content": "Resposta" }],
+ *   "actions": [{ "type": "close_session" }]
+ * }
+ * O sistema automaticamente envia as mensagens e executa as ações
  */
 
 import { webhooksRepository } from './webhooks.repository';
 import type { WebhookPayload } from './webhooks.interfaces';
 import { logger } from '@/services/logger';
+
+// TODO: Implementar @/lib/message-sender para callback responses
+type AnyCallbackResponse = any;
 
 export class WebhooksService {
   /**
@@ -71,13 +82,18 @@ export class WebhooksService {
 
   /**
    * Dispatch webhook to a specific URL
+   * Returns the response body for callback processing
+   *
+   * Suporta callback responses em múltiplos formatos:
+   * - Formato N8N: [{ type, content: { text, delay } }]
+   * - Formato estruturado: { messages: [...], actions: [...] }
    */
   private async dispatchWebhook(
     url: string,
     payload: WebhookPayload,
     secret?: string | null,
     timeout: number = 30000
-  ): Promise<{ success: boolean; response?: any; error?: string }> {
+  ): Promise<{ success: boolean; response?: any; error?: string; callbackData?: AnyCallbackResponse }> {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -105,6 +121,35 @@ export class WebhooksService {
 
       const responseData = await response.text();
 
+      // Tentar parsear resposta como JSON para callback
+      let callbackData: AnyCallbackResponse | undefined;
+      if (responseData) {
+        try {
+          const parsed = JSON.parse(responseData);
+
+          // ✅ FORMATO 1: Array direto (N8N format)
+          // [{ type: "text", content: { text: "...", delay: 1000 } }]
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].type) {
+            callbackData = parsed;
+            logger.info('[Webhooks] Callback response detectado (formato N8N array)', {
+              messagesCount: parsed.length,
+              firstMessageType: parsed[0].type,
+            });
+          }
+          // ✅ FORMATO 2: Objeto estruturado
+          // { messages: [...], actions: [...] }
+          else if (parsed.messages || parsed.actions) {
+            callbackData = parsed;
+            logger.info('[Webhooks] Callback response detectado (formato estruturado)', {
+              messagesCount: parsed.messages?.length || 0,
+              actionsCount: parsed.actions?.length || 0,
+            });
+          }
+        } catch {
+          // Não é JSON válido, ignorar
+        }
+      }
+
       if (response.ok) {
         return {
           success: true,
@@ -112,6 +157,7 @@ export class WebhooksService {
             status: response.status,
             body: responseData,
           },
+          callbackData,
         };
       } else {
         return {
@@ -204,6 +250,16 @@ export class WebhooksService {
           webhookId: webhook.id,
           deliveryId: delivery.id,
         });
+
+        // TODO: Implementar callback response quando @/lib/message-sender estiver disponível
+        // Suporta formatos: N8N array, objeto estruturado, content como string ou objeto
+        if (result.callbackData) {
+          logger.info('Callback response detected but not processed (message-sender not implemented)', {
+            webhookId: webhook.id,
+            deliveryId: delivery.id,
+            format: Array.isArray(result.callbackData) ? 'n8n_array' : 'structured',
+          });
+        }
       } else {
         logger.error('Webhook delivery failed', {
           webhookId: webhook.id,
@@ -214,6 +270,40 @@ export class WebhooksService {
     });
 
     await Promise.allSettled(promises);
+  }
+
+  /**
+   * Extract callback context from webhook data
+   */
+  private extractCallbackContext(data: any): {
+    instanceId?: string;
+    to?: string;
+    sessionId?: string;
+  } {
+    // Dados do Quayer enriched payload
+    if (data.quayer) {
+      return {
+        instanceId: data.quayer.instanceId,
+        to: data.uaz?.sender?.replace('@s.whatsapp.net', '') || data.context?.contact?.phoneNumber,
+        sessionId: data.context?.session?.id,
+      };
+    }
+
+    // Dados de mensagem direta
+    if (data.instanceId && data.sender) {
+      return {
+        instanceId: data.instanceId,
+        to: data.sender.replace('@s.whatsapp.net', ''),
+        sessionId: data.sessionId,
+      };
+    }
+
+    // Fallback para campos comuns
+    return {
+      instanceId: data.instanceId || data.instance?.id,
+      to: data.to || data.sender || data.phoneNumber || data.contact?.phoneNumber,
+      sessionId: data.sessionId || data.session?.id,
+    };
   }
 
   /**

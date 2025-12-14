@@ -2,6 +2,7 @@ import { igniter } from "@/igniter";
 import { AuthRepository } from "../repositories/auth.repository";
 import { User } from "@prisma/client";
 import { verifyAccessToken } from "@/lib/auth/jwt";
+import { apiKeysRepository } from "@/features/api-keys";
 
 /**
  * @typedef {object} AuthProcedureOptions
@@ -10,6 +11,67 @@ import { verifyAccessToken } from "@/lib/auth/jwt";
 type AuthProcedureOptions = {
   required?: boolean;
 };
+
+/**
+ * Check if a token is an API key (starts with qk_)
+ */
+function isApiKey(token: string): boolean {
+  return token.startsWith('qk_');
+}
+
+/**
+ * Validate API key and return user context
+ */
+async function validateApiKeyAuth(apiKey: string, db: any, ip?: string): Promise<{
+  valid: boolean;
+  user?: any;
+  scopes?: string[];
+  error?: string;
+}> {
+  try {
+    const result = await apiKeysRepository.validateKey(apiKey);
+
+    if (!result.valid || !result.apiKey) {
+      return { valid: false, error: result.reason || 'Invalid API key' };
+    }
+
+    // Update last used
+    await apiKeysRepository.updateLastUsed(result.apiKey.id, ip).catch(() => {});
+
+    // Get user from API key
+    const user = await db.user.findUnique({
+      where: { id: result.apiKey.userId },
+      include: {
+        organizations: {
+          where: { isActive: true },
+          include: { organization: true },
+        },
+      },
+    });
+
+    if (!user || !user.isActive) {
+      return { valid: false, error: 'User not found or inactive' };
+    }
+
+    // Add organizationId from API key to user
+    const userWithOrg = {
+      ...user,
+      organizationId: result.apiKey.organizationId,
+      currentOrgId: result.apiKey.organizationId,
+      isApiKeyAuth: true,
+      apiKeyScopes: result.apiKey.scopes,
+    };
+
+    return {
+      valid: true,
+      user: userWithOrg,
+      scopes: result.apiKey.scopes,
+    };
+  } catch (error) {
+    console.error('[API Key Auth] Error:', error);
+    return { valid: false, error: 'API key validation failed' };
+  }
+}
 
 /**
  * @typedef {object} AuthContext
@@ -42,24 +104,38 @@ export const authProcedure = igniter.procedure({
     const { request, response, context } = ctx;
     const { required = true } = options;
 
-    // Extrair token do header Authorization usando .get()
+    // Extrair token do header Authorization ou Cookie
     const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+    const cookieHeader = request.headers.get("cookie") || "";
+
+    // ✅ CORREÇÃO: Extrair token do cookie se não houver header Authorization
+    let tokenFromCookie: string | null = null;
+    if (!authHeader && cookieHeader) {
+      const cookies = cookieHeader.split(';').map(c => c.trim());
+      const accessTokenCookie = cookies.find(c => c.startsWith('accessToken='));
+      if (accessTokenCookie) {
+        tokenFromCookie = accessTokenCookie.split('=')[1];
+      }
+    }
+
+    const effectiveAuth = authHeader || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : null);
 
     console.log('[AuthProcedure] authHeader:', authHeader);
+    console.log('[AuthProcedure] tokenFromCookie:', tokenFromCookie ? 'present' : 'null');
     console.log('[AuthProcedure] required:', required);
 
     // Instanciar repository
     const authRepo = new AuthRepository(context.db);
 
-    // Se não há header e auth é obrigatória, retornar 401
-    if (!authHeader && required) {
-      console.log('[AuthProcedure] No auth header, auth required');
+    // Se não há auth (header ou cookie) e auth é obrigatória, retornar 401
+    if (!effectiveAuth && required) {
+      console.log('[AuthProcedure] No auth (header or cookie), auth required');
       return Response.json({ error: "Token não fornecido" }, { status: 401 });
     }
 
-    // Se não há header mas auth é opcional, retornar contexto com user null
-    if (!authHeader && !required) {
-      console.log('[AuthProcedure] No auth header, auth optional');
+    // Se não há auth mas é opcional, retornar contexto com user null
+    if (!effectiveAuth && !required) {
+      console.log('[AuthProcedure] No auth, auth optional');
       return {
         auth: {
           session: {
@@ -70,14 +146,68 @@ export const authProcedure = igniter.procedure({
       };
     }
 
-    // Extrair token
-    const token = typeof authHeader === 'string' && authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : authHeader;
+    // Extrair token (de header Authorization ou de cookie já formatado)
+    // Also check X-API-Key header for API key authentication
+    const xApiKey = request.headers.get("x-api-key") || request.headers.get("X-API-Key");
+    const token = xApiKey || (typeof effectiveAuth === 'string' && effectiveAuth.startsWith("Bearer ")
+      ? effectiveAuth.slice(7)
+      : effectiveAuth);
 
     console.log('[AuthProcedure] Token extracted:', token ? token.substring(0, 20) + '...' : 'null');
 
+    // Get client IP for API key tracking
+    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0].trim()
+      || request.headers.get('x-real-ip')
+      || 'unknown';
+
     try {
+      // Check if this is an API key (starts with qk_)
+      if (token && isApiKey(token)) {
+        console.log('[AuthProcedure] Detected API key authentication');
+
+        const apiKeyResult = await validateApiKeyAuth(token, context.db, clientIp);
+
+        if (!apiKeyResult.valid) {
+          if (required) {
+            console.log('[AuthProcedure] Invalid API key:', apiKeyResult.error);
+            return Response.json({ error: apiKeyResult.error || "API Key inválida" }, { status: 401 });
+          }
+          return {
+            auth: {
+              session: {
+                user: null,
+              },
+              repository: authRepo,
+            },
+          };
+        }
+
+        // API Key authenticated successfully
+        const user = apiKeyResult.user;
+        console.log('[AuthProcedure] API Key authenticated:', user.email);
+
+        // Adicionar headers de autenticação à request para uso em controllers
+        request.headers.set('x-user-id', user.id);
+        request.headers.set('x-user-role', user.role);
+        request.headers.set('x-auth-type', 'api-key');
+        if (user.currentOrgId) {
+          request.headers.set('x-org-id', user.currentOrgId);
+        }
+        if (apiKeyResult.scopes) {
+          request.headers.set('x-api-key-scopes', apiKeyResult.scopes.join(','));
+        }
+
+        return {
+          auth: {
+            session: {
+              user: user as User,
+            },
+            repository: authRepo,
+          },
+        };
+      }
+
+      // JWT Token Authentication
       // Verificar JWT token
       const payload = await verifyAccessToken(token as string);
 
@@ -151,6 +281,7 @@ export const authProcedure = igniter.procedure({
       // Adicionar headers de autenticação à request para uso em controllers
       request.headers.set('x-user-id', user.id);
       request.headers.set('x-user-role', user.role);
+      request.headers.set('x-auth-type', 'jwt');
       if (payload.currentOrgId) {
         request.headers.set('x-org-id', payload.currentOrgId);
       }
@@ -194,16 +325,29 @@ export const adminProcedure = igniter.procedure({
   handler: async (options: AuthProcedureOptions = { required: true }, ctx): Promise<AuthContext | Response> => {
     const { request, response, context } = ctx;
 
-    // Extrair token do header Authorization usando .get()
+    // Extrair token do header Authorization ou Cookie
     const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+    const cookieHeader = request.headers.get("cookie") || "";
 
-    if (!authHeader) {
+    // ✅ CORREÇÃO: Extrair token do cookie se não houver header Authorization
+    let tokenFromCookie: string | null = null;
+    if (!authHeader && cookieHeader) {
+      const cookies = cookieHeader.split(';').map(c => c.trim());
+      const accessTokenCookie = cookies.find(c => c.startsWith('accessToken='));
+      if (accessTokenCookie) {
+        tokenFromCookie = accessTokenCookie.split('=')[1];
+      }
+    }
+
+    const effectiveAuth = authHeader || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : null);
+
+    if (!effectiveAuth) {
       return Response.json({ error: "Token não fornecido" }, { status: 401 });
     }
 
-    const token = typeof authHeader === 'string' && authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : authHeader;
+    const token = typeof effectiveAuth === 'string' && effectiveAuth.startsWith("Bearer ")
+      ? effectiveAuth.slice(7)
+      : effectiveAuth;
 
     try {
       const authRepo = new AuthRepository(context.db);

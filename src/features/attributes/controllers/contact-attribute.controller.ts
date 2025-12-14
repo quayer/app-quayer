@@ -17,6 +17,7 @@ import { database } from '@/services/database';
  */
 export const contactAttributeController = igniter.controller({
   name: 'contact-attribute',
+  path: '/contact-attribute',
   description: 'Gerenciamento de valores de atributos para contatos',
 
   actions: {
@@ -34,8 +35,8 @@ export const contactAttributeController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { page, limit, contactId, attributeId } = context.query;
-        const { currentOrgId } = context.user;
+        const { page = 1, limit = 50, contactId, attributeId } = request.query;
+        const { currentOrgId } = (context as any).auth?.session?.user;
 
         const where: any = {
           contact: {
@@ -104,8 +105,8 @@ export const contactAttributeController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { contactId, attributeId, value } = context.body;
-        const { currentOrgId } = context.user;
+        const { contactId, attributeId, value } = request.body;
+        const { currentOrgId } = (context as any).auth?.session?.user;
 
         // Verificar se contato pertence à organização
         const contact = await database.contact.findFirst({
@@ -116,10 +117,7 @@ export const contactAttributeController = igniter.controller({
         });
 
         if (!contact) {
-          return response.error({
-            message: 'Contato não encontrado ou não pertence a esta organização',
-            status: 404,
-          });
+          return response.notFound('Contato não encontrado ou não pertence a esta organização');
         }
 
         // Verificar se atributo existe e pertence à organização
@@ -131,10 +129,7 @@ export const contactAttributeController = igniter.controller({
         });
 
         if (!attribute) {
-          return response.error({
-            message: 'Atributo não encontrado ou não pertence a esta organização',
-            status: 404,
-          });
+          return response.notFound('Atributo não encontrado ou não pertence a esta organização');
         }
 
         // Verificar se já existe valor para este atributo/contato
@@ -211,15 +206,12 @@ export const contactAttributeController = igniter.controller({
      * GET /api/contact-attribute/contact/:contactId
      * Busca todos os atributos de um contato específico
      */
-    getByContact: igniter.query({
+    getByContact: (igniter.query as any)({
       path: '/contact/:contactId',
-      params: z.object({
-        contactId: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { contactId } = context.params;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const { contactId } = request.params as { contactId: string };
+        const { currentOrgId } = (context as any).auth?.session?.user;
 
         // Verificar se contato existe e pertence à organização
         const contact = await database.contact.findFirst({
@@ -230,10 +222,7 @@ export const contactAttributeController = igniter.controller({
         });
 
         if (!contact) {
-          return response.error({
-            message: 'Contato não encontrado ou não pertence a esta organização',
-            status: 404,
-          });
+          return response.notFound('Contato não encontrado ou não pertence a esta organização');
         }
 
         const contactAttributes = await database.contactAttribute.findMany({
@@ -264,20 +253,17 @@ export const contactAttributeController = igniter.controller({
      * PUT /api/contact-attribute/:id
      * Atualiza valor de atributo existente
      */
-    update: igniter.mutation({
+    update: (igniter.mutation as any)({
       path: '/:id',
       method: 'PUT',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       body: z.object({
         value: z.string(),
       }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { value } = context.body;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const { id } = request.params as { id: string };
+        const { value } = request.body;
+        const { currentOrgId } = (context as any).auth?.session?.user;
 
         // Verificar se contactAttribute existe e pertence à organização
         const existing = await database.contactAttribute.findFirst({
@@ -290,10 +276,7 @@ export const contactAttributeController = igniter.controller({
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Atributo de contato não encontrado',
-            status: 404,
-          });
+          return response.notFound('Atributo de contato não encontrado');
         }
 
         const contactAttribute = await database.contactAttribute.update({
@@ -328,16 +311,13 @@ export const contactAttributeController = igniter.controller({
      * DELETE /api/contact-attribute/:id
      * Deleta valor de atributo
      */
-    delete: igniter.mutation({
+    delete: (igniter.mutation as any)({
       path: '/:id',
       method: 'DELETE',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const { id } = request.params as { id: string };
+        const { currentOrgId } = (context as any).auth?.session?.user;
 
         // Verificar se contactAttribute existe e pertence à organização
         const existing = await database.contactAttribute.findFirst({
@@ -350,10 +330,7 @@ export const contactAttributeController = igniter.controller({
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Atributo de contato não encontrado',
-            status: 404,
-          });
+          return response.notFound('Atributo de contato não encontrado');
         }
 
         await database.contactAttribute.delete({

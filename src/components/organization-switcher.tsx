@@ -58,20 +58,21 @@ export function OrganizationSwitcher() {
     setIsSwitching(true)
     try {
       const result = await api.auth.switchOrganization.mutate({
-        organizationId: orgId,
+        body: { organizationId: orgId },
       })
 
-      if (result.data) {
+      const data = result.data as any
+      if (data && !data.error) {
         // Atualizar token e contexto do usuário
-        if (result.data.accessToken) {
-          document.cookie = `accessToken=${result.data.accessToken}; path=/; max-age=900; SameSite=Lax`
+        if (data.accessToken) {
+          document.cookie = `accessToken=${data.accessToken}; path=/; max-age=900; SameSite=Lax`
         }
 
         // Atualizar estado do usuário
         updateAuth({
           ...user,
-          currentOrgId: result.data.currentOrgId,
-          organizationRole: result.data.organizationRole,
+          currentOrgId: data.currentOrgId,
+          organizationRole: data.organizationRole,
         })
 
         toast.success('Organização alterada com sucesso!')
@@ -79,7 +80,7 @@ export function OrganizationSwitcher() {
         // Recarregar página para atualizar dados
         window.location.reload()
       } else {
-        toast.error(result.error?.message || 'Erro ao trocar organização')
+        toast.error(data?.error || (result as any).error?.message || 'Erro ao trocar organização')
       }
     } catch (error) {
       console.error('Error switching organization:', error)

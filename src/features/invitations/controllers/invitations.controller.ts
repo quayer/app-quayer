@@ -4,6 +4,7 @@
  */
 
 import { igniter } from '@/igniter';
+import { z } from 'zod';
 import { invitationsRepository } from '../invitations.repository';
 import { organizationsRepository } from '@/features/organizations/organizations.repository';
 import { database } from '@/services/database';
@@ -69,7 +70,7 @@ export const invitationsController = igniter.controller({
         );
 
         if (isMember) {
-          return response.conflict('Este email já é membro da organização');
+          return response.badRequest('Este email já é membro da organização');
         }
       }
 
@@ -80,7 +81,7 @@ export const invitationsController = igniter.controller({
       );
 
       if (hasPending) {
-        return response.conflict('Já existe um convite pendente para este email');
+        return response.badRequest('Já existe um convite pendente para este email');
       }
 
       // Verificar limite de usuários da organização
@@ -165,7 +166,7 @@ export const invitationsController = igniter.controller({
 
       // Verificar se convite já foi usado
       if (invitation.usedAt) {
-        return response.conflict('Este convite já foi utilizado');
+        return response.badRequest('Este convite já foi utilizado');
       }
 
       // Verificar se convite expirou
@@ -189,13 +190,13 @@ export const invitationsController = igniter.controller({
       );
 
       if (isMember) {
-        return response.conflict('Você já é membro desta organização');
+        return response.badRequest('Você já é membro desta organização');
       }
 
       // Adicionar usuário à organização
       await organizationsRepository.addMember(invitation.organizationId, {
         userId,
-        role: invitation.role,
+        role: invitation.role as 'master' | 'manager' | 'user',
       });
 
       // Atualizar organização atual do usuário se não tiver nenhuma
@@ -245,7 +246,7 @@ export const invitationsController = igniter.controller({
 
       // Verificar se convite já foi usado
       if (invitation.usedAt) {
-        return response.conflict('Este convite já foi utilizado');
+        return response.badRequest('Este convite já foi utilizado');
       }
 
       // Verificar se convite expirou
@@ -259,7 +260,7 @@ export const invitationsController = igniter.controller({
       });
 
       if (existingUser) {
-        return response.conflict(
+        return response.badRequest(
           'Já existe uma conta com este email. Faça login para aceitar o convite.'
         );
       }
@@ -281,7 +282,7 @@ export const invitationsController = igniter.controller({
       // Adicionar usuário à organização
       await organizationsRepository.addMember(invitation.organizationId, {
         userId: newUser.id,
-        role: invitation.role,
+        role: invitation.role as 'master' | 'manager' | 'user',
       });
 
       // Marcar convite como usado
@@ -317,7 +318,7 @@ export const invitationsController = igniter.controller({
       const query = listInvitationsSchema.parse(request.query);
 
       // Se não especificou organizationId, usar a organização atual do usuário
-      const organizationId = query.organizationId || context.auth?.session?.currentOrgId;
+      const organizationId = query.organizationId || context.auth?.session?.user?.currentOrgId;
 
       if (!organizationId) {
         return response.badRequest('OrganizationId é obrigatório');
@@ -360,7 +361,7 @@ export const invitationsController = igniter.controller({
     use: [authProcedure({ required: true })],
     handler: async ({ request, response, context }) => {
       const userId = context.auth?.session?.user?.id!;
-      const { invitationId } = request.params;
+      const { invitationId } = request.params as { invitationId: string };
 
       // Buscar convite
       const invitation = await invitationsRepository.findById(invitationId);
@@ -405,7 +406,7 @@ export const invitationsController = igniter.controller({
     use: [authProcedure({ required: true })],
     handler: async ({ request, response, context }) => {
       const userId = context.auth?.session?.user?.id!;
-      const { invitationId } = request.params;
+      const { invitationId } = request.params as { invitationId: string };
       const body = resendInvitationSchema.parse(request.body);
 
       // Buscar convite
@@ -417,7 +418,7 @@ export const invitationsController = igniter.controller({
 
       // Verificar se convite já foi usado
       if (invitation.usedAt) {
-        return response.conflict('Este convite já foi utilizado e não pode ser reenviado');
+        return response.badRequest('Este convite já foi utilizado e não pode ser reenviado');
       }
 
       // Verificar se usuário é membro da organização
@@ -469,7 +470,7 @@ export const invitationsController = igniter.controller({
         });
       } catch (emailError) {
         console.error('Erro ao reenviar email de convite:', emailError);
-        return response.serverError('Erro ao enviar email');
+        return response.badRequest('Erro ao enviar email');
       }
 
       return response.success({
@@ -493,7 +494,7 @@ export const invitationsController = igniter.controller({
     path: '/validate/:token',
     method: 'GET',
     handler: async ({ request, response }) => {
-      const { token } = request.params;
+      const { token } = request.params as { token: string };
 
       const invitation = await invitationsRepository.findByToken(token);
 
@@ -502,7 +503,7 @@ export const invitationsController = igniter.controller({
       }
 
       if (invitation.usedAt) {
-        return response.conflict('Este convite já foi utilizado');
+        return response.badRequest('Este convite já foi utilizado');
       }
 
       if (new Date() > invitation.expiresAt) {

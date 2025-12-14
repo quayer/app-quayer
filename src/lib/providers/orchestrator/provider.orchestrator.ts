@@ -23,6 +23,7 @@ interface OrchestratorConfig {
   retryDelay: number; // milliseconds
   cacheEnabled: boolean;
   cacheTTL: number; // seconds
+  statusCacheTTL: number; // seconds - TTL específico para status (mais curto)
 }
 
 export class ProviderOrchestrator {
@@ -40,7 +41,8 @@ export class ProviderOrchestrator {
       maxRetries: config?.maxRetries ?? 3,
       retryDelay: config?.retryDelay ?? 1000,
       cacheEnabled: config?.cacheEnabled ?? true,
-      cacheTTL: config?.cacheTTL ?? 300, // 5 minutos
+      cacheTTL: config?.cacheTTL ?? 300, // 5 minutos para dados gerais
+      statusCacheTTL: config?.statusCacheTTL ?? 5, // 5 segundos para status (polling rápido)
     };
 
     // Registrar adapters disponíveis
@@ -72,14 +74,24 @@ export class ProviderOrchestrator {
       throw new Error(`Instância ${instanceId} não encontrada`);
     }
 
-    // 2. Obter brokerType da instância
-    const providerType = (instance.brokerType as ProviderType) || ProviderType.UAZAPI;
+    // 2. Obter provider da instância com mapeamento de compatibilidade
+    let providerType: ProviderType;
+
+    // Mapeamento de providers legados para novos
+    const providerMapping: Record<string, ProviderType> = {
+      'WHATSAPP_WEB': ProviderType.UAZAPI,  // Legacy WhatsApp Web → UAZapi
+      'WHATSAPP': ProviderType.UAZAPI,      // Legacy WhatsApp → UAZapi
+      'WEB': ProviderType.UAZAPI,           // Legacy Web → UAZapi
+    };
+
+    const rawProvider = instance.provider as string;
+    providerType = providerMapping[rawProvider] || (rawProvider as ProviderType) || ProviderType.UAZAPI;
 
     // 3. Buscar adapter correspondente
     const adapter = this.adapters.get(providerType);
 
     if (!adapter) {
-      throw new Error(`Adapter ${providerType} não está registrado`);
+      throw new Error(`Adapter ${providerType} não está registrado (provider original: ${rawProvider})`);
     }
 
     // 4. Verificar saúde do provider
@@ -202,7 +214,7 @@ export class ProviderOrchestrator {
     }
 
     return this.executeWithRetry(
-      () => adapter.sendTextMessage({ ...params, token: instance.token }),
+      () => adapter.sendTextMessage({ ...params, token: instance.uazapiToken || '' }),
       'sendTextMessage'
     );
   }
@@ -228,7 +240,7 @@ export class ProviderOrchestrator {
     }
 
     return this.executeWithRetry(
-      () => adapter.sendMediaMessage({ ...params, token: instance.token }),
+      () => adapter.sendMediaMessage({ ...params, token: instance.uazapiToken || '' }),
       'sendMediaMessage'
     );
   }
@@ -253,7 +265,7 @@ export class ProviderOrchestrator {
     }
 
     return this.executeWithRetry(
-      () => adapter.sendButtonsMessage({ ...params, token: instance.token }),
+      () => adapter.sendButtonsMessage({ ...params, token: instance.uazapiToken || '' }),
       'sendButtonsMessage'
     );
   }
@@ -282,8 +294,33 @@ export class ProviderOrchestrator {
     }
 
     return this.executeWithRetry(
-      () => adapter.sendListMessage({ ...params, token: instance.token }),
+      () => adapter.sendListMessage({ ...params, token: instance.uazapiToken || '' }),
       'sendListMessage'
+    );
+  }
+
+  /**
+   * Criar nova instância
+   */
+  async createInstance(params: {
+    instanceId: string;
+    name: string;
+    webhookUrl?: string;
+    providerType?: ProviderType;
+  }) {
+    const adapter = this.adapters.get(params.providerType || ProviderType.UAZAPI);
+
+    if (!adapter) {
+      throw new Error(`Adapter ${params.providerType || ProviderType.UAZAPI} não encontrado`);
+    }
+
+    return this.executeWithRetry(
+      () => adapter.createInstance({
+        instanceId: params.instanceId,
+        name: params.name,
+        webhookUrl: params.webhookUrl,
+      }),
+      'createInstance'
     );
   }
 
@@ -301,14 +338,122 @@ export class ProviderOrchestrator {
       throw new Error('Instância não encontrada');
     }
 
+    // Invalidar cache de status para garantir polling fresco
+    if (this.config.cacheEnabled) {
+      const cacheKey = `instance:status:${instanceId}`;
+      await redis.del(cacheKey);
+      logger.debug('[Orchestrator] Cache de status invalidado ao conectar', { instanceId });
+    }
+
     return this.executeWithRetry(
-      () => adapter.connectInstance({ token: instance.token, instanceId }),
+      () => adapter.connectInstance({ token: instance.uazapiToken || '', instanceId }),
       'connectInstance'
     );
   }
 
   /**
+   * Desconectar instância
+   */
+  async disconnectInstance(instanceId: string) {
+    const adapter = await this.getAdapterForInstance(instanceId);
+
+    const instance = await database.instance.findUnique({
+      where: { id: instanceId },
+    });
+
+    if (!instance) {
+      throw new Error('Instância não encontrada');
+    }
+
+    // Invalidar cache de status
+    if (this.config.cacheEnabled) {
+      const cacheKey = `instance:status:${instanceId}`;
+      await redis.del(cacheKey);
+    }
+
+    return this.executeWithRetry(
+      () => adapter.disconnectInstance({ token: instance.uazapiToken || '', instanceId }),
+      'disconnectInstance'
+    );
+  }
+
+  /**
+   * Deletar instância do provider
+   */
+  async deleteInstance(instanceId: string) {
+    const adapter = await this.getAdapterForInstance(instanceId);
+
+    const instance = await database.instance.findUnique({
+      where: { id: instanceId },
+    });
+
+    if (!instance) {
+      throw new Error('Instância não encontrada');
+    }
+
+    // Invalidar cache de status
+    if (this.config.cacheEnabled) {
+      const cacheKey = `instance:status:${instanceId}`;
+      await redis.del(cacheKey);
+    }
+
+    return this.executeWithRetry(
+      () => adapter.deleteInstance({ token: instance.uazapiToken || '', instanceId }),
+      'deleteInstance'
+    );
+  }
+
+  /**
+   * Obter foto de perfil
+   */
+  async getProfilePicture(instanceId: string, phoneNumber?: string) {
+    const adapter = await this.getAdapterForInstance(instanceId);
+
+    const instance = await database.instance.findUnique({
+      where: { id: instanceId },
+    });
+
+    if (!instance) {
+      throw new Error('Instância não encontrada');
+    }
+
+    // Usa o phoneNumber fornecido ou o da própria instância
+    const targetPhone = phoneNumber || instance.phoneNumber || '';
+
+    return this.executeWithRetry(
+      () => adapter.getProfilePicture({ token: instance.uazapiToken || '', phoneNumber: targetPhone }),
+      'getProfilePicture'
+    );
+  }
+
+  /**
+   * Buscar foto de perfil de um contato
+   * Retorna a URL da foto ou null se não encontrar
+   */
+  async getContactProfilePicture(provider: string, instanceId: string, phoneNumber: string): Promise<string | null> {
+    try {
+      const result = await this.getProfilePicture(instanceId, phoneNumber);
+
+      if (result.success && result.data) {
+        // O adapter retorna { url: string } ou { profilePicUrl: string }
+        const data = result.data as { url?: string; profilePicUrl?: string };
+        return data.url || data.profilePicUrl || null;
+      }
+
+      return null;
+    } catch (error) {
+      logger.error('[Orchestrator] Failed to get contact profile picture', {
+        instanceId,
+        phoneNumber,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
    * Obter status da instância
+   * Usa TTL curto (5s) para permitir polling frequente durante conexão
    */
   async getInstanceStatus(instanceId: string) {
     const adapter = await this.getAdapterForInstance(instanceId);
@@ -321,7 +466,7 @@ export class ProviderOrchestrator {
       throw new Error('Instância não encontrada');
     }
 
-    // Tentar cache primeiro
+    // Tentar cache primeiro - usa TTL curto para status
     if (this.config.cacheEnabled) {
       const cacheKey = `instance:status:${instanceId}`;
       const cached = await redis.get(cacheKey);
@@ -331,17 +476,18 @@ export class ProviderOrchestrator {
         return JSON.parse(cached);
       }
 
-      // Se não tem cache, buscar e cachear
-      const result = await adapter.getInstanceStatus({ token: instance.token });
+      // Se não tem cache, buscar e cachear com TTL curto
+      const result = await adapter.getInstanceStatus({ token: instance.uazapiToken || '' });
 
       if (result.success) {
-        await redis.setex(cacheKey, this.config.cacheTTL, JSON.stringify(result));
+        // Usar statusCacheTTL (5s) ao invés de cacheTTL (300s) para polling rápido
+        await redis.setex(cacheKey, this.config.statusCacheTTL, JSON.stringify(result));
       }
 
       return result;
     }
 
-    return adapter.getInstanceStatus({ token: instance.token });
+    return adapter.getInstanceStatus({ token: instance.uazapiToken || '' });
   }
 
   /**
@@ -412,6 +558,264 @@ export class ProviderOrchestrator {
 
     return results;
   }
+
+  /**
+   * Listar TODAS as instâncias de todos os providers (Admin only)
+   * Combina dados do banco local com dados dos providers
+   */
+  async listAllInstances(): Promise<{
+    success: boolean;
+    data: any[];
+    meta: {
+      totalUAZapi: number;
+      totalLocal: number;
+      combined: number;
+      uazApiError: string | null;
+    };
+    error?: string;
+  }> {
+    try {
+      // 1. Buscar instâncias do banco local
+      const localInstances = await database.connection.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: { organization: true },
+      });
+
+      // 2. Buscar instâncias de cada provider registrado
+      let uazInstances: any[] = [];
+      let uazApiError: string | null = null;
+
+      // UAZapi
+      const uazAdapter = this.adapters.get(ProviderType.UAZAPI);
+      if (uazAdapter) {
+        try {
+          const adminToken = process.env.UAZAPI_ADMIN_TOKEN || '';
+          const baseUrl = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+
+          if (!adminToken) {
+            uazApiError = 'Token admin não configurado';
+            logger.warn('[Orchestrator] UAZAPI_ADMIN_TOKEN não configurado');
+          } else {
+            // Import dinâmico para evitar dependência circular
+            const { UAZClient } = await import('../adapters/uazapi/uazapi.client');
+            const uazClient = new UAZClient({ baseUrl, adminToken });
+
+            logger.debug('[Orchestrator] Fetching all instances from UAZapi', { baseUrl });
+            const response = await uazClient.listAllInstances();
+
+            // UAZapi retorna direto um array, não { success, data }
+            if (Array.isArray(response)) {
+              uazInstances = response;
+              logger.info('[Orchestrator] UAZapi instances fetched (array response)', { count: uazInstances.length });
+            } else if (response && response.success && Array.isArray(response.data)) {
+              uazInstances = response.data;
+              logger.info('[Orchestrator] UAZapi instances fetched (wrapped response)', { count: uazInstances.length });
+            } else {
+              logger.warn('[Orchestrator] UAZapi returned unexpected format', { response: typeof response });
+            }
+          }
+        } catch (error: any) {
+          uazApiError = error.message || 'Erro ao conectar com UAZapi';
+          logger.error('[Orchestrator] Error fetching from UAZapi', { error: uazApiError });
+        }
+      }
+
+      // Futuramente: adicionar Evolution, Baileys, etc.
+      // const evolutionAdapter = this.adapters.get(ProviderType.EVOLUTION);
+      // if (evolutionAdapter) { ... }
+
+      // 3. Criar mapa de instâncias locais por uazapiInstanceId
+      const localMap = new Map(
+        localInstances
+          .filter(inst => inst.uazapiInstanceId)
+          .map(inst => [inst.uazapiInstanceId!, inst] as [string, typeof inst])
+      );
+
+      // 4. Combinar: instances do provider com dados locais quando disponível
+      const uazInstanceIds = new Set<string>();
+      const combined: any[] = [];
+
+      // Primeiro, adicionar instâncias do UAZapi (com dados locais se existirem)
+      // Formato real do UAZapi: { id, name, status, owner (telefone), token, profileName, ... }
+      for (const uazInst of uazInstances) {
+        // UAZapi usa 'id' diretamente, não instanceId
+        const uazId = uazInst.id || uazInst.instance?.instanceId || uazInst.instanceId;
+        uazInstanceIds.add(uazId);
+        const local = localMap.get(uazId);
+
+        combined.push({
+          // Dados do UAZapi (formato real da API)
+          uazInstanceId: uazId,
+          uazInstanceName: uazInst.name || uazInst.instance?.instanceName || uazInst.instanceName,
+          uazStatus: uazInst.status || uazInst.instance?.status,
+          uazPhoneNumber: uazInst.owner || uazInst.instance?.phoneNumber || uazInst.phoneNumber,
+          uazToken: uazInst.token,
+          uazProfileName: uazInst.profileName,
+          uazProfilePicUrl: uazInst.profilePicUrl,
+          uazIsBusiness: uazInst.isBusiness,
+          uazPlatform: uazInst.plataform,
+          uazCreated: uazInst.created,
+          uazUpdated: uazInst.updated,
+
+          // Dados locais (se existir no banco Quayer)
+          ...(local ? {
+            id: local.id,
+            name: local.name,
+            organizationId: local.organizationId,
+            organization: local.organization,
+            createdAt: local.createdAt,
+            updatedAt: local.updatedAt,
+            inQuayerDB: true,
+          } : {
+            inQuayerDB: false,
+          }),
+        });
+      }
+
+      // Adicionar instâncias locais que NÃO estão no UAZapi (orphans)
+      for (const local of localInstances) {
+        if (local.uazapiInstanceId && uazInstanceIds.has(local.uazapiInstanceId)) {
+          continue; // Já foi adicionada acima
+        }
+
+        combined.push({
+          // Dados locais
+          id: local.id,
+          name: local.name,
+          organizationId: local.organizationId,
+          organization: local.organization,
+          createdAt: local.createdAt,
+          updatedAt: local.updatedAt,
+          inQuayerDB: true,
+
+          // Dados do UAZapi (parciais, do banco local)
+          uazInstanceId: local.uazapiInstanceId,
+          uazInstanceName: local.name,
+          uazStatus: local.status || 'UNKNOWN',
+          uazPhoneNumber: local.phoneNumber,
+          uazToken: local.uazapiToken,
+
+          // Flag indicando que não foi encontrada no UAZapi
+          uazApiOrphan: true,
+        });
+      }
+
+      return {
+        success: true,
+        data: combined,
+        meta: {
+          totalUAZapi: uazInstances.length,
+          totalLocal: localInstances.length,
+          combined: combined.length,
+          uazApiError,
+        },
+      };
+    } catch (error: any) {
+      logger.error('[Orchestrator] Error listing all instances', { error: error.message });
+      return {
+        success: false,
+        data: [],
+        meta: {
+          totalUAZapi: 0,
+          totalLocal: 0,
+          combined: 0,
+          uazApiError: error.message,
+        },
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Atualizar campos administrativos de uma instância (Admin only)
+   * Usa POST /instance/updateAdminFields
+   */
+  async updateAdminFields(instanceId: string, data: {
+    adminField01?: string;
+    adminField02?: string;
+  }): Promise<ProviderResponse<any>> {
+    try {
+      const adminToken = process.env.UAZAPI_ADMIN_TOKEN || '';
+      const baseUrl = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+
+      if (!adminToken) {
+        return { success: false, error: 'Token admin não configurado' } as any;
+      }
+
+      const { UAZClient } = await import('../adapters/uazapi/uazapi.client');
+      const uazClient = new UAZClient({ baseUrl, adminToken });
+
+      const result = await uazClient.updateAdminFields({
+        id: instanceId,
+        ...data,
+      });
+
+      return { success: true, data: result } as any;
+    } catch (error: any) {
+      logger.error('[Orchestrator] Error updating admin fields', { error: error.message });
+      return { success: false, error: error.message } as any;
+    }
+  }
+
+  /**
+   * Obter configuração do Webhook Global (Admin only)
+   * Usa GET /globalwebhook
+   */
+  async getGlobalWebhook(): Promise<ProviderResponse<any>> {
+    try {
+      const adminToken = process.env.UAZAPI_ADMIN_TOKEN || '';
+      const baseUrl = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+
+      if (!adminToken) {
+        return { success: false, error: 'Token admin não configurado' } as any;
+      }
+
+      const { UAZClient } = await import('../adapters/uazapi/uazapi.client');
+      const uazClient = new UAZClient({ baseUrl, adminToken });
+
+      const result = await uazClient.getGlobalWebhook();
+      return { success: true, data: result } as any;
+    } catch (error: any) {
+      logger.error('[Orchestrator] Error getting global webhook', { error: error.message });
+      return { success: false, error: error.message } as any;
+    }
+  }
+
+  /**
+   * Configurar Webhook Global (Admin only)
+   * Usa POST /globalwebhook
+   *
+   * Eventos disponíveis:
+   * - connection, messages, messages_update, call, contacts, presence, groups, labels, chats, history
+   *
+   * Filtros excludeMessages (IMPORTANTE: sempre use 'wasSentByApi' para evitar loops):
+   * - wasSentByApi, wasNotSentByApi, fromMeYes, fromMeNo, isGroupYes, isGroupNo
+   */
+  async setGlobalWebhook(data: {
+    url: string;
+    events: string[];
+    excludeMessages?: string[];
+    addUrlEvents?: boolean;
+    addUrlTypesMessages?: boolean;
+  }): Promise<ProviderResponse<any>> {
+    try {
+      const adminToken = process.env.UAZAPI_ADMIN_TOKEN || '';
+      const baseUrl = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+
+      if (!adminToken) {
+        return { success: false, error: 'Token admin não configurado' } as any;
+      }
+
+      const { UAZClient } = await import('../adapters/uazapi/uazapi.client');
+      const uazClient = new UAZClient({ baseUrl, adminToken });
+
+      const result = await uazClient.setGlobalWebhook(data);
+      return { success: true, data: result } as any;
+    } catch (error: any) {
+      logger.error('[Orchestrator] Error setting global webhook', { error: error.message });
+      return { success: false, error: error.message } as any;
+    }
+  }
 }
 
 // Singleton instance
@@ -419,4 +823,5 @@ export const providerOrchestrator = new ProviderOrchestrator({
   enableFallback: process.env.ENABLE_PROVIDER_FALLBACK === 'true',
   maxRetries: parseInt(process.env.PROVIDER_MAX_RETRIES || '3', 10),
   cacheEnabled: process.env.ENABLE_PROVIDER_CACHE !== 'false',
+  statusCacheTTL: parseInt(process.env.PROVIDER_STATUS_CACHE_TTL || '5', 10), // 5 segundos para status
 });

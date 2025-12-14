@@ -3,6 +3,10 @@
  *
  * Orquestrador principal que gerencia múltiplos providers de WhatsApp
  * Delega operações para o provider correto baseado em instance.brokerType
+ *
+ * 🚀 Provider-Agnostic API:
+ * A API da Quayer funciona de forma idêntica independente do provider (UAZAPI, CloudAPI, etc.)
+ * Todas as operações são delegadas para o adapter correto automaticamente.
  */
 
 import type { IWhatsAppProvider } from './provider.interface';
@@ -15,9 +19,15 @@ import type {
   PairingCodeResult,
   SendTextInput,
   SendMediaInput,
+  SendLocationInput,
+  SendContactInput,
+  SendInteractiveListInput,
+  SendInteractiveButtonsInput,
   MessageResult,
   WebhookConfig,
   NormalizedWebhook,
+  PresenceType,
+  MediaDownloadResult,
 } from './provider.types';
 
 export class WhatsAppOrchestrator {
@@ -111,7 +121,7 @@ export class WhatsAppOrchestrator {
     return provider.restart(instanceId);
   }
 
-  // ===== MENSAGENS =====
+  // ===== MENSAGENS BÁSICAS =====
   async sendText(
     instanceId: string,
     brokerType: BrokerType,
@@ -155,6 +165,144 @@ export class WhatsAppOrchestrator {
       ...data,
       to: validNumber,
     });
+  }
+
+  async sendLocation(
+    instanceId: string,
+    brokerType: BrokerType,
+    data: SendLocationInput
+  ): Promise<MessageResult> {
+    const provider = this.getProvider(brokerType);
+
+    const validNumber = this.validatePhoneNumber(data.to);
+    if (!validNumber) {
+      throw new Error('Invalid phone number format');
+    }
+
+    console.log(`[Orchestrator] Sending location to ${validNumber} via ${brokerType}`);
+    return provider.sendLocation(instanceId, {
+      ...data,
+      to: validNumber,
+    });
+  }
+
+  async sendContact(
+    instanceId: string,
+    brokerType: BrokerType,
+    data: SendContactInput
+  ): Promise<MessageResult> {
+    const provider = this.getProvider(brokerType);
+
+    const validNumber = this.validatePhoneNumber(data.to);
+    if (!validNumber) {
+      throw new Error('Invalid phone number format');
+    }
+
+    console.log(`[Orchestrator] Sending contact to ${validNumber} via ${brokerType}`);
+    return provider.sendContact(instanceId, {
+      ...data,
+      to: validNumber,
+    });
+  }
+
+  // ===== MENSAGENS INTERATIVAS =====
+  async sendInteractiveList(
+    instanceId: string,
+    brokerType: BrokerType,
+    data: SendInteractiveListInput
+  ): Promise<MessageResult> {
+    const provider = this.getProvider(brokerType);
+
+    const validNumber = this.validatePhoneNumber(data.to);
+    if (!validNumber) {
+      throw new Error('Invalid phone number format');
+    }
+
+    console.log(`[Orchestrator] Sending interactive list to ${validNumber} via ${brokerType}`);
+    return provider.sendInteractiveList(instanceId, {
+      ...data,
+      to: validNumber,
+    });
+  }
+
+  async sendInteractiveButtons(
+    instanceId: string,
+    brokerType: BrokerType,
+    data: SendInteractiveButtonsInput
+  ): Promise<MessageResult> {
+    const provider = this.getProvider(brokerType);
+
+    const validNumber = this.validatePhoneNumber(data.to);
+    if (!validNumber) {
+      throw new Error('Invalid phone number format');
+    }
+
+    console.log(`[Orchestrator] Sending interactive buttons to ${validNumber} via ${brokerType}`);
+    return provider.sendInteractiveButtons(instanceId, {
+      ...data,
+      to: validNumber,
+    });
+  }
+
+  // ===== AÇÕES DE MENSAGEM =====
+  async markAsRead(
+    instanceId: string,
+    brokerType: BrokerType,
+    messageId: string
+  ): Promise<void> {
+    const provider = this.getProvider(brokerType);
+    console.log(`[Orchestrator] Marking message ${messageId} as read via ${brokerType}`);
+    return provider.markAsRead(instanceId, messageId);
+  }
+
+  async reactToMessage(
+    instanceId: string,
+    brokerType: BrokerType,
+    messageId: string,
+    emoji: string
+  ): Promise<void> {
+    const provider = this.getProvider(brokerType);
+    console.log(`[Orchestrator] Reacting to message ${messageId} with ${emoji} via ${brokerType}`);
+    return provider.reactToMessage(instanceId, messageId, emoji);
+  }
+
+  async deleteMessage(
+    instanceId: string,
+    brokerType: BrokerType,
+    messageId: string
+  ): Promise<void> {
+    const provider = this.getProvider(brokerType);
+    console.log(`[Orchestrator] Deleting message ${messageId} via ${brokerType}`);
+    return provider.deleteMessage(instanceId, messageId);
+  }
+
+  // ===== PRESENÇA =====
+  async sendPresence(
+    instanceId: string,
+    brokerType: BrokerType,
+    to: string,
+    type: PresenceType
+  ): Promise<void> {
+    const provider = this.getProvider(brokerType);
+
+    const validNumber = this.validatePhoneNumber(to);
+    if (!validNumber) {
+      throw new Error('Invalid phone number format');
+    }
+
+    console.log(`[Orchestrator] Sending presence ${type} to ${validNumber} via ${brokerType}`);
+    return provider.sendPresence(instanceId, validNumber, type);
+  }
+
+  // ===== MÍDIA =====
+  async downloadMedia(
+    instanceId: string,
+    brokerType: BrokerType,
+    messageId: string
+  ): Promise<MediaDownloadResult> {
+    const provider = this.getProvider(brokerType);
+    console.log(`[Orchestrator] Downloading media for message ${messageId} via ${brokerType}`);
+    return provider.downloadMedia(instanceId, messageId);
   }
 
   // ===== WEBHOOKS =====

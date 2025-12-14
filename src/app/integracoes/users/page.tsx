@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { api } from '@/igniter.client'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -47,6 +48,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -59,6 +70,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   UserPlus,
   Copy,
@@ -67,23 +79,47 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Shield,
+  ShieldCheck,
+  User,
+  UserCog,
+  UserMinus,
+  Crown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
-type User = {
+type OrgRole = 'master' | 'manager' | 'user'
+
+type Member = {
   id: string
-  name: string
-  email: string
-  role: 'admin' | 'user'
+  userId: string
+  organizationId: string
+  role: OrgRole
   isActive: boolean
   createdAt: string
+  user: {
+    id: string
+    name: string
+    email: string
+    role?: string
+  }
 }
 
 export default function UsersPage() {
-  const { user } = useAuth()
+  const { user: currentUser } = useAuth()
+  const currentOrgId = currentUser?.currentOrgId
+  const queryClient = useQueryClient()
+
+  // Dialog states
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
+  const [editRoleDialogOpen, setEditRoleDialogOpen] = useState(false)
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false)
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null)
+
+  // Form states
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<'user' | 'master' | 'manager'>('user')
+  const [inviteRole, setInviteRole] = useState<OrgRole>('user')
+  const [newRole, setNewRole] = useState<OrgRole>('user')
   const [inviteUrl, setInviteUrl] = useState('')
   const [error, setError] = useState('')
 
@@ -93,155 +129,278 @@ export default function UsersPage() {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState({})
 
-  const { user: currentUser } = useAuth()
-  const currentOrgId = currentUser?.currentOrgId
-
-  const { data: usersResponse, refetch, isLoading } = api.auth.listUsers.useQuery()
+  // Fetch organization members
+  const { data: membersResponse, isLoading, refetch } = useQuery({
+    queryKey: ['organization-members', currentOrgId],
+    queryFn: async () => {
+      if (!currentOrgId) return { members: [] }
+      // @ts-expect-error - Igniter client type issue with path params
+      const response = await api.organizations.listMembers.query({
+        id: currentOrgId,
+      })
+      return response as unknown as { members: Member[] }
+    },
+    enabled: !!currentOrgId,
+  })
 
   // Invitation mutation
-  const inviteMutation = api.invitations.create.useMutation({
+  const inviteMutation = useMutation({
+    mutationFn: async (data: { email: string; role: OrgRole; organizationId: string }) => {
+      // @ts-expect-error - Igniter client type issue
+      return api.invitations.create.mutate({
+        body: data,
+      })
+    },
     onSuccess: () => {
       refetch()
     },
   })
 
-  // Extract users array from response
-  const users = (usersResponse as any)?.data || []
+  // Update member role mutation
+  const updateRoleMutation = useMutation({
+    mutationFn: async ({ memberId, role }: { memberId: string; role: OrgRole }) => {
+      if (!currentOrgId) throw new Error('No organization selected')
+      return (api.organizations as any).updateMember.mutate({
+        id: currentOrgId,
+        userId: memberId,
+        body: { role },
+      })
+    },
+    onSuccess: () => {
+      toast.success('Cargo atualizado com sucesso!')
+      setEditRoleDialogOpen(false)
+      setSelectedMember(null)
+      refetch()
+    },
+    onError: (error: any) => {
+      const message = error?.message || 'Erro ao atualizar cargo'
+      toast.error(message)
+    },
+  })
+
+  // Remove member mutation
+  const removeMemberMutation = useMutation({
+    mutationFn: async (memberId: string) => {
+      if (!currentOrgId) throw new Error('No organization selected')
+      return (api.organizations as any).removeMember.mutate({
+        id: currentOrgId,
+        userId: memberId,
+      })
+    },
+    onSuccess: () => {
+      toast.success('Membro removido com sucesso!')
+      setRemoveDialogOpen(false)
+      setSelectedMember(null)
+      refetch()
+    },
+    onError: (error: any) => {
+      const message = error?.message || 'Erro ao remover membro'
+      toast.error(message)
+    },
+  })
+
+  // Extract members array from response
+  const members = membersResponse?.members || []
+
+  // Get current user's role in organization
+  const currentUserOrgRole = members.find(m => m.userId === currentUser?.id)?.role
+  const canManageMembers = currentUserOrgRole === 'master' || currentUser?.role === 'admin'
 
   // Calculate statistics
   const stats = {
-    total: users.length,
-    active: users.filter((u: any) => u.isActive).length,
-    inactive: users.filter((u: any) => !u.isActive).length,
-    admins: users.filter((u: any) => u.role === 'admin').length,
-    masters: users.filter((u: any) => u.role === 'master').length,
-    managers: users.filter((u: any) => u.role === 'manager').length,
-    regularUsers: users.filter((u: any) => u.role === 'user').length,
+    total: members.length,
+    active: members.filter((m) => m.isActive).length,
+    inactive: members.filter((m) => !m.isActive).length,
+    masters: members.filter((m) => m.role === 'master').length,
+    managers: members.filter((m) => m.role === 'manager').length,
+    users: members.filter((m) => m.role === 'user').length,
   }
 
-  const columns: ColumnDef<User>[] = useMemo(() => [
-    {
-      accessorKey: 'name',
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="ghost"
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            Nome
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        )
-      },
-      cell: ({ row }) => <div className="font-medium">{row.getValue('name')}</div>,
-    },
-    {
-      accessorKey: 'email',
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="ghost"
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            Email
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        )
-      },
-      cell: ({ row }) => <div className="lowercase">{row.getValue('email')}</div>,
-    },
-    {
-      accessorKey: 'role',
-      header: 'Função',
-      cell: ({ row }) => {
-        const role = row.getValue('role') as string
-        const roleLabels: Record<string, string> = {
-          admin: 'Admin',
-          master: 'Master',
-          manager: 'Manager',
-          user: 'Usuário'
-        }
-        const roleVariants: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-          admin: 'destructive',
-          master: 'default',
-          manager: 'default',
-          user: 'secondary'
-        }
-        return (
-          <Badge variant={roleVariants[role] || 'secondary'}>
-            {roleLabels[role] || role}
-          </Badge>
-        )
-      },
-      filterFn: (row, id, value) => {
-        return value.includes(row.getValue(id))
-      },
-    },
-    {
-      accessorKey: 'isActive',
-      header: 'Status',
-      cell: ({ row }) => {
-        const isActive = row.getValue('isActive') as boolean
-        return (
-          <Badge variant={isActive ? 'default' : 'destructive'}>
-            {isActive ? 'Ativo' : 'Inativo'}
-          </Badge>
-        )
-      },
-      filterFn: (row, id, value) => {
-        return value.includes(row.getValue(id))
-      },
-    },
-    {
-      accessorKey: 'createdAt',
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="ghost"
-            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          >
-            Data de Criação
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        )
-      },
-      cell: ({ row }) => {
-        return new Date(row.getValue('createdAt')).toLocaleDateString('pt-BR')
-      },
-    },
-    {
-      id: 'actions',
-      enableHiding: false,
-      cell: ({ row }) => {
-        const user = row.original
+  // Helper to get initials
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join('')
+      .toUpperCase()
+  }
 
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Abrir menu</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Ações</DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => navigator.clipboard.writeText(user.id)}
-              >
-                Copiar ID do usuário
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Ver detalhes</DropdownMenuItem>
-              <DropdownMenuItem>Editar usuário</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )
+  // Role icon component
+  const RoleIcon = ({ role }: { role: OrgRole }) => {
+    switch (role) {
+      case 'master':
+        return <Crown className="h-4 w-4 text-yellow-500" />
+      case 'manager':
+        return <ShieldCheck className="h-4 w-4 text-blue-500" />
+      default:
+        return <User className="h-4 w-4 text-gray-500" />
+    }
+  }
+
+  const columns: ColumnDef<Member>[] = useMemo(
+    () => [
+      {
+        id: 'userName',
+        accessorFn: (row) => row.user?.name || '',
+        header: ({ column }) => {
+          return (
+            <Button
+              variant="ghost"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              Usuário
+              <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+          )
+        },
+        cell: ({ row }) => {
+          const member = row.original
+          const name = member.user?.name || 'Sem nome'
+          const email = member.user?.email || ''
+          return (
+            <div className="flex items-center gap-3">
+              <Avatar className="h-9 w-9">
+                <AvatarImage src="" alt={name} />
+                <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                  {getInitials(name)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col">
+                <span className="font-medium">{name}</span>
+                <span className="text-xs text-muted-foreground">{email}</span>
+              </div>
+            </div>
+          )
+        },
       },
-    },
-  ], [])
+      {
+        accessorKey: 'role',
+        header: 'Cargo na Organização',
+        cell: ({ row }) => {
+          const role = row.getValue('role') as OrgRole
+          const roleLabels: Record<OrgRole, string> = {
+            master: 'Master',
+            manager: 'Gerente',
+            user: 'Membro',
+          }
+          const roleVariants: Record<OrgRole, 'default' | 'secondary' | 'outline'> = {
+            master: 'default',
+            manager: 'secondary',
+            user: 'outline',
+          }
+          return (
+            <div className="flex items-center gap-2">
+              <RoleIcon role={role} />
+              <Badge variant={roleVariants[role]}>{roleLabels[role]}</Badge>
+            </div>
+          )
+        },
+        filterFn: (row, id, value) => {
+          return value.includes(row.getValue(id))
+        },
+      },
+      {
+        accessorKey: 'isActive',
+        header: 'Status',
+        cell: ({ row }) => {
+          const isActive = row.getValue('isActive') as boolean
+          return (
+            <Badge variant={isActive ? 'default' : 'destructive'}>
+              {isActive ? 'Ativo' : 'Inativo'}
+            </Badge>
+          )
+        },
+        filterFn: (row, id, value) => {
+          return value.includes(row.getValue(id))
+        },
+      },
+      {
+        accessorKey: 'createdAt',
+        header: ({ column }) => {
+          return (
+            <Button
+              variant="ghost"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              Membro desde
+              <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+          )
+        },
+        cell: ({ row }) => {
+          return new Date(row.getValue('createdAt')).toLocaleDateString('pt-BR')
+        },
+      },
+      {
+        id: 'actions',
+        enableHiding: false,
+        cell: ({ row }) => {
+          const member = row.original
+          const isCurrentUser = member.userId === currentUser?.id
+          const isMaster = member.role === 'master'
+
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                  <span className="sr-only">Abrir menu</span>
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => {
+                    navigator.clipboard.writeText(member.userId)
+                    toast.success('ID copiado!')
+                  }}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copiar ID
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {canManageMembers && !isCurrentUser && (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setSelectedMember(member)
+                        setNewRole(member.role)
+                        setEditRoleDialogOpen(true)
+                      }}
+                    >
+                      <UserCog className="mr-2 h-4 w-4" />
+                      Alterar cargo
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => {
+                        setSelectedMember(member)
+                        setRemoveDialogOpen(true)
+                      }}
+                    >
+                      <UserMinus className="mr-2 h-4 w-4" />
+                      Remover da organização
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {isCurrentUser && (
+                  <DropdownMenuItem disabled className="text-muted-foreground">
+                    <Shield className="mr-2 h-4 w-4" />
+                    Você
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
+    ],
+    [canManageMembers, currentUser?.id]
+  )
 
   const table = useReactTable({
-    data: users,
+    data: members,
     columns,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
@@ -270,22 +429,51 @@ export default function UsersPage() {
 
     try {
       const response = await inviteMutation.mutateAsync({
-        body: {
-          email: inviteEmail,
-          role: inviteRole,
-          organizationId: currentOrgId,
-        }
+        email: inviteEmail,
+        role: inviteRole,
+        organizationId: currentOrgId,
       })
 
-      if (response.data) {
-        setInviteUrl(response.data.inviteUrl)
+      // Handle Igniter.js response structure: { data, error }
+      const result = response as any
+
+      // Check for error in response
+      if (result?.error) {
+        const errorMessage = result.error?.message || result.error || 'Erro ao criar convite'
+        setError(errorMessage)
+        toast.error(errorMessage)
+        return
+      }
+
+      // Success - extract inviteUrl from data
+      const url = result?.data?.inviteUrl || result?.inviteUrl
+      if (url) {
+        setInviteUrl(url)
         toast.success('Convite criado com sucesso!')
+      } else {
+        // Fallback - convite criado mas sem URL
+        toast.success('Convite criado! Verifique o email do convidado.')
+        resetInviteDialog()
       }
     } catch (err: any) {
-      const errorMessage = err?.response?.data?.message || err?.message || 'Erro ao criar convite'
+      const errorMessage =
+        err?.response?.data?.message || err?.message || 'Erro ao criar convite'
       setError(errorMessage)
       toast.error(errorMessage)
     }
+  }
+
+  const handleUpdateRole = async () => {
+    if (!selectedMember) return
+    await updateRoleMutation.mutateAsync({
+      memberId: selectedMember.userId,
+      role: newRole,
+    })
+  }
+
+  const handleRemoveMember = async () => {
+    if (!selectedMember) return
+    await removeMemberMutation.mutateAsync(selectedMember.userId)
   }
 
   const copyInviteUrl = () => {
@@ -301,8 +489,20 @@ export default function UsersPage() {
     setError('')
   }
 
-  // Remove this restriction - all organization members can see users
-  // User permissions are checked on the backend
+  if (!currentOrgId) {
+    return (
+      <div className="flex items-center justify-center h-[60vh]">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>Nenhuma organização selecionada</CardTitle>
+            <CardDescription>
+              Selecione uma organização para ver os membros.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 pt-6">
@@ -310,48 +510,59 @@ export default function UsersPage() {
         <div>
           <h1 className="text-3xl font-bold">Usuários</h1>
           <p className="text-muted-foreground">
-            Gerencie os usuários da organização
+            Gerencie os membros da sua organização
           </p>
         </div>
-        <Button onClick={() => setInviteDialogOpen(true)}>
-          <UserPlus className="mr-2 h-4 w-4" />
-          Convidar Usuário
-        </Button>
+        {canManageMembers && (
+          <Button onClick={() => setInviteDialogOpen(true)}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            Convidar Usuário
+          </Button>
+        )}
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Total de Usuários</CardDescription>
+            <CardDescription>Total de Membros</CardDescription>
             <CardTitle className="text-4xl">{stats.total}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Usuários Ativos</CardDescription>
-            <CardTitle className="text-4xl">{stats.active}</CardTitle>
+            <CardDescription>Masters</CardDescription>
+            <CardTitle className="text-4xl flex items-center gap-2">
+              <Crown className="h-6 w-6 text-yellow-500" />
+              {stats.masters}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Administradores</CardDescription>
-            <CardTitle className="text-4xl">{stats.admins}</CardTitle>
+            <CardDescription>Gerentes</CardDescription>
+            <CardTitle className="text-4xl flex items-center gap-2">
+              <ShieldCheck className="h-6 w-6 text-blue-500" />
+              {stats.managers}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Masters/Managers</CardDescription>
-            <CardTitle className="text-4xl">{stats.masters + stats.managers}</CardTitle>
+            <CardDescription>Membros</CardDescription>
+            <CardTitle className="text-4xl flex items-center gap-2">
+              <User className="h-6 w-6 text-gray-500" />
+              {stats.users}
+            </CardTitle>
           </CardHeader>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Usuários</CardTitle>
+          <CardTitle>Membros da Organização</CardTitle>
           <CardDescription>
-            {users.length} usuário(s) cadastrado(s)
+            {members.length} membro(s) na organização
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -360,9 +571,9 @@ export default function UsersPage() {
             <div className="flex items-center gap-2">
               <Input
                 placeholder="Filtrar por nome..."
-                value={(table.getColumn('name')?.getFilterValue() as string) ?? ''}
+                value={(table.getColumn('user.name')?.getFilterValue() as string) ?? ''}
                 onChange={(event) =>
-                  table.getColumn('name')?.setFilterValue(event.target.value)
+                  table.getColumn('user.name')?.setFilterValue(event.target.value)
                 }
                 className="max-w-sm"
               />
@@ -373,14 +584,13 @@ export default function UsersPage() {
                 }
               >
                 <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filtrar por função" />
+                  <SelectValue placeholder="Filtrar por cargo" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="master">Master</SelectItem>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="user">Usuário</SelectItem>
+                  <SelectItem value="manager">Gerente</SelectItem>
+                  <SelectItem value="user">Membro</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -388,11 +598,10 @@ export default function UsersPage() {
             {/* Table */}
             {isLoading ? (
               <div className="space-y-2">
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
               </div>
             ) : (
               <>
@@ -439,7 +648,7 @@ export default function UsersPage() {
                             colSpan={columns.length}
                             className="h-24 text-center"
                           >
-                            Nenhum resultado encontrado.
+                            Nenhum membro encontrado.
                           </TableCell>
                         </TableRow>
                       )}
@@ -450,8 +659,8 @@ export default function UsersPage() {
                 {/* Pagination */}
                 <div className="flex items-center justify-between px-2">
                   <div className="text-sm text-muted-foreground">
-                    {table.getFilteredSelectedRowModel().rows.length} de{' '}
-                    {table.getFilteredRowModel().rows.length} linha(s) selecionada(s).
+                    Mostrando {table.getRowModel().rows.length} de{' '}
+                    {table.getFilteredRowModel().rows.length} membro(s).
                   </div>
                   <div className="flex items-center space-x-2">
                     <Button
@@ -465,7 +674,7 @@ export default function UsersPage() {
                     </Button>
                     <div className="text-sm text-muted-foreground">
                       Página {table.getState().pagination.pageIndex + 1} de{' '}
-                      {table.getPageCount()}
+                      {table.getPageCount() || 1}
                     </div>
                     <Button
                       variant="outline"
@@ -484,12 +693,13 @@ export default function UsersPage() {
         </CardContent>
       </Card>
 
+      {/* Invite Dialog */}
       <Dialog open={inviteDialogOpen} onOpenChange={resetInviteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Convidar Novo Usuário</DialogTitle>
+            <DialogTitle>Convidar Novo Membro</DialogTitle>
             <DialogDescription>
-              Crie um link de convite para um novo usuário
+              Crie um link de convite para adicionar um novo membro à organização
             </DialogDescription>
           </DialogHeader>
 
@@ -514,17 +724,39 @@ export default function UsersPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="role">Função</Label>
-                <Select value={inviteRole} onValueChange={(value: any) => setInviteRole(value)}>
+                <Label htmlFor="role">Cargo</Label>
+                <Select
+                  value={inviteRole}
+                  onValueChange={(value: OrgRole) => setInviteRole(value)}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user">Usuário</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="master">Master</SelectItem>
+                    <SelectItem value="user">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        Membro
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="manager">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4" />
+                        Gerente
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="master">
+                      <div className="flex items-center gap-2">
+                        <Crown className="h-4 w-4" />
+                        Master
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Masters têm acesso total. Gerentes podem gerenciar membros. Membros têm
+                  acesso básico.
+                </p>
               </div>
 
               <DialogFooter>
@@ -559,6 +791,97 @@ export default function UsersPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Edit Role Dialog */}
+      <Dialog open={editRoleDialogOpen} onOpenChange={setEditRoleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alterar Cargo</DialogTitle>
+            <DialogDescription>
+              Altere o cargo de {selectedMember?.user?.name} na organização
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-primary/10 text-primary">
+                  {selectedMember?.user?.name
+                    ? getInitials(selectedMember.user.name)
+                    : '??'}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="font-medium">{selectedMember?.user?.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  {selectedMember?.user?.email}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Novo Cargo</Label>
+              <Select value={newRole} onValueChange={(value: OrgRole) => setNewRole(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      Membro
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="manager">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4" />
+                      Gerente
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="master">
+                    <div className="flex items-center gap-2">
+                      <Crown className="h-4 w-4" />
+                      Master
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRoleDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleUpdateRole} disabled={updateRoleMutation.isPending}>
+              {updateRoleMutation.isPending ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove Member Confirmation */}
+      <AlertDialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover membro</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja remover{' '}
+              <strong>{selectedMember?.user?.name}</strong> da organização? Esta ação
+              pode ser desfeita apenas convidando o usuário novamente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRemoveMember}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {removeMemberMutation.isPending ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

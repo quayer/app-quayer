@@ -28,7 +28,7 @@ import {
   Share2
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Instance } from '@prisma/client'
+import type { Connection as Instance } from '@prisma/client'
 import type { QRCodeResponse } from '@/features/instances/instances.interfaces'
 import { useConnectInstance, useInstanceStatus } from '@/hooks/useInstance'
 
@@ -36,6 +36,7 @@ interface ConnectionModalProps {
   instance: Instance | null
   isOpen: boolean
   onClose: () => void
+  onSuccess?: () => void
 }
 
 /**
@@ -43,7 +44,7 @@ interface ConnectionModalProps {
  * @description Modal para conectar instância WhatsApp via QR Code
  * Inclui countdown timer, auto-refresh e instruções passo a passo
  */
-export function ConnectionModal({ instance, isOpen, onClose }: ConnectionModalProps) {
+export function ConnectionModal({ instance, isOpen, onClose, onSuccess }: ConnectionModalProps) {
   const [qrData, setQrData] = useState<QRCodeResponse | null>(null)
   const [timeLeft, setTimeLeft] = useState(0)
   const [isExpired, setIsExpired] = useState(false)
@@ -58,7 +59,7 @@ export function ConnectionModal({ instance, isOpen, onClose }: ConnectionModalPr
 
   // Business Logic: Gerar QR Code quando modal abrir
   useEffect(() => {
-    if (isOpen && instance && !connectMutation.loading) {
+    if (isOpen && instance && !connectMutation.isPending) {
       generateQRCode()
     }
   }, [isOpen, instance])
@@ -69,6 +70,8 @@ export function ConnectionModal({ instance, isOpen, onClose }: ConnectionModalPr
 
     if (statusData?.status === 'connected' && step !== 4) {
       setStep(4) // Conectado com sucesso
+      // Chamar callback de sucesso para atualizar a lista
+      onSuccess?.()
       setTimeout(() => {
         onClose()
         // Reset states on close
@@ -79,7 +82,7 @@ export function ConnectionModal({ instance, isOpen, onClose }: ConnectionModalPr
         setErrorMessage(null)
       }, 2000)
     }
-  }, [statusData?.status, isOpen, step])
+  }, [statusData?.status, isOpen, step, onSuccess])
 
   // Business Logic: Countdown timer para QR Code
   useEffect(() => {
@@ -381,7 +384,7 @@ export function ConnectionModal({ instance, isOpen, onClose }: ConnectionModalPr
                 <TooltipTrigger asChild>
                   <Button
                     onClick={handleRefresh}
-                    disabled={connectMutation.loading}
+                    disabled={connectMutation.isPending}
                     className="flex-1 bg-theme-primary hover:bg-theme-primary-hover"
                   >
                     <RefreshCw className="h-4 w-4 mr-2" />

@@ -2,16 +2,16 @@
  * Projects Feature - Type Definitions
  */
 
-import type { Project, Instance } from '@prisma/client';
+import type { Project, Connection } from '@prisma/client';
 
 // ============================================
 // Database Types with Relations
 // ============================================
 
 export type ProjectWithRelations = Project & {
-  instances?: Instance[];
+  connections?: Connection[];
   _count?: {
-    instances: number;
+    connections: number;
   };
 };
 
@@ -27,7 +27,7 @@ export interface CreateProjectInput {
 
 export interface UpdateProjectInput {
   name?: string;
-  description?: string;
+  description?: string | null;
   isActive?: boolean;
 }
 
@@ -39,8 +39,8 @@ export interface ListProjectsQuery {
   isActive?: boolean;
 }
 
-export interface LinkInstanceInput {
-  instanceId: string;
+export interface LinkConnectionInput {
+  connectionId: string;
 }
 
 // ============================================
@@ -56,7 +56,7 @@ export interface ProjectResponse {
   createdAt: Date;
   updatedAt: Date;
   stats?: {
-    instancesCount: number;
+    connectionsCount: number;
   };
 }
 

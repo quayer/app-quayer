@@ -17,6 +17,7 @@ import { database } from '@/services/database';
  */
 export const attributesController = igniter.controller({
   name: 'attribute',
+  path: '/attribute',
   description: 'Gerenciamento de definições de atributos customizados',
 
   actions: {
@@ -37,8 +38,17 @@ export const attributesController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { name, description, type, isRequired, defaultValue, options } = context.body;
-        const { currentOrgId } = context.user;
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { name, description, type, isRequired, defaultValue, options } = request.body;
+        const currentOrgId = user.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.forbidden('Organização não encontrada');
+        }
 
         // Verificar se já existe atributo com mesmo nome nesta organização
         const existing = await database.attribute.findFirst({
@@ -49,10 +59,7 @@ export const attributesController = igniter.controller({
         });
 
         if (existing) {
-          return response.error({
-            message: 'Já existe um atributo com este nome nesta organização',
-            status: 400,
-          });
+          return response.badRequest('Já existe um atributo com este nome nesta organização');
         }
 
         const attribute = await database.attribute.create({
@@ -88,8 +95,17 @@ export const attributesController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { page, limit, type, isActive } = context.query;
-        const { currentOrgId } = context.user;
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { page = 1, limit = 50, type, isActive } = request.query;
+        const currentOrgId = user.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.forbidden('Organização não encontrada');
+        }
 
         const where: any = {
           organizationId: currentOrgId,
@@ -148,15 +164,21 @@ export const attributesController = igniter.controller({
      * GET /api/attribute/:id
      * Busca atributo por ID
      */
-    getById: igniter.query({
+    getById: (igniter.query as any)({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { id } = request.params as { id: string };
+        const currentOrgId = user.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.forbidden('Organização não encontrada');
+        }
 
         const attribute = await database.attribute.findFirst({
           where: {
@@ -173,10 +195,7 @@ export const attributesController = igniter.controller({
         });
 
         if (!attribute) {
-          return response.error({
-            message: 'Atributo não encontrado',
-            status: 404,
-          });
+          return response.notFound('Atributo não encontrado');
         }
 
         return response.success({
@@ -201,12 +220,9 @@ export const attributesController = igniter.controller({
      * PUT /api/attribute/:id
      * Atualiza atributo existente
      */
-    update: igniter.mutation({
+    update: (igniter.mutation as any)({
       path: '/:id',
       method: 'PUT',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       body: z.object({
         name: z.string().min(1).optional(),
         description: z.string().optional(),
@@ -217,10 +233,19 @@ export const attributesController = igniter.controller({
         isActive: z.boolean().optional(),
       }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const updateData = context.body;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { id } = request.params as { id: string };
+        const updateData = request.body;
+        const currentOrgId = user.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.forbidden('Organização não encontrada');
+        }
 
         // Verificar se atributo existe e pertence à organização
         const existingAttribute = await database.attribute.findFirst({
@@ -231,10 +256,7 @@ export const attributesController = igniter.controller({
         });
 
         if (!existingAttribute) {
-          return response.error({
-            message: 'Atributo não encontrado',
-            status: 404,
-          });
+          return response.notFound('Atributo não encontrado');
         }
 
         // Se está tentando mudar o nome, verificar se não existe outro com o mesmo nome
@@ -248,10 +270,7 @@ export const attributesController = igniter.controller({
           });
 
           if (duplicateName) {
-            return response.error({
-              message: 'Já existe um atributo com este nome nesta organização',
-              status: 400,
-            });
+            return response.badRequest('Já existe um atributo com este nome nesta organização');
           }
         }
 
@@ -290,20 +309,26 @@ export const attributesController = igniter.controller({
      * DELETE /api/attribute/:id
      * Deleta atributo (soft delete - marca como inativo)
      */
-    delete: igniter.mutation({
+    delete: (igniter.mutation as any)({
       path: '/:id',
       method: 'DELETE',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       query: z.object({
         force: z.coerce.boolean().default(false),
       }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { force } = context.query;
-        const { currentOrgId } = context.user;
+      handler: async ({ request, response, context }: any) => {
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { id } = request.params as { id: string };
+        const { force = false } = request.query;
+        const currentOrgId = user.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.forbidden('Organização não encontrada');
+        }
 
         // Verificar se atributo existe e pertence à organização
         const existingAttribute = await database.attribute.findFirst({
@@ -321,18 +346,12 @@ export const attributesController = igniter.controller({
         });
 
         if (!existingAttribute) {
-          return response.error({
-            message: 'Atributo não encontrado',
-            status: 404,
-          });
+          return response.notFound('Atributo não encontrado');
         }
 
         // Verificar se há contatos usando este atributo
         if (existingAttribute._count.contactAttributes > 0 && !force) {
-          return response.error({
-            message: `Este atributo está sendo usado por ${existingAttribute._count.contactAttributes} contato(s). Use ?force=true para deletar mesmo assim (os valores serão removidos).`,
-            status: 400,
-          });
+          return response.badRequest(`Este atributo está sendo usado por ${existingAttribute._count.contactAttributes} contato(s). Use ?force=true para deletar mesmo assim (os valores serão removidos).`);
         }
 
         if (force && existingAttribute._count.contactAttributes > 0) {

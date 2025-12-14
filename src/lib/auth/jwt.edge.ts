@@ -13,6 +13,7 @@ export interface AccessTokenPayload {
   role: UserRole
   currentOrgId: string | null
   organizationRole?: string
+  needsOnboarding?: boolean
 }
 
 export interface RefreshTokenPayload {
@@ -40,6 +41,7 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenPaylo
       role: payload.role as UserRole,
       currentOrgId: payload.currentOrgId as string | null,
       organizationRole: payload.organizationRole as string | undefined,
+      needsOnboarding: payload.needsOnboarding as boolean | undefined,
     }
   } catch (error) {
     console.error('Error verifying access token:', error)

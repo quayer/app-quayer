@@ -5,7 +5,7 @@
  * Documentação: https://docs.uazapi.com
  */
 
-const UAZ_BASE_URL = process.env.UAZ_API_URL || 'https://free.uazapi.com';
+const UAZ_BASE_URL = process.env.UAZAPI_URL || process.env.UAZ_API_URL || 'https://quayer.uazapi.com';
 
 export interface SendTextDto {
   number: string; // Ex: "5511999999999@s.whatsapp.net"
@@ -135,12 +135,22 @@ export class UAZService {
       },
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`UAZ API Error [${response.status}]: ${error}`);
+    // Parse response body
+    const data = await response.json().catch(() => null);
+
+    // Para /instance/connect, 409 é válido se contiver QR code
+    // UAZapi retorna 409 quando a instância já está conectando
+    if (response.status === 409 && endpoint === '/instance/connect' && data?.instance?.qrcode) {
+      // Retornar os dados do instance como se fosse sucesso
+      return data.instance as T;
     }
 
-    return response.json();
+    if (!response.ok) {
+      const errorText = data ? JSON.stringify(data) : `HTTP ${response.status}`;
+      throw new Error(`UAZ API Error [${response.status}]: ${errorText}`);
+    }
+
+    return data as T;
   }
 
   // ==========================================

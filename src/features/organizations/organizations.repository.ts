@@ -54,8 +54,9 @@ export class OrganizationsRepository {
             _count: {
               select: {
                 users: true,
-                instances: true,
+                connections: true,
                 projects: true,
+                webhooks: true,
               },
             },
           }
@@ -122,8 +123,9 @@ export class OrganizationsRepository {
           _count: {
             select: {
               users: true,
-              instances: true,
+              connections: true,
               projects: true,
+              webhooks: true,
             },
           },
         },

@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 /**
  * Schema de criação de instância
+ * ✅ ATUALIZADO: Suporte a WhatsApp Cloud API (cloudapi)
  */
 export const createInstanceSchema = z.object({
   name: z
@@ -24,7 +25,7 @@ export const createInstanceSchema = z.object({
     .optional()
     .nullable(),
   brokerType: z
-    .enum(['uazapi', 'evolution', 'baileys'], {
+    .enum(['uazapi', 'evolution', 'baileys', 'cloudapi'], {
       required_error: 'Broker type is required',
     })
     .default('uazapi'),
@@ -47,6 +48,10 @@ export const createInstanceSchema = z.object({
     .max(60, 'Delay cannot exceed 60 seconds')
     .optional()
     .default(4),
+  // WhatsApp Cloud API fields (required when brokerType = cloudapi)
+  cloudApiAccessToken: z.string().optional(),
+  cloudApiPhoneNumberId: z.string().optional(),
+  cloudApiWabaId: z.string().optional(),
 });
 
 export type CreateInstanceInput = z.infer<typeof createInstanceSchema>;
@@ -90,6 +95,7 @@ export type UpdateInstanceInput = z.infer<typeof updateInstanceSchema>;
 
 /**
  * Schema de listagem de instâncias
+ * ✅ ATUALIZADO: Suporte a WhatsApp Cloud API (cloudapi)
  */
 export const listInstancesSchema = z.object({
   page: z.number().int().min(1).optional().default(1),
@@ -100,7 +106,7 @@ export const listInstancesSchema = z.object({
   status: z
     .enum(['connected', 'disconnected', 'connecting', 'qr'])
     .optional(),
-  brokerType: z.enum(['uazapi', 'evolution', 'baileys']).optional(),
+  brokerType: z.enum(['uazapi', 'evolution', 'baileys', 'cloudapi']).optional(),
   isActive: z.boolean().optional(),
   sortBy: z
     .enum(['name', 'status', 'createdAt', 'lastConnected'])

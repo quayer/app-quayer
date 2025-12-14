@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
-import type { Instance } from '@prisma/client'
+import type { Connection as Instance } from '@prisma/client'
 import type {
   CreateInstanceInput,
   UpdateInstanceInput,
@@ -10,23 +10,68 @@ import type {
   InstanceStatusResponse
 } from '@/features/instances/instances.interfaces'
 
+// Helper para fazer requests autenticados
+async function fetchWithAuth(url: string, options: RequestInit = {}) {
+  const response = await fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
+
+  if (!response.ok) {
+    let errorMessage = `Erro HTTP ${response.status}`
+    try {
+      const errorData = await response.json()
+      // Extrair mensagem de erro de forma robusta
+      if (typeof errorData === 'string') {
+        errorMessage = errorData
+      } else if (errorData?.message) {
+        errorMessage = errorData.message
+      } else if (errorData?.error) {
+        errorMessage = typeof errorData.error === 'string'
+          ? errorData.error
+          : errorData.error?.message || JSON.stringify(errorData.error)
+      }
+    } catch {
+      // Ignore JSON parse error
+    }
+    throw new Error(errorMessage)
+  }
+
+  // Verificar se há conteúdo para parsear
+  const text = await response.text()
+  if (!text) {
+    return { success: true }
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { success: true, data: text }
+  }
+}
+
 /**
  * @hook useInstances
  * @description Hook para listar todas as instâncias WhatsApp com polling inteligente
  * @returns {object} Objeto com dados, loading, error e refetch
  */
-export function useInstances(options?: { page?: number; limit?: number; status?: string; search?: string; enablePolling?: boolean }) {
-  const { enablePolling = true, ...queryOptions } = options || {}
+export function useInstances(options?: { page?: number; limit?: number; status?: string; search?: string; enablePolling?: boolean; fastPolling?: boolean }) {
+  const { enablePolling = true, fastPolling = false, ...queryOptions } = options || {}
 
   return useQuery({
     queryKey: ['instances', queryOptions],
     queryFn: async () => {
-      const response = await api.instances.list.query()
+      const response = await api.instances.list.query({ query: {} })
 
       // Tratamento de erro explícito
       if (response.error) {
         console.error('Error loading instances:', response.error)
-        throw new Error(response.error.message || 'Erro ao carregar integrações')
+        const errorMessage = (response.error as { message?: string })?.message || 'Erro ao carregar integrações'
+        throw new Error(errorMessage)
       }
 
       // Retornar a resposta completa (Igniter.js já retorna { data, error })
@@ -34,7 +79,8 @@ export function useInstances(options?: { page?: number; limit?: number; status?:
     },
     staleTime: 0, // Sempre buscar dados frescos para real-time sync
     refetchOnWindowFocus: true,
-    refetchInterval: enablePolling ? 10 * 1000 : false, // Polling a cada 10 segundos (conforme especificação)
+    // Polling: 3 segundos se fastPolling, 10 segundos normal, false se desabilitado
+    refetchInterval: enablePolling ? (fastPolling ? 3 * 1000 : 10 * 1000) : false,
     retry: 2, // Tentar novamente 2 vezes antes de falhar
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
   })
@@ -50,7 +96,7 @@ export function useInstance(id: string) {
   return useQuery({
     queryKey: ['instances', id],
     queryFn: async () => {
-      const response = await api.instances.getById.query()
+      const response = await fetchWithAuth(`/api/v1/instances/${id}`)
       return response.data as Instance
     },
     enabled: !!id,
@@ -71,11 +117,26 @@ export function useCreateInstance() {
       const response = await api.instances.create.mutate({
         body: data
       })
+
+      // Verificar se houve erro na resposta do Igniter.js
+      if (response.error) {
+        // Extrair mensagem de erro
+        const errorMessage = typeof response.error === 'string'
+          ? response.error
+          : (response.error as { message?: string })?.message || 'Erro ao criar instância na UAZapi'
+        throw new Error(errorMessage)
+      }
+
+      if (!response.data) {
+        throw new Error('Resposta vazia da API ao criar instância')
+      }
+
       return response.data as Instance
     },
     onSuccess: () => {
       // Business Logic: Invalidar cache de instâncias após criação
       queryClient.invalidateQueries({ queryKey: ['instances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-instances'] })
     },
   })
 }
@@ -90,8 +151,9 @@ export function useUpdateInstance() {
 
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateInstanceInput }) => {
-      const response = await api.instances.update.mutate({
-        body: data
+      const response = await fetchWithAuth(`/api/v1/instances/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
       })
       return response.data as Instance
     },
@@ -113,13 +175,22 @@ export function useConnectInstance() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.instances.connect.mutate()
-      return response.data as QRCodeResponse
+      const response = await fetchWithAuth(`/api/v1/instances/${id}/connect`, {
+        method: 'POST',
+      })
+      // Igniter retorna { data: { qrcode, expires }, error: null }
+      const data = response.data || response
+      return data as QRCodeResponse
     },
     onSuccess: (_, id) => {
       // Business Logic: Invalidar cache da instância após conectar
       queryClient.invalidateQueries({ queryKey: ['instances', id] })
       queryClient.invalidateQueries({ queryKey: ['instances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-instances'] })
+      queryClient.invalidateQueries({ queryKey: ['instances', 'stats'] })
+    },
+    onError: (error) => {
+      console.error('[useConnectInstance] Erro ao conectar:', error)
     },
   })
 }
@@ -135,8 +206,10 @@ export function useInstanceStatus(id: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ['instances', id, 'status'],
     queryFn: async () => {
-      const response = await api.instances.getStatus.query()
-      return response.data as InstanceStatusResponse
+      const response = await fetchWithAuth(`/api/v1/instances/${id}/status`)
+      // ✅ CORREÇÃO: Igniter retorna { data: { status, ... }, error: null }
+      const data = response.data || response
+      return data as InstanceStatusResponse
     },
     enabled: enabled && !!id,
     refetchInterval: 3 * 1000, // Polling a cada 3 segundos (conforme especificação)
@@ -154,8 +227,10 @@ export function useDisconnectInstance() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.instances.disconnect.mutate()
-      return response.data
+      const response = await fetchWithAuth(`/api/v1/instances/${id}/disconnect`, {
+        method: 'POST',
+      })
+      return response
     },
     onSuccess: (_, id) => {
       // Business Logic: Invalidar cache após desconectar
@@ -176,12 +251,63 @@ export function useDeleteInstance() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.instances.delete.mutate()
-      return response.data
+      const response = await fetchWithAuth(`/api/v1/instances/${id}`, {
+        method: 'DELETE',
+      })
+      return response
     },
-    onSuccess: () => {
-      // Business Logic: Invalidar cache de instâncias após deletar
+    onMutate: async (id: string) => {
+      // Cancelar queries em andamento
+      await queryClient.cancelQueries({ queryKey: ['instances'] })
+
+      // Snapshot dos dados anteriores
+      const previousInstances = queryClient.getQueryData(['instances'])
+
+      // Otimistic update - remover da lista imediatamente
+      // Usar setQueriesData para atingir todas as variações de chave (com/sem filtros)
+      queryClient.setQueriesData({ queryKey: ['instances'] }, (old: any) => {
+        if (!old) return old
+
+        // Formato 1: { data: [...] } (objeto com array de data)
+        if (old.data && Array.isArray(old.data)) {
+          return {
+            ...old,
+            data: old.data.filter((instance: any) => instance.id !== id)
+          }
+        }
+
+        // Formato 2: Array direto
+        if (Array.isArray(old)) {
+          return old.filter((instance: any) => instance.id !== id)
+        }
+
+        // Formato 3: { data: { data: [...] } } (nested data)
+        if (old.data?.data && Array.isArray(old.data.data)) {
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: old.data.data.filter((instance: any) => instance.id !== id)
+            }
+          }
+        }
+
+        return old
+      })
+
+      return { previousInstances }
+    },
+    onError: (_error, _id, context) => {
+      // Reverter para dados anteriores em caso de erro
+      if (context?.previousInstances) {
+        queryClient.setQueryData(['instances'], context.previousInstances)
+      }
+    },
+    onSettled: () => {
+      // Sempre revalidar após mutação
       queryClient.invalidateQueries({ queryKey: ['instances'] })
+      queryClient.invalidateQueries({ queryKey: ['all-instances'] })
+      queryClient.invalidateQueries({ queryKey: ['instances', 'stats'] })
     },
   })
 }
@@ -201,9 +327,9 @@ export function useInstanceStats() {
       // Business Logic: Calcular estatísticas das instâncias
       const stats = {
         total: data.length,
-        connected: data.filter(i => i.status === 'connected').length,
-        disconnected: data.filter(i => i.status === 'disconnected').length,
-        connecting: data.filter(i => i.status === 'connecting').length,
+        connected: data.filter(i => i.status === 'CONNECTED').length,
+        disconnected: data.filter(i => i.status === 'DISCONNECTED').length,
+        connecting: data.filter(i => i.status === 'CONNECTING').length,
       }
 
       return stats
@@ -219,20 +345,16 @@ export function useInstanceStats() {
  * @returns {object} Objeto com URL da foto de perfil, loading e error
  */
 export function useProfilePicture(instanceId: string) {
-  const queryClient = useQueryClient()
-
   return useQuery({
     queryKey: ['instances', instanceId, 'profile-picture'],
     queryFn: async () => {
-      const response = await api.instances.getProfilePicture.query()
-      return response.data as { profilePictureUrl: string }
+      const response = await fetchWithAuth(`/api/v1/instances/${instanceId}/profile-picture`)
+      // ✅ CORREÇÃO: Igniter retorna { data: { profilePictureUrl }, error: null }
+      const data = response.data || response
+      return data as { profilePictureUrl: string }
     },
     enabled: !!instanceId,
     staleTime: 5 * 60 * 1000, // 5 minutos (fotos de perfil não mudam com frequência)
-    onSuccess: () => {
-      // Invalidar cache da instância para atualizar dados
-      queryClient.invalidateQueries({ queryKey: ['instances', instanceId] })
-    },
   })
 }
 
@@ -246,10 +368,11 @@ export function useSetWebhook() {
 
   return useMutation({
     mutationFn: async ({ instanceId, webhookUrl, events }: { instanceId: string; webhookUrl: string; events: string[] }) => {
-      const response = await api.instances.setWebhook.mutate({
-        body: { webhookUrl, events }
+      const response = await fetchWithAuth(`/api/v1/instances/${instanceId}/webhook`, {
+        method: 'POST',
+        body: JSON.stringify({ webhookUrl, events }),
       })
-      return response.data
+      return response
     },
     onSuccess: (_, { instanceId }) => {
       // Invalidar cache da instância e webhook após configuração
@@ -269,8 +392,10 @@ export function useWebhook(instanceId: string) {
   return useQuery({
     queryKey: ['instances', instanceId, 'webhook'],
     queryFn: async () => {
-      const response = await api.instances.getWebhook.query()
-      return response.data as { webhookUrl: string; events: string[] }
+      const response = await fetchWithAuth(`/api/v1/instances/${instanceId}/webhook`)
+      // ✅ CORREÇÃO: Igniter retorna { data: { webhookUrl, events }, error: null }
+      const data = response.data || response
+      return data as { webhookUrl: string; events: string[] }
     },
     enabled: !!instanceId,
     staleTime: 30 * 1000, // 30 segundos

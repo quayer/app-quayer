@@ -1,4 +1,4 @@
-import { PrismaClient, Instance } from "@prisma/client";
+import { PrismaClient, Connection as Instance, ConnectionStatus } from "@prisma/client";
 import { CreateInstanceInput, UpdateInstanceInput } from "../instances.interfaces";
 
 /**
@@ -24,7 +24,8 @@ export class InstancesRepository {
    */
   async create(data: CreateInstanceInput): Promise<Instance> {
     // Business Logic: Criar nova instância no banco de dados usando Prisma
-    return this.prisma.connection.create({ data });
+    // Use type assertion to satisfy Prisma's discriminated union type
+    return this.prisma.connection.create({ data: data as any });
   }
 
   /**
@@ -33,11 +34,20 @@ export class InstancesRepository {
    * @param {string} organizationId - ID da organização para filtrar (opcional)
    * @returns {Promise<Instance[]>} Lista de todas as instâncias
    */
-  async findAll(organizationId?: string): Promise<Instance[]> {
+  async findAll(organizationId?: string): Promise<any[]> {
     // Business Logic: Buscar todas as instâncias ordenadas por data de criação
     return this.prisma.connection.findMany({
       where: organizationId ? { organizationId } : undefined,
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          }
+        }
+      }
     });
   }
 
@@ -81,6 +91,15 @@ export class InstancesRepository {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            }
+          }
+        }
       }),
       this.prisma.connection.count({ where }),
     ]);
@@ -94,10 +113,19 @@ export class InstancesRepository {
    * @param {string} id - ID da instância
    * @returns {Promise<Instance | null>} Instância encontrada ou null
    */
-  async findById(id: string): Promise<Instance | null> {
+  async findById(id: string): Promise<any | null> {
     // Business Logic: Buscar instância por ID usando Prisma
     return this.prisma.connection.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          }
+        }
+      }
     });
   }
 
@@ -134,24 +162,24 @@ export class InstancesRepository {
    * @description Atualiza apenas o status de uma instância
    * @param {string} id - ID da instância
    * @param {string} status - Novo status
-   * @param {string} brokerId - ID do broker (opcional)
    * @param {string} phoneNumber - Número do telefone (opcional)
+   * @param {string} profilePictureUrl - URL da foto de perfil (opcional)
    * @returns {Promise<Instance>} Instância atualizada
    */
   async updateStatus(
-    id: string, 
-    status: string, 
-    brokerId?: string, 
-    phoneNumber?: string
+    id: string,
+    status: string,
+    phoneNumber?: string,
+    profilePictureUrl?: string | null
   ): Promise<Instance> {
     // Business Logic: Atualizar status e dados relacionados da instância
     return this.prisma.connection.update({
       where: { id },
       data: {
-        status,
-        ...(brokerId && { brokerId }),
+        status: status as ConnectionStatus,
         ...(phoneNumber && { phoneNumber }),
-        ...(status === 'connected' && { lastConnected: new Date() })
+        ...(profilePictureUrl !== undefined && { profilePictureUrl }),
+        ...(status === 'CONNECTED' && { lastConnected: new Date() })
       }
     });
   }
@@ -171,7 +199,7 @@ export class InstancesRepository {
       data: {
         qrCode,
         ...(pairingCode && { pairingCode }),
-        status: 'connecting'
+        status: 'CONNECTING'
       }
     });
   }
@@ -225,7 +253,7 @@ export class InstancesRepository {
   async countByStatus(status: string): Promise<number> {
     // Business Logic: Contar instâncias por status específico
     return this.prisma.connection.count({
-      where: { status }
+      where: { status: status as ConnectionStatus }
     });
   }
 
@@ -238,7 +266,7 @@ export class InstancesRepository {
   async findByShareToken(shareToken: string): Promise<Instance | null> {
     // Business Logic: Buscar instância pelo token de compartilhamento com dados da organização
     return this.prisma.connection.findFirst({
-      where: { 
+      where: {
         shareToken,
         shareTokenExpiresAt: {
           gt: new Date() // Apenas tokens não expirados

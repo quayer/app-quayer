@@ -70,13 +70,14 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         throw apiError
       }
 
-      if (data?.accessToken) {
-        localStorage.setItem("accessToken", data.accessToken)
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken)
+      const loginData = data as any
+      if (loginData?.accessToken) {
+        localStorage.setItem("accessToken", loginData.accessToken)
+        if (loginData.refreshToken) {
+          localStorage.setItem("refreshToken", loginData.refreshToken)
         }
 
-        const cookieValue = encodeURIComponent(data.accessToken)
+        const cookieValue = encodeURIComponent(loginData.accessToken)
         document.cookie = 'accessToken=' + cookieValue + '; path=/; max-age=86400; SameSite=Lax'
 
         setSuccess(true)
@@ -86,7 +87,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         sessionStorage.removeItem('signup-name')
 
         setTimeout(() => {
-          const redirectPath = data.user?.role === "admin" ? "/admin" : "/integracoes"
+          const redirectPath = loginData.user?.role === "admin" ? "/admin" : "/integracoes"
           window.location.href = redirectPath
         }, 1500)
       }

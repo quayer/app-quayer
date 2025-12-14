@@ -5,7 +5,41 @@ import { IgniterProvider } from '@igniter-js/core/client'
 import { ThemeProvider } from 'next-themes'
 import { AuthProvider } from '@/lib/auth/auth-provider'
 import { Toaster } from '@/components/ui/sonner'
-import { useState, useEffect } from 'react'
+import { CommandPalette } from '@/components/command-palette'
+import { SkipLink } from '@/components/accessibility/skip-link'
+import { useState, useLayoutEffect } from 'react'
+
+// ✅ CORREÇÃO: Instalar interceptor imediatamente (fora do componente, mas apenas no cliente)
+if (typeof window !== 'undefined') {
+  const win = window as any
+  if (!win.__fetchIntercepted) {
+    const originalFetch = win.fetch
+
+    win.fetch = async function(...args: any[]) {
+      const [url, options = {}] = args
+
+      // Adicionar token automaticamente em requisições para /api/v1
+      if (typeof url === 'string' && url.includes('/api/v1')) {
+        const token = localStorage.getItem('accessToken')
+
+        if (token) {
+          options.headers = {
+            ...options.headers,
+            'Authorization': `Bearer ${token}`,
+          }
+        }
+
+        // ✅ CORREÇÃO: Sempre incluir credentials para enviar cookies
+        options.credentials = options.credentials || 'include'
+      }
+
+      return originalFetch(url, options)
+    }
+
+    win.__fetchIntercepted = true
+    console.log('✅ Global fetch interceptor installed (immediate)')
+  }
+}
 
 /**
  * @component AppProviders
@@ -22,31 +56,31 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     },
   }))
 
-  // ✅ CORREÇÃO BRUTAL: Interceptar fetch globalmente
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !window.__fetchIntercepted) {
-      const originalFetch = window.fetch
-      
-      window.fetch = async function(...args: any[]) {
+  // ✅ Garantir que o interceptor está instalado no layout effect (mais cedo que useEffect)
+  useLayoutEffect(() => {
+    const win = window as any
+    if (!win.__fetchIntercepted) {
+      const originalFetch = win.fetch
+
+      win.fetch = async function(...args: any[]) {
         const [url, options = {}] = args
-        
-        // Adicionar token automaticamente em requisições para /api/v1
+
         if (typeof url === 'string' && url.includes('/api/v1')) {
           const token = localStorage.getItem('accessToken')
-          
           if (token) {
             options.headers = {
               ...options.headers,
               'Authorization': `Bearer ${token}`,
             }
           }
+          options.credentials = options.credentials || 'include'
         }
-        
+
         return originalFetch(url, options)
       }
-      
-      window.__fetchIntercepted = true
-      console.log('✅ Global fetch interceptor installed')
+
+      win.__fetchIntercepted = true
+      console.log('✅ Global fetch interceptor installed (layoutEffect)')
     }
   }, [])
 
@@ -58,27 +92,12 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         enableSystem
         disableTransitionOnChange
       >
-        <IgniterProvider
-          options={{
-            defaultOptions: {
-              headers: () => {
-                // ✅ CORREÇÃO BRUTAL: Injetar token em todas as requisições
-                if (typeof window !== 'undefined') {
-                  const token = localStorage.getItem('accessToken')
-                  if (token) {
-                    return {
-                      'Authorization': `Bearer ${token}`,
-                    }
-                  }
-                }
-                return {}
-              },
-            },
-          }}
-        >
+        <IgniterProvider>
           <AuthProvider>
+            <SkipLink />
             {children}
             <Toaster />
+            <CommandPalette />
           </AuthProvider>
         </IgniterProvider>
       </ThemeProvider>

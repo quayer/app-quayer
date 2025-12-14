@@ -214,35 +214,37 @@ class MessageConcatenatorService {
         })
         .join('\n\n');
 
-      // Buscar sessão
+      // Buscar sessão com contato e conexão
       const session = await database.chatSession.findUnique({
         where: { id: block.sessionId },
+        include: { contact: true },
       });
 
-      if (!session) {
-        logger.warn('[MessageConcatenator] Sessão não encontrada', {
+      if (!session || !session.contactId || !session.connectionId) {
+        logger.warn('[MessageConcatenator] Sessão não encontrada ou incompleta', {
           sessionId: block.sessionId,
         });
         await this.deleteBlock(blockKey);
         return;
       }
 
+      // Gerar waMessageId único para mensagem concatenada
+      const waMessageId = `concat_${block.sessionId}_${Date.now()}`;
+
       // Criar mensagem concatenada
       await database.message.create({
         data: {
           sessionId: block.sessionId,
-          type: 'concatenated', // Tipo especial
+          contactId: session.contactId,
+          connectionId: session.connectionId,
+          waMessageId,
+          type: 'text',
           direction: 'INBOUND',
-          author: block.sender,
+          author: 'CUSTOMER',
           content: concatenatedContent,
-          status: 'DELIVERED',
-          organizationId: session.organizationId,
-          metadata: {
-            concatenated: true,
-            originalMessagesCount: block.count,
-            firstMessageAt: block.firstMessageAt,
-            lastMessageAt: block.lastMessageAt,
-          },
+          status: 'delivered',
+          isConcatenated: true,
+          concatGroupId: blockKey,
         },
       });
 

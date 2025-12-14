@@ -20,14 +20,19 @@ import type {
   SendDocumentInput,
   SendLocationInput,
   SendContactInput,
+  SendInteractiveListInput,
+  SendInteractiveButtonsInput,
   MessageResult,
   WebhookConfig,
   NormalizedWebhook,
   Chat,
   Contact,
   ChatFilters,
+  PresenceType,
+  MediaDownloadResult,
 } from '../../core/provider.types';
 import { UAZClient } from './uazapi.client';
+import { uazService } from '@/lib/uaz/uaz.service';
 import { database } from '@/services/database';
 
 export class UAZapiAdapter implements IWhatsAppProvider {
@@ -61,43 +66,53 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   }
 
   async deleteInstance(instanceId: string): Promise<void> {
-    await this.client.deleteInstance(instanceId);
+    const token = await this.getInstanceToken(instanceId);
+    await this.client.deleteInstance(instanceId, token);
   }
 
   async getInstanceStatus(instanceId: string): Promise<InstanceStatus> {
     const token = await this.getInstanceToken(instanceId);
-    const response = await this.client.getInstanceInfo(instanceId, token);
+    const response = await this.client.getInstanceStatus(token);
     return this.mapStatus(response.data.status);
   }
 
-  // ===== QR CODE =====
+  // ===== QR CODE / CONNECTION =====
+
+  /**
+   * Conecta a instância ao WhatsApp gerando QR Code
+   * Usa POST /instance/connect
+   */
   async generateQRCode(instanceId: string): Promise<QRCodeResult> {
     const token = await this.getInstanceToken(instanceId);
-    const response = await this.client.getInstanceQRCode(instanceId, token);
+    const response = await this.client.connectInstance(token);
 
     return {
       qrCode: response.data.qrcode || response.data.qr,
-      pairingCode: response.data.paircode,
+      pairingCode: response.data.pairingCode || response.data.paircode,
     };
   }
 
-  async getPairingCode(instanceId: string): Promise<PairingCodeResult> {
+  /**
+   * Gera pairing code para conexão via número de telefone
+   * Usa POST /instance/connect com phone
+   */
+  async getPairingCode(instanceId: string, phone?: string): Promise<PairingCodeResult> {
     const token = await this.getInstanceToken(instanceId);
-    const response = await this.client.getPairingCode(instanceId, token);
+    const response = await this.client.connectInstance(token, phone);
 
     return {
-      pairingCode: response.data.paircode || response.data.code,
+      pairingCode: response.data.pairingCode || response.data.paircode || response.data.code,
     };
   }
 
   async disconnect(instanceId: string): Promise<void> {
     const token = await this.getInstanceToken(instanceId);
-    await this.client.disconnectInstance(instanceId, token);
+    await this.client.disconnectInstance(token);
   }
 
   async restart(instanceId: string): Promise<void> {
     const token = await this.getInstanceToken(instanceId);
-    await this.client.restartInstance(instanceId, token);
+    await this.client.restartInstance(token);
   }
 
   // ===== MENSAGENS =====
@@ -182,15 +197,107 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   }
 
   async sendLocation(instanceId: string, data: SendLocationInput): Promise<MessageResult> {
-    // UAZapi não tem endpoint específico de location documentado
-    // Implementar quando disponível
-    throw new Error('Location messages not yet supported by UAZapi adapter');
+    const token = await this.getInstanceToken(instanceId);
+    const response = await uazService.sendLocation(token, {
+      number: data.to,
+      lat: data.latitude,
+      lng: data.longitude,
+      name: data.name,
+      address: data.address,
+    });
+
+    return {
+      messageId: response.messageId || response.id || `loc_${Date.now()}`,
+      status: 'sent',
+      timestamp: new Date(),
+    };
   }
 
   async sendContact(instanceId: string, data: SendContactInput): Promise<MessageResult> {
-    // UAZapi não tem endpoint específico de contact documentado
-    // Implementar quando disponível
-    throw new Error('Contact messages not yet supported by UAZapi adapter');
+    const token = await this.getInstanceToken(instanceId);
+    const response = await uazService.sendContact(token, {
+      number: data.to,
+      contact: {
+        name: data.contact.name,
+        number: data.contact.phone,
+      },
+    });
+
+    return {
+      messageId: response.messageId || response.id || `contact_${Date.now()}`,
+      status: 'sent',
+      timestamp: new Date(),
+    };
+  }
+
+  // ===== MENSAGENS INTERATIVAS =====
+  async sendInteractiveList(instanceId: string, data: SendInteractiveListInput): Promise<MessageResult> {
+    const token = await this.getInstanceToken(instanceId);
+    const response = await uazService.sendList(token, {
+      number: data.to,
+      title: data.title,
+      description: data.description,
+      buttonText: data.buttonText,
+      sections: data.sections,
+      footer: data.footer,
+    });
+
+    return {
+      messageId: response.messageId || response.id || `list_${Date.now()}`,
+      status: 'sent',
+      timestamp: new Date(),
+    };
+  }
+
+  async sendInteractiveButtons(instanceId: string, data: SendInteractiveButtonsInput): Promise<MessageResult> {
+    const token = await this.getInstanceToken(instanceId);
+    const response = await uazService.sendButtons(token, {
+      number: data.to,
+      text: data.text,
+      buttons: data.buttons,
+      footer: data.footer,
+    });
+
+    return {
+      messageId: response.messageId || response.id || `btn_${Date.now()}`,
+      status: 'sent',
+      timestamp: new Date(),
+    };
+  }
+
+  // ===== AÇÕES DE MENSAGEM =====
+  async markAsRead(instanceId: string, messageId: string): Promise<void> {
+    const token = await this.getInstanceToken(instanceId);
+    await uazService.markAsRead(token, messageId);
+  }
+
+  async reactToMessage(instanceId: string, messageId: string, emoji: string): Promise<void> {
+    const token = await this.getInstanceToken(instanceId);
+    await uazService.reactToMessage(token, messageId, emoji);
+  }
+
+  async deleteMessage(instanceId: string, messageId: string): Promise<void> {
+    const token = await this.getInstanceToken(instanceId);
+    await uazService.deleteMessage(token, messageId);
+  }
+
+  // ===== PRESENÇA =====
+  async sendPresence(instanceId: string, to: string, type: PresenceType): Promise<void> {
+    const token = await this.getInstanceToken(instanceId);
+    await uazService.sendPresence(token, to, type);
+  }
+
+  // ===== MÍDIA =====
+  async downloadMedia(instanceId: string, messageId: string): Promise<MediaDownloadResult> {
+    const token = await this.getInstanceToken(instanceId);
+    const response = await uazService.downloadMedia(token, messageId);
+
+    return {
+      data: response.data, // Base64
+      mimeType: response.mimetype,
+      fileName: response.fileName,
+      size: response.size,
+    };
   }
 
   // ===== CHATS E CONTATOS =====
@@ -313,16 +420,16 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   // ===== HELPERS =====
   private async getInstanceToken(instanceId: string): Promise<string> {
     // Buscar token da instância no banco
-    const instance = await database.instance.findUnique({
+    const instance = await database.connection.findUnique({
       where: { id: instanceId },
-      select: { uazToken: true },
+      select: { uazapiToken: true },
     });
 
-    if (!instance?.uazToken) {
+    if (!instance?.uazapiToken) {
       throw new Error(`Instance ${instanceId} not found or missing UAZ token`);
     }
 
-    return instance.uazToken;
+    return instance.uazapiToken;
   }
 
   private mapStatus(uazStatus: string): InstanceStatus {

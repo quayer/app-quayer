@@ -13,7 +13,7 @@ export class AuthRepository {
   /**
    * Criar um novo usuário
    */
-  async createUser(data: RegisterInput & { role?: string; organizationId?: string }) {
+  async createUser(data: RegisterInput & { role?: string; currentOrgId?: string }) {
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
     return this.prisma.user.create({
@@ -22,7 +22,7 @@ export class AuthRepository {
         password: hashedPassword,
         name: data.name,
         role: data.role || "user",
-        organizationId: data.organizationId,
+        currentOrgId: data.currentOrgId,
       },
       select: {
         id: true,
@@ -30,7 +30,7 @@ export class AuthRepository {
         name: true,
         role: true,
         isActive: true,
-        organizationId: true,
+        currentOrgId: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -58,7 +58,7 @@ export class AuthRepository {
         name: true,
         role: true,
         isActive: true,
-        organizationId: true,
+        currentOrgId: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -121,7 +121,7 @@ export class AuthRepository {
   /**
    * Criar convite
    */
-  async createInvitation(email: string, role: string, invitedById: string) {
+  async createInvitation(email: string, role: string, invitedById: string, organizationId: string) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Expira em 7 dias
 
@@ -130,6 +130,7 @@ export class AuthRepository {
         email,
         role,
         invitedById,
+        organizationId,
         expiresAt,
       },
     });
@@ -166,7 +167,7 @@ export class AuthRepository {
         name: true,
         role: true,
         isActive: true,
-        organizationId: true,
+        currentOrgId: true,
         createdAt: true,
         updatedAt: true,
       },

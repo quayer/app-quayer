@@ -5,7 +5,37 @@
  */
 
 // ===== BROKER TYPE =====
-export type BrokerType = 'uazapi' | 'evolution' | 'baileys';
+export type BrokerType = 'uazapi' | 'evolution' | 'baileys' | 'cloudapi';
+
+// ===== CLOUD API CONFIG =====
+/**
+ * Configuration for WhatsApp Cloud API (Official Meta API)
+ * Used when provider is 'WHATSAPP_CLOUD_API'
+ */
+export interface CloudAPIConfig {
+  /** System User Access Token from Meta Business */
+  accessToken: string;
+  /** Phone Number ID from WhatsApp Business Manager */
+  phoneNumberId: string;
+  /** WhatsApp Business Account ID */
+  wabaId: string;
+  /** Display phone number (e.g., +55 11 99999-0000) */
+  displayPhoneNumber?: string;
+  /** Verified business name */
+  verifiedName?: string;
+}
+
+/**
+ * Input for creating a Cloud API instance (no QR Code needed)
+ */
+export interface CreateCloudAPIInstanceInput {
+  name: string;
+  accessToken: string;
+  phoneNumberId: string;
+  wabaId: string;
+  phoneNumber?: string;
+  webhookUrl?: string;
+}
 
 // ===== INSTANCE =====
 export interface CreateInstanceInput {
@@ -199,4 +229,47 @@ export interface ChatFilters {
 export interface MessageFilters {
   limit?: number;
   beforeTimestamp?: Date;
+}
+
+// ===== MENSAGENS INTERATIVAS =====
+export interface SendInteractiveListInput {
+  to: string;
+  title: string;
+  description: string;
+  buttonText: string;
+  sections: Array<{
+    title: string;
+    rows: Array<{
+      id: string;
+      title: string;
+      description?: string;
+    }>;
+  }>;
+  footer?: string;
+}
+
+export interface SendInteractiveButtonsInput {
+  to: string;
+  text: string;
+  buttons: Array<{
+    id: string;
+    text: string;
+  }>;
+  footer?: string;
+  header?: {
+    type: 'text' | 'image' | 'video' | 'document';
+    text?: string;
+    mediaUrl?: string;
+  };
+}
+
+// ===== PRESENÇA =====
+export type PresenceType = 'composing' | 'recording' | 'paused' | 'available' | 'unavailable';
+
+// ===== MÍDIA =====
+export interface MediaDownloadResult {
+  data: string; // Base64
+  mimeType: string;
+  fileName?: string;
+  size?: number;
 }

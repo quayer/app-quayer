@@ -63,6 +63,19 @@ import {
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+
+// Helper para formatar datas com segurança
+function safeFormatDate(date: any): string {
+  if (!date) return 'N/A'
+  try {
+    const d = new Date(date)
+    if (isNaN(d.getTime())) return 'N/A'
+    return formatDistanceToNow(d, { addSuffix: true, locale: ptBR })
+  } catch {
+    return 'N/A'
+  }
+}
+
 import {
   getInvitationsAction,
   createInvitationAction,
@@ -461,14 +474,8 @@ export default function AdminInvitationsPage() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {invitation.usedAt
-                          ? `Aceito ${formatDistanceToNow(new Date(invitation.usedAt), {
-                              addSuffix: true,
-                              locale: ptBR,
-                            })}`
-                          : formatDistanceToNow(new Date(invitation.expiresAt), {
-                              addSuffix: true,
-                              locale: ptBR,
-                            })}
+                          ? `Aceito ${safeFormatDate(invitation.usedAt)}`
+                          : safeFormatDate(invitation.expiresAt)}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

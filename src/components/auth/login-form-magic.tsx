@@ -77,27 +77,29 @@ export function LoginFormMagic({
 
     try {
       const { data, error: apiError } = await api.auth.login.mutate({
-        body: { email, password, rememberMe }
+        body: { email, password }
       })
 
       if (apiError) {
-        setError(apiError.message || apiError.error?.message || 'Erro ao fazer login')
+        const err = apiError as any
+        setError(err.message || err.error?.message || 'Erro ao fazer login')
         setIsLoading(false)
         return
       }
 
-      if (data?.accessToken) {
-        localStorage.setItem("accessToken", data.accessToken)
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken)
+      const loginData = data as any
+      if (loginData?.accessToken) {
+        localStorage.setItem("accessToken", loginData.accessToken)
+        if (loginData.refreshToken) {
+          localStorage.setItem("refreshToken", loginData.refreshToken)
         }
 
         // Cookie duration based on Remember Me
         const maxAge = rememberMe ? 2592000 : 86400 // 30 days or 24 hours
-        const cookieValue = encodeURIComponent(data.accessToken)
+        const cookieValue = encodeURIComponent(loginData.accessToken)
         document.cookie = `accessToken=${cookieValue}; path=/; max-age=${maxAge}; SameSite=Lax`
 
-        const userRole = data.user?.role
+        const userRole = loginData.user?.role
         const redirectPath = userRole === "admin" ? "/admin" : "/integracoes"
 
         window.location.href = redirectPath

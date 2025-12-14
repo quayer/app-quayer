@@ -12,6 +12,45 @@ import { createIgniterClient, useIgniterQueryClient } from '@igniter-js/core/cli
 import type { AppRouterType } from './igniter.router'
 
 /**
+ * Sanitiza o basePath para evitar bug do Git Bash no Windows
+ * O Git Bash converte /api/v1 para C:/Program Files/Git/api/v1
+ */
+function sanitizeBasePath(path: string): string {
+  // Remove prefixos de path do Windows (C:/, D:/, etc) e Git paths
+  const sanitized = path
+    .replace(/^[A-Z]:\/Program Files\/Git/i, '')
+    .replace(/^[A-Z]:\//i, '/')
+  return sanitized.startsWith('/') ? sanitized : `/${sanitized}`
+}
+
+/**
+ * Get authentication token from cookies
+ */
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+
+  const cookies = document.cookie.split(';')
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=')
+    if (name === 'accessToken') {
+      return value
+    }
+  }
+  return null
+}
+
+/**
+ * Get authentication headers for API calls
+ */
+export function getAuthHeaders(): Record<string, string> {
+  const token = getAuthToken()
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` }
+  }
+  return {}
+}
+
+/**
  * Type-safe API client generated from your Igniter router
  *
  * Usage in Server Components:
@@ -19,10 +58,13 @@ import type { AppRouterType } from './igniter.router'
  *
  * Usage in Client Components:
  * const { data } = api.users.list.useQuery()
+ *
+ * For authenticated API calls, pass headers option:
+ * api.users.list.query({ headers: getAuthHeaders() })
  */
 export const api = createIgniterClient<AppRouterType>({
   baseURL: process.env.NEXT_PUBLIC_IGNITER_API_URL || 'http://localhost:3000',
-  basePath: process.env.NEXT_PUBLIC_IGNITER_API_BASE_PATH || '/api/v1',
+  basePATH: sanitizeBasePath(process.env.NEXT_PUBLIC_IGNITER_API_BASE_PATH || '/api/v1'),
   router: () => {
     if (typeof window === 'undefined') {
       return require('./igniter.router').AppRouter
@@ -30,21 +72,6 @@ export const api = createIgniterClient<AppRouterType>({
 
     // Client-side: use schema for type-safe API calls
     return require('./igniter.schema').AppRouterSchema
-  },
-  // ✅ CORREÇÃO BRUTAL: Custom fetcher com token injection
-  fetcher: async (url: string, options: RequestInit = {}) => {
-    // Injetar token automaticamente em todas as requisições
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('accessToken')
-      
-      if (token) {
-        const headers = new Headers(options.headers)
-        headers.set('Authorization', `Bearer ${token}`)
-        options.headers = headers
-      }
-    }
-
-    return fetch(url, options)
   },
 })
 

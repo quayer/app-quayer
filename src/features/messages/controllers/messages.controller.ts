@@ -1,6 +1,7 @@
 /**
  * Messages Controller
  * ⭐ CRITICAL - Formato falecomigo.ai
+ * 🚀 Provider-Agnostic: Funciona igual para UAZAPI, CloudAPI e futuros providers
  * Gerenciamento de mensagens dentro de sessões
  */
 
@@ -10,11 +11,26 @@ import { database } from '@/services/database';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { orchestrator } from '@/lib/providers/core/orchestrator';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
-import { uazService } from '@/lib/uaz/uaz.service';
 import type { BrokerType } from '@/lib/providers/core/provider.types';
+
+/**
+ * Helper: Mapeia provider do banco para BrokerType do orchestrator
+ * Provider-Agnostic: Suporta tanto providers antigos quanto novos
+ */
+function mapProviderToBrokerType(provider: string): BrokerType {
+  const mapping: Record<string, BrokerType> = {
+    'WHATSAPP_WEB': 'uazapi',
+    'WHATSAPP_CLOUD_API': 'cloudapi',
+    'WHATSAPP': 'uazapi',
+    'uazapi': 'uazapi',
+    'cloudapi': 'cloudapi',
+  };
+  return mapping[provider] || 'uazapi';
+}
 
 export const messagesController = igniter.controller({
   name: 'messages',
+  path: '/messages',
   description: 'Gerenciamento de mensagens do sistema',
 
   actions: {
@@ -36,6 +52,7 @@ export const messagesController = igniter.controller({
      */
     create: igniter.mutation({
       path: '/',
+      method: 'POST',
       body: z.object({
         sessionId: z.string().uuid('ID da sessão inválido'),
         type: z.enum(['text', 'image', 'audio', 'video', 'document', 'location', 'contact', 'list', 'buttons']),
@@ -48,9 +65,9 @@ export const messagesController = igniter.controller({
         // Opcionais
         pauseSession: z.boolean().optional().default(false),
         status: z
-          .enum(['PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED'])
+          .enum(['pending', 'sent', 'delivered', 'read', 'failed'])
           .optional()
-          .default('PENDING'),
+          .default('pending'),
         externalId: z.string().optional(),
         sendExternalMessage: z.boolean().optional().default(true),
 
@@ -96,7 +113,7 @@ export const messagesController = igniter.controller({
           where: { id: sessionId },
           include: {
             contact: true,
-            instance: true,
+            connection: true,
           },
         });
 
@@ -126,17 +143,15 @@ export const messagesController = igniter.controller({
           data: {
             sessionId,
             contactId: session.contactId,
-            instanceId: session.instanceId,
+            connectionId: session.connectionId,
             waMessageId,
-            direction,
+            direction: direction!,
             type,
             author,
             content,
             status,
-            externalId,
             mediaUrl,
-            caption,
-            filename,
+            fileName: filename,
           },
           include: {
             contact: {
@@ -151,88 +166,105 @@ export const messagesController = igniter.controller({
         });
 
         // 6. ENVIAR VIA WHATSAPP (se sendExternalMessage = true)
+        // 🚀 Provider-Agnostic: Usa o orchestrator para todas as operações
         if (sendExternalMessage && direction === 'OUTBOUND') {
           try {
-            const brokerType = session.instance.brokerType as BrokerType;
-            const uazToken = session.instance.uazToken;
-
-            if (!uazToken) {
-              throw new Error('Instância sem token UAZ configurado');
-            }
+            const brokerType = mapProviderToBrokerType(session.connection.provider);
 
             // 6.1. EFEITO DIGITANDO (se showTyping = true)
             if (showTyping) {
-              await uazService.sendPresence(uazToken, session.contact.phoneNumber, 'composing');
+              await orchestrator.sendPresence(
+                session.connectionId,
+                brokerType,
+                session.contact.phoneNumber,
+                'composing'
+              );
             }
 
             // 6.2. DELAY (se delayMs > 0)
-            if (delayMs > 0) {
+            if (delayMs && delayMs > 0) {
               await new Promise(resolve => setTimeout(resolve, delayMs));
             }
 
             // 6.3. ENVIAR MENSAGEM conforme tipo
             if (type === 'text') {
               // Texto simples
-              await orchestrator.sendText(session.instanceId, brokerType, {
+              await orchestrator.sendText(session.connectionId, brokerType, {
                 to: session.contact.phoneNumber,
                 text: content,
               });
             } else if (type === 'list') {
-              // Lista interativa
-              await uazService.sendList(uazToken, {
-                number: session.contact.phoneNumber,
-                ...interactiveData,
+              // Lista interativa (provider-agnostic)
+              await orchestrator.sendInteractiveList(session.connectionId, brokerType, {
+                to: session.contact.phoneNumber,
+                title: interactiveData?.title || '',
+                description: interactiveData?.description || content,
+                buttonText: interactiveData?.buttonText || 'Selecionar',
+                sections: interactiveData?.sections || [],
+                footer: interactiveData?.footer,
               });
             } else if (type === 'buttons') {
-              // Botões interativos
-              await uazService.sendButtons(uazToken, {
-                number: session.contact.phoneNumber,
-                ...interactiveData,
+              // Botões interativos (provider-agnostic)
+              await orchestrator.sendInteractiveButtons(session.connectionId, brokerType, {
+                to: session.contact.phoneNumber,
+                text: interactiveData?.text || content,
+                buttons: interactiveData?.buttons || [],
+                footer: interactiveData?.footer,
+                header: interactiveData?.header,
               });
             } else if (type === 'location') {
-              // Localização
-              await uazService.sendLocation(uazToken, {
-                number: session.contact.phoneNumber,
-                ...interactiveData,
+              // Localização (provider-agnostic)
+              await orchestrator.sendLocation(session.connectionId, brokerType, {
+                to: session.contact.phoneNumber,
+                latitude: interactiveData?.latitude || interactiveData?.lat,
+                longitude: interactiveData?.longitude || interactiveData?.lng,
+                name: interactiveData?.name,
+                address: interactiveData?.address,
               });
             } else if (type === 'contact') {
-              // Contato
-              await uazService.sendContact(uazToken, {
-                number: session.contact.phoneNumber,
-                ...interactiveData,
+              // Contato (provider-agnostic)
+              await orchestrator.sendContact(session.connectionId, brokerType, {
+                to: session.contact.phoneNumber,
+                contact: {
+                  name: interactiveData?.contact?.name || interactiveData?.name,
+                  phone: interactiveData?.contact?.phone || interactiveData?.contact?.number || interactiveData?.number,
+                },
               });
             } else if (mediaUrl) {
               // Mídia (image, video, audio, document)
-              await orchestrator.sendMedia(session.instanceId, brokerType, {
+              await orchestrator.sendMedia(session.connectionId, brokerType, {
                 to: session.contact.phoneNumber,
                 mediaUrl,
                 mediaType: type,
                 caption: caption || content,
-                filename,
+                fileName: filename,
               });
             }
 
             // 6.4. PARAR EFEITO DIGITANDO
             if (showTyping) {
-              await uazService.sendPresence(uazToken, session.contact.phoneNumber, 'paused');
+              await orchestrator.sendPresence(
+                session.connectionId,
+                brokerType,
+                session.contact.phoneNumber,
+                'paused'
+              );
             }
 
             // 6.5. Atualizar status
             await database.message.update({
               where: { id: message.id },
-              data: { status: 'SENT' },
+              data: { status: 'sent' },
             });
           } catch (error) {
             console.error('[MessagesController] Erro ao enviar:', error);
 
             await database.message.update({
               where: { id: message.id },
-              data: { status: 'FAILED' },
+              data: { status: 'failed' },
             });
 
-            return response.error('Falha ao enviar mensagem via WhatsApp', {
-              error: error instanceof Error ? error.message : 'Erro desconhecido',
-            });
+            return response.badRequest(`Falha ao enviar mensagem via WhatsApp: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
           }
         }
 
@@ -240,8 +272,7 @@ export const messagesController = igniter.controller({
         if (pauseSession) {
           await sessionsManager.updateSessionStatus(
             sessionId,
-            'PAUSED',
-            'Pausado após envio de mensagem'
+            'PAUSED'
           );
         }
 
@@ -260,12 +291,9 @@ export const messagesController = igniter.controller({
           author: message.author,
           content: message.content,
           status: message.status,
-          externalId: message.externalId,
           mediaUrl: message.mediaUrl,
-          caption: message.caption,
-          filename: message.filename,
+          fileName: message.fileName,
           createdAt: message.createdAt,
-          updatedAt: message.updatedAt,
           contact: message.contact,
         });
       },
@@ -312,7 +340,7 @@ export const messagesController = igniter.controller({
           };
         }
 
-        const skip = (page - 1) * limit;
+        const skip = (page! - 1) * limit!;
 
         // Buscar mensagens e total
         const [messages, total] = await Promise.all([
@@ -346,11 +374,11 @@ export const messagesController = igniter.controller({
           data: messages,
           pagination: {
             total_data: total,
-            total_pages: Math.ceil(total / limit),
-            page,
-            limit,
-            has_next_page: page * limit < total,
-            has_previous_page: page > 1,
+            total_pages: Math.ceil(total / limit!),
+            page: page!,
+            limit: limit!,
+            has_next_page: page! * limit! < total,
+            has_previous_page: page! > 1,
           },
         });
       },
@@ -362,9 +390,6 @@ export const messagesController = igniter.controller({
      */
     getById: igniter.query({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid('ID inválido'),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -372,7 +397,7 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as any;
 
         const message = await database.message.findUnique({
           where: { id },
@@ -414,9 +439,6 @@ export const messagesController = igniter.controller({
      */
     downloadMedia: igniter.query({
       path: '/:id/download',
-      params: z.object({
-        id: z.string().uuid('ID inválido'),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -424,7 +446,7 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as any;
 
         // 1. Buscar mensagem
         const message = await database.message.findUnique({
@@ -432,7 +454,7 @@ export const messagesController = igniter.controller({
           include: {
             session: {
               include: {
-                instance: true,
+                connection: true,
               },
             },
           },
@@ -448,47 +470,42 @@ export const messagesController = igniter.controller({
         }
 
         // 3. Verificar se mensagem tem mídia
-        if (!message.mediaUrl && !message.externalId) {
+        if (!message.mediaUrl && !message.waMessageId) {
           return response.badRequest('Mensagem não possui mídia');
         }
 
-        // 4. Download via UAZ API
+        // 4. Download via Orchestrator (Provider-Agnostic)
         try {
-          const instance = message.session.instance;
-          if (!instance.uazToken) {
-            return response.error('Instância sem token UAZ configurado');
-          }
+          const connection = message.session.connection;
+          const brokerType = mapProviderToBrokerType(connection.provider);
 
           // Se já tiver mediaUrl (URL pública), retornar direto
           if (message.mediaUrl && message.mediaUrl.startsWith('http')) {
             return response.success({
               messageId: message.id,
               mediaUrl: message.mediaUrl,
-              filename: message.filename,
+              fileName: message.fileName,
               mimeType: message.type,
-              caption: message.caption,
             });
           }
 
-          // Caso contrário, baixar via UAZ usando waMessageId
-          const media = await uazService.downloadMedia(
-            instance.uazToken,
+          // Caso contrário, baixar via orchestrator usando waMessageId
+          const media = await orchestrator.downloadMedia(
+            connection.id,
+            brokerType,
             message.waMessageId
           );
 
           return response.success({
             messageId: message.id,
             data: media.data, // Base64
-            filename: media.fileName || message.filename,
-            mimeType: media.mimetype,
+            fileName: media.fileName || message.fileName,
+            mimeType: media.mimeType,
             size: media.size,
-            caption: message.caption,
           });
         } catch (error) {
           console.error('[MessagesController] Erro ao baixar mídia:', error);
-          return response.error('Erro ao baixar mídia', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao baixar mídia: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -499,9 +516,7 @@ export const messagesController = igniter.controller({
      */
     react: igniter.mutation({
       path: '/:id/react',
-      params: z.object({
-        id: z.string().uuid('ID inválido'),
-      }),
+      method: 'POST',
       body: z.object({
         emoji: z.string().min(1).max(10, 'Emoji inválido'),
       }),
@@ -512,7 +527,7 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as any;
         const { emoji } = request.body;
 
         // 1. Buscar mensagem
@@ -521,7 +536,7 @@ export const messagesController = igniter.controller({
           include: {
             session: {
               include: {
-                instance: true,
+                connection: true,
                 contact: true,
               },
             },
@@ -537,15 +552,14 @@ export const messagesController = igniter.controller({
           return response.forbidden('Acesso negado');
         }
 
-        // 3. Reagir via UAZ
+        // 3. Reagir via Orchestrator (Provider-Agnostic)
         try {
-          const instance = message.session.instance;
-          if (!instance.uazToken) {
-            return response.error('Instância sem token UAZ');
-          }
+          const connection = message.session.connection;
+          const brokerType = mapProviderToBrokerType(connection.provider);
 
-          await uazService.reactToMessage(
-            instance.uazToken,
+          await orchestrator.reactToMessage(
+            connection.id,
+            brokerType,
             message.waMessageId,
             emoji
           );
@@ -557,9 +571,7 @@ export const messagesController = igniter.controller({
           });
         } catch (error) {
           console.error('[MessagesController] Erro ao reagir:', error);
-          return response.error('Erro ao reagir à mensagem', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao reagir à mensagem: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -570,9 +582,7 @@ export const messagesController = igniter.controller({
      */
     delete: igniter.mutation({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid('ID inválido'),
-      }),
+      method: 'DELETE',
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -580,7 +590,7 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as any;
 
         // 1. Buscar mensagem
         const message = await database.message.findUnique({
@@ -588,7 +598,7 @@ export const messagesController = igniter.controller({
           include: {
             session: {
               include: {
-                instance: true,
+                connection: true,
               },
             },
           },
@@ -603,15 +613,14 @@ export const messagesController = igniter.controller({
           return response.forbidden('Acesso negado');
         }
 
-        // 3. Deletar via UAZ
+        // 3. Deletar via Orchestrator (Provider-Agnostic)
         try {
-          const instance = message.session.instance;
-          if (!instance.uazToken) {
-            return response.error('Instância sem token UAZ');
-          }
+          const connection = message.session.connection;
+          const brokerType = mapProviderToBrokerType(connection.provider);
 
-          await uazService.deleteMessage(
-            instance.uazToken,
+          await orchestrator.deleteMessage(
+            connection.id,
+            brokerType,
             message.waMessageId
           );
 
@@ -630,9 +639,7 @@ export const messagesController = igniter.controller({
           });
         } catch (error) {
           console.error('[MessagesController] Erro ao deletar:', error);
-          return response.error('Erro ao deletar mensagem', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao deletar mensagem: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -643,9 +650,7 @@ export const messagesController = igniter.controller({
      */
     markAsRead: igniter.mutation({
       path: '/:id/mark-read',
-      params: z.object({
-        id: z.string().uuid('ID inválido'),
-      }),
+      method: 'PATCH',
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -653,7 +658,7 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as any;
 
         // 1. Buscar mensagem
         const message = await database.message.findUnique({
@@ -661,7 +666,7 @@ export const messagesController = igniter.controller({
           include: {
             session: {
               include: {
-                instance: true,
+                connection: true,
                 contact: true,
               },
             },
@@ -677,22 +682,21 @@ export const messagesController = igniter.controller({
           return response.forbidden('Acesso negado');
         }
 
-        // 3. Marcar como lida via UAZ
+        // 3. Marcar como lida via Orchestrator (Provider-Agnostic)
         try {
-          const instance = message.session.instance;
-          if (!instance.uazToken) {
-            return response.error('Instância sem token UAZ');
-          }
+          const connection = message.session.connection;
+          const brokerType = mapProviderToBrokerType(connection.provider);
 
-          await uazService.markAsRead(
-            instance.uazToken,
+          await orchestrator.markAsRead(
+            connection.id,
+            brokerType,
             message.waMessageId
           );
 
           // 4. Atualizar status no banco
           await database.message.update({
             where: { id },
-            data: { status: 'READ' },
+            data: { status: 'read' },
           });
 
           return response.success({
@@ -701,9 +705,7 @@ export const messagesController = igniter.controller({
           });
         } catch (error) {
           console.error('[MessagesController] Erro ao marcar como lida:', error);
-          return response.error('Erro ao marcar mensagem como lida', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao marcar mensagem como lida: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),

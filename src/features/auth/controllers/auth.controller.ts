@@ -6,6 +6,7 @@
 
 import { igniter } from '@/igniter';
 import { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import {
@@ -26,7 +27,18 @@ import {
   verifyMagicLinkSchema,
   signupOTPSchema,
   verifySignupOTPSchema,
+  webAuthnRegisterOptionsSchema,
+  webAuthnRegisterVerifySchema,
+  webAuthnLoginOptionsSchema,
+  webAuthnLoginVerifySchema,
 } from '../auth.schemas';
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
+} from '@simplewebauthn/server';
+import type { AuthenticatorTransportFuture } from '@simplewebauthn/types';
 import {
   hashPassword,
   verifyPassword,
@@ -41,9 +53,10 @@ import {
   verifyMagicLinkToken,
 } from '@/lib/auth/jwt';
 import { authProcedure } from '../procedures/auth.procedure';
-import { UserRole } from '@/lib/auth/roles';
+import { UserRole, OrganizationRole } from '@/lib/auth/roles';
 import { emailService } from '@/lib/email';
 import { authRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-limiter';
+import { auditLog } from '@/lib/audit';
 
 const db = new PrismaClient();
 
@@ -163,6 +176,13 @@ export const authController = igniter.controller({
         // Enviar email de boas-vindas
         await emailService.sendWelcomeEmail(email, name, dashboardUrl);
 
+        // Log de auditoria: registro de usuário
+        await auditLog.logAuth('register', user.id, {
+          email: user.email,
+          organizationId: organization?.id,
+          isFirstUser,
+        }, identifier);
+
         // NÃO fazer login automático - requer verificação de email primeiro
         return response.created({
           message: 'User created successfully. Please verify your email.',
@@ -211,12 +231,22 @@ export const authController = igniter.controller({
         });
 
         if (!user) {
+          // Log de auditoria: tentativa de login com email não encontrado
+          await auditLog.logAuth('login_failed', 'unknown', {
+            email,
+            reason: 'user_not_found',
+          }, identifier);
           return response.status(401).json({ error: 'Invalid credentials' });
         }
 
         // Verificar senha
         const isValidPassword = await verifyPassword(password, user.password);
         if (!isValidPassword) {
+          // Log de auditoria: tentativa de login com senha inválida
+          await auditLog.logAuth('login_failed', user.id, {
+            email,
+            reason: 'invalid_password',
+          }, identifier);
           return response.status(401).json({ error: 'Invalid credentials' });
         }
 
@@ -269,6 +299,13 @@ export const authController = igniter.controller({
           where: { id: refreshTokenData.id },
           data: { token: refreshToken },
         });
+
+        // Log de auditoria: login com sucesso
+        await auditLog.logAuth('login', user.id, {
+          email: user.email,
+          currentOrgId,
+          role: user.role,
+        }, identifier);
 
         return response.success({
           accessToken,
@@ -533,11 +570,14 @@ export const authController = igniter.controller({
       path: '/switch-organization',
       method: 'POST',
       body: switchOrganizationSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        if (!userId) {
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        // ✅ CORREÇÃO: Usar authProcedure para obter usuário autenticado
+        const authUser = context.auth?.session?.user;
+        if (!authUser) {
           return response.status(401).json({ error: 'Not authenticated' });
         }
+        const userId = authUser.id;
 
         const { organizationId } = request.body;
 
@@ -637,6 +677,70 @@ export const authController = igniter.controller({
         });
 
         return response.success(users);
+      },
+    }),
+
+    /**
+     * Toggle User Active Status (Admin only)
+     */
+    toggleUserActive: igniter.mutation({
+      name: 'Toggle User Active',
+      description: 'Enable or disable a user account (admin only)',
+      path: '/users/:userId/active',
+      method: 'PATCH',
+      body: z.object({
+        isActive: z.boolean(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.status(401).json({ error: 'Not authenticated' });
+        }
+
+        // Verificar se é admin
+        if (user.role !== 'admin') {
+          return response.status(403).json({ error: 'Admin access required' });
+        }
+
+        const { userId } = request.params as { userId: string };
+        const { isActive } = request.body;
+
+        // Não permitir desativar a si mesmo
+        if (userId === user.id) {
+          return response.badRequest('Voce nao pode desativar sua propria conta');
+        }
+
+        // Verificar se usuário existe
+        const targetUser = await db.user.findUnique({
+          where: { id: userId },
+          select: { id: true, email: true, name: true },
+        });
+
+        if (!targetUser) {
+          return response.notFound('Usuario nao encontrado');
+        }
+
+        // Atualizar status
+        const updatedUser = await db.user.update({
+          where: { id: userId },
+          data: { isActive },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            isActive: true,
+            updatedAt: true,
+          },
+        });
+
+        return response.success({
+          message: isActive
+            ? 'Usuario ativado com sucesso'
+            : 'Usuario desativado com sucesso',
+          user: updatedUser,
+        });
       },
     }),
 
@@ -866,7 +970,7 @@ export const authController = igniter.controller({
           const accessToken = signAccessToken({
             userId: user.id,
             email: user.email,
-            role: user.role,
+            role: user.role as UserRole,
             currentOrgId: user.currentOrgId,
             needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
           });
@@ -1017,7 +1121,7 @@ export const authController = igniter.controller({
         await db.user.update({
           where: { email },
           data: {
-            emailVerified: true,
+            emailVerified: new Date(),
             resetToken: null,
             resetTokenExpiry: null,
           },
@@ -1027,23 +1131,34 @@ export const authController = igniter.controller({
         const accessToken = await signAccessToken({
           userId: user.id,
           email: user.email,
-          role: user.role,
+          role: user.role as UserRole,
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
         });
 
-        const refreshToken = await signRefreshToken({
+        const refreshTokenValue = signRefreshToken({
           userId: user.id,
-          email: user.email,
-          role: user.role,
+          tokenId: '', // Temporário, será atualizado
         });
 
         // Salvar refresh token
-        await db.refreshToken.create({
+        const savedRefreshToken = await db.refreshToken.create({
           data: {
             userId: user.id,
-            token: refreshToken,
-            expiresAt: getExpirationDate(30),
+            token: refreshTokenValue,
+            expiresAt: getExpirationDate('30d'),
           },
+        });
+
+        // Gerar refresh token final com tokenId correto
+        const refreshToken = signRefreshToken({
+          userId: user.id,
+          tokenId: savedRefreshToken.id,
+        });
+
+        // Atualizar refresh token no banco
+        await db.refreshToken.update({
+          where: { id: savedRefreshToken.id },
+          data: { token: refreshToken },
         });
 
         return response.success({
@@ -1118,7 +1233,7 @@ export const authController = igniter.controller({
           name,
         });
 
-        const magicLinkUrl = `${appBaseUrl}/signup/verify-magic?token=${magicLinkToken}`;
+        const magicLinkUrl = `${appBaseUrl}/verify-magic?token=${magicLinkToken}`;
 
         // Send WELCOME email (first time user)
         await emailService.sendWelcomeSignupEmail(email, name, otpCode, magicLinkUrl, 10);
@@ -1216,7 +1331,7 @@ export const authController = igniter.controller({
           email: user.email,
           role: user.role as UserRole,
           currentOrgId: organization.id,
-          organizationRole: 'master',
+          organizationRole: OrganizationRole.MASTER,
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
         }, '24h');
 
@@ -1249,7 +1364,7 @@ export const authController = igniter.controller({
             name: user.name,
             role: user.role,
             currentOrgId: organization.id,
-            organizationRole: 'master',
+            organizationRole: OrganizationRole.MASTER,
           },
         });
       },
@@ -1365,7 +1480,7 @@ export const authController = igniter.controller({
             type: 'signup',
           });
 
-          const signupMagicLinkUrl = `${appBaseUrl}/signup/verify-magic?token=${signupMagicLinkToken}`;
+          const signupMagicLinkUrl = `${appBaseUrl}/verify-magic?token=${signupMagicLinkToken}`;
 
           // Enviar email de SIGNUP (boas-vindas)
           await emailService.sendWelcomeSignupEmail(
@@ -1419,7 +1534,7 @@ export const authController = igniter.controller({
         });
 
         // Gerar URL completa do magic link
-        const magicLinkUrl = `${appBaseUrl}/login/verify-magic?token=${magicLinkToken}`;
+        const magicLinkUrl = `${appBaseUrl}/verify-magic?token=${magicLinkToken}`;
 
         // Enviar email com AMBOS: código OTP e magic link (Vercel pattern)
         await emailService.sendLoginCodeEmail(
@@ -1481,6 +1596,18 @@ export const authController = igniter.controller({
         const normalizedRecoveryToken = String(recoveryToken).trim();
         const normalizedUserToken = user.resetToken ? String(user.resetToken).trim() : null;
 
+        // ✅ CORREÇÃO: Verificar código também no VerificationCode table
+        // Isso é necessário porque para admins o OTP não é salvo no resetToken
+        const verificationCode = await db.verificationCode.findFirst({
+          where: {
+            email,
+            code: normalizedCode,
+            used: false,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
         // Business Rule: Em modo de teste, aceitar códigos de teste
         if (isTestMode && testCodes.includes(normalizedCode)) {
           console.log('🧪 [verifyLoginOTP] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
@@ -1488,10 +1615,9 @@ export const authController = igniter.controller({
           // Pular validação e ir direto para geração de tokens
           // (lógica de tokens continua abaixo normalmente)
         } else {
-          // ✅ CORREÇÃO BRUTAL: Aceitar recovery token (123456) para QUALQUER usuário
-          // Recovery token é fallback universal para testes E2E
-          
-          const isValidCode = normalizedCode === normalizedRecoveryToken || 
+          // ✅ CORREÇÃO: Aceitar código do VerificationCode, recovery token ou user resetToken
+          const isValidCode = !!verificationCode ||
+                            normalizedCode === normalizedRecoveryToken ||
                             normalizedCode === normalizedUserToken;
 
           console.log('🔍 [verifyLoginOTP] DEBUG COMPLETO:', {
@@ -1501,6 +1627,7 @@ export const authController = igniter.controller({
             codeNormalized: normalizedCode,
             recoveryToken: normalizedRecoveryToken,
             userResetToken: normalizedUserToken,
+            verificationCodeFound: !!verificationCode,
             isValidCode,
             matchesRecovery: normalizedCode === normalizedRecoveryToken,
             matchesUserToken: normalizedCode === normalizedUserToken,
@@ -1511,24 +1638,37 @@ export const authController = igniter.controller({
             console.log('❌ [verifyLoginOTP] Código inválido!', {
               provided: normalizedCode,
               expected: normalizedRecoveryToken,
-              userToken: normalizedUserToken
+              userToken: normalizedUserToken,
+              verificationCodeFound: !!verificationCode
             });
             return response.status(400).json({ error: 'Invalid or expired code' });
           }
         }
 
+        // ✅ CORREÇÃO: Marcar VerificationCode como usado se foi encontrado
+        if (verificationCode) {
+          await db.verificationCode.update({
+            where: { id: verificationCode.id },
+            data: { used: true },
+          });
+          console.log('✅ [verifyLoginOTP] VerificationCode marcado como usado:', verificationCode.id);
+        }
+
         // ✅ CORREÇÃO BRUTAL: Ignorar expiração para recovery token
-        // Se usou recovery token, não verificar expiração
+        // Se usou recovery token ou VerificationCode, não verificar expiração do resetToken
         const usedRecoveryToken = normalizedCode === normalizedRecoveryToken;
-        
+        const usedVerificationCode = !!verificationCode;
+
         console.log('🔧 [verifyLoginOTP] Verificação de expiração:', {
           usedRecoveryToken,
+          usedVerificationCode,
           hasExpiry: !!user.resetTokenExpiry,
           expiryDate: user.resetTokenExpiry,
           isExpired: user.resetTokenExpiry ? user.resetTokenExpiry < new Date() : null,
         });
-        
-        if (!usedRecoveryToken && (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())) {
+
+        // Só verificar expiração do resetToken se não usou recovery token nem VerificationCode
+        if (!usedRecoveryToken && !usedVerificationCode && (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())) {
           console.log('❌ [verifyLoginOTP] Código expirado!');
           return response.status(400).json({ error: 'Code expired' });
         }
@@ -1708,7 +1848,7 @@ export const authController = igniter.controller({
             email: user.email,
             role: user.role as UserRole,
             currentOrgId: organization.id,
-            organizationRole: 'master',
+            organizationRole: OrganizationRole.MASTER,
             needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
           }, '24h');
 
@@ -1741,7 +1881,7 @@ export const authController = igniter.controller({
               name: user.name,
               role: user.role,
               currentOrgId: organization.id,
-              organizationRole: 'master',
+              organizationRole: OrganizationRole.MASTER,
             },
           });
         }
@@ -1880,6 +2020,441 @@ export const authController = igniter.controller({
             onboardingCompleted: updatedUser.onboardingCompleted,
           },
         });
+      },
+    }),
+
+    // ============================================
+    // PASSKEY / WEBAUTHN ENDPOINTS
+    // ============================================
+
+    /**
+     * Passkey Register Options - Gerar challenge para registro de passkey
+     */
+    passkeyRegisterOptions: igniter.mutation({
+      name: 'Passkey Register Options',
+      description: 'Generate WebAuthn registration options for passkey',
+      path: '/passkey/register/options',
+      method: 'POST',
+      body: webAuthnRegisterOptionsSchema,
+      handler: async ({ request, response }) => {
+        const { email } = request.body;
+
+        // Buscar usuário
+        const user = await db.user.findUnique({
+          where: { email },
+          include: {
+            passkeyCredentials: true,
+          },
+        });
+
+        if (!user) {
+          return response.status(400).json({ error: 'Usuário não encontrado. Faça login primeiro.' });
+        }
+
+        // Configuração do RP (Relying Party)
+        const rpName = 'Quayer';
+        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+        // Gerar opções de registro
+        const options = await generateRegistrationOptions({
+          rpName,
+          rpID,
+          userName: user.email,
+          userDisplayName: user.name,
+          userID: new TextEncoder().encode(user.id),
+          attestationType: 'none',
+          excludeCredentials: user.passkeyCredentials.map((cred) => ({
+            id: cred.credentialId,
+            transports: cred.transports as AuthenticatorTransportFuture[],
+          })),
+          authenticatorSelection: {
+            residentKey: 'preferred',
+            userVerification: 'preferred',
+            authenticatorAttachment: 'platform',
+          },
+          timeout: 60000,
+        });
+
+        // Salvar challenge no banco (expira em 5 minutos)
+        await db.passkeyChallenge.create({
+          data: {
+            challenge: options.challenge,
+            userId: user.id,
+            email: user.email,
+            type: 'registration',
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+          },
+        });
+
+        return response.success(options);
+      },
+    }),
+
+    /**
+     * Passkey Register Verify - Verificar e salvar passkey registrada
+     */
+    passkeyRegisterVerify: igniter.mutation({
+      name: 'Passkey Register Verify',
+      description: 'Verify and save registered passkey',
+      path: '/passkey/register/verify',
+      method: 'POST',
+      body: webAuthnRegisterVerifySchema,
+      handler: async ({ request, response }) => {
+        const { email, credential } = request.body;
+
+        // Buscar usuário e challenge
+        const user = await db.user.findUnique({ where: { email } });
+        if (!user) {
+          return response.status(400).json({ error: 'Usuário não encontrado' });
+        }
+
+        const challengeRecord = await db.passkeyChallenge.findFirst({
+          where: {
+            userId: user.id,
+            type: 'registration',
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!challengeRecord) {
+          return response.status(400).json({ error: 'Challenge expirado ou inválido. Tente novamente.' });
+        }
+
+        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+        try {
+          const verification = await verifyRegistrationResponse({
+            response: credential,
+            expectedChallenge: challengeRecord.challenge,
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+          });
+
+          if (!verification.verified || !verification.registrationInfo) {
+            return response.status(400).json({ error: 'Verificação de passkey falhou' });
+          }
+
+          const { credential: verifiedCredential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+
+          // Salvar credencial no banco
+          await db.passkeyCredential.create({
+            data: {
+              userId: user.id,
+              credentialId: verifiedCredential.id,
+              publicKey: Buffer.from(verifiedCredential.publicKey),
+              counter: BigInt(verifiedCredential.counter),
+              credentialDeviceType,
+              credentialBackedUp,
+              transports: credential.response?.transports || [],
+              name: `Passkey ${new Date().toLocaleDateString('pt-BR')}`,
+              aaguid: verification.registrationInfo.aaguid,
+            },
+          });
+
+          // Limpar challenge usado
+          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
+
+          return response.success({
+            verified: true,
+            message: 'Passkey registrada com sucesso!',
+          });
+        } catch (error: any) {
+          console.error('[Passkey Register] Error:', error);
+          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
+        }
+      },
+    }),
+
+    /**
+     * Passkey Login Options - Gerar challenge para login com passkey
+     */
+    passkeyLoginOptions: igniter.mutation({
+      name: 'Passkey Login Options',
+      description: 'Generate WebAuthn authentication options for passkey login',
+      path: '/passkey/login/options',
+      method: 'POST',
+      body: webAuthnLoginOptionsSchema,
+      handler: async ({ request, response }) => {
+        const { email } = request.body;
+
+        // Buscar usuário e suas passkeys
+        const user = await db.user.findUnique({
+          where: { email },
+          include: {
+            passkeyCredentials: true,
+          },
+        });
+
+        if (!user) {
+          return response.status(400).json({ error: 'Usuário não encontrado' });
+        }
+
+        if (user.passkeyCredentials.length === 0) {
+          return response.status(400).json({ error: 'Nenhuma passkey registrada. Registre uma passkey primeiro.' });
+        }
+
+        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+
+        // Gerar opções de autenticação
+        const options = await generateAuthenticationOptions({
+          rpID,
+          allowCredentials: user.passkeyCredentials.map((cred) => ({
+            id: cred.credentialId,
+            transports: cred.transports as AuthenticatorTransportFuture[],
+          })),
+          userVerification: 'preferred',
+          timeout: 60000,
+        });
+
+        // Salvar challenge no banco
+        await db.passkeyChallenge.create({
+          data: {
+            challenge: options.challenge,
+            userId: user.id,
+            email: user.email,
+            type: 'authentication',
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+          },
+        });
+
+        return response.success(options);
+      },
+    }),
+
+    /**
+     * Passkey Login Verify - Verificar passkey e autenticar usuário
+     */
+    passkeyLoginVerify: igniter.mutation({
+      name: 'Passkey Login Verify',
+      description: 'Verify passkey and authenticate user',
+      path: '/passkey/login/verify',
+      method: 'POST',
+      body: webAuthnLoginVerifySchema,
+      handler: async ({ request, response }) => {
+        const identifier = getClientIdentifier(request);
+        const rateLimit = await authRateLimiter.check(identifier);
+
+        if (!rateLimit.success) {
+          return response.status(429).json({
+            error: 'Too many requests',
+            retryAfter: rateLimit.retryAfter,
+          });
+        }
+
+        const { email, credential } = request.body;
+
+        // Buscar usuário
+        const user = await db.user.findUnique({
+          where: { email },
+          include: {
+            passkeyCredentials: true,
+            organizations: {
+              where: { isActive: true },
+              include: { organization: true },
+            },
+          },
+        });
+
+        if (!user) {
+          return response.status(400).json({ error: 'Usuário não encontrado' });
+        }
+
+        // Buscar challenge
+        const challengeRecord = await db.passkeyChallenge.findFirst({
+          where: {
+            userId: user.id,
+            type: 'authentication',
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!challengeRecord) {
+          return response.status(400).json({ error: 'Challenge expirado. Tente novamente.' });
+        }
+
+        // Buscar credencial usada
+        const storedCredential = user.passkeyCredentials.find(
+          (cred) => cred.credentialId === credential.id
+        );
+
+        if (!storedCredential) {
+          return response.status(400).json({ error: 'Passkey não encontrada' });
+        }
+
+        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+        try {
+          const verification = await verifyAuthenticationResponse({
+            response: credential,
+            expectedChallenge: challengeRecord.challenge,
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+            credential: {
+              id: storedCredential.credentialId,
+              publicKey: storedCredential.publicKey,
+              counter: Number(storedCredential.counter),
+              transports: storedCredential.transports as AuthenticatorTransportFuture[],
+            },
+          });
+
+          if (!verification.verified) {
+            return response.status(400).json({ error: 'Verificação de passkey falhou' });
+          }
+
+          // Atualizar counter para prevenir replay attacks
+          await db.passkeyCredential.update({
+            where: { id: storedCredential.id },
+            data: {
+              counter: BigInt(verification.authenticationInfo.newCounter),
+              lastUsedAt: new Date(),
+            },
+          });
+
+          // Limpar challenge usado
+          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
+
+          // Verificar se usuário está ativo
+          if (!user.isActive) {
+            return response.status(403).json({ error: 'Conta desabilitada' });
+          }
+
+          // Se admin não tem org setada, setar primeira org disponível
+          let currentOrgId = user.currentOrgId;
+          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+            currentOrgId = user.organizations[0].organizationId;
+            await db.user.update({
+              where: { id: user.id },
+              data: { currentOrgId },
+            });
+          }
+
+          // Obter role na organização atual
+          const currentOrgRelation = user.organizations.find(
+            (org) => org.organizationId === currentOrgId
+          );
+
+          // Criar access token
+          const accessToken = signAccessToken({
+            userId: user.id,
+            email: user.email,
+            role: user.role as UserRole,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role as any,
+            needsOnboarding: !user.onboardingCompleted,
+          }, '24h');
+
+          // Criar refresh token
+          const refreshTokenData = await db.refreshToken.create({
+            data: {
+              userId: user.id,
+              token: signRefreshToken({ userId: user.id, tokenId: '' }),
+              expiresAt: getExpirationDate('7d'),
+            },
+          });
+
+          const refreshToken = signRefreshToken({
+            userId: user.id,
+            tokenId: refreshTokenData.id,
+          });
+
+          await db.refreshToken.update({
+            where: { id: refreshTokenData.id },
+            data: { token: refreshToken },
+          });
+
+          // Log de auditoria
+          await auditLog.logAuth('passkey_login', user.id, {
+            email: user.email,
+            currentOrgId,
+            passkeyId: storedCredential.id,
+          }, identifier);
+
+          return response.success({
+            accessToken,
+            refreshToken,
+            needsOnboarding: !user.onboardingCompleted,
+            user: {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              currentOrgId,
+              organizationRole: currentOrgRelation?.role,
+            },
+          });
+        } catch (error: any) {
+          console.error('[Passkey Login] Error:', error);
+          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
+        }
+      },
+    }),
+
+    /**
+     * Passkey List - Listar passkeys do usuário
+     */
+    passkeyList: igniter.query({
+      name: 'Passkey List',
+      description: 'List user passkeys',
+      path: '/passkey/list',
+      method: 'GET',
+      use: [authProcedure({ required: true })],
+      handler: async ({ response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.status(401).json({ error: 'Not authenticated' });
+        }
+
+        const passkeys = await db.passkeyCredential.findMany({
+          where: { userId: user.id },
+          select: {
+            id: true,
+            name: true,
+            credentialDeviceType: true,
+            credentialBackedUp: true,
+            createdAt: true,
+            lastUsedAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        return response.success(passkeys);
+      },
+    }),
+
+    /**
+     * Passkey Delete - Remover passkey do usuário
+     */
+    passkeyDelete: igniter.mutation({
+      name: 'Passkey Delete',
+      description: 'Delete user passkey',
+      path: '/passkey/:id',
+      method: 'DELETE',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) {
+          return response.status(401).json({ error: 'Not authenticated' });
+        }
+
+        const { id } = request.params as { id: string };
+
+        // Verificar se passkey pertence ao usuário
+        const passkey = await db.passkeyCredential.findFirst({
+          where: { id, userId: user.id },
+        });
+
+        if (!passkey) {
+          return response.notFound('Passkey não encontrada');
+        }
+
+        await db.passkeyCredential.delete({ where: { id } });
+
+        return response.success({ message: 'Passkey removida com sucesso' });
       },
     }),
   },

@@ -64,11 +64,6 @@ export function EditWebhookDialog({ webhook, isOpen, onClose, onSuccess }: EditW
 
     if (!webhook) return
 
-    if (!formData.name.trim()) {
-      toast.error('Nome do webhook é obrigatório')
-      return
-    }
-
     if (!formData.url.trim()) {
       toast.error('URL do webhook é obrigatória')
       return
@@ -88,10 +83,9 @@ export function EditWebhookDialog({ webhook, isOpen, onClose, onSuccess }: EditW
     }
 
     try {
-      await updateMutation.mutate({
-        params: { id: webhook.id },
+      await (updateMutation.mutate as any)({
+        id: webhook.id,
         body: {
-          name: formData.name,
           url: formData.url,
           description: formData.description || undefined,
           events: formData.events,
@@ -134,19 +128,6 @@ export function EditWebhookDialog({ webhook, isOpen, onClose, onSuccess }: EditW
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-name">
-                Nome <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="edit-name"
-                placeholder="Ex: Notificações de Mensagens"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-              />
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="edit-url">
                 URL <span className="text-destructive">*</span>

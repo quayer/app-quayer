@@ -12,6 +12,7 @@ interface User {
   isActive?: boolean
   currentOrgId?: string | null
   organizationId?: string
+  emailVerified?: Date | string | null // Email verification timestamp
   createdAt?: Date
   updatedAt?: Date
 }

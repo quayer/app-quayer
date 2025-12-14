@@ -134,6 +134,8 @@ export const createOrganizationSchema = z.object({
   maxInstances: z.number().int().min(1).max(1000).optional(),
   maxUsers: z.number().int().min(1).max(100).optional(),
   billingType: billingTypeSchema.optional(),
+  adminName: z.string().min(2, 'Nome do admin deve ter no mínimo 2 caracteres').optional(),
+  adminEmail: z.string().email('Email do admin inválido').optional(),
 });
 
 export const updateOrganizationSchema = z.object({
@@ -147,6 +149,22 @@ export const updateOrganizationSchema = z.object({
   maxUsers: z.number().int().min(1).max(100).optional(),
   billingType: billingTypeSchema.optional(),
   isActive: z.boolean().optional(),
+  // Business Hours (opcionais)
+  businessHoursStart: z.string().regex(/^\d{2}:\d{2}$/, 'Formato: HH:MM').optional().nullable(),
+  businessHoursEnd: z.string().regex(/^\d{2}:\d{2}$/, 'Formato: HH:MM').optional().nullable(),
+  businessDays: z.string().regex(/^[0-6](,[0-6])*$/, 'Formato: 0,1,2,3,4 (Dom=0, Seg=1...)').optional().nullable(),
+  timezone: z.string().min(1).max(50).optional(),
+  // Session & Automation Settings
+  sessionTimeoutHours: z.number().int().min(1).max(72).optional(),
+  notificationsEnabled: z.boolean().optional(),
+  balancedDistribution: z.boolean().optional(),
+  typingIndicator: z.boolean().optional(),
+  profanityFilter: z.boolean().optional(),
+  autoGreeting: z.boolean().optional(),
+  greetingMessage: z.string().max(500).optional().nullable(),
+  // Infrastructure Config
+  dbConfig: z.record(z.any()).optional(),
+  redisConfig: z.record(z.any()).optional(),
 });
 
 export const listOrganizationsSchema = z.object({

@@ -8,9 +8,10 @@ import { database } from '@/services/database';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { listChatsSchema, markAsReadSchema } from '../messages.schemas';
 import { z } from 'zod';
-import type { Chat, ChatCounters } from '../messages.interfaces';
+import { ConnectionStatus } from '@prisma/client';
+import { uazapiService } from '@/lib/api/uazapi.service';
 
-const UAZAPI_BASE_URL = process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'http://localhost:3000';
+const UAZAPI_BASE_URL = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
 
 export const chatsController = igniter.controller({
   name: 'chats',
@@ -23,20 +24,20 @@ export const chatsController = igniter.controller({
     list: igniter.query({
       path: '/list',
       method: 'GET',
+      query: listChatsSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id!;
-        const query = listChatsSchema.parse(request.query);
+        const query = request.query as z.infer<typeof listChatsSchema>;
+        const { instanceId } = query;
 
         // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
-            id: query.instanceId,
+            id: instanceId,
             organization: {
               users: {
-                some: {
-                  userId: userId,
-                },
+                some: { userId: userId },
               },
             },
           },
@@ -46,83 +47,208 @@ export const chatsController = igniter.controller({
           return response.notFound('Instância não encontrada');
         }
 
-        if (instance.status !== 'connected' || !instance.uazToken) {
-          return response.badRequest('Instância não está conectada');
-        }
-
         try {
-          // Montar filtros para UAZapi
-          const filters: any[] = [];
+          // Filtros
+          const where: any = {
+            connectionId: instanceId,
+          };
 
           if (query.search) {
-            filters.push({
-              column: 'wa_name',
-              operator: 'LIKE',
-              value: `%${query.search}%`,
-            });
+            where.contact = {
+              OR: [
+                { name: { contains: query.search, mode: 'insensitive' } },
+                { phoneNumber: { contains: query.search } },
+              ],
+            };
           }
 
-          if (query.status === 'unread') {
-            filters.push({
-              column: 'wa_unreadCount',
-              operator: '>',
-              value: 0,
-            });
-          } else if (query.status === 'groups') {
-            filters.push({
-              column: 'wa_isGroup',
-              operator: '=',
-              value: true,
-            });
-          } else if (query.status === 'pinned') {
-            filters.push({
-              column: 'wa_isPinned',
-              operator: '=',
-              value: true,
-            });
+          if (query.status === 'groups') {
+            where.contact = {
+              ...where.contact,
+              phoneNumber: { contains: '@g.us' }
+            };
           }
 
-          // Buscar chats via UAZapi
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/find`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
-            body: JSON.stringify({
-              filters,
-              operator: 'AND',
-              sort: '-wa_lastMsgTimestamp',
-              limit: query.limit,
-              offset: query.offset,
-            }),
-          });
+          // Paginação
+          const limit = query.limit || 20;
+          const offset = query.offset || 0;
 
-          if (!uazResponse.ok) {
-            throw new Error('Erro ao buscar chats na UAZapi');
+          const fetchLocalChats = async () => {
+            return Promise.all([
+              database.chatSession.findMany({
+                where,
+                include: {
+                  contact: true,
+                  messages: {
+                    take: 1,
+                    orderBy: { createdAt: 'desc' },
+                  },
+                },
+                orderBy: { lastMessageAt: 'desc' },
+                skip: offset,
+                take: limit,
+              }),
+              database.chatSession.count({ where }),
+            ]);
+          };
+
+          let [sessions, total] = await fetchLocalChats();
+
+          // Lógica de Sync (Função isolada)
+          const runSync = async () => {
+            if (!instance.uazapiToken || instance.status !== ConnectionStatus.CONNECTED) return false;
+
+            try {
+              console.log('[ChatsController] Iniciando sync brutal com UAZapi...');
+              const uazChatsResponse = await uazapiService.findChats(instance.uazapiToken);
+              const rawData = uazChatsResponse.data;
+              const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
+
+              if (Array.isArray(uazChats) && uazChats.length > 0) {
+                console.log(`[ChatsController] Processando ${uazChats.length} chats...`);
+
+                for (const chat of uazChats) {
+                  const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                  if (!phoneNumber) continue;
+
+                  const ts = Number(chat.lastMsgTimestamp);
+                  const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
+
+                  const contactData = {
+                    name: chat.name || chat.formattedTitle || phoneNumber,
+                    profilePicUrl: chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl,
+                    verifiedName: chat.pushname || chat.name,
+                    isBusiness: chat.isBusiness || false
+                  };
+
+                  // Upsert Contact
+                  const contact = await database.contact.upsert({
+                    where: { phoneNumber },
+                    create: {
+                      phoneNumber,
+                      name: contactData.name,
+                      profilePicUrl: contactData.profilePicUrl,
+                      verifiedName: contactData.verifiedName,
+                      isBusiness: contactData.isBusiness,
+                      organizationId: instance.organizationId,
+                      source: instance.id
+                    },
+                    update: {
+                      name: contactData.name,
+                      profilePicUrl: contactData.profilePicUrl,
+                      verifiedName: contactData.verifiedName,
+                      // Não sobrescreve organizationId se já existe
+                    }
+                  });
+
+                  // Upsert ChatSession
+                  const sessionOrgId = instance.organizationId;
+                  await database.chatSession.upsert({
+                    where: {
+                      connectionId_contactId: { // Check composite unique constraint if exists, otherwise assume manual check logic if unique constraint is missing
+                        connectionId: instance.id,
+                        contactId: contact.id
+                      }
+                    },
+                    create: {
+                      connectionId: instance.id,
+                      contactId: contact.id,
+                      organizationId: sessionOrgId,
+                      status: 'ACTIVE',
+                      lastMessageAt,
+                      customerJourney: 'new'
+                    },
+                    update: {
+                      lastMessageAt
+                    }
+                  }).catch(async (e) => {
+                    // Fallback se unique key não existir como esperado (Prisma às vezes trick)
+                    // Tentativa manual se upsert falhar por constraint name mismatch
+                    const existing = await database.chatSession.findFirst({
+                      where: { connectionId: instance.id, contactId: contact.id }
+                    });
+                    if (existing) {
+                      await database.chatSession.update({
+                        where: { id: existing.id },
+                        data: { lastMessageAt }
+                      });
+                    } else {
+                      await database.chatSession.create({
+                        data: {
+                          connectionId: instance.id,
+                          contactId: contact.id,
+                          organizationId: sessionOrgId,
+                          status: 'ACTIVE',
+                          lastMessageAt
+                        }
+                      });
+                    }
+                  });
+                }
+                console.log('[ChatsController] Sync finalizado.');
+                return true;
+              }
+            } catch (err) {
+              console.error('[ChatsController] Erro no sync:', err);
+            }
+            return false;
+          };
+
+          // Estratégia de Sync
+          if (total === 0 && instance.status === ConnectionStatus.CONNECTED) {
+            // Blocking Sync
+            await runSync();
+            // Refetch
+            const [newSessions, newTotal] = await fetchLocalChats();
+            sessions = newSessions;
+            total = newTotal;
+          } else if (instance.status === ConnectionStatus.CONNECTED) {
+            // Background Sync
+            setImmediate(() => runSync());
           }
 
-          const uazData = await uazResponse.json();
+          // Mapper
+          const mapSessionToChat = (session: any) => {
+            const lastMsg = session.messages[0];
+            const isGroup = session.contact.phoneNumber.endsWith('@g.us') || session.contact.isBusiness;
+
+            return {
+              wa_chatid: session.contact.phoneNumber.includes('@') ? session.contact.phoneNumber : `${session.contact.phoneNumber}@s.whatsapp.net`,
+              wa_name: session.contact.name || session.contact.phoneNumber,
+              wa_profilePicUrl: session.contact.profilePicUrl,
+              wa_isGroup: isGroup,
+              wa_lastMsgTimestamp: session.lastMessageAt.getTime(),
+              wa_lastMsgBody: lastMsg?.content || null,
+              wa_unreadCount: 0,
+              wa_isPinned: false,
+              wa_isArchived: session.status === 'CLOSED',
+              wa_isMuted: false,
+              lead_status: session.customerJourney || null,
+              lead_source: session.leadSource || 'whatsapp',
+              created_at: session.createdAt.toISOString(),
+              updated_at: session.updatedAt.toISOString(),
+            };
+          };
 
           return response.success({
-            chats: uazData.chats || [],
+            chats: sessions.map(mapSessionToChat),
             pagination: {
-              total: uazData.total || 0,
-              limit: query.limit,
-              offset: query.offset,
-              hasMore: (query.offset + query.limit) < (uazData.total || 0),
+              total,
+              limit,
+              offset,
+              hasMore: offset + limit < total,
             },
           });
-        } catch (error) {
-          console.error('Erro ao buscar chats:', error);
-          return response.serverError('Erro ao buscar conversas');
+
+        } catch (error: any) {
+          console.error('[ChatsController] Erro geral:', error);
+          return response.badRequest(`Erro ao buscar conversas: ${error.message}`);
         }
       },
     }),
 
     /**
      * GET /api/v1/chats/count
-     * Buscar contadores de chats
      */
     count: igniter.query({
       path: '/count',
@@ -132,56 +258,35 @@ export const chatsController = igniter.controller({
         const userId = context.auth?.session?.user?.id!;
         const { instanceId } = request.query as { instanceId: string };
 
-        if (!instanceId) {
-          return response.badRequest('instanceId é obrigatório');
-        }
+        if (!instanceId) return response.badRequest('instanceId é obrigatório');
 
-        // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
             id: instanceId,
-            organization: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
+            organization: { users: { some: { userId } } },
           },
         });
 
-        if (!instance) {
-          return response.notFound('Instância não encontrada');
-        }
-
-        if (instance.status !== 'connected' || !instance.uazToken) {
-          return response.success({
-            total_chats: 0,
-            unread_chats: 0,
-            groups: 0,
-            pinned_chats: 0,
-          });
-        }
+        if (!instance) return response.notFound('Instância não encontrada');
 
         try {
-          // Buscar contadores via UAZapi
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/count`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
+          const [total, groups] = await Promise.all([
+            database.chatSession.count({ where: { connectionId: instanceId } }),
+            database.chatSession.count({
+              where: {
+                connectionId: instanceId,
+                contact: { phoneNumber: { contains: '@g.us' } }
+              }
+            })
+          ]);
+
+          return response.success({
+            total_chats: total,
+            unread_chats: 0,
+            groups: groups,
+            pinned_chats: 0,
           });
-
-          if (!uazResponse.ok) {
-            throw new Error('Erro ao buscar contadores na UAZapi');
-          }
-
-          const counters: ChatCounters = await uazResponse.json();
-
-          return response.success(counters);
         } catch (error) {
-          console.error('Erro ao buscar contadores:', error);
           return response.success({
             total_chats: 0,
             unread_chats: 0,
@@ -194,218 +299,141 @@ export const chatsController = igniter.controller({
 
     /**
      * POST /api/v1/chats/mark-read
-     * Marcar chat como lido
      */
     markAsRead: igniter.mutation({
       path: '/mark-read',
       method: 'POST',
+      body: markAsReadSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id!;
-        const body = markAsReadSchema.parse(request.body);
+        const body = request.body;
 
-        // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
             id: body.instanceId,
-            organization: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
+            organization: { users: { some: { userId } } },
           },
         });
 
-        if (!instance) {
-          return response.notFound('Instância não encontrada');
-        }
-
-        if (instance.status !== 'connected' || !instance.uazToken) {
+        if (!instance) return response.notFound('Instância não encontrada');
+        if (instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
           return response.badRequest('Instância não está conectada');
         }
 
         try {
-          // Marcar como lido via UAZapi
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/mark-read`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
-            body: JSON.stringify({
-              chatId: body.chatId,
-            }),
-          });
-
-          if (!uazResponse.ok) {
-            throw new Error('Erro ao marcar como lido na UAZapi');
-          }
-
+          await uazapiService.markAsRead(instance.uazapiToken, body.chatId);
           return response.success({ message: 'Chat marcado como lido' });
         } catch (error) {
-          console.error('Erro ao marcar como lido:', error);
-          return response.serverError('Erro ao marcar chat como lido');
+          // Fallback se helper nao existir
+          try {
+            await fetch(`${UAZAPI_BASE_URL}/chat/mark-read`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
+              body: JSON.stringify({ chatId: body.chatId }),
+            });
+            return response.success({ message: 'Chat marcado como lido' });
+          } catch (e) {
+            return response.badRequest('Erro ao marcar chat como lido');
+          }
         }
       },
     }),
 
     /**
      * POST /api/v1/chats/:chatId/archive
-     * Arquivar chat
      */
     archive: igniter.mutation({
       path: '/:chatId/archive',
       method: 'POST',
-      params: z.object({
-        chatId: z.string().min(1, 'chatId é obrigatório'),
-      }),
-      body: z.object({
-        instanceId: z.string().uuid(),
-      }),
+      body: z.object({ instanceId: z.string().uuid() }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id!;
         const { chatId } = request.params as { chatId: string };
         const { instanceId } = request.body;
 
-        // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
             id: instanceId,
-            organization: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
+            organization: { users: { some: { userId } } },
           },
         });
 
-        if (!instance) {
-          return response.notFound('Instância não encontrada');
-        }
-
-        if (instance.status !== 'connected' || !instance.uazToken) {
+        if (!instance) return response.notFound('Instância não encontrada');
+        if (instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
           return response.badRequest('Instância não está conectada');
         }
 
         try {
-          // Arquivar chat via UAZapi
           const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/archive`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
-            body: JSON.stringify({
-              chatId,
-              archive: true,
-            }),
+            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
+            body: JSON.stringify({ chatId, archive: true }),
           });
 
-          if (!uazResponse.ok) {
-            const errorData = await uazResponse.text();
-            throw new Error(`Erro ao arquivar chat na UAZapi: ${errorData}`);
-          }
-
+          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
           return response.success({ message: 'Chat arquivado com sucesso' });
         } catch (error) {
-          console.error('Erro ao arquivar chat:', error);
-          return response.serverError('Erro ao arquivar chat');
+          return response.badRequest('Erro ao arquivar chat');
         }
       },
     }),
 
     /**
      * DELETE /api/v1/chats/:chatId
-     * Deletar chat
      */
     delete: igniter.mutation({
       path: '/:chatId',
       method: 'DELETE',
-      params: z.object({
-        chatId: z.string().min(1, 'chatId é obrigatório'),
-      }),
-      body: z.object({
-        instanceId: z.string().uuid(),
-      }),
+      body: z.object({ instanceId: z.string().uuid() }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id!;
         const { chatId } = request.params as { chatId: string };
         const { instanceId } = request.body;
 
-        // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
             id: instanceId,
-            organization: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
+            organization: { users: { some: { userId } } },
           },
         });
 
-        if (!instance) {
-          return response.notFound('Instância não encontrada');
-        }
-
-        if (instance.status !== 'connected' || !instance.uazToken) {
+        if (!instance) return response.notFound('Instância não encontrada');
+        if (instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
           return response.badRequest('Instância não está conectada');
         }
 
         try {
-          // Deletar chat via UAZapi
           const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/delete`, {
             method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
-            body: JSON.stringify({
-              chatId,
-            }),
+            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
+            body: JSON.stringify({ chatId }),
           });
 
-          if (!uazResponse.ok) {
-            const errorData = await uazResponse.text();
-            throw new Error(`Erro ao deletar chat na UAZapi: ${errorData}`);
-          }
+          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
 
-          // Deletar sessão correspondente no banco de dados (se existir)
-          await database.session.deleteMany({
+          await database.chatSession.deleteMany({
             where: {
-              instanceId: instanceId,
-              contact: {
-                phoneNumber: chatId.replace('@s.whatsapp.net', '').replace('@g.us', ''),
-              },
+              connectionId: instanceId,
+              contact: { phoneNumber: chatId.replace('@s.whatsapp.net', '').replace('@g.us', '') },
             },
           });
 
           return response.success({ message: 'Chat deletado com sucesso' });
         } catch (error) {
-          console.error('Erro ao deletar chat:', error);
-          return response.serverError('Erro ao deletar chat');
+          return response.badRequest('Erro ao deletar chat');
         }
       },
     }),
 
     /**
      * POST /api/v1/chats/:chatId/block
-     * Bloquear contato
      */
     block: igniter.mutation({
       path: '/:chatId/block',
       method: 'POST',
-      params: z.object({
-        chatId: z.string().min(1, 'chatId é obrigatório'),
-      }),
       body: z.object({
         instanceId: z.string().uuid(),
         block: z.boolean().default(true),
@@ -416,51 +444,25 @@ export const chatsController = igniter.controller({
         const { chatId } = request.params as { chatId: string };
         const { instanceId, block } = request.body;
 
-        // Buscar instância e verificar permissão
         const instance = await database.instance.findFirst({
           where: {
             id: instanceId,
-            organization: {
-              users: {
-                some: {
-                  userId: userId,
-                },
-              },
-            },
+            organization: { users: { some: { userId } } },
           },
         });
 
-        if (!instance) {
-          return response.notFound('Instância não encontrada');
-        }
-
-        if (instance.status !== 'connected' || !instance.uazToken) {
-          return response.badRequest('Instância não está conectada');
-        }
-
+        if (!instance) return response.notFound('Instância não encontrada');
         try {
-          // Bloquear/desbloquear contato via UAZapi
           const uazResponse = await fetch(`${UAZAPI_BASE_URL}/contact/${block ? 'block' : 'unblock'}`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              token: instance.uazToken,
-            },
-            body: JSON.stringify({
-              number: chatId,
-            }),
+            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken! },
+            body: JSON.stringify({ number: chatId }),
           });
 
-          if (!uazResponse.ok) {
-            const errorData = await uazResponse.text();
-            throw new Error(`Erro ao ${block ? 'bloquear' : 'desbloquear'} contato na UAZapi: ${errorData}`);
-          }
-
-          const message = block ? 'Contato bloqueado com sucesso' : 'Contato desbloqueado com sucesso';
-          return response.success({ message });
+          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
+          return response.success({ message: block ? 'Bloqueado' : 'Desbloqueado' });
         } catch (error) {
-          console.error(`Erro ao ${block ? 'bloquear' : 'desbloquear'} contato:`, error);
-          return response.serverError(`Erro ao ${block ? 'bloquear' : 'desbloquear'} contato`);
+          return response.badRequest(`Erro ao ${block ? 'bloquear' : 'desbloquear'}`);
         }
       },
     }),

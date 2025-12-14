@@ -4,27 +4,66 @@
  * POST /api/v1/webhooks/uazapi
  * POST /api/v1/webhooks/evolution
  * POST /api/v1/webhooks/baileys
+ * POST /api/v1/webhooks/cloudapi
+ * GET  /api/v1/webhooks/cloudapi (Meta verification challenge)
  *
  * Recebe webhooks de qualquer provider, normaliza e processa
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { ConnectionStatus } from '@prisma/client';
 import { orchestrator } from '@/lib/providers';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
 import { messageConcatenator } from '@/lib/concatenation';
 import { transcriptionQueue } from '@/lib/transcription';
 import { database } from '@/services/database';
 import { redis } from '@/services/redis';
+import { chatwootSyncService } from '@/features/chatwoot';
 import type { BrokerType, NormalizedWebhook } from '@/lib/providers/core/provider.types';
+
+/**
+ * GET /api/v1/webhooks/cloudapi
+ * Handles Meta webhook verification challenge
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ provider: string }> }
+) {
+  const { provider: providerParam } = await params;
+  
+  // Only Cloud API uses GET for verification
+  if (providerParam !== 'cloudapi') {
+    return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get('hub.mode');
+  const token = searchParams.get('hub.verify_token');
+  const challenge = searchParams.get('hub.challenge');
+
+  console.log('[Webhook] Cloud API verification request:', { mode, token, challenge });
+
+  // Verify token should be configured in environment
+  const verifyToken = process.env.CLOUDAPI_WEBHOOK_VERIFY_TOKEN || 'quayer-cloudapi-verify';
+
+  if (mode === 'subscribe' && token === verifyToken && challenge) {
+    console.log('[Webhook] Cloud API verification successful');
+    return new NextResponse(challenge, { status: 200 });
+  }
+
+  console.warn('[Webhook] Cloud API verification failed');
+  return NextResponse.json({ error: 'Verification failed' }, { status: 403 });
+}
 
 /**
  * POST /api/v1/webhooks/:provider
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { provider: string } }
+  { params }: { params: Promise<{ provider: string }> }
 ) {
-  const provider = params.provider as BrokerType; // 'uazapi' | 'evolution' | 'baileys'
+  const { provider: providerParam } = await params;
+  const provider = providerParam as BrokerType; // 'uazapi' | 'evolution' | 'baileys' | 'cloudapi'
   const rawBody = await request.json();
 
   console.log(`[Webhook] Received from ${provider}:`, JSON.stringify(rawBody, null, 2));
@@ -32,13 +71,30 @@ export async function POST(
   try {
     // 1. NORMALIZAR WEBHOOK
     const normalized = await orchestrator.normalizeWebhook(provider, rawBody);
+    
+    // 2. CLOUD API: Map phoneNumberId to real instanceId
+    if (provider === 'cloudapi' && normalized.instanceId) {
+      const instance = await database.instance.findFirst({
+        where: { cloudApiPhoneNumberId: normalized.instanceId },
+        select: { id: true },
+      });
+      
+      if (instance) {
+        console.log(`[Webhook] CloudAPI: Mapped phoneNumberId ${normalized.instanceId} to instanceId ${instance.id}`);
+        normalized.instanceId = instance.id;
+      } else {
+        console.warn(`[Webhook] CloudAPI: No instance found for phoneNumberId ${normalized.instanceId}`);
+        // Return success to avoid Meta retrying, but don't process
+        return NextResponse.json({ success: true, message: 'Instance not found' });
+      }
+    }
 
     console.log(`[Webhook] Normalized event: ${normalized.event}`);
 
-    // 2. PROCESSAR POR TIPO DE EVENTO
+    // 3. PROCESSAR POR TIPO DE EVENTO
     switch (normalized.event) {
       case 'message.received':
-        await processIncomingMessage(normalized);
+        await processIncomingMessage(normalized, provider);
         break;
 
       case 'message.sent':
@@ -86,7 +142,7 @@ export async function POST(
 /**
  * Processar mensagem recebida (INBOUND)
  */
-async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void> {
+async function processIncomingMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
   const { instanceId, data } = webhook;
   const { from, message } = data;
 
@@ -95,12 +151,14 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
     return;
   }
 
-  console.log(`[Webhook] Processing incoming message from ${from}`);
+  console.log(`[Webhook] Processing incoming message from ${from} (provider: ${provider})`);
 
   // 1. Buscar ou criar contato
   let contact = await database.contact.findUnique({
     where: { phoneNumber: from },
   });
+
+  const isNewContact = !contact;
 
   if (!contact) {
     console.log(`[Webhook] Creating new contact: ${from}`);
@@ -110,6 +168,25 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
         name: from, // Será atualizado quando soubermos o nome
       },
     });
+  }
+
+  // 1.5. Buscar foto de perfil do contato (se novo ou não tem foto)
+  // Cloud API não tem método de profile picture fácil, pular para cloudapi
+  if ((isNewContact || !contact.profilePicUrl) && provider !== 'cloudapi') {
+    console.log(`[Webhook] Fetching profile picture for ${from}`);
+    try {
+      const profilePicUrl = await orchestrator.getProfilePicture(instanceId, provider, from);
+      if (profilePicUrl) {
+        contact = await database.contact.update({
+          where: { id: contact.id },
+          data: { profilePicUrl },
+        });
+        console.log(`[Webhook] Profile picture updated for ${from}: ${profilePicUrl}`);
+      }
+    } catch (error) {
+      console.error(`[Webhook] Failed to fetch profile picture for ${from}:`, error);
+      // Continuar mesmo se falhar - a foto não é crítica
+    }
   }
 
   // 2. Buscar instância para obter organizationId
@@ -126,7 +203,7 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
   // 3. Buscar ou criar sessão
   const session = await sessionsManager.getOrCreateSession({
     contactId: contact.id,
-    instanceId,
+    connectionId: instanceId,
     organizationId: instance.organizationId,
   });
 
@@ -143,7 +220,7 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
     console.log('[Webhook] Text message - adding to concatenation queue');
 
     await messageConcatenator.addMessage(session.id, contact.id, {
-      instanceId,
+      connectionId: instanceId, // Map instanceId to connectionId
       waMessageId: message.id,
       type: message.type,
       content: message.content,
@@ -163,7 +240,7 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
       data: {
         sessionId: session.id,
         contactId: contact.id,
-        instanceId,
+        connectionId: instanceId,
         waMessageId: message.id,
         direction: 'INBOUND',
         type: message.type,
@@ -191,6 +268,23 @@ async function processIncomingMessage(webhook: NormalizedWebhook): Promise<void>
     });
 
     console.log(`[Webhook] Transcription queued for message ${savedMessage.id}`);
+
+    // ⭐ CHATWOOT SYNC: Sincronizar mensagem de mídia com Chatwoot
+    try {
+      await chatwootSyncService.syncIncomingMessage({
+        instanceId,
+        organizationId: instance.organizationId,
+        phoneNumber: from,
+        contactName: contact.name || from,
+        messageContent: message.content || `[${message.media.type}]`,
+        messageType: message.media.type as any,
+        mediaUrl: message.media.mediaUrl,
+        mediaMimeType: message.media.mimeType,
+        isFromGroup: from.includes('@g.us'),
+      });
+    } catch (chatwootError) {
+      console.error('[Webhook] Chatwoot sync failed (non-blocking):', chatwootError);
+    }
   }
 
   // 6. Atualizar lastMessageAt da sessão
@@ -290,19 +384,29 @@ async function updateMessageStatus(webhook: NormalizedWebhook): Promise<void> {
 async function updateInstanceStatus(instanceId: string, status: string): Promise<void> {
   console.log(`[Webhook] Updating instance ${instanceId} status to ${status}`);
 
+  // Map webhook status strings to ConnectionStatus enum
+  const statusMap: Record<string, ConnectionStatus> = {
+    connected: ConnectionStatus.CONNECTED,
+    disconnected: ConnectionStatus.DISCONNECTED,
+    connecting: ConnectionStatus.CONNECTING,
+    error: ConnectionStatus.ERROR,
+  };
+
+  const mappedStatus = statusMap[status.toLowerCase()] || ConnectionStatus.DISCONNECTED;
+
   await database.instance.update({
     where: { id: instanceId },
-    data: { status },
+    data: { status: mappedStatus },
   });
 
   // Publicar evento no Redis (para frontend via WebSocket)
   await redis.publish('instance:status', JSON.stringify({
     instanceId,
-    status,
+    status: mappedStatus,
     timestamp: new Date(),
   }));
 
-  console.log(`[Webhook] Instance ${instanceId} status updated`);
+  console.log(`[Webhook] Instance ${instanceId} status updated to ${mappedStatus}`);
 }
 
 /**

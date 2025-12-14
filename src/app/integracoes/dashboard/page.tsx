@@ -17,19 +17,33 @@ import {
   Bot,
   CheckCircle2,
   XCircle,
-  Clock,
   TrendingUp,
   BarChart3,
   PieChart,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { useAuth } from '@/lib/auth/auth-provider'
-import { Area, AreaChart, Bar, BarChart, Pie, PieChart as RechartsPieChart, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts'
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { motion } from 'framer-motion'
 import CountUp from 'react-countup'
-
-// ✅ Dados reais da UAZapi (removido mock data)
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '@/components/ui/chart'
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  Cell,
+  PieChart as RechartsPieChart,
+  Pie,
+  Legend,
+} from 'recharts'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -53,8 +67,8 @@ export default function DashboardPage() {
   const stats = useMemo(() => ({
     instances: {
       total: instances.length,
-      connected: instances.filter(i => i.status === 'connected').length,
-      disconnected: instances.filter(i => i.status === 'disconnected').length,
+      connected: instances.filter((i: any) => i.status === 'CONNECTED').length,
+      disconnected: instances.filter((i: any) => i.status === 'DISCONNECTED').length,
     },
   }), [instances])
 
@@ -120,13 +134,22 @@ export default function DashboardPage() {
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col gap-6 pt-6" role="main" aria-label="Dashboard de métricas">
-        {/* Header */}
-        <header>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Bem-vindo(a), {user?.name}! Acompanhe métricas de atendimento em tempo real.
-          </p>
+      <div className="flex flex-col gap-6" role="main" aria-label="Dashboard de métricas">
+        {/* Header - consistente com design pattern */}
+        <header className="space-y-4 mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0 p-2 bg-primary/10 rounded-lg">
+                <BarChart3 className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Dashboard</h1>
+                <p className="text-muted-foreground mt-1 text-base sm:text-lg">
+                  Bem-vindo(a), {user?.name}! Acompanhe métricas em tempo real.
+                </p>
+              </div>
+            </div>
+          </div>
         </header>
 
       {/* Alert when no instances connected */}
@@ -440,8 +463,8 @@ export default function DashboardPage() {
                 <AreaChart data={metrics.charts.conversationsPerHour}>
                   <defs>
                     <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

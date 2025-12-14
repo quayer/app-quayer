@@ -2,6 +2,7 @@
  * IWhatsAppProvider - Interface Base
  *
  * TODOS os providers (UAZapi, Evolution, Baileys, etc) devem implementar esta interface
+ * Provider-Agnostic: A API da Quayer funciona igual independente do provider
  */
 
 import type {
@@ -18,6 +19,8 @@ import type {
   SendDocumentInput,
   SendLocationInput,
   SendContactInput,
+  SendInteractiveListInput,
+  SendInteractiveButtonsInput,
   MessageResult,
   WebhookConfig,
   NormalizedWebhook,
@@ -25,6 +28,8 @@ import type {
   Contact,
   ChatFilters,
   MessageFilters,
+  PresenceType,
+  MediaDownloadResult,
 } from './provider.types';
 
 export interface IWhatsAppProvider {
@@ -43,7 +48,7 @@ export interface IWhatsAppProvider {
   disconnect(instanceId: string): Promise<void>;
   restart(instanceId: string): Promise<void>;
 
-  // ===== MENSAGENS =====
+  // ===== MENSAGENS BÁSICAS =====
   sendText(instanceId: string, data: SendTextInput): Promise<MessageResult>;
   sendMedia(instanceId: string, data: SendMediaInput): Promise<MessageResult>;
   sendImage(instanceId: string, data: SendImageInput): Promise<MessageResult>;
@@ -52,6 +57,21 @@ export interface IWhatsAppProvider {
   sendDocument(instanceId: string, data: SendDocumentInput): Promise<MessageResult>;
   sendLocation(instanceId: string, data: SendLocationInput): Promise<MessageResult>;
   sendContact(instanceId: string, data: SendContactInput): Promise<MessageResult>;
+
+  // ===== MENSAGENS INTERATIVAS =====
+  sendInteractiveList(instanceId: string, data: SendInteractiveListInput): Promise<MessageResult>;
+  sendInteractiveButtons(instanceId: string, data: SendInteractiveButtonsInput): Promise<MessageResult>;
+
+  // ===== AÇÕES DE MENSAGEM =====
+  markAsRead(instanceId: string, messageId: string): Promise<void>;
+  reactToMessage(instanceId: string, messageId: string, emoji: string): Promise<void>;
+  deleteMessage(instanceId: string, messageId: string): Promise<void>;
+
+  // ===== PRESENÇA =====
+  sendPresence(instanceId: string, to: string, type: PresenceType): Promise<void>;
+
+  // ===== MÍDIA =====
+  downloadMedia(instanceId: string, messageId: string): Promise<MediaDownloadResult>;
 
   // ===== CHATS E CONTATOS =====
   getChats(instanceId: string, filters?: ChatFilters): Promise<Chat[]>;

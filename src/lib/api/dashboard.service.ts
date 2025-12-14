@@ -1,9 +1,78 @@
 /**
  * Dashboard Service
  * Integração com UAZapi para métricas do dashboard
+ *
+ * Features:
+ * - Retry automático em falhas (até 3 tentativas)
+ * - Cache em memória para reduzir chamadas
+ * - Limites otimizados para performance
  */
 
 import { UAZClient, UAZConfig } from '@/lib/uaz/uaz.client';
+import { logger } from '@/services/logger';
+
+// Configuração de retry e cache
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  retryDelay: 1000, // ms
+  backoffMultiplier: 2,
+};
+
+const CACHE_CONFIG = {
+  ttl: 30 * 1000, // 30 segundos
+};
+
+// Limites otimizados para performance (reduzido para evitar sobrecarga)
+const LIMITS = {
+  chats: 500, // Reduzido de 1000
+  messages: 1000, // Reduzido de 5000
+};
+
+// Cache em memória simples
+const cache = new Map<string, { data: any; expires: number }>();
+
+function getCached<T>(key: string): T | null {
+  const entry = cache.get(key);
+  if (entry && entry.expires > Date.now()) {
+    return entry.data as T;
+  }
+  cache.delete(key);
+  return null;
+}
+
+function setCache(key: string, data: any): void {
+  cache.set(key, { data, expires: Date.now() + CACHE_CONFIG.ttl });
+}
+
+// Helper para retry com backoff exponencial
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+
+      if (attempt < RETRY_CONFIG.maxRetries) {
+        const delay = RETRY_CONFIG.retryDelay * Math.pow(RETRY_CONFIG.backoffMultiplier, attempt - 1);
+        logger.warn(`[DashboardService] ${operationName} falhou, tentativa ${attempt}/${RETRY_CONFIG.maxRetries}`, {
+          error: (error as Error).message,
+          nextRetryIn: delay,
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  logger.error(`[DashboardService] ${operationName} falhou após ${RETRY_CONFIG.maxRetries} tentativas`, {
+    error: lastError?.message,
+  });
+  throw lastError;
+}
 
 export interface DashboardMetrics {
   conversations: ConversationMetrics;
@@ -92,6 +161,11 @@ export interface MessageFindResponse {
  */
 export class DashboardService {
   private clients: Map<string, UAZClient> = new Map();
+  private baseUrl: string;
+
+  constructor() {
+    this.baseUrl = process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'https://quayer.uazapi.com';
+  }
 
   /**
    * Obter ou criar cliente UAZ para uma instância
@@ -99,7 +173,7 @@ export class DashboardService {
   private getClient(instanceId: string, token: string): UAZClient {
     if (!this.clients.has(instanceId)) {
       const config: UAZConfig = {
-        baseUrl: process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'https://quayer.uazapi.com',
+        baseUrl: this.baseUrl,
         adminToken: token,
       };
       this.clients.set(instanceId, new UAZClient(config));
@@ -108,44 +182,55 @@ export class DashboardService {
   }
 
   /**
-   * Buscar contadores de chats de uma instância
+   * Buscar contadores de chats de uma instância (com retry e cache)
    */
   async getChatCounts(instanceId: string, token: string): Promise<ChatCountResponse> {
+    const cacheKey = `chatCounts:${instanceId}`;
+    const cached = getCached<ChatCountResponse>(cacheKey);
+    if (cached) {
+      logger.debug('[DashboardService] Cache hit: getChatCounts', { instanceId });
+      return cached;
+    }
+
+    const defaultResponse: ChatCountResponse = {
+      total_chats: 0,
+      unread_chats: 0,
+      archived_chats: 0,
+      pinned_chats: 0,
+      blocked_chats: 0,
+      groups: 0,
+      groups_admin: 0,
+      groups_announce: 0,
+      groups_member: 0,
+    };
+
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'https://quayer.uazapi.com'}/chat/count`,
-        {
+      const result = await withRetry(async () => {
+        const response = await fetch(`${this.baseUrl}/chat/count`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
             token: token,
           },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch chat counts: ${response.statusText}`);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch chat counts: ${response.statusText}`);
-      }
+        return await response.json();
+      }, 'getChatCounts');
 
-      return await response.json();
+      setCache(cacheKey, result);
+      return result;
     } catch (error) {
-      console.error('Error fetching chat counts:', error);
-      return {
-        total_chats: 0,
-        unread_chats: 0,
-        archived_chats: 0,
-        pinned_chats: 0,
-        blocked_chats: 0,
-        groups: 0,
-        groups_admin: 0,
-        groups_announce: 0,
-        groups_member: 0,
-      };
+      logger.error('[DashboardService] Error fetching chat counts:', { error, instanceId });
+      return defaultResponse;
     }
   }
 
   /**
-   * Buscar chats com filtros
+   * Buscar chats com filtros (com retry e cache)
    */
   async findChats(
     instanceId: string,
@@ -160,10 +245,27 @@ export class DashboardService {
       lead_isTicketOpen?: boolean;
     }
   ): Promise<ChatFindResponse> {
+    const effectiveLimit = Math.min(filters?.limit || LIMITS.chats, LIMITS.chats);
+    const cacheKey = `findChats:${instanceId}:${effectiveLimit}`;
+    const cached = getCached<ChatFindResponse>(cacheKey);
+    if (cached) {
+      logger.debug('[DashboardService] Cache hit: findChats', { instanceId });
+      return cached;
+    }
+
+    const defaultResponse: ChatFindResponse = {
+      chats: [],
+      pagination: {
+        totalRecords: 0,
+        pageSize: 0,
+        currentPage: 1,
+        totalPages: 0,
+      },
+    };
+
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'https://quayer.uazapi.com'}/chat/find`,
-        {
+      const result = await withRetry(async () => {
+        const response = await fetch(`${this.baseUrl}/chat/find`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -172,34 +274,29 @@ export class DashboardService {
           body: JSON.stringify({
             operator: filters?.operator || 'AND',
             sort: filters?.sort || '-wa_lastMsgTimestamp',
-            limit: filters?.limit || 100,
+            limit: effectiveLimit,
             offset: filters?.offset || 0,
             ...filters,
           }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to find chats: ${response.statusText}`);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`Failed to find chats: ${response.statusText}`);
-      }
+        return await response.json();
+      }, 'findChats');
 
-      return await response.json();
+      setCache(cacheKey, result);
+      return result;
     } catch (error) {
-      console.error('Error finding chats:', error);
-      return {
-        chats: [],
-        pagination: {
-          totalRecords: 0,
-          pageSize: 0,
-          currentPage: 1,
-          totalPages: 0,
-        },
-      };
+      logger.error('[DashboardService] Error finding chats:', { error, instanceId });
+      return defaultResponse;
     }
   }
 
   /**
-   * Buscar mensagens
+   * Buscar mensagens (com retry, cache e limite otimizado)
    */
   async findMessages(
     instanceId: string,
@@ -211,65 +308,83 @@ export class DashboardService {
       offset?: number;
     }
   ): Promise<MessageFindResponse> {
+    // Limitar mensagens para performance
+    const effectiveLimit = Math.min(filters?.limit || LIMITS.messages, LIMITS.messages);
+    const cacheKey = `findMessages:${instanceId}:${effectiveLimit}`;
+    const cached = getCached<MessageFindResponse>(cacheKey);
+    if (cached) {
+      logger.debug('[DashboardService] Cache hit: findMessages', { instanceId });
+      return cached;
+    }
+
+    const defaultResponse: MessageFindResponse = {
+      messages: [],
+      pagination: {
+        totalRecords: 0,
+      },
+    };
+
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_UAZAPI_BASE_URL || 'https://quayer.uazapi.com'}/message/find`,
-        {
+      const result = await withRetry(async () => {
+        const response = await fetch(`${this.baseUrl}/message/find`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             token: token,
           },
           body: JSON.stringify({
-            limit: filters?.limit || 1000,
+            limit: effectiveLimit,
             offset: filters?.offset || 0,
             ...filters,
           }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to find messages: ${response.statusText}`);
         }
-      );
 
-      if (!response.ok) {
-        throw new Error(`Failed to find messages: ${response.statusText}`);
-      }
+        return await response.json();
+      }, 'findMessages');
 
-      return await response.json();
+      setCache(cacheKey, result);
+      return result;
     } catch (error) {
-      console.error('Error finding messages:', error);
-      return {
-        messages: [],
-        pagination: {
-          totalRecords: 0,
-        },
-      };
+      logger.error('[DashboardService] Error finding messages:', { error, instanceId });
+      return defaultResponse;
     }
   }
 
   /**
-   * Obter métricas agregadas do dashboard para múltiplas instâncias
+   * Obter métricas agregadas do dashboard para múltiplas conexões
    */
   async getAggregatedMetrics(
-    instances: Array<{ id: string; uazToken: string | null; status: string }>
+    connections: Array<{ id: string; uazapiToken: string | null; status: string }>
   ): Promise<DashboardMetrics> {
-    // Filtrar apenas instâncias conectadas
-    const connectedInstances = instances.filter(
-      (i) => i.status === 'connected' && i.uazToken
+    // Filtrar apenas conexões conectadas
+    const connectedInstances = connections.filter(
+      (i) => i.status === 'CONNECTED' && i.uazapiToken
     );
 
     if (connectedInstances.length === 0) {
       return this.getEmptyMetrics();
     }
 
-    // Buscar dados de todas as instâncias em paralelo
-    const chatCountsPromises = connectedInstances.map((instance) =>
-      this.getChatCounts(instance.id, instance.uazToken!)
+    logger.info('[DashboardService] Buscando métricas agregadas', {
+      totalConnections: connections.length,
+      connectedInstances: connectedInstances.length,
+    });
+
+    // Buscar dados de todas as conexões em paralelo (com limites otimizados)
+    const chatCountsPromises = connectedInstances.map((connection) =>
+      this.getChatCounts(connection.id, connection.uazapiToken!)
     );
 
-    const chatsPromises = connectedInstances.map((instance) =>
-      this.findChats(instance.id, instance.uazToken!, { limit: 1000 })
+    const chatsPromises = connectedInstances.map((connection) =>
+      this.findChats(connection.id, connection.uazapiToken!, { limit: LIMITS.chats })
     );
 
-    const messagesPromises = connectedInstances.map((instance) =>
-      this.findMessages(instance.id, instance.uazToken!, { limit: 5000 })
+    const messagesPromises = connectedInstances.map((connection) =>
+      this.findMessages(connection.id, connection.uazapiToken!, { limit: LIMITS.messages })
     );
 
     const [chatCountsResults, chatsResults, messagesResults] = await Promise.all([
@@ -330,6 +445,12 @@ export class DashboardService {
     // Gerar dados de gráfico por hora (últimas 24 horas)
     const conversationsPerHour = this.generateConversationsPerHour(allChats);
 
+    logger.info('[DashboardService] Métricas agregadas calculadas', {
+      totalChats: allChats.length,
+      totalMessages: allMessages.length,
+      openChats: openChats.length,
+    });
+
     return {
       conversations: {
         total: totalChatCounts.total_chats,
@@ -340,8 +461,8 @@ export class DashboardService {
         inProgress: openChats.length,
         aiControlled: aiControlled.length,
         humanControlled: humanControlled.length,
-        avgResponseTime: 0, // TODO: Calcular baseado em timestamps
-        resolutionRate: 0, // TODO: Calcular baseado em tickets resolvidos
+        avgResponseTime: 0, // Calculado via endpoint attendance no frontend
+        resolutionRate: 0, // Calculado via endpoint attendance no frontend
       },
       messages: {
         sent: totalSent,
@@ -453,6 +574,14 @@ export class DashboardService {
         ],
       },
     };
+  }
+
+  /**
+   * Limpar cache manualmente (útil para testes)
+   */
+  clearCache(): void {
+    cache.clear();
+    logger.info('[DashboardService] Cache limpo');
   }
 }
 

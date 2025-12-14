@@ -10,6 +10,7 @@ import { database } from '@/services/database';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { z } from 'zod';
+import { sseEvents } from '@/lib/events/sse-events.service';
 
 export const sessionsController = igniter.controller({
   name: 'sessions',
@@ -19,12 +20,13 @@ export const sessionsController = igniter.controller({
     /**
      * GET /sessions
      * Listar sessões com filtros e paginação
+     * ✅ Caching: 30 segundos por query unique
      */
     list: igniter.query({
       path: '/',
       query: z.object({
         organizationId: z.string().optional(),
-        instanceId: z.string().optional(),
+        connectionId: z.string().optional(),
         contactId: z.string().optional(),
         status: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
         page: z.coerce.number().min(1).default(1),
@@ -42,21 +44,40 @@ export const sessionsController = igniter.controller({
         // Admin pode ver todas orgs (se não passar organizationId) ou filtrar por uma específica
         const organizationId = user.role === 'admin'
           ? request.query.organizationId || undefined // Admin sem filtro = ver todas
-          : user.currentOrgId; // Não-admin sempre filtrado pela org atual
+          : user.currentOrgId || undefined; // Não-admin sempre filtrado pela org atual
 
         // Apenas não-admin precisa ter organizationId obrigatório
         if (user.role !== 'admin' && !organizationId) {
           return response.forbidden('Organização não encontrada');
         }
 
+        // 🚀 Cache: Verificar cache antes de buscar no banco
+        const cacheKey = `sessions:list:${organizationId || 'all'}:${request.query.connectionId || ''}:${request.query.status || ''}:${request.query.page}:${request.query.limit}`;
+
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss ou erro - continuar sem cache
+        }
+
         const result = await sessionsManager.listSessions({
           organizationId,
-          instanceId: request.query.instanceId,
+          connectionId: request.query.connectionId,
           contactId: request.query.contactId,
           status: request.query.status,
           page: request.query.page,
           limit: request.query.limit,
         });
+
+        // 🚀 Cache: Salvar resultado com TTL de 30 segundos
+        try {
+          await igniter.store.set(cacheKey, result, { ttl: 30 });
+        } catch (e) {
+          // Erro ao salvar cache - não crítico
+        }
 
         return response.success(result);
       },
@@ -68,7 +89,6 @@ export const sessionsController = igniter.controller({
      */
     get: igniter.query({
       path: '/:id',
-      params: z.object({ id: z.string() }),
       query: z.object({
         includeMessages: z.coerce.boolean().default(true),
         messagesLimit: z.coerce.number().min(1).max(500).default(100),
@@ -81,7 +101,8 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const session = await sessionsManager.getSessionById(request.params.id, {
+        const { id } = request.params as { id: string };
+        const session = await sessionsManager.getSessionById(id, {
           includeMessages: request.query.includeMessages,
           messagesLimit: request.query.messagesLimit,
         });
@@ -105,7 +126,7 @@ export const sessionsController = igniter.controller({
      */
     blockAI: igniter.mutation({
       path: '/:id/block-ai',
-      params: z.object({ id: z.string() }),
+      method: 'POST',
       body: z.object({
         durationMinutes: z.number().min(1).max(1440).default(15), // Max 24 horas
         reason: z.string().optional().default('manual_response'),
@@ -118,8 +139,8 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
-        const { durationMinutes, reason } = request.body;
+        const { id } = request.params as { id: string };
+        const { durationMinutes = 15, reason = 'manual_response' } = request.body;
 
         // Verificar se sessão existe e pertence à org do usuário
         const session = await database.chatSession.findUnique({
@@ -151,7 +172,7 @@ export const sessionsController = igniter.controller({
      */
     unblockAI: igniter.mutation({
       path: '/:id/unblock-ai',
-      params: z.object({ id: z.string() }),
+      method: 'POST',
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -160,7 +181,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
 
         // Verificar permissão
         const session = await database.chatSession.findUnique({
@@ -188,8 +209,8 @@ export const sessionsController = igniter.controller({
      * Encerrar sessão
      */
     close: igniter.mutation({
-      path: '/:id/close',
-      params: z.object({ id: z.string() }),
+      path: '/:id/close' as const,
+      method: 'POST',
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -198,7 +219,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
 
         // Verificar permissão
         const session = await database.chatSession.findUnique({
@@ -234,7 +255,7 @@ export const sessionsController = igniter.controller({
      */
     updateStatus: igniter.mutation({
       path: '/:id/status',
-      params: z.object({ id: z.string() }),
+      method: 'PATCH',
       body: z.object({
         status: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']),
       }),
@@ -246,7 +267,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
         const { status } = request.body;
 
         // Verificar permissão
@@ -274,12 +295,71 @@ export const sessionsController = igniter.controller({
     }),
 
     /**
+     * PATCH /sessions/:id/department
+     * Atualizar departamento da sessão
+     */
+    updateDepartment: igniter.mutation({
+      path: '/:id/department' as const,
+      method: 'PATCH',
+      body: z.object({
+        departmentId: z.string().nullable(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { id } = request.params as { id: string };
+        const { departmentId } = request.body;
+
+        // Verificar permissão
+        const session = await database.chatSession.findUnique({
+          where: { id },
+          select: { organizationId: true },
+        });
+
+        if (!session) {
+          return response.notFound('Sessão não encontrada');
+        }
+
+        if (user.role !== 'admin' && session.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado a esta sessão');
+        }
+
+        // Atualizar departamento
+        const updated = await database.chatSession.update({
+          where: { id },
+          data: { assignedDepartmentId: departmentId },
+          include: {
+            department: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+          },
+        });
+
+        return response.success({
+          message: departmentId
+            ? `Sessão transferida para ${updated.department?.name || 'departamento'}`
+            : 'Departamento removido da sessão',
+          department: updated.department,
+        });
+      },
+    }),
+
+    /**
      * POST /sessions/:id/tags
      * Adicionar tags à sessão
      */
     addTags: igniter.mutation({
       path: '/:id/tags',
-      params: z.object({ id: z.string() }),
+      method: 'POST',
       body: z.object({
         tags: z.array(z.string()).min(1),
       }),
@@ -291,7 +371,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
         const { tags } = request.body;
 
         // Verificar permissão
@@ -324,7 +404,7 @@ export const sessionsController = igniter.controller({
      */
     removeTags: igniter.mutation({
       path: '/:id/tags',
-      params: z.object({ id: z.string() }),
+      method: 'DELETE',
       body: z.object({
         tags: z.array(z.string()).min(1),
       }),
@@ -336,7 +416,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
         const { tags } = request.body;
 
         // Verificar permissão
@@ -369,7 +449,6 @@ export const sessionsController = igniter.controller({
      */
     checkAIStatus: igniter.query({
       path: '/:id/ai-status',
-      params: z.object({ id: z.string() }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const user = context.auth?.session?.user;
@@ -378,7 +457,7 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
 
         // Verificar permissão
         const session = await database.chatSession.findUnique({
@@ -418,7 +497,6 @@ export const sessionsController = igniter.controller({
      */
     byContact: igniter.query({
       path: '/by-contact/:contactId',
-      params: z.object({ contactId: z.string() }),
       query: z.object({
         page: z.coerce.number().min(1).default(1),
         limit: z.coerce.number().min(1).max(100).default(50),
@@ -431,8 +509,9 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { contactId } = request.params;
-        const { page, limit } = request.query;
+        const { contactId } = request.params as { contactId: string };
+        const page = request.query.page ?? 1;
+        const limit = request.query.limit ?? 50;
 
         // Buscar contato
         const contact = await database.contact.findUnique({
@@ -466,11 +545,11 @@ export const sessionsController = igniter.controller({
         const sessions = await database.chatSession.findMany({
           where: { contactId },
           include: {
-            instance: {
+            connection: {
               select: {
                 id: true,
                 name: true,
-                brokerType: true,
+                provider: true,
               },
             },
             sessionTabulations: {
@@ -538,10 +617,10 @@ export const sessionsController = igniter.controller({
           sessions: sessions.map((session) => ({
             ...session,
             integration: {
-              id: session.instance.id,
-              name: session.instance.name,
+              id: session.connection.id,
+              name: session.connection.name,
               provider: {
-                slug: session.instance.brokerType,
+                slug: session.connection.provider,
               },
             },
             tabulations: session.sessionTabulations.map((st) => st.tabulation),
@@ -560,7 +639,7 @@ export const sessionsController = igniter.controller({
           lastSessionAssignedDepartment: lastSession?.assignedDepartmentId
             ? { id: lastSession.assignedDepartmentId, name: 'Department' }
             : null,
-          integrationProviderKey: sessions[0]?.instance.brokerType || 'uazapi',
+          integrationProviderKey: sessions[0]?.connection.provider || 'uazapi',
           integrationHasAgent: false,
           pagination: {
             total_data: totalMessages,
@@ -570,6 +649,469 @@ export const sessionsController = igniter.controller({
             has_next_page: page * limit < totalMessages,
             has_previous_page: page > 1,
           },
+        });
+      },
+    }),
+
+    /**
+     * GET /sessions/blacklist
+     * Lista contatos na blacklist (bypassBots = true)
+     */
+    blacklist: igniter.query({
+      path: '/blacklist',
+      query: z.object({
+        page: z.coerce.number().min(1).default(1),
+        limit: z.coerce.number().min(1).max(100).default(50),
+        search: z.string().optional(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticacao necessaria');
+        }
+
+        const organizationId = user.role === 'admin' ? undefined : user.currentOrgId;
+
+        if (user.role !== 'admin' && !organizationId) {
+          return response.forbidden('Organizacao nao encontrada');
+        }
+
+        const page = request.query.page ?? 1;
+        const limit = request.query.limit ?? 50;
+        const search = request.query.search;
+        const skip = (page - 1) * limit;
+
+        const where: any = {
+          bypassBots: true,
+          ...(organizationId && { organizationId }),
+          ...(search && {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { phoneNumber: { contains: search } },
+            ],
+          }),
+        };
+
+        const [contacts, total] = await Promise.all([
+          database.contact.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy: { updatedAt: 'desc' },
+            select: {
+              id: true,
+              phoneNumber: true,
+              name: true,
+              profilePicUrl: true,
+              bypassBots: true,
+              createdAt: true,
+              updatedAt: true,
+              _count: {
+                select: { chatSessions: true },
+              },
+            },
+          }),
+          database.contact.count({ where }),
+        ]);
+
+        return response.success({
+          data: contacts.map((c) => ({
+            ...c,
+            sessionsCount: c._count.chatSessions,
+          })),
+          pagination: {
+            total,
+            totalPages: Math.ceil(total / limit),
+            page,
+            limit,
+          },
+        });
+      },
+    }),
+
+    /**
+     * POST /sessions/contacts/:contactId/blacklist
+     * Adicionar contato a blacklist
+     */
+    addToBlacklist: igniter.mutation({
+      path: '/contacts/:contactId/blacklist' as const,
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticacao necessaria');
+        }
+
+        const { contactId } = request.params as { contactId: string };
+
+        const contact = await database.contact.findUnique({
+          where: { id: contactId },
+          select: { id: true, organizationId: true, bypassBots: true },
+        });
+
+        if (!contact) {
+          return response.notFound('Contato nao encontrado');
+        }
+
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado');
+        }
+
+        if (contact.bypassBots) {
+          return response.badRequest('Contato ja esta na blacklist');
+        }
+
+        await sessionsManager.setContactBypassBots(contactId, true);
+
+        return response.success({ message: 'Contato adicionado a blacklist' });
+      },
+    }),
+
+    /**
+     * DELETE /sessions/contacts/:contactId/blacklist
+     * Remover contato da blacklist
+     */
+    removeFromBlacklist: igniter.mutation({
+      path: '/contacts/:contactId/blacklist' as const,
+      method: 'DELETE',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticacao necessaria');
+        }
+
+        const { contactId } = request.params as { contactId: string };
+
+        const contact = await database.contact.findUnique({
+          where: { id: contactId },
+          select: { id: true, organizationId: true, bypassBots: true },
+        });
+
+        if (!contact) {
+          return response.notFound('Contato nao encontrado');
+        }
+
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado');
+        }
+
+        if (!contact.bypassBots) {
+          return response.badRequest('Contato nao esta na blacklist');
+        }
+
+        await sessionsManager.setContactBypassBots(contactId, false);
+
+        return response.success({ message: 'Contato removido da blacklist' });
+      },
+    }),
+
+    /**
+     * PUT /sessions/contacts/:contactId/labels
+     * Gerenciar labels/etiquetas do contato (3 modos)
+     * Modo 1: labelIds - Substitui TODAS as labels
+     * Modo 2: addLabelId - Adiciona UMA label
+     * Modo 3: removeLabelId - Remove UMA label
+     */
+    updateContactLabels: igniter.mutation({
+      path: '/contacts/:contactId/labels' as const,
+      method: 'PUT',
+      body: z.object({
+        labelIds: z.array(z.string()).optional(),
+        addLabelId: z.string().optional(),
+        removeLabelId: z.string().optional(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { contactId } = request.params as { contactId: string };
+        const { labelIds, addLabelId, removeLabelId } = request.body;
+
+        // Validar que apenas um modo foi usado
+        const modesUsed = [labelIds, addLabelId, removeLabelId].filter(Boolean).length;
+        if (modesUsed === 0) {
+          return response.badRequest('Forneça labelIds, addLabelId ou removeLabelId');
+        }
+        if (modesUsed > 1) {
+          return response.badRequest('Use apenas um modo por requisição: labelIds, addLabelId ou removeLabelId');
+        }
+
+        // Verificar se contato existe e pertence à organização
+        const contact = await database.contact.findUnique({
+          where: { id: contactId },
+          select: { id: true, organizationId: true },
+        });
+
+        if (!contact) {
+          return response.notFound('Contato não encontrado');
+        }
+
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado');
+        }
+
+        // MODO 1: Substituir todas as labels
+        if (labelIds !== undefined) {
+          await database.contactTabulation.deleteMany({
+            where: { contactId },
+          });
+
+          if (labelIds.length > 0) {
+            await database.contactTabulation.createMany({
+              data: labelIds.map((labelId) => ({
+                contactId,
+                tabulationId: labelId,
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
+
+        // MODO 2: Adicionar uma label
+        if (addLabelId) {
+          await database.contactTabulation.upsert({
+            where: {
+              contactId_tabulationId: {
+                contactId,
+                tabulationId: addLabelId,
+              },
+            },
+            create: {
+              contactId,
+              tabulationId: addLabelId,
+            },
+            update: {},
+          });
+        }
+
+        // MODO 3: Remover uma label
+        if (removeLabelId) {
+          await database.contactTabulation.deleteMany({
+            where: {
+              contactId,
+              tabulationId: removeLabelId,
+            },
+          });
+        }
+
+        // Buscar tabulations atualizadas
+        const updatedContact = await database.contact.findUnique({
+          where: { id: contactId },
+          include: {
+            contactTabulations: {
+              include: {
+                tabulation: {
+                  select: {
+                    id: true,
+                    name: true,
+                    backgroundColor: true,
+                    description: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        const labels = updatedContact?.contactTabulations.map((ct) => ct.tabulation) || [];
+
+        // Emitir evento SSE para sincronização em tempo real
+        sseEvents.emitContactLabelsChanged({
+          contactId,
+          action: labelIds ? 'replaced' : addLabelId ? 'added' : 'removed',
+          labelIds: labelIds,
+          labelId: addLabelId || removeLabelId,
+          organizationId: contact.organizationId || undefined,
+        });
+
+        return response.success({
+          message: labelIds
+            ? `${labelIds.length} etiqueta(s) definida(s)`
+            : addLabelId
+            ? 'Etiqueta adicionada com sucesso'
+            : 'Etiqueta removida com sucesso',
+          labels,
+          count: labels.length,
+        });
+      },
+    }),
+
+    /**
+     * PUT /sessions/:sessionId/labels
+     * Gerenciar labels/etiquetas da sessão (3 modos)
+     * Modo 1: labelIds - Substitui TODAS as labels
+     * Modo 2: addLabelId - Adiciona UMA label
+     * Modo 3: removeLabelId - Remove UMA label
+     */
+    updateSessionLabels: igniter.mutation({
+      path: '/:sessionId/labels',
+      method: 'PUT',
+      body: z.object({
+        labelIds: z.array(z.string()).optional(),
+        addLabelId: z.string().optional(),
+        removeLabelId: z.string().optional(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { sessionId } = request.params as { sessionId: string };
+        const { labelIds, addLabelId, removeLabelId } = request.body;
+
+        // Validar que apenas um modo foi usado
+        const modesUsed = [labelIds, addLabelId, removeLabelId].filter(Boolean).length;
+        if (modesUsed === 0) {
+          return response.badRequest('Forneça labelIds, addLabelId ou removeLabelId');
+        }
+        if (modesUsed > 1) {
+          return response.badRequest('Use apenas um modo por requisição');
+        }
+
+        // Verificar se sessão existe e pertence à organização
+        const session = await database.chatSession.findUnique({
+          where: { id: sessionId },
+          select: { id: true, organizationId: true },
+        });
+
+        if (!session) {
+          return response.notFound('Sessão não encontrada');
+        }
+
+        if (user.role !== 'admin' && session.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado');
+        }
+
+        // MODO 1: Substituir todas as labels
+        if (labelIds !== undefined) {
+          await database.sessionTabulation.deleteMany({
+            where: { sessionId },
+          });
+
+          if (labelIds.length > 0) {
+            await database.sessionTabulation.createMany({
+              data: labelIds.map((labelId) => ({
+                sessionId,
+                tabulationId: labelId,
+              })),
+              skipDuplicates: true,
+            });
+          }
+        }
+
+        // MODO 2: Adicionar uma label
+        if (addLabelId) {
+          await database.sessionTabulation.upsert({
+            where: {
+              sessionId_tabulationId: {
+                sessionId,
+                tabulationId: addLabelId,
+              },
+            },
+            create: {
+              sessionId,
+              tabulationId: addLabelId,
+            },
+            update: {},
+          });
+        }
+
+        // MODO 3: Remover uma label
+        if (removeLabelId) {
+          await database.sessionTabulation.deleteMany({
+            where: {
+              sessionId,
+              tabulationId: removeLabelId,
+            },
+          });
+        }
+
+        // Buscar tabulations atualizadas
+        const updatedSession = await database.chatSession.findUnique({
+          where: { id: sessionId },
+          include: {
+            sessionTabulations: {
+              include: {
+                tabulation: {
+                  select: {
+                    id: true,
+                    name: true,
+                    backgroundColor: true,
+                    description: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        const labels = updatedSession?.sessionTabulations.map((st) => st.tabulation) || [];
+
+        // Emitir evento SSE para sincronização em tempo real
+        sseEvents.emitSessionLabelsChanged({
+          sessionId,
+          action: labelIds ? 'replaced' : addLabelId ? 'added' : 'removed',
+          labelIds: labelIds,
+          labelId: addLabelId || removeLabelId,
+          organizationId: session.organizationId,
+        });
+
+        return response.success({
+          message: labelIds
+            ? `${labelIds.length} etiqueta(s) definida(s)`
+            : addLabelId
+            ? 'Etiqueta adicionada com sucesso'
+            : 'Etiqueta removida com sucesso',
+          labels,
+          count: labels.length,
+        });
+      },
+    }),
+
+    /**
+     * GET /sessions/tabulations
+     * Listar tabulations/etiquetas disponíveis
+     */
+    listTabulations: igniter.query({
+      path: '/tabulations',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const organizationId = user.role === 'admin' ? undefined : user.currentOrgId;
+
+        const tabulations = await database.tabulation.findMany({
+          where: {
+            ...(organizationId && { organizationId }),
+          },
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            backgroundColor: true,
+          },
+        });
+
+        return response.success({
+          data: tabulations,
         });
       },
     }),
@@ -596,7 +1138,9 @@ export const sessionsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { page, limit, status, responseFilter, search } = request.query;
+        const { status, responseFilter, search } = request.query;
+        const page = request.query.page ?? 1;
+        const limit = request.query.limit ?? 10;
         const organizationId = user.role === 'admin' ? undefined : user.currentOrgId;
 
         if (user.role !== 'admin' && !organizationId) {
@@ -634,12 +1178,12 @@ export const sessionsController = igniter.controller({
                 },
               },
             },
-            instance: {
+            connection: {
               select: {
                 id: true,
                 name: true,
                 phoneNumber: true,
-                brokerType: true,
+                provider: true,
               },
             },
             sessionTabulations: {
@@ -673,7 +1217,7 @@ export const sessionsController = igniter.controller({
                 sessionId: session.id,
                 author: 'CUSTOMER',
                 direction: 'INBOUND',
-                status: { not: 'READ' },
+                status: { not: 'read' },
               },
             });
 
@@ -687,17 +1231,17 @@ export const sessionsController = igniter.controller({
               sessionStatus: session.status,
               sessionCreatedAt: session.createdAt,
               sessionUpdatedAt: session.updatedAt,
-              sessionIntegrationId: session.instance.id,
+              sessionIntegrationId: session.connection.id,
               sessionIntegration: {
-                id: session.instance.id,
+                id: session.connection.id,
                 provider: {
-                  id: session.instance.id,
-                  name: session.instance.brokerType,
-                  slug: session.instance.brokerType,
+                  id: session.connection.id,
+                  name: session.connection.provider,
+                  slug: session.connection.provider,
                   icon: 'https://storage.falecomigo.ai/falecomigo.ai/assets/whatsapp.png',
                 },
-                name: session.instance.name,
-                phoneNumber: session.instance.phoneNumber,
+                name: session.connection.name,
+                phoneNumber: session.connection.phoneNumber,
               },
               assignedDepartment: session.assignedDepartmentId
                 ? {
@@ -754,6 +1298,231 @@ export const sessionsController = igniter.controller({
             page,
             limit,
           },
+        });
+      },
+    }),
+
+    /**
+     * PATCH /sessions/contacts/:contactId/lead
+     * Editar lead/contato completo (inspirado em /chat/editLead)
+     * Permite editar todos os campos do contato incluindo os 20 campos personalizados
+     */
+    updateContactLead: igniter.mutation({
+      path: '/contacts/:contactId/lead' as const,
+      method: 'PATCH',
+      body: z.object({
+        name: z.string().optional(),
+        email: z.string().email().optional(),
+        tags: z.array(z.string()).optional(),
+        // Custom fields 01-20
+        contactField01: z.string().max(255).nullable().optional(),
+        contactField02: z.string().max(255).nullable().optional(),
+        contactField03: z.string().max(255).nullable().optional(),
+        contactField04: z.string().max(255).nullable().optional(),
+        contactField05: z.string().max(255).nullable().optional(),
+        contactField06: z.string().max(255).nullable().optional(),
+        contactField07: z.string().max(255).nullable().optional(),
+        contactField08: z.string().max(255).nullable().optional(),
+        contactField09: z.string().max(255).nullable().optional(),
+        contactField10: z.string().max(255).nullable().optional(),
+        contactField11: z.string().max(255).nullable().optional(),
+        contactField12: z.string().max(255).nullable().optional(),
+        contactField13: z.string().max(255).nullable().optional(),
+        contactField14: z.string().max(255).nullable().optional(),
+        contactField15: z.string().max(255).nullable().optional(),
+        contactField16: z.string().max(255).nullable().optional(),
+        contactField17: z.string().max(255).nullable().optional(),
+        contactField18: z.string().max(255).nullable().optional(),
+        contactField19: z.string().max(255).nullable().optional(),
+        contactField20: z.string().max(255).nullable().optional(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const { contactId } = request.params as { contactId: string };
+        const updateData = request.body;
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        // Verificar se o contato existe
+        const contact = await database.contact.findUnique({
+          where: { id: contactId },
+        });
+
+        if (!contact) {
+          return response.notFound('Contato não encontrado');
+        }
+
+        // Atualizar contato
+        const updated = await database.contact.update({
+          where: { id: contactId },
+          data: updateData,
+          include: {
+            contactTabulations: {
+              include: {
+                tabulation: {
+                  select: {
+                    id: true,
+                    name: true,
+                    backgroundColor: true,
+                    description: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        // Emitir eventos SSE para campos importantes alterados
+        const changedFields = Object.keys(updateData);
+        if (changedFields.length > 0) {
+          const updateDataRecord = updateData as Record<string, unknown>;
+          for (const field of changedFields) {
+            if (updateDataRecord[field] !== undefined && updateDataRecord[field] !== (contact as Record<string, unknown>)[field]) {
+              sseEvents.emitContactUpdated({
+                contactId,
+                field,
+                oldValue: (contact as Record<string, unknown>)[field],
+                newValue: updateDataRecord[field],
+                organizationId: contact.organizationId || undefined,
+              });
+            }
+          }
+        }
+
+        return response.success({
+          message: 'Lead/Contato atualizado com sucesso',
+          data: updated,
+        });
+      },
+    }),
+
+    /**
+     * PATCH /sessions/:sessionId/lead
+     * Editar ticket/sessão (status, atendente, kanban, tags)
+     * Inspirado em /chat/editLead para gerenciamento de tickets
+     */
+    updateSessionLead: igniter.mutation({
+      path: '/:sessionId/lead',
+      method: 'PATCH',
+      body: z.object({
+        status: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
+        assignedAgentId: z.string().nullable().optional(),
+        assignedDepartmentId: z.string().nullable().optional(),
+        journeyStage: z.string().optional(), // Posição no kanban
+        customerJourney: z.string().optional(),
+        leadScore: z.number().min(0).max(100).nullable().optional(),
+        tags: z.array(z.string()).optional(),
+        statusReason: z.string().optional(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const { sessionId } = request.params as { sessionId: string };
+        const updateData = request.body;
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        // Verificar se a sessão existe e pertence à organização do usuário
+        const session = await database.chatSession.findUnique({
+          where: { id: sessionId },
+        });
+
+        if (!session) {
+          return response.notFound('Sessão não encontrada');
+        }
+
+        if (user.role !== 'admin' && session.organizationId !== user.currentOrgId) {
+          return response.forbidden('Sem permissão para editar esta sessão');
+        }
+
+        // Atualizar sessão
+        const updated = await database.chatSession.update({
+          where: { id: sessionId },
+          data: {
+            ...updateData,
+            ...(updateData.status === 'CLOSED' && { closedAt: new Date() }),
+          },
+          include: {
+            contact: {
+              select: {
+                id: true,
+                name: true,
+                phoneNumber: true,
+                email: true,
+                profilePicUrl: true,
+              },
+            },
+            department: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            sessionTabulations: {
+              include: {
+                tabulation: {
+                  select: {
+                    id: true,
+                    name: true,
+                    backgroundColor: true,
+                    description: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        // Emitir eventos SSE para cada campo alterado
+        if (updateData.status) {
+          sseEvents.emitSessionUpdated({
+            sessionId,
+            field: 'status',
+            oldValue: session.status,
+            newValue: updateData.status,
+            organizationId: session.organizationId,
+          });
+        }
+
+        if (updateData.assignedAgentId !== undefined) {
+          sseEvents.emitSessionUpdated({
+            sessionId,
+            field: 'assignedAgentId',
+            oldValue: session.assignedAgentId,
+            newValue: updateData.assignedAgentId,
+            organizationId: session.organizationId,
+          });
+        }
+
+        if (updateData.assignedDepartmentId !== undefined) {
+          sseEvents.emitSessionUpdated({
+            sessionId,
+            field: 'assignedDepartmentId',
+            oldValue: session.assignedDepartmentId,
+            newValue: updateData.assignedDepartmentId,
+            organizationId: session.organizationId,
+          });
+        }
+
+        if (updateData.journeyStage) {
+          sseEvents.emitSessionUpdated({
+            sessionId,
+            field: 'journeyStage',
+            oldValue: session.journeyStage,
+            newValue: updateData.journeyStage,
+            organizationId: session.organizationId,
+          });
+        }
+
+        return response.success({
+          message: 'Ticket/Sessão atualizado com sucesso',
+          data: updated,
         });
       },
     }),

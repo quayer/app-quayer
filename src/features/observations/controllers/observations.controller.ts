@@ -16,6 +16,7 @@ import { database } from '@/services/database';
  */
 export const observationsController = igniter.controller({
   name: 'contact-observation',
+  path: '/contact-observation',
   description: 'Gerenciamento de observações para contatos',
 
   actions: {
@@ -33,28 +34,25 @@ export const observationsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { contactId, content, type } = context.body;
-        const { user, currentOrgId } = context.user;
+        const { contactId, content, type } = request.body;
+        const { id: userId, currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se contato existe e pertence à organização
         const contact = await database.contact.findFirst({
           where: {
             id: contactId,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!contact) {
-          return response.error({
-            message: 'Contato não encontrado ou não pertence a esta organização',
-            status: 404,
-          });
+          return response.notFound('Contato não encontrado ou não pertence a esta organização');
         }
 
         const observation = await database.contactObservation.create({
           data: {
             contactId,
-            userId: user.userId,
+            userId,
             content,
             type,
           },
@@ -82,31 +80,25 @@ export const observationsController = igniter.controller({
      */
     getByContact: igniter.query({
       path: '/contact/:contactId',
-      params: z.object({
-        contactId: z.string().uuid(),
-      }),
       query: z.object({
         type: z.enum(['note', 'warning', 'important']).optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { contactId } = context.params;
-        const { type } = context.query;
-        const { currentOrgId } = context.user;
+        const { contactId } = request.params as any;
+        const { type } = request.query as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se contato existe e pertence à organização
         const contact = await database.contact.findFirst({
           where: {
             id: contactId,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!contact) {
-          return response.error({
-            message: 'Contato não encontrado ou não pertence a esta organização',
-            status: 404,
-          });
+          return response.notFound('Contato não encontrado ou não pertence a esta organização');
         }
 
         const where: any = { contactId };
@@ -142,42 +134,33 @@ export const observationsController = igniter.controller({
     update: igniter.mutation({
       path: '/:id',
       method: 'PUT',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       body: z.object({
         content: z.string().min(1).optional(),
         type: z.enum(['note', 'warning', 'important']).optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { content, type } = context.body;
-        const { user, currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { content, type } = request.body;
+        const { id: userId, role, currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se observação existe e pertence à organização do contato
         const existing = await database.contactObservation.findFirst({
           where: {
             id,
             contact: {
-              organizationId: currentOrgId,
+              organizationId: currentOrgId!,
             },
           },
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Observação não encontrada',
-            status: 404,
-          });
+          return response.notFound('Observação não encontrada');
         }
 
         // Verificar se o usuário é o autor ou tem permissão
-        if (existing.userId !== user.userId && user.role !== 'admin') {
-          return response.error({
-            message: 'Você não tem permissão para editar esta observação',
-            status: 403,
-          });
+        if (existing.userId !== userId && role !== 'admin') {
+          return response.forbidden('Você não tem permissão para editar esta observação');
         }
 
         const observation = await database.contactObservation.update({
@@ -211,37 +194,28 @@ export const observationsController = igniter.controller({
     delete: igniter.mutation({
       path: '/:id',
       method: 'DELETE',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { user, currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { id: userId, role, currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se observação existe e pertence à organização do contato
         const existing = await database.contactObservation.findFirst({
           where: {
             id,
             contact: {
-              organizationId: currentOrgId,
+              organizationId: currentOrgId!,
             },
           },
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Observação não encontrada',
-            status: 404,
-          });
+          return response.notFound('Observação não encontrada');
         }
 
         // Verificar se o usuário é o autor ou tem permissão
-        if (existing.userId !== user.userId && user.role !== 'admin') {
-          return response.error({
-            message: 'Você não tem permissão para deletar esta observação',
-            status: 403,
-          });
+        if (existing.userId !== userId && role !== 'admin') {
+          return response.forbidden('Você não tem permissão para deletar esta observação');
         }
 
         await database.contactObservation.delete({

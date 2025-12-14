@@ -71,12 +71,13 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
       })
 
       if (apiError) {
+        const err = apiError as any
         let errorMessage = "Código inválido ou expirado"
 
-        if (apiError.error?.message) {
-          errorMessage = apiError.error.message
-        } else if (apiError.message) {
-          errorMessage = apiError.message
+        if (err.error?.message) {
+          errorMessage = err.error.message
+        } else if (err.message) {
+          errorMessage = err.message
         }
 
         setError(errorMessage)
@@ -84,19 +85,20 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
         return
       }
 
-      if (data?.accessToken) {
-        localStorage.setItem("accessToken", data.accessToken)
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken)
+      const loginData = data as any
+      if (loginData?.accessToken) {
+        localStorage.setItem("accessToken", loginData.accessToken)
+        if (loginData.refreshToken) {
+          localStorage.setItem("refreshToken", loginData.refreshToken)
         }
 
-        const cookieValue = encodeURIComponent(data.accessToken)
+        const cookieValue = encodeURIComponent(loginData.accessToken)
         document.cookie = 'accessToken=' + cookieValue + '; path=/; max-age=86400; SameSite=Lax'
 
         setSuccess(true)
 
         setTimeout(() => {
-          const redirectPath = data.user?.role === "admin" ? "/admin" : "/integracoes"
+          const redirectPath = loginData.user?.role === "admin" ? "/admin" : "/integracoes"
           window.location.href = redirectPath
         }, 1500)
       }

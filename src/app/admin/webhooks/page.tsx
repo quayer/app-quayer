@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, Search, MoreVertical, Webhook, CheckCircle2, XCircle, Activity } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus, Search, MoreVertical, Webhook, CheckCircle2, XCircle, Activity, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,16 +23,64 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { api } from '@/igniter.client'
+import { listWebhooksAction } from '@/app/admin/actions'
+import { CreateWebhookDialog } from '@/app/integracoes/webhooks/create-webhook-dialog'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+// Helper para formatar datas com segurança
+function safeFormatDate(date: any): string {
+  if (!date) return 'Nunca'
+  try {
+    const d = new Date(date)
+    if (isNaN(d.getTime())) return 'Nunca'
+    return formatDistanceToNow(d, { addSuffix: true, locale: ptBR })
+  } catch {
+    return 'Nunca'
+  }
+}
+
+interface WebhookType {
+  id: string
+  url: string
+  events: string[]
+  isActive: boolean
+  organizationId?: string | null
+  organization?: { name: string } | null
+  instance?: { name: string } | null
+  lastExecutedAt?: Date | string | null
+  createdAt?: Date | string
+}
+
 export default function AdminWebhooksPage() {
   const [searchTerm, setSearchTerm] = useState('')
+  const [isMounted, setIsMounted] = useState(false)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const queryClient = useQueryClient()
 
-  // Fetch webhooks from API
-  const { data: webhooksData, isLoading, error, refetch } = api.webhooks.list.useQuery()
-  const webhooks = webhooksData?.data || []
+  // Hydration fix: esperar montagem no cliente
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
+  const handleCreateSuccess = () => {
+    setIsCreateDialogOpen(false)
+    queryClient.invalidateQueries({ queryKey: ['admin-webhooks'] })
+  }
+
+  // Fetch webhooks usando Server Action (como outras páginas admin)
+  const { data: webhooksData, isLoading, error, refetch } = useQuery({
+    queryKey: ['admin-webhooks'],
+    queryFn: async () => {
+      const result = await listWebhooksAction({ page: 1, limit: 100 })
+      if (result.error) {
+        throw new Error(result.error.message || 'Erro ao carregar webhooks')
+      }
+      return result.data
+    },
+    enabled: isMounted,
+  })
+  const webhooks = (webhooksData?.data || []) as WebhookType[]
 
   // Calculate statistics
   const stats = {
@@ -68,40 +117,53 @@ export default function AdminWebhooksPage() {
             Gerencie todos os webhooks configurados no sistema
           </p>
         </div>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Webhook
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Atualizar
+          </Button>
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Webhook
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Dialog de criação */}
+      <CreateWebhookDialog
+        isOpen={isCreateDialogOpen}
+        onClose={() => setIsCreateDialogOpen(false)}
+        onSuccess={handleCreateSuccess}
+      />
+
+      {/* Stats Cards - Compact */}
+      <div className="grid grid-cols-3 gap-3">
         <Card>
-          <CardHeader className="pb-3">
-            <CardDescription className="flex items-center gap-2">
-              <Webhook className="h-4 w-4" />
-              Total de Webhooks
-            </CardDescription>
-            <CardTitle className="text-4xl">{stats.total}</CardTitle>
-          </CardHeader>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+              <Webhook className="h-3.5 w-3.5" />
+              Total
+            </div>
+            <p className="text-2xl font-bold">{stats.total}</p>
+          </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
+        <Card className="border-green-500/20">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
               Ativos
-            </CardDescription>
-            <CardTitle className="text-4xl">{stats.active}</CardTitle>
-          </CardHeader>
+            </div>
+            <p className="text-2xl font-bold text-green-600">{stats.active}</p>
+          </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardDescription className="flex items-center gap-2">
-              <XCircle className="h-4 w-4 text-red-500" />
+        <Card className="border-red-500/20">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+              <XCircle className="h-3.5 w-3.5 text-red-500" />
               Inativos
-            </CardDescription>
-            <CardTitle className="text-4xl">{stats.inactive}</CardTitle>
-          </CardHeader>
+            </div>
+            <p className="text-2xl font-bold text-red-600">{stats.inactive}</p>
+          </CardContent>
         </Card>
       </div>
 
@@ -121,7 +183,7 @@ export default function AdminWebhooksPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {!isMounted || isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-16 w-full" />
@@ -136,7 +198,7 @@ export default function AdminWebhooksPage() {
               <p className="text-muted-foreground mb-4">
                 Configure o primeiro webhook para começar
               </p>
-              <Button>
+              <Button onClick={() => setIsCreateDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Criar Webhook
               </Button>
@@ -182,12 +244,7 @@ export default function AdminWebhooksPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {webhook.lastExecutedAt
-                        ? formatDistanceToNow(new Date(webhook.lastExecutedAt), {
-                            addSuffix: true,
-                            locale: ptBR,
-                          })
-                        : 'Nunca'}
+                      {safeFormatDate(webhook.lastExecutedAt)}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>

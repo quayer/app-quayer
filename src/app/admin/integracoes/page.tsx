@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, Search, MoreVertical, Plug, PlugZap, Activity, XCircle, CheckCircle2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { Plus, Search, MoreVertical, Plug, XCircle, CheckCircle2, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,47 +18,92 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ConnectionModal } from '@/components/whatsapp/connection-modal'
 import { CreateInstanceModal } from '@/components/whatsapp/create-instance-modal'
-import { ShareModal } from '@/components/whatsapp/share-modal'
+// FIXME: Temporarily disabled - ShareToken model not in Prisma schema
+// import { ShareModal } from '@/components/whatsapp/share-modal'
 import { EditInstanceModal } from '@/components/whatsapp/edit-instance-modal'
 import { DetailsModal } from '@/components/whatsapp/details-modal'
-import { useInstances } from '@/hooks/useInstance'
-import type { Instance } from '@prisma/client'
+import { AssignOrganizationModal } from './assign-organization-modal'
+import { useAllInstances } from '@/hooks/useAllInstances'
+import type { Connection as Instance } from '@prisma/client'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+
+// Helper para formatar datas com segurança
+function safeFormatDate(date: any): string | null {
+  if (!date) return null
+  try {
+    const d = new Date(date)
+    if (isNaN(d.getTime())) return null
+    return formatDistanceToNow(d, { addSuffix: true, locale: ptBR })
+  } catch {
+    return null
+  }
+}
 
 export default function IntegracoesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false)
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+  // FIXME: Temporarily disabled - ShareToken model not in Prisma schema
+  // const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
-  const [selectedInstance, setSelectedInstance] = useState<Instance | null>(null)
+  const [isAssignOrgModalOpen, setIsAssignOrgModalOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [selectedInstance, setSelectedInstance] = useState<any | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [isMounted, setIsMounted] = useState(false)
 
-  const { data: instancesData, isLoading, error, refetch } = useInstances()
-  const instances = instancesData?.data || []
+  // Hydration fix: esperar montagem no cliente
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
-  // Calcular estatísticas
+  const { data: allInstancesData, isLoading, error, refetch } = useAllInstances()
+  const instances = allInstancesData?.data || []
+  const meta = allInstancesData?.success ? (allInstancesData as any)?.meta : undefined
+
+  // Calcular estatísticas baseado nos dados do UAZapi
+  // UAZapi retorna status em lowercase: 'connected', 'disconnected'
+  const normalizeStatus = (status: string | undefined) => (status || '').toLowerCase()
+  const isConnectedStatus = (s: string) => s === 'connected' || s === 'open'
+  const isDisconnectedStatus = (s: string) => s === 'disconnected' || s === 'close'
+
   const stats = {
-    total: instances.length,
-    connected: instances.filter(i => i.status === 'connected').length,
-    disconnected: instances.filter(i => i.status === 'disconnected').length,
-    active: instances.filter(i => i.status === 'connected').length,
-    inactive: instances.filter(i => i.status !== 'connected').length,
+    total: meta?.totalUAZapi || instances.length,
+    connected: instances.filter((i: any) => isConnectedStatus(normalizeStatus(i.uazStatus || i.status))).length,
+    disconnected: instances.filter((i: any) => isDisconnectedStatus(normalizeStatus(i.uazStatus || i.status))).length,
+    active: instances.filter((i: any) => isConnectedStatus(normalizeStatus(i.uazStatus || i.status))).length,
+    inactive: instances.filter((i: any) => !isConnectedStatus(normalizeStatus(i.uazStatus || i.status))).length,
+    inQuayerDB: meta?.totalLocal || instances.filter((i: any) => i.inQuayerDB).length,
   }
 
-  // Filtrar instâncias
-  const filteredInstances = instances.filter(instance =>
-    instance.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    instance.phoneNumber?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  // Filtrar instâncias (buscar em nome local ou do UAZapi)
+  const filteredInstances = instances.filter((instance: any) => {
+    const name = instance.name || instance.uazInstanceName || ''
+    const phone = instance.phoneNumber || instance.uazPhoneNumber || ''
+    return name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      phone.toLowerCase().includes(searchTerm.toLowerCase())
+  })
 
   const handleConnect = (instance: Instance) => {
     setSelectedInstance(instance)
@@ -69,14 +115,68 @@ export default function IntegracoesPage() {
     setIsEditModalOpen(true)
   }
 
-  const handleShare = (instance: Instance) => {
-    setSelectedInstance(instance)
-    setIsShareModalOpen(true)
-  }
+  // FIXME: Temporarily disabled - ShareToken model not in Prisma schema
+  // const handleShare = (instance: Instance) => {
+  //   setSelectedInstance(instance)
+  //   setIsShareModalOpen(true)
+  // }
 
   const handleDetails = (instance: Instance) => {
     setSelectedInstance(instance)
     setIsDetailModalOpen(true)
+  }
+
+  const handleAssignOrganization = (instance: any) => {
+    setSelectedInstance(instance)
+    setIsAssignOrgModalOpen(true)
+  }
+
+  const handleDeleteClick = (instance: any) => {
+    setSelectedInstance(instance)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedInstance) return
+
+    setIsDeleting(true)
+    try {
+      // Se está no Quayer DB, deletar usando o controller (que também remove do UAZapi)
+      if (selectedInstance.inQuayerDB && selectedInstance.id) {
+        const response = await fetch(`/api/v1/instances/${selectedInstance.id}`, {
+          method: 'DELETE',
+        })
+        if (!response.ok) {
+          const data = await response.json()
+          throw new Error(data.message || data.error || 'Erro ao excluir instância')
+        }
+      } else {
+        // Se não está no banco local, deletar diretamente do UAZapi pelo token
+        const token = selectedInstance.uazToken || selectedInstance.token
+        if (token) {
+          const response = await fetch('/api/v1/instances/delete-by-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          })
+          if (!response.ok) {
+            const data = await response.json()
+            throw new Error(data.message || data.error || 'Erro ao excluir no UAZapi')
+          }
+        } else {
+          throw new Error('Instância não possui token para exclusão')
+        }
+      }
+
+      toast.success('Instância excluída com sucesso')
+      refetch()
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao excluir instância')
+    } finally {
+      setIsDeleting(false)
+      setIsDeleteDialogOpen(false)
+      setSelectedInstance(null)
+    }
   }
 
   if (error) {
@@ -102,17 +202,45 @@ export default function IntegracoesPage() {
               Gerencie todas as integrações do sistema
             </p>
           </div>
-          <Button onClick={() => setIsCreateModalOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Integração
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Atualizar
+            </Button>
+            <Link href="/admin/settings">
+              <Button variant="outline" size="sm">
+                <Plug className="h-4 w-4 mr-2" />
+                Configurações UAZapi
+              </Button>
+            </Link>
+            <Button onClick={() => setIsCreateModalOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Integração
+            </Button>
+          </div>
         </div>
 
+        {/* Alerta de erro UAZapi */}
+        {meta?.uazApiError && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>
+                <strong>Erro ao conectar com UAZapi:</strong> {meta.uazApiError}.
+                Mostrando apenas instâncias do banco local ({meta.totalLocal}).
+              </span>
+              <Button variant="outline" size="sm" onClick={() => refetch()} className="ml-4">
+                Tentar novamente
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardDescription>Total</CardDescription>
+              <CardDescription>Total (UAZapi)</CardDescription>
               <CardTitle className="text-4xl">{stats.total}</CardTitle>
             </CardHeader>
           </Card>
@@ -137,19 +265,10 @@ export default function IntegracoesPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardDescription className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-blue-500" />
-                Ativas
+                <Plug className="h-4 w-4 text-purple-500" />
+                No Quayer DB
               </CardDescription>
-              <CardTitle className="text-4xl">{stats.active}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardDescription className="flex items-center gap-2">
-                <PlugZap className="h-4 w-4 text-gray-500" />
-                Inativas
-              </CardDescription>
-              <CardTitle className="text-4xl">{stats.inactive}</CardTitle>
+              <CardTitle className="text-4xl">{stats.inQuayerDB}</CardTitle>
             </CardHeader>
           </Card>
         </div>
@@ -170,7 +289,7 @@ export default function IntegracoesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {!isMounted || isLoading ? (
               <div className="space-y-2">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-16 w-full" />
@@ -196,6 +315,7 @@ export default function IntegracoesPage() {
                   <TableRow>
                     <TableHead>Nome</TableHead>
                     <TableHead>Telefone</TableHead>
+                    <TableHead>Organização</TableHead>
                     <TableHead>Provedor</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Conexão</TableHead>
@@ -206,68 +326,114 @@ export default function IntegracoesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredInstances.map((instance) => (
-                    <TableRow key={instance.id}>
-                      <TableCell className="font-medium">{instance.name}</TableCell>
-                      <TableCell>{instance.phoneNumber || '-'}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <img
-                            src="/logo.svg"
-                            alt="WhatsApp"
-                            className="h-4 w-4"
-                          />
-                          <span className="text-sm">WhatsApp falecomigo.ai</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'}>
-                          {instance.status === 'connected' ? 'Ativo' : 'Inativo'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={instance.status === 'connected' ? 'default' : 'destructive'}>
-                          {instance.status === 'connected' ? 'Conectado' : 'Desconectado'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>0 agente(s)</TableCell>
-                      <TableCell>
-                        {formatDistanceToNow(new Date(instance.createdAt), {
-                          addSuffix: true,
-                          locale: ptBR,
-                        })}
-                      </TableCell>
-                      <TableCell>
-                        {formatDistanceToNow(new Date(instance.updatedAt), {
-                          addSuffix: true,
-                          locale: ptBR,
-                        })}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleDetails(instance)}>
-                              Ver Detalhes
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleEdit(instance)}>
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleConnect(instance)}>
-                              {instance.status === 'connected' ? 'Reconectar' : 'Conectar'}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleShare(instance)}>
-                              Compartilhar
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredInstances.map((instance: any) => {
+                    const displayName = instance.name || instance.uazInstanceName || 'Sem nome'
+                    const displayPhone = instance.phoneNumber || instance.uazPhoneNumber || '-'
+                    const rawStatus = instance.uazStatus || instance.status || 'unknown'
+                    const displayStatus = rawStatus.toLowerCase()
+                    const isConnected = isConnectedStatus(displayStatus)
+                    const rowKey = instance.id || instance.uazInstanceId
+
+                    return (
+                      <TableRow key={rowKey}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {displayName}
+                            {!instance.inQuayerDB && (
+                              <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-300">
+                                UAZapi only
+                              </Badge>
+                            )}
+                            {instance.uazApiOrphan && (
+                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
+                                Local only
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{displayPhone}</TableCell>
+                        <TableCell>
+                          {instance.organization ? (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline">
+                                {instance.organization.name}
+                              </Badge>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">Sem organização</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <img
+                              src="/logo.svg"
+                              alt="WhatsApp"
+                              className="h-4 w-4"
+                            />
+                            <span className="text-sm">
+                              {instance.inQuayerDB ? 'Quayer (UAZapi)' : 'UAZapi (não importado)'}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={isConnected ? 'default' : 'secondary'}>
+                            {isConnected ? 'Ativo' : 'Inativo'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={isConnected ? 'default' : 'destructive'}>
+                            {isConnected ? 'Conectado' : 'Desconectado'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>0 agente(s)</TableCell>
+                        <TableCell>
+                          {safeFormatDate(instance.createdAt) || <span className="text-muted-foreground text-sm">-</span>}
+                        </TableCell>
+                        <TableCell>
+                          {safeFormatDate(instance.updatedAt) || <span className="text-muted-foreground text-sm">-</span>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleDetails(instance)}>
+                                Ver Detalhes
+                              </DropdownMenuItem>
+                              {instance.inQuayerDB ? (
+                                <>
+                                  <DropdownMenuItem onClick={() => handleEdit(instance)}>
+                                    Editar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleConnect(instance)}>
+                                    {isConnected ? 'Reconectar' : 'Conectar'}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleAssignOrganization(instance)}>
+                                    {instance.organization ? 'Alterar Organização' : 'Atribuir Organização'}
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <DropdownMenuItem onClick={() => handleAssignOrganization(instance)}>
+                                  Importar para Quayer
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteClick(instance)}
+                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             )}
@@ -289,16 +455,22 @@ export default function IntegracoesPage() {
         instance={selectedInstance}
         isOpen={isConnectModalOpen}
         onClose={() => setIsConnectModalOpen(false)}
+        onSuccess={() => {
+          refetch()
+          setIsConnectModalOpen(false)
+          setSelectedInstance(null)
+        }}
       />
 
-      <ShareModal
+      {/* FIXME: Temporarily disabled - ShareToken model not in Prisma schema */}
+      {/* <ShareModal
         instance={selectedInstance}
         isOpen={isShareModalOpen}
         onClose={() => {
           setIsShareModalOpen(false)
           setSelectedInstance(null)
         }}
-      />
+      /> */}
 
       <EditInstanceModal
         instance={selectedInstance}
@@ -323,6 +495,67 @@ export default function IntegracoesPage() {
         }}
         onEdit={handleEdit}
       />
+
+      <AssignOrganizationModal
+        instance={selectedInstance}
+        isOpen={isAssignOrgModalOpen}
+        onClose={() => {
+          setIsAssignOrgModalOpen(false)
+          setSelectedInstance(null)
+        }}
+        onSuccess={() => {
+          refetch()
+          setIsAssignOrgModalOpen(false)
+          setSelectedInstance(null)
+        }}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-muted-foreground text-sm">
+                <p>
+                  Tem certeza que deseja excluir a instância{' '}
+                  <strong className="text-foreground">{selectedInstance?.name || selectedInstance?.uazInstanceName}</strong>?
+                </p>
+                <p className="mt-3">Esta ação irá:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  {(selectedInstance?.uazToken || selectedInstance?.token) && (
+                    <li>Excluir a instância do UAZapi</li>
+                  )}
+                  {selectedInstance?.inQuayerDB && (
+                    <li>Remover do banco de dados local</li>
+                  )}
+                </ul>
+                <p className="mt-3 text-red-600 font-medium">Esta ação não pode ser desfeita.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Excluindo...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Excluir
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

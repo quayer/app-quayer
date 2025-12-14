@@ -1,4 +1,10 @@
+/* Premium Font - Inter - MUST BE FIRST */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @import "tailwindcss";
+
+/* Dashboard Animations & Effects */
+@import "./dashboard-animations.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -116,8 +122,38 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Typography Scale */
+  h1 {
+    @apply text-4xl md:text-5xl font-bold tracking-tight;
+  }
+
+  h2 {
+    @apply text-3xl md:text-4xl font-semibold tracking-tight;
+  }
+
+  h3 {
+    @apply text-2xl md:text-3xl font-semibold;
+  }
+
+  h4 {
+    @apply text-xl md:text-2xl font-semibold;
+  }
+
+  h5 {
+    @apply text-lg md:text-xl font-medium;
+  }
+
+  h6 {
+    @apply text-base md:text-lg font-medium;
   }
 }
 
@@ -126,6 +162,7 @@
    ======================================== */
 
 @layer utilities {
+
   /* Focus Indicators - WCAG 2.1 Success Criterion 2.4.7 */
   *:focus-visible {
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
@@ -153,6 +190,7 @@
 
   /* Reduced Motion - WCAG 2.1 Success Criterion 2.3.3 */
   @media (prefers-reduced-motion: reduce) {
+
     *,
     *::before,
     *::after {
@@ -168,6 +206,7 @@
     * {
       @apply border-2;
     }
+
     button,
     a,
     [role="button"] {
@@ -224,14 +263,38 @@
 
   /* ✅ CORREÇÃO BRUTAL: Error Feedback Animations */
   @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-    20%, 40%, 60%, 80% { transform: translateX(4px); }
+
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+
+    10%,
+    30%,
+    50%,
+    70%,
+    90% {
+      transform: translateX(-4px);
+    }
+
+    20%,
+    40%,
+    60%,
+    80% {
+      transform: translateX(4px);
+    }
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .error-shake {
@@ -254,4 +317,250 @@
     @apply text-red-400 text-xs mt-1;
     animation: fadeIn 0.3s ease-out;
   }
+}
+
+/* ===========================================
+   Tiptap Editor Styles
+   =========================================== */
+
+/* Editor base styles */
+.ProseMirror {
+  outline: none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Prose styles for editor content */
+.ProseMirror {
+  > * + * {
+    margin-top: 0.75em;
+  }
+
+  h1 {
+    font-size: 2em;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+  }
+
+  h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+  }
+
+  h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+  }
+
+  ul, ol {
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+  }
+
+  ul {
+    list-style-type: disc;
+  }
+
+  ol {
+    list-style-type: decimal;
+  }
+
+  li {
+    margin: 0.25em 0;
+  }
+
+  blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 1em;
+    margin: 1em 0;
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+
+  code {
+    background-color: var(--muted);
+    border-radius: 0.25em;
+    padding: 0.15em 0.3em;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+
+  pre {
+    background-color: var(--muted);
+    border-radius: 0.5em;
+    padding: 0.75em 1em;
+    overflow-x: auto;
+
+    code {
+      background: none;
+      padding: 0;
+      font-size: 0.9em;
+    }
+  }
+
+  a {
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
+
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.5em 0;
+  }
+
+  strong {
+    font-weight: 600;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  u {
+    text-decoration: underline;
+  }
+
+  s {
+    text-decoration: line-through;
+  }
+}
+
+/* Text alignment */
+.ProseMirror [style*="text-align: left"] {
+  text-align: left;
+}
+
+.ProseMirror [style*="text-align: center"] {
+  text-align: center;
+}
+
+.ProseMirror [style*="text-align: right"] {
+  text-align: right;
+}
+
+.ProseMirror [style*="text-align: justify"] {
+  text-align: justify;
+}
+
+/* ========================================
+   Mobile Responsive Utilities
+   ======================================== */
+
+@layer utilities {
+  /* Safe area insets for modern mobile devices (notch, home indicator) */
+  .safe-area-inset-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Touch-friendly tap targets */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Prevent text selection on interactive elements */
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Smooth scrolling container */
+  .scroll-smooth-touch {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  /* Hide scrollbar but allow scrolling */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Mobile-first responsive text sizes */
+  .text-responsive-xs {
+    @apply text-xs sm:text-sm;
+  }
+
+  .text-responsive-sm {
+    @apply text-sm sm:text-base;
+  }
+
+  .text-responsive-base {
+    @apply text-base sm:text-lg;
+  }
+
+  .text-responsive-lg {
+    @apply text-lg sm:text-xl md:text-2xl;
+  }
+
+  /* Mobile bottom navigation safe area */
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /* Active state for touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    .touch-active:active {
+      @apply bg-accent/50 transition-colors;
+    }
+  }
+
+  /* Landscape orientation adjustments */
+  @media (orientation: landscape) and (max-height: 500px) {
+    .landscape-compact {
+      @apply py-2;
+    }
+  }
+}
+
+/* Mobile bottom sheet backdrop */
+.bottom-sheet-backdrop {
+  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+}
+
+/* Mobile bottom sheet container */
+.bottom-sheet {
+  @apply fixed bottom-0 left-0 right-0 bg-card rounded-t-2xl z-50;
+  @apply transform transition-transform duration-300 ease-out;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Mobile drawer handle */
+.drawer-handle {
+  @apply w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto my-3;
+}
+
+/* Reset Next.js portal positioning */
+nextjs-portal {
+  left: unset !important;
+  top: unset !important;
 }

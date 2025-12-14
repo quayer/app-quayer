@@ -1,402 +1,367 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { toast } from 'sonner'
-import { Loader2, Save, User, Bell, Shield, Palette, Clock } from 'lucide-react'
+import { Loader2, Save, User, Palette, AlertTriangle, CheckCircle2, Settings2, Key, Plug, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 import { useTheme } from 'next-themes'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { useMutation } from '@tanstack/react-query'
+import { api } from '@/igniter.client'
+import { PageContainer, PageHeader } from '@/components/layout/page-layout'
+import { ApiKeysSettings } from '@/components/admin-settings/ApiKeysSettings'
+
+// ============================================
+// TYPES
+// ============================================
+
+interface ProfileForm {
+  name: string
+  email: string
+}
+
+// ============================================
+// COMPONENT
+// ============================================
 
 export default function SettingsPage() {
-  const { user } = useAuth()
-  const { theme, setTheme } = useTheme()
-  const [isSaving, setIsSaving] = useState(false)
+  const { user, refreshUser } = useAuth()
+  const { theme, setTheme, resolvedTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
 
-  // Profile settings
-  const [profileData, setProfileData] = useState({
-    name: user?.name || '',
-    email: user?.email || '',
+  // Hydration fix: esperar montagem no cliente
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  // Profile form state
+  const [profileForm, setProfileForm] = useState<ProfileForm>({
+    name: '',
+    email: '',
+  })
+  const [emailChanged, setEmailChanged] = useState(false)
+
+  // ============================================
+  // MUTATIONS
+  // ============================================
+
+  // Update profile mutation
+  const updateProfileMutation = useMutation({
+    mutationFn: async (data: ProfileForm) => {
+      const response = await api.auth.updateProfile.mutate({
+        body: {
+          name: data.name,
+          email: data.email !== user?.email ? data.email : undefined,
+        }
+      })
+      return response
+    },
+    onSuccess: () => {
+      toast.success('Perfil atualizado com sucesso!')
+      refreshUser?.()
+      if (emailChanged) {
+        toast.info('Um código de verificação foi enviado para o novo email.')
+        setEmailChanged(false)
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao atualizar perfil')
+    },
   })
 
-  // Business hours settings
-  const [businessHours, setBusinessHours] = useState({
-    enabled: true,
-    startTime: '09:00',
-    endTime: '18:00',
-    timezone: 'America/Sao_Paulo',
-    workDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-  })
+  // ============================================
+  // EFFECTS
+  // ============================================
 
-  // Notification settings
-  const [notificationSettings, setNotificationSettings] = useState({
-    emailNotifications: true,
-    instanceAlerts: true,
-    webhookFailures: true,
-    weeklyReport: false,
-  })
+  // Sync profile form with user data
+  useEffect(() => {
+    if (user) {
+      setProfileForm({
+        name: user.name || '',
+        email: user.email || '',
+      })
+    }
+  }, [user])
 
-  // ✅ REMOVIDO: Security settings de senha (não faz sentido com OTP login)
-  // Login é feito via token OTP, não há senha para alterar
+  // Track email changes
+  useEffect(() => {
+    if (user && profileForm.email !== user.email) {
+      setEmailChanged(true)
+    } else {
+      setEmailChanged(false)
+    }
+  }, [profileForm.email, user])
+
+  // ============================================
+  // HANDLERS
+  // ============================================
 
   const handleSaveProfile = async () => {
-    setIsSaving(true)
-    try {
-      // TODO: Implement API call to update profile
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      toast.success('Perfil atualizado com sucesso!')
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao atualizar perfil')
-    } finally {
-      setIsSaving(false)
+    if (!profileForm.name.trim()) {
+      toast.error('Nome é obrigatório')
+      return
     }
+    if (profileForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileForm.email)) {
+      toast.error('Email inválido')
+      return
+    }
+    updateProfileMutation.mutate(profileForm)
   }
 
-  const handleSaveBusinessHours = async () => {
-    setIsSaving(true)
-    try {
-      // TODO: Implement API call to update business hours
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      toast.success('Horário de atendimento atualizado!')
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao atualizar horário')
-    } finally {
-      setIsSaving(false)
-    }
+  // ============================================
+  // LOADING STATE
+  // ============================================
+
+  if (!user) {
+    return (
+      <PageContainer maxWidth="4xl">
+        <PageHeader
+          title="Configurações"
+          description="Gerencie suas preferências e informações pessoais."
+          icon={<Settings2 className="h-6 w-6 text-primary" />}
+        />
+        <div className="grid gap-8">
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-64" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Skeleton className="h-10 w-full max-w-md" />
+              <Skeleton className="h-10 w-full max-w-md" />
+              <Skeleton className="h-10 w-32" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-64" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-10 w-64" />
+            </CardContent>
+          </Card>
+        </div>
+      </PageContainer>
+    )
   }
 
-  const handleSaveNotifications = async () => {
-    setIsSaving(true)
-    try {
-      // TODO: Implement API call to update notification settings
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      toast.success('Preferências de notificação atualizadas!')
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao atualizar preferências')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  // ✅ REMOVIDO: handleChangePassword (não necessário com OTP login)
+  // ============================================
+  // RENDER
+  // ============================================
 
   return (
-    <div className="flex flex-col gap-6 pt-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Configurações</h1>
-        <p className="text-muted-foreground mt-1">
-          Gerencie suas preferências e configurações da conta
-        </p>
-      </div>
+    <PageContainer maxWidth="4xl">
+      <PageHeader
+        title="Configurações"
+        description="Gerencie suas preferências e informações pessoais."
+        icon={<Settings2 className="h-6 w-6 text-primary" />}
+      />
 
-      {/* Profile Settings */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="h-5 w-5" />
-            <CardTitle>Perfil</CardTitle>
-          </div>
-          <CardDescription>
-            Atualize suas informações pessoais
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="name">Nome</Label>
-            <Input
-              id="name"
-              value={profileData.name}
-              onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
-              placeholder="Seu nome"
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="email">E-mail</Label>
-            <Input
-              id="email"
-              type="email"
-              value={profileData.email}
-              onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-              placeholder="seu@email.com"
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Função</Label>
-            <Input
-              value={user?.role || 'N/A'}
-              disabled
-              className="bg-muted"
-            />
-          </div>
-
-          <Button onClick={handleSaveProfile} disabled={isSaving}>
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" />
-            Salvar Perfil
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Appearance Settings */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Palette className="h-5 w-5" />
-            <CardTitle>Aparência</CardTitle>
-          </div>
-          <CardDescription>
-            Personalize a aparência da aplicação
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Tema</Label>
-              <p className="text-sm text-muted-foreground">
-                Escolha o tema da interface
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant={theme === 'light' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('light')}
-              >
-                Claro
-              </Button>
-              <Button
-                variant={theme === 'dark' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('dark')}
-              >
-                Escuro
-              </Button>
-              <Button
-                variant={theme === 'system' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTheme('system')}
-              >
-                Sistema
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Business Hours Settings */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Clock className="h-5 w-5" />
-            <CardTitle>Horário de Atendimento</CardTitle>
-          </div>
-          <CardDescription>
-            Defina o horário de funcionamento para atendimento automático
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Habilitar Horário de Atendimento</Label>
-              <p className="text-sm text-muted-foreground">
-                Controle automático baseado em horário de trabalho
-              </p>
-            </div>
-            <Switch
-              checked={businessHours.enabled}
-              onCheckedChange={(checked) =>
-                setBusinessHours({ ...businessHours, enabled: checked })
-              }
-            />
-          </div>
-
-          {businessHours.enabled && (
-            <>
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="start-time">Horário de Início</Label>
-                  <Input
-                    id="start-time"
-                    type="time"
-                    value={businessHours.startTime}
-                    onChange={(e) => setBusinessHours({ ...businessHours, startTime: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="end-time">Horário de Término</Label>
-                  <Input
-                    id="end-time"
-                    type="time"
-                    value={businessHours.endTime}
-                    onChange={(e) => setBusinessHours({ ...businessHours, endTime: e.target.value })}
-                  />
-                </div>
+      <div className="grid gap-8">
+        {/* Profile Settings */}
+        <Card className="border-muted/60 shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <User className="h-5 w-5 text-primary" />
               </div>
+              <CardTitle>Perfil</CardTitle>
+            </div>
+            <CardDescription>
+              Atualize suas informações de identificação e contato.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-3">
+              <Label htmlFor="name">Nome Completo</Label>
+              <Input
+                id="name"
+                value={profileForm.name}
+                onChange={(e) => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Seu nome"
+                className="max-w-md"
+              />
+            </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="timezone">Fuso Horário</Label>
-                <Select
-                  value={businessHours.timezone}
-                  onValueChange={(value) => setBusinessHours({ ...businessHours, timezone: value })}
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between max-w-md">
+                <Label htmlFor="email">E-mail</Label>
+                {user?.emailVerified ? (
+                  <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Verificado
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-yellow-600 border-yellow-200 bg-yellow-50">
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Pendente
+                  </Badge>
+                )}
+              </div>
+              <Input
+                id="email"
+                type="email"
+                value={profileForm.email}
+                onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="seu@email.com"
+                className="max-w-md"
+              />
+              {emailChanged && (
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200 max-w-md">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertTitle className="text-yellow-800">Atenção</AlertTitle>
+                  <AlertDescription className="text-yellow-700">
+                    Ao alterar seu email, você precisará verificar o novo endereço.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+
+            <div className="grid gap-3">
+              <Label>Função no Sistema</Label>
+              <Input
+                value={user?.role === 'admin' ? 'Administrador do Sistema' : 'Usuário'}
+                disabled
+                className="bg-muted/50 max-w-md"
+              />
+            </div>
+
+            <div className="pt-2">
+              <Button
+                onClick={handleSaveProfile}
+                disabled={updateProfileMutation.isPending}
+                className="w-full sm:w-auto"
+              >
+                {updateProfileMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Salvar Alterações
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Appearance Settings */}
+        <Card className="border-muted/60 shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Palette className="h-5 w-5 text-primary" />
+              </div>
+              <CardTitle>Aparência</CardTitle>
+            </div>
+            <CardDescription>
+              Personalize como você visualiza a aplicação.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <Label className="text-base">Tema da Interface</Label>
+                <p className="text-sm text-muted-foreground">
+                  Alterne entre modo claro, escuro ou automático.
+                </p>
+              </div>
+              {/* ✅ CORREÇÃO: Usar mounted para evitar hydration mismatch */}
+              <div className="flex gap-2 bg-muted/50 p-1 rounded-lg">
+                <Button
+                  variant={mounted && theme === 'light' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setTheme('light')}
+                  className="h-8"
+                  disabled={!mounted}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="America/Sao_Paulo">São Paulo (GMT-3)</SelectItem>
-                    <SelectItem value="America/Manaus">Manaus (GMT-4)</SelectItem>
-                    <SelectItem value="America/Rio_Branco">Rio Branco (GMT-5)</SelectItem>
-                  </SelectContent>
-                </Select>
+                  Claro
+                </Button>
+                <Button
+                  variant={mounted && theme === 'dark' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setTheme('dark')}
+                  className="h-8"
+                  disabled={!mounted}
+                >
+                  Escuro
+                </Button>
+                <Button
+                  variant={mounted && theme === 'system' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setTheme('system')}
+                  className="h-8"
+                  disabled={!mounted}
+                >
+                  Sistema
+                </Button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
 
-              <div className="grid gap-2">
-                <Label>Dias de Funcionamento</Label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'monday', label: 'Seg' },
-                    { value: 'tuesday', label: 'Ter' },
-                    { value: 'wednesday', label: 'Qua' },
-                    { value: 'thursday', label: 'Qui' },
-                    { value: 'friday', label: 'Sex' },
-                    { value: 'saturday', label: 'Sáb' },
-                    { value: 'sunday', label: 'Dom' },
-                  ].map((day) => (
-                    <Button
-                      key={day.value}
-                      variant={businessHours.workDays.includes(day.value) ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        const newWorkDays = businessHours.workDays.includes(day.value)
-                          ? businessHours.workDays.filter(d => d !== day.value)
-                          : [...businessHours.workDays, day.value]
-                        setBusinessHours({ ...businessHours, workDays: newWorkDays })
-                      }}
-                    >
-                      {day.label}
-                    </Button>
-                  ))}
+        {/* Integrations/Providers Link */}
+        <Card className="border-muted/60 shadow-sm hover:shadow-md transition-shadow">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-primary/10 rounded-lg">
+                  <Plug className="h-5 w-5 text-primary" />
                 </div>
+                <CardTitle>Provedores & Integrações</CardTitle>
               </div>
-            </>
-          )}
+              <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+                2 ativos
+              </Badge>
+            </div>
+            <CardDescription>
+              Configure provedores de IA, voz, transcrição e infraestrutura para sua organização.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">
+                  OpenAI, Anthropic, ElevenLabs, Deepgram, Supabase, Redis e mais.
+                </p>
+              </div>
+              <Link href="/integracoes/settings/organization/integrations">
+                <Button variant="outline" className="gap-2">
+                  Gerenciar
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
 
-          <Button onClick={handleSaveBusinessHours} disabled={isSaving}>
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" />
-            Salvar Horário
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Notification Settings */}
-      <Card>
-        <CardHeader>
+        {/* API Keys Settings */}
+        <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Bell className="h-5 w-5" />
-            <CardTitle>Notificações</CardTitle>
-          </div>
-          <CardDescription>
-            Configure como você deseja receber notificações
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Notificações por E-mail</Label>
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Key className="h-5 w-5 text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">API Keys</h2>
               <p className="text-sm text-muted-foreground">
-                Receba atualizações por e-mail
+                Gerencie chaves de API para acesso programático à plataforma.
               </p>
             </div>
-            <Switch
-              checked={notificationSettings.emailNotifications}
-              onCheckedChange={(checked) =>
-                setNotificationSettings({ ...notificationSettings, emailNotifications: checked })
-              }
-            />
           </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Alertas de Instância</Label>
-              <p className="text-sm text-muted-foreground">
-                Seja notificado quando instâncias desconectarem
-              </p>
-            </div>
-            <Switch
-              checked={notificationSettings.instanceAlerts}
-              onCheckedChange={(checked) =>
-                setNotificationSettings({ ...notificationSettings, instanceAlerts: checked })
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Falhas de Webhook</Label>
-              <p className="text-sm text-muted-foreground">
-                Receba alertas quando webhooks falharem
-              </p>
-            </div>
-            <Switch
-              checked={notificationSettings.webhookFailures}
-              onCheckedChange={(checked) =>
-                setNotificationSettings({ ...notificationSettings, webhookFailures: checked })
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Relatório Semanal</Label>
-              <p className="text-sm text-muted-foreground">
-                Receba um resumo semanal de atividades
-              </p>
-            </div>
-            <Switch
-              checked={notificationSettings.weeklyReport}
-              onCheckedChange={(checked) =>
-                setNotificationSettings({ ...notificationSettings, weeklyReport: checked })
-              }
-            />
-          </div>
-
-          <Button onClick={handleSaveNotifications} disabled={isSaving}>
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" />
-            Salvar Preferências
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* ✅ REMOVIDO: Security Settings (senha)
-          - Login é feito via token OTP (sem senha)
-          - Não faz sentido ter formulário de "alterar senha"
-          - Segurança é gerenciada via tokens temporários no email
-      */}
-    </div>
+          <ApiKeysSettings />
+        </div>
+      </div>
+    </PageContainer>
   )
 }

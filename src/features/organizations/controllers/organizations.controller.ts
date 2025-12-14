@@ -17,6 +17,7 @@ import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
 import { z } from 'zod';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const db = new PrismaClient();
 
@@ -66,33 +67,68 @@ export const organizationsController = igniter.controller({
           }
         }
 
-        const existing = await organizationsRepository.findByDocument(request.body.document);
+        const { adminEmail, adminName, ...orgData } = request.body;
+
+        const existing = await organizationsRepository.findByDocument(orgData.document);
         if (existing) {
           return response.badRequest('Já existe uma organização com este CPF/CNPJ');
         }
 
-        const organization = await organizationsRepository.create(request.body);
+        // 1. Criar Organização
+        const organization = await organizationsRepository.create(orgData);
 
-        // ✅ CORREÇÃO BRUTAL: SEMPRE criar relação User-Organization (inclusive para admin)
-        // Durante onboarding, admin também precisa ter uma organização vinculada
+        // 2. Vincular Usuário (Criador ou Novo Admin)
+        let targetUserId = userId;
+
+        // Se foi passado email de admin específico (caso de criação por Super Admin)
+        if (isAdmin && adminEmail) {
+          // Verificar se usuário já existe
+          let adminUser = await db.user.findUnique({
+            where: { email: adminEmail },
+          });
+
+          // Se não existe, criar usuário
+          if (!adminUser) {
+            // Gerar senha temporária segura (8 caracteres alfanuméricos)
+            const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-4).toUpperCase();
+            const tempPasswordHash = await bcrypt.hash(tempPassword, 10);
+
+            adminUser = await db.user.create({
+              data: {
+                email: adminEmail,
+                name: adminName || 'Admin',
+                password: tempPasswordHash,
+                role: 'user', // Role no sistema (não na org)
+                onboardingCompleted: true, // Já entra aprovado
+              },
+            });
+
+            // TODO: Enviar email com senha temporária para o novo admin
+            console.log(`[Organizations] Novo usuário criado: ${adminEmail} com senha temporária: ${tempPassword}`);
+          }
+
+          targetUserId = adminUser.id;
+        }
+
+        // 3. Criar vínculo User-Organization
         await db.userOrganization.create({
           data: {
-            userId,
+            userId: targetUserId,
             organizationId: organization.id,
-            role: 'master', // Criador da org é master
+            role: 'master', // Criador/Admin é master
             isActive: true,
           },
         });
 
-        // ✅ CORREÇÃO BRUTAL: SEMPRE atualizar currentOrgId do usuário
+        // 4. Atualizar currentOrgId do usuário alvo
         await db.user.update({
-          where: { id: userId },
+          where: { id: targetUserId },
           data: {
             currentOrgId: organization.id,
           },
         });
 
-        return response.created({ message: 'Organização criada', organization });
+        return response.created({ message: 'Organização criada com sucesso', organization });
       },
     }),
 
@@ -117,17 +153,18 @@ export const organizationsController = igniter.controller({
     get: igniter.query({
       path: '/:id' as const,
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
+        const userId = user.id;
+        const userRole = user.role as UserRole;
         const { id } = request.params as { id: string };
 
-        const isAdmin = isSystemAdmin(userRole as UserRole);
+        const isAdmin = isSystemAdmin(userRole);
         const isMember = await organizationsRepository.isMember(id, userId);
 
         if (!isAdmin && !isMember) {
@@ -156,7 +193,7 @@ export const organizationsController = igniter.controller({
         }
 
         const organization = await organizationsRepository.findById(user.currentOrgId, true);
-        
+
         if (!organization) {
           return response.notFound('Organização não encontrada');
         }
@@ -168,20 +205,21 @@ export const organizationsController = igniter.controller({
     // UPDATE
     update: igniter.mutation({
       path: '/:id',
-      params: z.object({ id: z.string() }),
+      method: 'PUT',
       body: updateOrganizationSchema,
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
+        const userId = user.id;
+        const userRole = user.role as UserRole;
         const { id } = request.params as { id: string };
 
-        const isAdmin = isSystemAdmin(userRole as UserRole);
+        const isAdmin = isSystemAdmin(userRole);
         const orgRole = await organizationsRepository.getUserRole(id, userId);
 
         if (!isAdmin && orgRole !== 'master') {
@@ -201,13 +239,12 @@ export const organizationsController = igniter.controller({
     // DELETE (Admin only, soft delete)
     delete: igniter.mutation({
       path: '/:id',
-      params: z.object({ id: z.string() }),
+      method: 'DELETE',
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole || !isSystemAdmin(userRole as UserRole)) {
+        if (!user || !isSystemAdmin(user.role as UserRole)) {
           return response.forbidden('Apenas administradores podem deletar organizações');
         }
 
@@ -227,17 +264,18 @@ export const organizationsController = igniter.controller({
     listMembers: igniter.query({
       path: '/:id/members',
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
+        const userId = user.id;
+        const userRole = user.role as UserRole;
         const { id } = request.params as { id: string };
 
-        const isAdmin = isSystemAdmin(userRole as UserRole);
+        const isAdmin = isSystemAdmin(userRole);
         const isMember = await organizationsRepository.isMember(id, userId);
 
         if (!isAdmin && !isMember) {
@@ -252,20 +290,22 @@ export const organizationsController = igniter.controller({
     // ADD MEMBER
     addMember: igniter.mutation({
       path: '/:id/members',
+      method: 'POST',
       body: addMemberSchema,
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response }) => {
-        const requestUserId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!requestUserId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
+        const requestUserId = user.id;
+        const userRole = user.role as UserRole;
         const { id } = request.params as { id: string };
         const { userId, role } = request.body;
 
-        const isAdmin = isSystemAdmin(userRole as UserRole);
+        const isAdmin = isSystemAdmin(userRole);
         const orgRole = await organizationsRepository.getUserRole(id, requestUserId);
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
@@ -296,10 +336,6 @@ export const organizationsController = igniter.controller({
     updateMember: igniter.mutation({
       path: '/:id/members/:userId',
       method: 'PATCH',
-      params: z.object({
-        id: z.string().uuid(),
-        userId: z.string().uuid(),
-      }),
       body: updateMemberSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -381,10 +417,6 @@ export const organizationsController = igniter.controller({
     removeMember: igniter.mutation({
       path: '/:id/members/:userId',
       method: 'DELETE',
-      params: z.object({
-        id: z.string().uuid(),
-        userId: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const requestUserId = context.auth?.session?.user?.id;

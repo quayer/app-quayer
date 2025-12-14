@@ -7,10 +7,14 @@ async function cleanDatabase() {
 
   try {
     // Ordem correta devido às foreign keys
-    await prisma.session.deleteMany()
+    await prisma.message.deleteMany()
+    await prisma.chatSession.deleteMany()
     await prisma.invitation.deleteMany()
-    await prisma.shareToken.deleteMany()
-    await prisma.instance.deleteMany()
+    await prisma.connection.deleteMany()
+    await prisma.userOrganization.deleteMany()
+    await prisma.organization.deleteMany()
+    await prisma.refreshToken.deleteMany()
+    await prisma.tempUser.deleteMany()
     await prisma.user.deleteMany()
 
     console.log('✅ Banco de dados limpo com sucesso!')

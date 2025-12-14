@@ -9,11 +9,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { 
-  CheckCircle, 
-  ArrowLeft, 
-  ArrowRight, 
-  Smartphone, 
+import {
+  CheckCircle,
+  ArrowLeft,
+  ArrowRight,
+  Smartphone,
   MessageSquare,
   Webhook,
   Clock,
@@ -26,7 +26,9 @@ import {
   Globe,
   Shield,
   Info,
-  Settings
+  Settings,
+  Cloud,
+  Zap
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -34,6 +36,7 @@ interface CreateIntegrationModalProps {
   open: boolean;
   onClose: () => void;
   onCreate: (data: CreateIntegrationData) => Promise<{ success: boolean; instanceId: string } | void>;
+  onSelectQRCode?: (instanceId: string, instanceName: string) => void;
   isAdmin?: boolean;
 }
 
@@ -42,46 +45,50 @@ interface CreateIntegrationData {
   description?: string;
   webhookUrl?: string;
   events: string[];
+  provider: 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API';
+  // Cloud API fields
+  cloudApiAccessToken?: string;
+  cloudApiPhoneNumberId?: string;
+  cloudApiWabaId?: string;
 }
 
-type Step = 'channel' | 'config' | 'connect' | 'share' | 'success';
+type Step = 'channel' | 'config' | 'method' | 'connect' | 'share' | 'success';
+type ConnectionMethod = 'qrcode' | 'share' | null;
 
-export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = false }: CreateIntegrationModalProps) {
+export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode, isAdmin = false }: CreateIntegrationModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>('channel');
   const [loading, setLoading] = useState(false);
   const [shareLink, setShareLink] = useState<string>('');
   const [instanceId, setInstanceId] = useState<string>('');
+  const [connectionMethod, setConnectionMethod] = useState<ConnectionMethod>(null);
   const [formData, setFormData] = useState<CreateIntegrationData>({
     name: '',
     description: '',
     webhookUrl: '',
-    events: ['messages', 'connection']
+    events: ['messages', 'connection'],
+    provider: 'WHATSAPP_WEB',
+    cloudApiAccessToken: '',
+    cloudApiPhoneNumberId: '',
+    cloudApiWabaId: ''
   });
 
   const steps = [
-    { id: 'channel', title: 'Escolher Canal', icon: Smartphone },
+    { id: 'channel', title: 'Canal', icon: Smartphone },
     { id: 'config', title: 'Configurar', icon: Settings },
-    { id: 'connect', title: 'Conectar', icon: Wifi },
-    { id: 'share', title: 'Compartilhar', icon: Share2 },
+    { id: 'method', title: 'Método', icon: Wifi },
     { id: 'success', title: 'Concluído', icon: CheckCircle }
   ];
 
   const handleNext = () => {
-    const stepOrder: Step[] = ['channel', 'config', 'connect', 'share', 'success'];
+    const stepOrder: Step[] = ['channel', 'config', 'method', 'success'];
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex < stepOrder.length - 1) {
-      // Se estamos indo de share para success e não temos shareLink, gerar um novo
-      if (currentStep === 'share' && !shareLink) {
-        const token = generateToken();
-        const baseUrl = window.location.origin;
-        setShareLink(`${baseUrl}/integracoes/compartilhar/${token}`);
-      }
       setCurrentStep(stepOrder[currentIndex + 1]);
     }
   };
 
   const handlePrev = () => {
-    const stepOrder: Step[] = ['channel', 'config', 'connect', 'share', 'success'];
+    const stepOrder: Step[] = ['channel', 'config', 'method', 'success'];
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(stepOrder[currentIndex - 1]);
@@ -93,25 +100,74 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
     try {
       const result = await onCreate(formData);
 
-      // Usar o ID da instância retornado ou gerar token aleatório
-      const instanceIdOrToken = result?.instanceId || generateToken();
-      setInstanceId(instanceIdOrToken);
+      if (!result?.instanceId) {
+        throw new Error('ID da instancia nao retornado');
+      }
 
-      const baseUrl = window.location.origin;
-      setShareLink(`${baseUrl}/integracoes/compartilhar/${instanceIdOrToken}`);
+      setInstanceId(result.instanceId);
 
-      // Avançar para a próxima etapa
-      setCurrentStep('share');
-    } catch (error) {
-      console.error('Erro ao criar integração:', error);
-      toast.error('Erro ao criar integração. Tente novamente.');
+      // Se for Cloud API, já está conectado (não tem QR code), ir para sucesso
+      if (formData.provider === 'WHATSAPP_CLOUD_API') {
+        setCurrentStep('success');
+      } else {
+        // UAZAPI precisa escolher método de conexão (QR Code ou Link)
+        setCurrentStep('method');
+      }
+    } catch (error: any) {
+      console.error('Erro ao criar integração:', JSON.stringify(error, null, 2));
+      const errorMessage = error?.response?.data?.message || error?.message || 'Erro ao criar integração.';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const generateToken = () => {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  const handleSelectQRCode = () => {
+    setConnectionMethod('qrcode');
+    // Notifica a página para abrir o QRCodeModal
+    if (onSelectQRCode && instanceId) {
+      onSelectQRCode(instanceId, formData.name);
+    }
+    // Fecha o modal
+    handleClose();
+  };
+
+  const handleSelectShareLink = async () => {
+    if (!instanceId) {
+      toast.error('ID da instância não encontrado');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Chamar API para gerar token de compartilhamento
+      const shareResponse = await fetch(`/api/v1/instances/${instanceId}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+
+      if (!shareResponse.ok) {
+        const errorData = await shareResponse.json().catch(() => ({}));
+        throw new Error(errorData.message || errorData.error || 'Erro ao gerar link de compartilhamento');
+      }
+
+      const shareResult = await shareResponse.json();
+      const shareUrl = shareResult.data?.shareUrl || shareResult.shareUrl;
+
+      if (!shareUrl) {
+        throw new Error('URL de compartilhamento nao foi gerada');
+      }
+
+      setShareLink(shareUrl);
+      setConnectionMethod('share');
+      setCurrentStep('share');
+    } catch (error) {
+      console.error('Erro ao gerar link:', error);
+      toast.error(error instanceof Error ? error.message : 'Erro ao gerar link. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCopyLink = async () => {
@@ -145,10 +201,15 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
       name: '',
       description: '',
       webhookUrl: '',
-      events: ['messages', 'connection']
+      events: ['messages', 'connection'],
+      provider: 'WHATSAPP_WEB',
+      cloudApiAccessToken: '',
+      cloudApiPhoneNumberId: '',
+      cloudApiWabaId: ''
     });
     setShareLink('');
     setInstanceId('');
+    setConnectionMethod(null);
     onClose();
   };
 
@@ -159,8 +220,8 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
-            <Smartphone className="h-6 w-6 text-primary" />
-            <span>Criar Nova Integração WhatsApp Business</span>
+            <Smartphone className="h-6 w-6 text-green-600" />
+            <span>Conectar Novo WhatsApp</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -170,14 +231,14 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
             const StepIcon = step.icon;
             const isActive = index === currentStepIndex;
             const isCompleted = index < currentStepIndex;
-            
+
             return (
               <div key={step.id} className="flex items-center">
                 <div className={`
                   flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors
-                  ${isActive ? 'border-primary bg-primary text-primary-foreground' : 
-                    isCompleted ? 'border-green-500 bg-green-500 text-white' : 
-                    'border-muted bg-background text-muted-foreground'}
+                  ${isActive ? 'border-primary bg-primary text-primary-foreground' :
+                    isCompleted ? 'border-green-500 bg-green-500 text-white' :
+                      'border-muted bg-background text-muted-foreground'}
                 `}>
                   <StepIcon className="h-4 w-4" />
                 </div>
@@ -203,57 +264,97 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
                 </p>
               </div>
 
-              <Card className="border-2 border-primary bg-primary/5">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-4">
-                    <div className="p-3 bg-primary/10 rounded-lg">
-                      <Smartphone className="h-8 w-8 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-lg">WhatsApp Business</h4>
-                      <p className="text-muted-foreground mb-3">
-                        Conecte sua conta WhatsApp Business para começar
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary">
-                          <MessageSquare className="h-3 w-3 mr-1" />
-                          Envio de mensagens
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Opção WhatsApp Web (UAZAPI) */}
+                <Card
+                  className={`cursor-pointer border-2 transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${formData.provider === 'WHATSAPP_WEB'
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-muted hover:border-primary/50'
+                    }`}
+                  onClick={() => setFormData(prev => ({ ...prev, provider: 'WHATSAPP_WEB' }))}
+                  role="radio"
+                  aria-checked={formData.provider === 'WHATSAPP_WEB'}
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && setFormData(prev => ({ ...prev, provider: 'WHATSAPP_WEB' }))}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex flex-col items-center text-center space-y-4">
+                      <div className={`p-4 rounded-full transition-colors ${formData.provider === 'WHATSAPP_WEB' ? 'bg-primary/20' : 'bg-muted'}`}>
+                        <Smartphone className={`h-8 w-8 ${formData.provider === 'WHATSAPP_WEB' ? 'text-primary' : 'text-muted-foreground'}`} />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-lg text-foreground">Conectar Novo WhatsApp</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Conecte escaneando o QR Code. Ideal para números já existentes.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Badge variant="outline" className="border-primary/20 text-foreground">
+                          QR Code
                         </Badge>
-                        <Badge variant="secondary">
-                          <Webhook className="h-3 w-3 mr-1" />
-                          Recebimento via webhook
-                        </Badge>
-                        <Badge variant="secondary">
-                          📎 Suporte a mídia
-                        </Badge>
-                        <Badge variant="secondary">
-                          ✅ Status de entrega
+                        <Badge variant="outline" className="border-primary/20 text-foreground">
+                          Rápido
                         </Badge>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {/* Opção WhatsApp Cloud API */}
+                <Card
+                  className={`cursor-pointer border-2 transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${formData.provider === 'WHATSAPP_CLOUD_API'
+                    ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-900/20 shadow-sm'
+                    : 'border-muted hover:border-blue-600/50'
+                    }`}
+                  onClick={() => setFormData(prev => ({ ...prev, provider: 'WHATSAPP_CLOUD_API' }))}
+                  role="radio"
+                  aria-checked={formData.provider === 'WHATSAPP_CLOUD_API'}
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && setFormData(prev => ({ ...prev, provider: 'WHATSAPP_CLOUD_API' }))}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex flex-col items-center text-center space-y-4">
+                      <div className={`p-4 rounded-full transition-colors ${formData.provider === 'WHATSAPP_CLOUD_API' ? 'bg-blue-100 dark:bg-blue-900' : 'bg-muted'}`}>
+                        <Cloud className={`h-8 w-8 ${formData.provider === 'WHATSAPP_CLOUD_API' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-lg text-foreground">WhatsApp Cloud API</h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          API Oficial da Meta. Alta estabilidade e escala.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Badge variant="outline" className="border-blue-200 text-foreground">
+                          Oficial
+                        </Badge>
+                        <Badge variant="outline" className="border-blue-200 text-foreground">
+                          Estável
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           )}
 
           {currentStep === 'config' && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold mb-2">Configurar Instância</h3>
+                <h3 className="text-lg font-semibold mb-2">Como você quer chamar este WhatsApp?</h3>
                 <p className="text-muted-foreground">
-                  Defina as configurações básicas da sua integração
+                  Dê um nome para identificar facilmente este número
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="name">Nome da Instância *</Label>
+                  <Label htmlFor="name">Nome do WhatsApp *</Label>
                   <Input
                     id="name"
                     value={formData.name}
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="Ex: Loja ABC - Vendas"
+                    placeholder="Ex: Vendas, Suporte, Atendimento..."
                     className="mt-1"
                   />
                 </div>
@@ -292,80 +393,137 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
                   </div>
                 )}
 
-                {!isAdmin && (
-                  <Alert>
-                    <Info className="h-4 w-4" />
-                    <AlertDescription>
-                      <strong>Configuração de webhook:</strong> Disponível apenas para administradores. 
-                      Entre em contato com seu administrador para configurar webhooks.
-                    </AlertDescription>
-                  </Alert>
+
+                {formData.provider === 'WHATSAPP_CLOUD_API' && (
+                  <div className="space-y-4 pt-4 border-t">
+                    <h4 className="font-medium text-sm">Credenciais da Meta (Cloud API)</h4>
+
+                    <div>
+                      <Label htmlFor="cloudApiAccessToken">Access Token *</Label>
+                      <Input
+                        id="cloudApiAccessToken"
+                        type="password"
+                        value={formData.cloudApiAccessToken}
+                        onChange={(e) => setFormData(prev => ({ ...prev, cloudApiAccessToken: e.target.value }))}
+                        placeholder="EAAB..."
+                        className="mt-1 font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Token de usuário do sistema ou temporário.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="cloudApiPhoneNumberId">Phone Number ID *</Label>
+                        <Input
+                          id="cloudApiPhoneNumberId"
+                          value={formData.cloudApiPhoneNumberId}
+                          onChange={(e) => setFormData(prev => ({ ...prev, cloudApiPhoneNumberId: e.target.value }))}
+                          placeholder="123456789..."
+                          className="mt-1 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="cloudApiWabaId">WABA ID *</Label>
+                        <Input
+                          id="cloudApiWabaId"
+                          value={formData.cloudApiWabaId}
+                          onChange={(e) => setFormData(prev => ({ ...prev, cloudApiWabaId: e.target.value }))}
+                          placeholder="987654321..."
+                          className="mt-1 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <Alert className="bg-blue-50 border-blue-200">
+                      <Info className="h-4 w-4 text-blue-600" />
+                      <AlertDescription className="text-blue-700 text-xs">
+                        Certifique-se de que o token tem permissões `whatsapp_business_messaging` e `whatsapp_business_management`.
+                      </AlertDescription>
+                    </Alert>
+                  </div>
                 )}
+
               </div>
             </div>
           )}
 
-          {currentStep === 'connect' && (
+          {currentStep === 'method' && (
             <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold mb-2">Conectar WhatsApp</h3>
+              <div className="text-center">
+                <h3 className="text-lg font-semibold mb-2">Como deseja conectar?</h3>
                 <p className="text-muted-foreground">
-                  Escaneie o QR code para vincular sua conta WhatsApp
+                  Instância <strong>{formData.name}</strong> criada com sucesso! Escolha como conectar o WhatsApp.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="aspect-square bg-muted rounded-lg flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-32 h-32 bg-black rounded-lg mx-auto mb-4 flex items-center justify-center">
-                        <span className="text-white text-sm">QR Code</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        <Clock className="h-4 w-4 inline mr-1" />
-                        Expira em: 04:32
-                      </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Opção QR Code */}
+                <Card
+                  className="cursor-pointer hover:border-primary transition-colors group"
+                  onClick={handleSelectQRCode}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSelectQRCode()}
+                  aria-label="Conectar via QR Code"
+                >
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-primary/20 transition-colors">
+                      <Smartphone className="h-8 w-8 text-primary" aria-hidden="true" />
                     </div>
-                  </div>
-                  <Button variant="outline" className="w-full">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Atualizar QR Code
-                  </Button>
-                </div>
-
-                <div className="space-y-4">
-                  <h4 className="font-medium">Instruções:</h4>
-                  <ol className="space-y-3 text-sm">
-                    <li className="flex items-start space-x-2">
-                      <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">1</span>
-                      <span>Abra WhatsApp no seu celular</span>
-                    </li>
-                    <li className="flex items-start space-x-2">
-                      <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">2</span>
-                      <span>Vá em <strong>Configurações</strong></span>
-                    </li>
-                    <li className="flex items-start space-x-2">
-                      <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">3</span>
-                      <span>Selecione <strong>Aparelhos conectados</strong></span>
-                    </li>
-                    <li className="flex items-start space-x-2">
-                      <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">4</span>
-                      <span>Toque em <strong>Vincular dispositivo</strong></span>
-                    </li>
-                    <li className="flex items-start space-x-2">
-                      <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">5</span>
-                      <span>Escaneie o QR code na tela</span>
-                    </li>
-                  </ol>
-
-                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <p className="text-sm text-yellow-800">
-                      <Clock className="h-4 w-4 inline mr-1" />
-                      Status: Aguardando conexão...
+                    <h4 className="font-semibold text-lg mb-2">Escanear QR Code</h4>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Conecte agora escaneando o QR code com seu celular
                     </p>
-                  </div>
-                </div>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-center gap-2">
+                        <CheckCircle className="h-3 w-3 text-green-500" aria-hidden="true" />
+                        <span>Conexão imediata</span>
+                      </div>
+                      <div className="flex items-center justify-center gap-2">
+                        <CheckCircle className="h-3 w-3 text-green-500" aria-hidden="true" />
+                        <span>Você mesmo conecta</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Opção Link de Compartilhamento */}
+                <Card
+                  className="cursor-pointer hover:border-primary transition-colors group"
+                  onClick={handleSelectShareLink}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSelectShareLink()}
+                  aria-label="Gerar link de compartilhamento"
+                >
+                  <CardContent className="p-6 text-center">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-500/20 transition-colors">
+                      <Share2 className="h-8 w-8 text-blue-500" aria-hidden="true" />
+                    </div>
+                    <h4 className="font-semibold text-lg mb-2">Gerar Link</h4>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Gere um link para outra pessoa conectar o WhatsApp
+                    </p>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-center gap-2">
+                        <CheckCircle className="h-3 w-3 text-green-500" aria-hidden="true" />
+                        <span>Compartilhe via WhatsApp</span>
+                      </div>
+                      <div className="flex items-center justify-center gap-2">
+                        <CheckCircle className="h-3 w-3 text-green-500" aria-hidden="true" />
+                        <span>Conexão remota</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
+
+              {loading && (
+                <div className="flex items-center justify-center py-4">
+                  <Clock className="h-5 w-5 animate-spin mr-2 text-primary" aria-hidden="true" />
+                  <span className="text-sm text-muted-foreground">Gerando link...</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -394,9 +552,9 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
                     </div>
 
                     <div className="flex space-x-2">
-                      <Input 
-                        value={shareLink} 
-                        readOnly 
+                      <Input
+                        value={shareLink}
+                        readOnly
                         className="font-mono text-sm"
                       />
                       <Button variant="outline" onClick={handleCopyLink}>
@@ -432,7 +590,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
                     <Alert>
                       <Info className="h-4 w-4" />
                       <AlertDescription>
-                        <strong>Dica:</strong> Compartilhe este link via WhatsApp, email ou qualquer outro meio. 
+                        <strong>Dica:</strong> Compartilhe este link via WhatsApp, email ou qualquer outro meio.
                         A pessoa que receber poderá conectar seu WhatsApp diretamente.
                       </AlertDescription>
                     </Alert>
@@ -447,11 +605,11 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
                 <CheckCircle className="h-8 w-8 text-green-600" />
               </div>
-              
+
               <div>
-                <h3 className="text-lg font-semibold mb-2">Integração Criada com Sucesso!</h3>
+                <h3 className="text-lg font-semibold mb-2">WhatsApp Conectado!</h3>
                 <p className="text-muted-foreground">
-                  Sua instância WhatsApp Business está pronta para uso
+                  Seu WhatsApp está pronto para atender clientes
                 </p>
               </div>
 
@@ -507,25 +665,35 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
 
         {/* Footer buttons */}
         <div className="flex justify-between pt-6 border-t">
-          {currentStep !== 'channel' && currentStep !== 'success' && (
+          {currentStep !== 'channel' && currentStep !== 'success' && currentStep !== 'method' && (
             <Button variant="outline" onClick={handlePrev}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Voltar
             </Button>
           )}
-          
+
           <div className="ml-auto flex space-x-2">
             {currentStep === 'success' ? (
               <Button onClick={handleClose}>
                 Concluir
               </Button>
             ) : currentStep === 'share' ? (
-              <Button onClick={handleNext}>
+              <Button onClick={handleClose}>
                 Finalizar
-                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            ) : currentStep === 'method' ? (
+              <Button variant="ghost" onClick={handleClose}>
+                Fechar e conectar depois
               </Button>
             ) : currentStep === 'config' ? (
-              <Button onClick={handleSubmit} disabled={!formData.name || loading}>
+              <Button
+                onClick={handleSubmit}
+                disabled={
+                  !formData.name ||
+                  loading ||
+                  (formData.provider === 'WHATSAPP_CLOUD_API' && (!formData.cloudApiAccessToken || !formData.cloudApiPhoneNumberId || !formData.cloudApiWabaId))
+                }
+              >
                 {loading ? (
                   <>
                     <Clock className="h-4 w-4 mr-2 animate-spin" />
@@ -533,7 +701,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
                   </>
                 ) : (
                   <>
-                    Criar
+                    Criar Instância
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </>
                 )}
@@ -547,6 +715,6 @@ export function CreateIntegrationModal({ open, onClose, onCreate, isAdmin = fals
           </div>
         </div>
       </DialogContent>
-    </Dialog>
+    </Dialog >
   );
 }

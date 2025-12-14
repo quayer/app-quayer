@@ -17,4 +17,5 @@ export * from './roles';
 export * from './permissions';
 
 // Auth Context & Provider
-export * from './auth-context';
+export { AuthProvider, useAuth } from './auth-provider';
+

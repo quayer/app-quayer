@@ -69,7 +69,7 @@ export function NavUser({
     ? organizationsData.data.data 
     : []
   
-  const currentOrg = currentOrgData?.name || "Sem Organização"
+  const currentOrg = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name || "Sem Organização"
 
   const filteredOrgs = organizations.filter((org: any) =>
     org?.name?.toLowerCase().includes(searchTerm.toLowerCase())

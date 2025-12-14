@@ -2,18 +2,21 @@
  * OpenAI Media Processor Service
  *
  * Processa TODOS os tipos de mídia automaticamente:
- * - Áudio → Transcrição (Whisper)
- * - Imagem → Descrição detalhada (Vision)
- * - Vídeo → Frames + Áudio transcrito
- * - Documento → OCR + Extração de texto
+ * - Audio -> Transcricao (Whisper)
+ * - Imagem -> Descricao detalhada (Vision)
+ * - Video -> Extracao de audio + Transcricao
+ * - Documento -> PDF/DOCX text extraction + OCR fallback
  *
- * Quando webhook chegar, campo 'text' já estará preenchido!
+ * Quando webhook chegar, campo 'text' ja estara preenchido!
  */
 
 import OpenAI from 'openai';
 import { redis } from '@/services/redis';
 import { logger } from '@/services/logger';
 import crypto from 'crypto';
+// @ts-ignore - pdf-parse tem tipagem embutida
+import pdfParse from 'pdf-parse';
+import mammoth from 'mammoth';
 
 // ============================================
 // TIPOS
@@ -221,38 +224,87 @@ class OpenAIMediaProcessorService {
   }
 
   // ==========================================
-  // VÍDEO → FRAMES + ÁUDIO
+  // VIDEO -> Transcricao de audio do video
   // ==========================================
 
   async processVideo(videoUrl: string): Promise<MediaProcessResult> {
     try {
-      logger.info('[MediaProcessor] Processando vídeo', { videoUrl });
+      logger.info('[MediaProcessor] Processando video', { videoUrl });
 
-      // Para vídeos, vamos:
-      // 1. Extrair frames-chave (início, meio, fim)
-      // 2. Extrair e transcrever áudio
-      // 3. Analisar frames com Vision
-      // 4. Combinar tudo
+      // Whisper aceita varios formatos de audio e alguns containers de video
+      // Formatos suportados: mp3, mp4, mpeg, mpga, m4a, wav, webm
+      // Vamos tentar enviar o video diretamente para Whisper primeiro
 
-      // Nota: Isso requer FFmpeg no servidor
-      // Por enquanto, vamos simplificar retornando uma mensagem
+      try {
+        // Download do video
+        const response = await fetch(videoUrl);
+        if (!response.ok) {
+          throw new Error(`Falha ao baixar video: ${response.statusText}`);
+        }
 
-      const text = `[VÍDEO] URL: ${videoUrl}\n\nNota: Processamento completo de vídeo requer FFmpeg instalado no servidor. Implemente extração de frames e áudio para análise detalhada.`;
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
 
-      logger.info('[MediaProcessor] Vídeo processado', { videoUrl });
+        // Determinar extensao do arquivo pelo mimeType
+        const contentType = response.headers.get('content-type') || 'video/mp4';
+        let extension = 'mp4';
+        if (contentType.includes('webm')) extension = 'webm';
+        else if (contentType.includes('mpeg')) extension = 'mpeg';
+        else if (contentType.includes('mov') || contentType.includes('quicktime')) extension = 'mp4';
 
-      return {
-        text,
-        type: 'video',
-        metadata: {
-          provider: 'openai',
-          model: 'manual', // Placeholder
-          processingTimeMs: 0,
-          cached: false,
-        },
-      };
+        // Criar File object para OpenAI
+        const videoFile = new File([buffer], `video.${extension}`, { type: contentType });
+
+        // Tentar transcrever o audio do video com Whisper
+        // Whisper consegue processar containers de video que contenham audio
+        const transcription = await this.openai.audio.transcriptions.create({
+          file: videoFile,
+          model: 'whisper-1',
+          language: 'pt',
+          response_format: 'verbose_json',
+        });
+
+        logger.info('[MediaProcessor] Video transcrito com sucesso', {
+          videoUrl,
+          textLength: transcription.text.length,
+          language: transcription.language,
+          duration: transcription.duration,
+        });
+
+        return {
+          text: transcription.text,
+          type: 'video',
+          metadata: {
+            provider: 'openai',
+            model: 'whisper-1',
+            language: transcription.language,
+            duration: transcription.duration,
+            processingTimeMs: 0,
+            cached: false,
+          },
+        };
+      } catch (whisperError: any) {
+        // Se Whisper falhar (formato nao suportado), informar o usuario
+        logger.warn('[MediaProcessor] Whisper nao conseguiu processar o video', {
+          videoUrl,
+          error: whisperError.message,
+        });
+
+        // Retornar mensagem informativa
+        return {
+          text: `[VIDEO RECEBIDO]\n\nO video foi recebido mas nao foi possivel transcrever o audio automaticamente.\n\nMotivo: ${whisperError.message || 'Formato de video nao suportado pelo Whisper'}\n\nFormatos de video suportados para transcricao: MP4, WebM, MPEG\n\nURL: ${videoUrl}`,
+          type: 'video',
+          metadata: {
+            provider: 'openai',
+            model: 'whisper-1-fallback',
+            processingTimeMs: 0,
+            cached: false,
+          },
+        };
+      }
     } catch (error) {
-      logger.error('[MediaProcessor] Erro ao processar vídeo', {
+      logger.error('[MediaProcessor] Erro ao processar video', {
         error,
         videoUrl,
       });
@@ -261,7 +313,7 @@ class OpenAIMediaProcessorService {
   }
 
   // ==========================================
-  // DOCUMENTO → OCR
+  // DOCUMENTO -> Extracao de texto (PDF, DOCX, etc)
   // ==========================================
 
   async processDocument(
@@ -274,63 +326,98 @@ class OpenAIMediaProcessorService {
         mimeType,
       });
 
-      // Se for PDF ou imagem de documento, usar Vision para OCR
-      if (
-        mimeType === 'application/pdf' ||
-        mimeType.startsWith('image/') ||
-        mimeType.includes('document')
+      // Download do documento
+      const documentBuffer = await this.downloadBuffer(documentUrl);
+
+      // Processar conforme tipo de documento
+      let extractedText = '';
+      let model = 'native';
+
+      // PDF - usar pdf-parse para extracao de texto
+      if (mimeType === 'application/pdf') {
+        try {
+          const pdfData = await pdfParse(documentBuffer);
+          extractedText = pdfData.text;
+          model = 'pdf-parse';
+
+          logger.info('[MediaProcessor] PDF extraido com pdf-parse', {
+            documentUrl,
+            pages: pdfData.numpages,
+            textLength: extractedText.length,
+          });
+
+          // Se o texto extraido for muito curto, provavelmente e um PDF escaneado
+          // Usar Vision como fallback para OCR
+          if (extractedText.trim().length < 50) {
+            logger.info('[MediaProcessor] PDF com pouco texto, tentando OCR com Vision', {
+              documentUrl,
+            });
+            return this.processDocumentWithVision(documentUrl);
+          }
+        } catch (pdfError) {
+          logger.warn('[MediaProcessor] Erro ao extrair PDF, tentando Vision', { pdfError });
+          return this.processDocumentWithVision(documentUrl);
+        }
+      }
+      // Word DOCX - usar mammoth para extracao
+      else if (
+        mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        mimeType === 'application/msword' ||
+        mimeType.includes('word')
       ) {
-        // Converter primeira página para imagem (se PDF)
-        // Por enquanto, usar Vision diretamente
-        const response = await this.openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Extraia TODO o texto deste documento. Mantenha a formatação e estrutura. Seja preciso e completo. Se houver tabelas, descreva-as claramente.',
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: documentUrl,
-                    detail: 'high',
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 2000,
-        });
+        try {
+          const result = await mammoth.extractRawText({ buffer: documentBuffer });
+          extractedText = result.value;
+          model = 'mammoth';
 
-        const extractedText = response.choices[0]?.message?.content || '';
-
-        logger.info('[MediaProcessor] Documento processado com sucesso', {
+          logger.info('[MediaProcessor] DOCX extraido com mammoth', {
+            documentUrl,
+            textLength: extractedText.length,
+            messages: result.messages,
+          });
+        } catch (docxError) {
+          logger.warn('[MediaProcessor] Erro ao extrair DOCX', { docxError });
+          extractedText = `[ERRO] Nao foi possivel extrair texto do documento Word.`;
+        }
+      }
+      // Texto puro
+      else if (mimeType === 'text/plain' || mimeType.includes('text/')) {
+        extractedText = documentBuffer.toString('utf-8');
+        model = 'text';
+      }
+      // Imagem de documento - usar Vision para OCR
+      else if (mimeType.startsWith('image/')) {
+        return this.processDocumentWithVision(documentUrl);
+      }
+      // Outros - tentar Vision como fallback
+      else {
+        logger.info('[MediaProcessor] Tipo de documento desconhecido, tentando Vision', {
           documentUrl,
-          textLength: extractedText.length,
+          mimeType,
         });
+        return this.processDocumentWithVision(documentUrl);
+      }
 
+      // Se nao extraiu nada, retornar erro informativo
+      if (!extractedText.trim()) {
         return {
-          text: extractedText,
+          text: `[DOCUMENTO] O documento foi recebido mas nao foi possivel extrair texto automaticamente.\nTipo: ${mimeType}\nURL: ${documentUrl}`,
           type: 'document',
           metadata: {
             provider: 'openai',
-            model: 'gpt-4o',
+            model: 'fallback',
             processingTimeMs: 0,
             cached: false,
           },
         };
       }
 
-      // Fallback para documentos não suportados
       return {
-        text: `[DOCUMENTO] ${documentUrl}\nTipo: ${mimeType}\n\nDocumento recebido mas tipo não suportado para OCR automático.`,
+        text: extractedText.trim(),
         type: 'document',
         metadata: {
           provider: 'openai',
-          model: 'manual',
+          model,
           processingTimeMs: 0,
           cached: false,
         },
@@ -340,6 +427,57 @@ class OpenAIMediaProcessorService {
         error,
         documentUrl,
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Processa documento usando Vision (OCR para imagens/PDFs escaneados)
+   */
+  private async processDocumentWithVision(documentUrl: string): Promise<MediaProcessResult> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Extraia TODO o texto deste documento. Mantenha a formatacao e estrutura. Seja preciso e completo. Se houver tabelas, descreva-as claramente. Responda apenas com o texto extraido.',
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: documentUrl,
+                  detail: 'high',
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 4000,
+      });
+
+      const extractedText = response.choices[0]?.message?.content || '';
+
+      logger.info('[MediaProcessor] Documento processado com Vision OCR', {
+        documentUrl,
+        textLength: extractedText.length,
+      });
+
+      return {
+        text: extractedText,
+        type: 'document',
+        metadata: {
+          provider: 'openai',
+          model: 'gpt-4o-vision',
+          processingTimeMs: 0,
+          cached: false,
+        },
+      };
+    } catch (error) {
+      logger.error('[MediaProcessor] Erro no Vision OCR', { error, documentUrl });
       throw error;
     }
   }
@@ -358,7 +496,7 @@ class OpenAIMediaProcessorService {
   private async downloadMedia(url: string): Promise<File> {
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`Falha ao baixar mídia: ${response.statusText}`);
+      throw new Error(`Falha ao baixar midia: ${response.statusText}`);
     }
 
     const blob = await response.blob();
@@ -367,6 +505,16 @@ class OpenAIMediaProcessorService {
 
     // Criar File object para OpenAI
     return new File([buffer], 'audio.ogg', { type: blob.type });
+  }
+
+  private async downloadBuffer(url: string): Promise<Buffer> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Falha ao baixar arquivo: ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   private async getCached(mediaUrl: string): Promise<MediaProcessResult | null> {

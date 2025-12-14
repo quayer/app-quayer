@@ -12,8 +12,9 @@ export type OrganizationWithRelations = Organization & {
   users?: UserOrganization[];
   _count?: {
     users: number;
-    instances: number;
+    connections: number;
     projects: number;
+    webhooks?: number;
   };
 };
 
@@ -31,15 +32,28 @@ export interface CreateOrganizationInput {
   type: 'pf' | 'pj';
   maxInstances?: number;
   maxUsers?: number;
-  billingType?: 'free' | 'basic' | 'pro';
+  billingType?: 'free' | 'basic' | 'pro' | 'enterprise';
 }
 
 export interface UpdateOrganizationInput {
   name?: string;
   maxInstances?: number;
   maxUsers?: number;
-  billingType?: 'free' | 'basic' | 'pro';
+  billingType?: 'free' | 'basic' | 'pro' | 'enterprise';
   isActive?: boolean;
+  // Business Hours
+  businessHoursStart?: string | null;
+  businessHoursEnd?: string | null;
+  businessDays?: string | null;
+  timezone?: string;
+  // Session & Automation Settings
+  sessionTimeoutHours?: number;
+  notificationsEnabled?: boolean;
+  balancedDistribution?: boolean;
+  typingIndicator?: boolean;
+  profanityFilter?: boolean;
+  autoGreeting?: boolean;
+  greetingMessage?: string | null;
 }
 
 export interface ListOrganizationsQuery {
@@ -47,7 +61,7 @@ export interface ListOrganizationsQuery {
   limit?: number;
   search?: string;
   type?: 'pf' | 'pj';
-  billingType?: 'free' | 'basic' | 'pro';
+  billingType?: 'free' | 'basic' | 'pro' | 'enterprise';
   isActive?: boolean;
 }
 
@@ -73,8 +87,21 @@ export interface OrganizationResponse {
   type: 'pf' | 'pj';
   maxInstances: number;
   maxUsers: number;
-  billingType: 'free' | 'basic' | 'pro';
+  billingType: 'free' | 'basic' | 'pro' | 'enterprise';
   isActive: boolean;
+  // Business Hours
+  businessHoursStart: string | null;
+  businessHoursEnd: string | null;
+  businessDays: string | null;
+  timezone: string;
+  // Session & Automation Settings
+  sessionTimeoutHours: number;
+  notificationsEnabled: boolean;
+  balancedDistribution: boolean;
+  typingIndicator: boolean;
+  profanityFilter: boolean;
+  autoGreeting: boolean;
+  greetingMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
   stats?: {

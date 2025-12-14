@@ -16,7 +16,7 @@ import {
   useSetWebhook,
   useWebhook
 } from '@/hooks/useInstance'
-import type { Instance } from '@prisma/client'
+import type { Connection as Instance } from '@prisma/client'
 
 /**
  * @test Unit Tests - useInstance Hooks

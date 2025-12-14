@@ -15,14 +15,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -40,6 +32,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   Plus,
   Search,
@@ -49,10 +42,19 @@ import {
   Building2,
   Users,
   MessageSquare,
+  Target,
+  Headphones,
+  DollarSign,
+  Wrench,
+  Package,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
 
 interface Department {
   id: string;
@@ -66,6 +68,32 @@ interface Department {
     sessions: number;
   };
 }
+
+// Ícones e cores por tipo de departamento
+const getDepartmentIconAndColor = (name: string) => {
+  const nameLower = name.toLowerCase();
+
+  if (nameLower.includes('venda') || nameLower.includes('comercial')) {
+    return { icon: TrendingUp, color: 'text-green-600', bgColor: 'bg-green-100', borderColor: 'border-green-200' };
+  }
+  if (nameLower.includes('suporte') || nameLower.includes('técnico')) {
+    return { icon: Headphones, color: 'text-blue-600', bgColor: 'bg-blue-100', borderColor: 'border-blue-200' };
+  }
+  if (nameLower.includes('financeiro') || nameLower.includes('cobrança')) {
+    return { icon: DollarSign, color: 'text-yellow-600', bgColor: 'bg-yellow-100', borderColor: 'border-yellow-200' };
+  }
+  if (nameLower.includes('atendimento') || nameLower.includes('sac')) {
+    return { icon: MessageSquare, color: 'text-purple-600', bgColor: 'bg-purple-100', borderColor: 'border-purple-200' };
+  }
+  if (nameLower.includes('manutenção') || nameLower.includes('operações')) {
+    return { icon: Wrench, color: 'text-orange-600', bgColor: 'bg-orange-100', borderColor: 'border-orange-200' };
+  }
+  if (nameLower.includes('logística') || nameLower.includes('entrega')) {
+    return { icon: Package, color: 'text-indigo-600', bgColor: 'bg-indigo-100', borderColor: 'border-indigo-200' };
+  }
+
+  return { icon: Target, color: 'text-gray-600', bgColor: 'bg-gray-100', borderColor: 'border-gray-200' };
+};
 
 export default function DepartamentosPage() {
   const router = useRouter();
@@ -235,13 +263,16 @@ export default function DepartamentosPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Departamentos</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <Building2 className="h-8 w-8 text-primary" />
+            Departamentos
+          </h1>
+          <p className="text-muted-foreground mt-1">
             Organize sua equipe em departamentos para melhor distribuição de atendimentos
           </p>
         </div>
-        <Button onClick={() => setCreateModalOpen(true)} size="default">
-          <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
+        <Button onClick={() => setCreateModalOpen(true)} size="default" className="gap-2">
+          <Plus className="h-4 w-4" />
           Novo Departamento
         </Button>
       </div>
@@ -253,7 +284,7 @@ export default function DepartamentosPage() {
             <CardTitle className="text-sm font-medium">
               Total de Departamentos
             </CardTitle>
-            <Building2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{departments.length}</div>
@@ -266,7 +297,7 @@ export default function DepartamentosPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Usuários Alocados</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalUsers}</div>
@@ -279,7 +310,7 @@ export default function DepartamentosPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Sessões Ativas</CardTitle>
-            <MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalSessions}</div>
@@ -291,149 +322,168 @@ export default function DepartamentosPage() {
       </div>
 
       {/* Search */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1">
-              <Search
-                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <Input
-                placeholder="Buscar departamentos..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                aria-label="Buscar departamentos"
-              />
-            </div>
-          </div>
-        </CardHeader>
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1">
+          <Search
+            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            placeholder="Buscar departamentos..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
 
-        <CardContent>
-          {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+      {/* Departments Grid */}
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className="h-12 w-12 rounded-lg mb-3" />
+                <Skeleton className="h-6 w-3/4" />
+                <Skeleton className="h-4 w-full mt-2" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-10 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : filteredDepartments.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <div className="rounded-full bg-muted p-6 mb-4">
+              <Building2 className="h-12 w-12 text-muted-foreground" />
             </div>
-          ) : filteredDepartments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Building2 className="h-12 w-12 text-muted-foreground mb-4" aria-hidden="true" />
-              <h3 className="text-lg font-semibold">Nenhum departamento encontrado</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                {searchQuery
-                  ? 'Tente buscar com outro termo'
-                  : 'Crie seu primeiro departamento para começar'}
-              </p>
-              {!searchQuery && (
-                <Button onClick={() => setCreateModalOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" aria-hidden="true" />
-                  Novo Departamento
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead>Usuários</TableHead>
-                    <TableHead>Sessões</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Criado</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredDepartments.map((department) => (
-                    <TableRow key={department.id}>
-                      <TableCell className="font-medium">
-                        {department.name}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
-                        {department.description || '—'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">
-                          {department._count?.users || 0}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">
-                          {department._count?.sessions || 0}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={department.isActive}
-                            onCheckedChange={() => handleToggleActive(department)}
-                            aria-label={`${department.isActive ? 'Desativar' : 'Ativar'} departamento`}
-                          />
-                          <Badge
-                            variant={department.isActive ? 'default' : 'secondary'}
-                          >
-                            {department.isActive ? 'Ativo' : 'Inativo'}
-                          </Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDistanceToNow(new Date(department.createdAt), {
-                          locale: ptBR,
-                          addSuffix: true,
-                        })}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`Opções para ${department.name}`}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">Abrir menu</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onClick={() => openEditModal(department)}
-                              aria-label="Editar departamento"
-                            >
-                              <Edit className="h-4 w-4 mr-2" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleToggleActive(department)}
-                              aria-label={`${department.isActive ? 'Desativar' : 'Ativar'} departamento`}
-                            >
-                              <Building2 className="h-4 w-4 mr-2" />
-                              {department.isActive ? 'Desativar' : 'Ativar'}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => handleDelete(department.id)}
-                              aria-label="Excluir departamento"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Excluir
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            <h3 className="text-xl font-semibold mb-2">
+              {searchQuery ? 'Nenhum departamento encontrado' : 'Crie seu primeiro departamento'}
+            </h3>
+            <p className="text-sm text-muted-foreground mb-6 text-center max-w-md">
+              {searchQuery
+                ? 'Tente buscar com outro termo ou crie um novo departamento'
+                : 'Departamentos ajudam a organizar sua equipe e distribuir atendimentos de forma eficiente'}
+            </p>
+            {!searchQuery && (
+              <Button onClick={() => setCreateModalOpen(true)} size="lg" className="gap-2">
+                <Plus className="h-5 w-5" />
+                Criar Primeiro Departamento
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredDepartments.map((department) => {
+            const { icon: Icon, color, bgColor, borderColor } = getDepartmentIconAndColor(department.name);
+
+            return (
+              <Card
+                key={department.id}
+                className={cn(
+                  "relative overflow-hidden transition-all hover:shadow-md",
+                  department.isActive ? borderColor : "border-gray-200 opacity-75"
+                )}
+              >
+                {/* Status Badge */}
+                <div className="absolute top-4 right-4 z-10">
+                  <Badge
+                    variant={department.isActive ? "default" : "secondary"}
+                    className="gap-1"
+                  >
+                    {department.isActive ? (
+                      <>
+                        <CheckCircle2 className="h-3 w-3" />
+                        Ativo
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-3 w-3" />
+                        Inativo
+                      </>
+                    )}
+                  </Badge>
+                </div>
+
+                <CardHeader className="pb-4">
+                  {/* Icon */}
+                  <div className={cn("w-12 h-12 rounded-lg flex items-center justify-center mb-3", bgColor)}>
+                    <Icon className={cn("h-6 w-6", color)} />
+                  </div>
+
+                  {/* Name & Description */}
+                  <CardTitle className="text-lg pr-20">{department.name}</CardTitle>
+                  {department.description && (
+                    <CardDescription className="line-clamp-2 text-sm">
+                      {department.description}
+                    </CardDescription>
+                  )}
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  {/* Stats */}
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Users className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{department._count?.users || 0}</span>
+                      <span className="text-muted-foreground text-xs">usuários</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{department._count?.sessions || 0}</span>
+                      <span className="text-muted-foreground text-xs">conversas</span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => openEditModal(department)}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Editar
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => handleToggleActive(department)}>
+                          {department.isActive ? 'Desativar' : 'Ativar'}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={() => handleDelete(department.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  {/* Created At */}
+                  <p className="text-xs text-muted-foreground pt-2 border-t">
+                    Criado {formatDistanceToNow(new Date(department.createdAt), {
+                      locale: ptBR,
+                      addSuffix: true,
+                    })}
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {/* Create Dialog */}
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
@@ -447,13 +497,12 @@ export default function DepartamentosPage() {
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="create-name">Nome</Label>
+              <Label htmlFor="create-name">Nome do Departamento *</Label>
               <Input
                 id="create-name"
-                placeholder="Ex: Suporte Técnico"
+                placeholder="Ex: Vendas, Suporte, Financeiro..."
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                aria-label="Nome do departamento"
               />
             </div>
 
@@ -467,11 +516,10 @@ export default function DepartamentosPage() {
                   setFormData({ ...formData, description: e.target.value })
                 }
                 rows={3}
-                aria-label="Descrição do departamento"
               />
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between rounded-lg border p-4">
               <div className="space-y-0.5">
                 <Label htmlFor="create-active">Ativar imediatamente</Label>
                 <p className="text-xs text-muted-foreground">
@@ -484,7 +532,6 @@ export default function DepartamentosPage() {
                 onCheckedChange={(checked) =>
                   setFormData({ ...formData, isActive: checked })
                 }
-                aria-label="Ativar departamento"
               />
             </div>
           </div>
@@ -516,13 +563,12 @@ export default function DepartamentosPage() {
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-name">Nome</Label>
+              <Label htmlFor="edit-name">Nome do Departamento *</Label>
               <Input
                 id="edit-name"
-                placeholder="Ex: Suporte Técnico"
+                placeholder="Ex: Vendas, Suporte, Financeiro..."
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                aria-label="Nome do departamento"
               />
             </div>
 
@@ -536,11 +582,10 @@ export default function DepartamentosPage() {
                   setFormData({ ...formData, description: e.target.value })
                 }
                 rows={3}
-                aria-label="Descrição do departamento"
               />
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between rounded-lg border p-4">
               <div className="space-y-0.5">
                 <Label htmlFor="edit-active">Status do departamento</Label>
                 <p className="text-xs text-muted-foreground">
@@ -553,7 +598,6 @@ export default function DepartamentosPage() {
                 onCheckedChange={(checked) =>
                   setFormData({ ...formData, isActive: checked })
                 }
-                aria-label="Status do departamento"
               />
             </div>
           </div>

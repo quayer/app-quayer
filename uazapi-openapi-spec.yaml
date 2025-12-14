@@ -2387,6 +2387,197 @@ paths:
           description: Instância não encontrada
         '500':
           description: Erro interno
+  /instance/proxy:
+    get:
+      tags:
+        - Proxy
+      summary: Obter configuração de proxy da instância
+      description: >
+        A uazapiGO já utiliza um proxy gerenciado por padrão. Para dar liberdade ao cliente, é possível informar um
+        proxy próprio.
+
+        Retorna o estado atual do proxy, com a URL mascarada e informações do último teste de conectividade.
+      security:
+        - token: []
+      responses:
+        '200':
+          description: Configuração de proxy recuperada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Indica se o proxy está habilitado
+                  proxy_url:
+                    type: string
+                    description: URL do proxy (mascarada na resposta)
+                  last_test_at:
+                    type: integer
+                    description: Timestamp (ms) do último teste
+                  last_test_error:
+                    type: string
+                    description: Último erro de teste (se houver)
+                  validation_error:
+                    type: boolean
+                    description: Indica se o último teste resultou em erro
+        '401':
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Unauthorized
+        '500':
+          description: Erro interno do servidor ao recuperar a configuração
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Mensagem detalhando o erro encontrado
+    post:
+      tags:
+        - Proxy
+      summary: Configurar ou alterar o proxy
+      description: |
+        Permite habilitar ou trocar para um proxy próprio. A URL é validada antes de salvar.
+        Quando já usamos o proxy gerenciado padrão, você pode substituí-lo enviando seu `proxy_url`.
+        A conexão pode ser reiniciada automaticamente para aplicar a mudança.
+      security:
+        - token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enable:
+                  type: boolean
+                  description: Define se o proxy deve ser habilitado; se `false`, remove o proxy atual
+                  default: true
+                proxy_url:
+                  type: string
+                  description: URL do proxy a ser usado (obrigatória se `enable=true`)
+                  example: http://usuario:senha@ip:porta
+              required:
+                - enable
+      responses:
+        '200':
+          description: Proxy configurado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  details:
+                    type: string
+                    example: Proxy configurado
+                  proxy:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                      proxy_url:
+                        type: string
+                        description: URL mascarada do proxy salvo
+                      last_test_at:
+                        type: integer
+                        description: Timestamp (ms) do último teste
+                      last_test_error:
+                        type: string
+                        description: Último erro de teste (se houver)
+                      validation_error:
+                        type: boolean
+                        description: Indica se o último teste resultou em erro
+                  restart_requested:
+                    type: boolean
+                    description: Indica se uma reinicialização da conexão foi solicitada para aplicar o proxy
+        '400':
+          description: Payload inválido ou falha na validação do proxy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Falha ao validar proxy: ...'
+        '401':
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Unauthorized
+        '500':
+          description: Erro interno do servidor ao configurar o proxy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Mensagem detalhando o erro encontrado
+    delete:
+      tags:
+        - Proxy
+      summary: Remover o proxy configurado
+      description: |
+        Desativa e apaga o proxy personalizado, voltando ao comportamento padrão (proxy gerenciado).
+        Pode reiniciar a conexão para aplicar a remoção.
+      security:
+        - token: []
+      responses:
+        '200':
+          description: Configuração de proxy removida com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  details:
+                    type: string
+                    example: Proxy removido
+                  proxy:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                  restart_requested:
+                    type: boolean
+                    description: Indica se a conexão foi reiniciada para aplicar a mudança
+        '401':
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Unauthorized
+        '500':
+          description: Erro interno do servidor ao deletar a configuração de proxy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Mensagem detalhando o erro encontrado
   /profile/name:
     post:
       tags:
@@ -5180,6 +5371,359 @@ paths:
                   error:
                     type: string
                     example: Failed to send location
+  /send/request-payment:
+    post:
+      tags:
+        - Enviar Mensagem
+      summary: Solicitar pagamento
+      description: |
+        Envia uma solicitação de pagamento com o botão nativo **"Revisar e pagar"** do WhatsApp.
+        O fluxo suporta PIX (estático, dinâmico ou desabilitado), boleto, link de pagamento e cartão,
+        combinando tudo em uma única mensagem interativa.
+
+        ## Como funciona
+        - Define o valor em `amount` (BRL por padrão) e opcionalmente personaliza título, texto e nota adicional.
+        - Por padrão exige `pixKey`.
+        - O arquivo apontado por `fileUrl` é anexado como documento (boleto ou fatura em PDF, por exemplo).
+        - `paymentLink` habilita o botão externo.
+
+        ### Links suportados (`paymentLink`)
+        O WhatsApp apenas aceita URLs de provedores homologados. Utilize os padrões abaixo:
+        - Mercado Pago: `mpago.la/*`, `mpago.li/*`, `mercadopago.com.br/*`
+        - PicPay: `picpay.me/*`, `link.picpay.com/*`, `app.picpay.com/user/*`
+        - Stone: `payment-link.stone.com.br/*`
+        - Cielo: `cielolink.com.br/*`, `cielo.mystore.com.br/*`
+        - Getnet: `pag.getnet.com.br/*`
+        - Rede: `userede.com.br/pagamentos/*`
+        - SumUp: `pay.sumup.com/b2c/*`
+        - Pagar.me: `payment-link.pagar.me/*`
+        - TON: `payment-link.ton.com.br/*`
+        - PagBank: `sacola.pagbank.com.br/*`, `pag.ae/*`
+        - Nubank: `nubank.com.br/cobrar/*`, `checkout.nubank.com.br/*`
+        - InfinitePay: `pay.infinitepay.io/*`
+        - VTEX: `*.vtexpayments.com/*`, `*.myvtex.com/*`
+        - EBANX: `payment.ebanx.com/*`
+        - Asaas: `asaas.com/*`
+        - Vindi: `pagar.vindi.com.br/*`
+        - Adyen: `eu.adyen.link/*`
+        - EFI (Gerencianet): `sejaefi.link/*`, `pagamento.sejaefi.com.br/*`
+        - SafraPay: `portal.safrapay.com.br/*`, `safrapay.aditum.com.br/*`
+        - Stripe: `buy.stripe.com/*`
+        - Hotmart: `pay.hotmart.com/*`
+
+
+        ## Campos comuns
+        Este endpoint também suporta os campos padrão: `delay`, `readchat`, `readmessages`, `replyid`,
+        `mentions`, `track_source`, `track_id` e `async`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                number:
+                  type: string
+                  description: Número do destinatário (DDD + número, formato internacional)
+                  example: '5511999999999'
+                title:
+                  type: string
+                  description: Título que aparece no cabeçalho do fluxo
+                  example: Detalhes do pedido
+                text:
+                  type: string
+                  description: Mensagem exibida no corpo do fluxo
+                  example: 'Pedido #123 pronto para pagamento'
+                footer:
+                  type: string
+                  description: Texto do rodapé da mensagem
+                  example: Loja Exemplo
+                itemName:
+                  type: string
+                  description: Nome do item principal listado no fluxo
+                  example: Assinatura Plano Ouro
+                invoiceNumber:
+                  type: string
+                  description: Identificador ou número da fatura
+                  example: PED-123
+                amount:
+                  type: number
+                  format: float
+                  description: Valor da cobrança (em BRL por padrão)
+                  example: 199.9
+                pixKey:
+                  type: string
+                  description: Chave PIX estático (CPF/CNPJ/telefone/email/EVP)
+                  example: 123e4567-e89b-12d3-a456-426614174000
+                pixType:
+                  type: string
+                  description: Tipo da chave PIX (`CPF`, `CNPJ`, `PHONE`, `EMAIL`, `EVP`). Padrão `EVP`
+                  example: EVP
+                pixName:
+                  type: string
+                  description: Nome do recebedor exibido no fluxo (padrão usa o nome do perfil da instância)
+                  example: Loja Exemplo
+                paymentLink:
+                  type: string
+                  description: URL externa para checkout (somente dominios homologados; veja lista acima)
+                  example: https://pagamentos.exemplo.com/checkout/abc
+                fileUrl:
+                  type: string
+                  description: 'URL ou caminho (base64) do documento a ser anexado (ex.: boleto PDF)'
+                  example: https://cdn.exemplo.com/boleto-123.pdf
+                fileName:
+                  type: string
+                  description: Nome do arquivo exibido no WhatsApp ao anexar `fileUrl`
+                  example: boleto-123.pdf
+                boletoCode:
+                  type: string
+                  description: Linha digitável do boleto (habilita o método boleto automaticamente)
+                  example: 34191.79001 01043.510047 91020.150008 5 91070026000
+                replyid:
+                  type: string
+                  description: ID da mensagem que será respondida
+                mentions:
+                  type: string
+                  description: Números mencionados separados por vírgula
+                delay:
+                  type: integer
+                  description: Atraso em milissegundos antes do envio (exibe "digitando..." no WhatsApp)
+                readchat:
+                  type: boolean
+                  description: Marca o chat como lido após enviar a mensagem
+                readmessages:
+                  type: boolean
+                  description: Marca mensagens recentes como lidas após o envio
+                async:
+                  type: boolean
+                  description: Enfileira o envio para processamento assíncrono
+                track_source:
+                  type: string
+                  description: 'Origem de rastreamento (ex.: chatwoot, crm-interno)'
+                track_id:
+                  type: string
+                  description: Identificador de rastreamento (aceita valores duplicados)
+              required:
+                - number
+                - amount
+            examples:
+              pixSimples:
+                summary: PIX simples
+                value:
+                  number: '5511999999999'
+                  amount: 199.9
+                  text: 'Pedido #123 pronto para pagamento'
+                  pixKey: 123e4567-e89b-12d3-a456-426614174000
+                  pixType: EVP
+              pixEBoleto:
+                summary: PIX + boleto
+                value:
+                  number: '5511999999999'
+                  amount: 349.5
+                  text: 'Pedido #457 com boleto'
+                  pixKey: '12345678000190'
+                  pixType: CNPJ
+                  pixName: Loja Exemplo LTDA
+                  boletoCode: 34191.79001 01043.510047 91020.150008 5 91070026000
+                  additionalNote: Pague via PIX ou utilize o boleto em anexo
+              completo:
+                summary: PIX + boleto + link
+                value:
+                  number: '5511888888888'
+                  title: Assinatura Premium
+                  text: Plano anual disponível para pagamento
+                  footer: footer
+                  invoiceNumber: INV-789
+                  itemName: Bolo XYZ
+                  amount: 599
+                  pixKey: 123e4567-e89b-12d3-a456-426614174000
+                  pixType: EVP
+                  pixName: Empresa Exemplo
+                  boletoCode: 23793.38128 60000.000123 45670.000012 3 45670000012345
+                  fileUrl: https://cdn.exemplo.com/boleto-inv-789.pdf
+                  fileName: Clique para abrir o PDF.pdf
+                  paymentLink: https://payment-link.pagar.me/checkout/inv-789
+      responses:
+        '200':
+          description: Solicitação de pagamento enviada com sucesso
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: ../schemas/message.yaml#/Message
+                  - type: object
+                    properties:
+                      response:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: success
+                          message:
+                            type: string
+                            example: Payment request sent successfully
+        '400':
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Missing pixKey or pixCode
+        '401':
+          description: Não autorizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Invalid token
+        '500':
+          description: Erro interno do servidor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Failed to send payment request
+  /send/pix-button:
+    post:
+      tags:
+        - Enviar Mensagem
+      summary: Enviar botão PIX
+      description: |
+        Envia um botão nativo do WhatsApp que abre para pagamento PIX com a chave informada.
+        O usuário visualiza o detalhe do recebedor, nome e chave.
+
+        ## Regras principais
+        - `pixType` aceita: `CPF`, `CNPJ`, `PHONE`, `EMAIL`, `EVP` (case insensitive)
+        - `pixName` padrão: `"Pix"` quando não informado - nome de quem recebe o pagamento
+
+
+        ## Campos comuns
+        Este endpoint herda os campos opcionais padronizados da tag **"Enviar Mensagem"**:
+        `delay`, `readchat`, `readmessages`, `replyid`, `mentions`, `track_source`, `track_id` e `async`.
+
+        ## Exemplo de payload
+        ```json
+        {
+          "number": "5511999999999",
+          "pixType": "EVP",
+          "pixKey": "123e4567-e89b-12d3-a456-426614174000",
+          "pixName": "Loja Exemplo"
+        }
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                number:
+                  type: string
+                  description: Número do destinatário (DDD + número, formato internacional)
+                  example: '5511999999999'
+                pixType:
+                  type: string
+                  description: 'Tipo da chave PIX. Valores aceitos: CPF, CNPJ, PHONE, EMAIL ou EVP'
+                  example: EVP
+                pixKey:
+                  type: string
+                  description: Valor da chave PIX (CPF/CNPJ/telefone/email/EVP)
+                  example: 123e4567-e89b-12d3-a456-426614174000
+                pixName:
+                  type: string
+                  description: Nome exibido como recebedor do PIX (padrão "Pix" se vazio)
+                  example: Loja Exemplo
+                async:
+                  type: boolean
+                  description: Enfileira o envio para processamento assíncrono
+                delay:
+                  type: integer
+                  description: Atraso em milissegundos antes do envio (exibe "digitando..." no WhatsApp)
+                readchat:
+                  type: boolean
+                  description: Marca o chat como lido após enviar a mensagem
+                readmessages:
+                  type: boolean
+                  description: Marca mensagens recentes como lidas após o envio
+                replyid:
+                  type: string
+                  description: ID da mensagem que será respondida
+                mentions:
+                  type: string
+                  description: Lista de números mencionados separados por vírgula
+                track_source:
+                  type: string
+                  description: 'Origem de rastreamento (ex.: chatwoot, crm-interno)'
+                track_id:
+                  type: string
+                  description: Identificador de rastreamento (aceita valores duplicados)
+              required:
+                - number
+                - pixType
+                - pixKey
+              example:
+                number: '5511999999999'
+                pixType: EVP
+                pixKey: 123e4567-e89b-12d3-a456-426614174000
+                pixName: Loja Exemplo
+      responses:
+        '200':
+          description: Botão PIX enviado com sucesso
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: ../schemas/message.yaml#/Message
+                  - type: object
+                    properties:
+                      response:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: success
+                          message:
+                            type: string
+                            example: PIX button sent successfully
+        '400':
+          description: Requisição inválida
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 'Invalid keyType. Allowed: CPF, CNPJ, PHONE, EMAIL, EVP'
+        '401':
+          description: Não autorizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Invalid token
+        '500':
+          description: Erro interno do servidor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: Failed to send PIX button
   /message/download:
     post:
       tags:
@@ -5439,47 +5983,68 @@ paths:
                   example: msg_123456789
                 limit:
                   type: integer
-                  description: Número máximo de mensagens a retornar
+                  description: Numero maximo de mensagens a retornar (padrao 100)
                   minimum: 1
                   default: 100
-                  example: 10
+                  example: 20
+                offset:
+                  type: integer
+                  description: Deslocamento para paginacao (0 retorna as mensagens mais recentes)
+                  default: 0
             examples:
               chatSearch:
-                summary: Buscar por chat específico
-                description: Busca mensagens de uma conversa específica
+                summary: Buscar por chat especifico
+                description: Busca mensagens de uma conversa especifica
                 value:
                   chatid: 5511999999999@s.whatsapp.net
-                  limit: 10
+                  limit: 20
+                  offset: 0
               idSearch:
-                summary: Buscar por ID específico
-                description: Busca uma mensagem específica pelo seu ID
+                summary: Buscar por ID especifico
+                description: Busca uma mensagem especifica pelo seu ID
                 value:
                   id: user123:r3EB0538
               trackingSearch:
                 summary: Buscar por rastreamento
-                description: Busca mensagens usando dados de tracking
+                description: Busca mensagens usando dados de tracking com paginacao
                 value:
                   track_source: chatwoot
                   track_id: conv_123456
                   limit: 50
+                  offset: 100
       responses:
         '200':
-          description: Lista de mensagens encontradas
+          description: Lista de mensagens encontradas com metadados de paginacao
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  returnedMessages:
+                    type: integer
+                    description: Quantidade de mensagens retornadas nesta pagina
                   messages:
                     type: array
                     items:
                       $ref: ../schemas/message.yaml#/Message
+                  limit:
+                    type: integer
+                    description: Limite aplicado na busca
+                  offset:
+                    type: integer
+                    description: Offset usado para recuperar os resultados
+                  nextOffset:
+                    type: integer
+                    description: Offset sugerido para a proxima pagina
+                  hasMore:
+                    type: boolean
+                    description: Indica se existem mais mensagens apos esta pagina
         '400':
-          description: Parâmetros inválidos
+          description: Parametros invalidos
         '401':
-          description: Token inválido ou expirado
+          description: Token invalido ou expirado
         '404':
-          description: Chat não encontrado
+          description: Chat nao encontrado
         '500':
           description: Erro interno do servidor
   /message/markread:
@@ -6496,6 +7061,96 @@ paths:
                     items:
                       $ref: ../schemas/group.yaml#/Group
                     description: Lista detalhada de grupos
+        '500':
+          description: Erro interno do servidor ao recuperar grupos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Mensagem detalhando o erro encontrado
+    post:
+      tags:
+        - Grupos e Comunidades
+      summary: Listar todos os grupos com filtros e paginacao
+      description: >
+        Retorna uma lista com todos os grupos disponiveis para a instancia atual do WhatsApp, com opcoes de filtros e
+        paginacao via corpo (POST).
+
+        A rota GET continua para quem prefere a listagem direta sem paginacao.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  type: integer
+                  description: Numero da pagina para paginacao (padrao 1)
+                  default: 1
+                pageSize:
+                  type: integer
+                  description: Quantidade de resultados por pagina (padrao 50, maximo 1000)
+                  default: 50
+                limit:
+                  type: integer
+                  description: Alias opcional para `pageSize`
+                offset:
+                  type: integer
+                  description: Deslocamento base zero; se informado recalcula a pagina
+                  default: 0
+                search:
+                  type: string
+                  description: Texto para filtrar grupos por nome/JID
+                force:
+                  type: boolean
+                  default: false
+                  description: |
+                    Se definido como `true`, forca a atualizacao do cache de grupos.
+                    Util para garantir que as informacoes mais recentes sejam recuperadas.
+                noParticipants:
+                  type: boolean
+                  default: false
+                  description: |
+                    Se definido como `true`, retorna a lista de grupos sem incluir os participantes.
+                    Util para otimizar a resposta quando nao ha necessidade dos dados dos participantes.
+      responses:
+        '200':
+          description: Lista de grupos recuperada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: ../schemas/group.yaml#/Group
+                    description: Lista detalhada de grupos
+                  pagination:
+                    type: object
+                    properties:
+                      totalRecords:
+                        type: integer
+                        description: Total de grupos encontrados
+                      pageSize:
+                        type: integer
+                        description: Itens por pagina
+                      currentPage:
+                        type: integer
+                        description: Pagina atual
+                      totalPages:
+                        type: integer
+                        description: Numero total de paginas
+                      hasNextPage:
+                        type: boolean
+                        description: Indica se existe uma proxima pagina
+                      hasPreviousPage:
+                        type: boolean
+                        description: Indica se existe pagina anterior
         '500':
           description: Erro interno do servidor ao recuperar grupos
           content:
@@ -10411,64 +11066,6 @@ paths:
                         type: integer
                       totalPages:
                         type: integer
-  /chat/count:
-    get:
-      summary: Retorna contadores de chats
-      description: |
-        Retorna estatísticas e contadores agregados dos chats, incluindo:
-        - Total de chats
-        - Chats não lidos
-        - Chats arquivados
-        - Chats fixados
-        - Chats bloqueados
-        - Grupos e status de grupos
-      tags:
-        - Chats
-      responses:
-        '200':
-          description: Contadores retornados com sucesso
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  total_chats:
-                    type: integer
-                    description: Número total de chats
-                  unread_chats:
-                    type: integer
-                    description: Número de chats com mensagens não lidas
-                  archived_chats:
-                    type: integer
-                    description: Número de chats arquivados
-                  pinned_chats:
-                    type: integer
-                    description: Número de chats fixados
-                  blocked_chats:
-                    type: integer
-                    description: Número de contatos bloqueados
-                  groups:
-                    type: integer
-                    description: Número total de grupos
-                  admin_groups:
-                    type: integer
-                    description: Número de grupos onde é administrador
-                  member_groups:
-                    type: integer
-                    description: Número de grupos onde é membro
-                example:
-                  total_chats: 150
-                  unread_chats: 5
-                  archived_chats: 10
-                  pinned_chats: 3
-                  blocked_chats: 2
-                  groups: 8
-                  admin_groups: 3
-                  member_groups: 5
-        '401':
-          description: Não autorizado - token inválido
-        '500':
-          description: Erro interno do servidor
   /chat/editLead:
     post:
       summary: Edita informações de lead
@@ -10700,6 +11297,108 @@ paths:
                   error:
                     type: string
                     example: Internal server error
+  /contacts/list:
+    post:
+      tags:
+        - Contatos
+      summary: Listar todos os contatos com paginacao
+      description: |
+        Retorna uma lista paginada de contatos da instancia do WhatsApp. 
+        Use este endpoint (POST) para controlar pagina, tamanho e offset via corpo da requisicao.
+        A rota GET `/contacts` continua disponivel para quem prefere a lista completa sem paginacao.
+      security:
+        - token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  type: integer
+                  description: Numero da pagina para paginacao (padrao 1)
+                  default: 1
+                pageSize:
+                  type: integer
+                  description: Quantidade de resultados por pagina (padrao 100, maximo 1000)
+                  default: 100
+                limit:
+                  type: integer
+                  description: Alias opcional para `pageSize`
+                offset:
+                  type: integer
+                  description: Deslocamento base zero para paginacao; se informado recalcula a pagina
+                  default: 0
+      responses:
+        '200':
+          description: Lista de contatos recuperada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        jid:
+                          type: string
+                          description: 'ID unico do contato no WhatsApp (formato: numero@s.whatsapp.net)'
+                          example: 5511999999999@s.whatsapp.net
+                        contact_name:
+                          type: string
+                          description: Nome completo do contato (quando salvo)
+                          example: Joao Silva
+                        contact_FirstName:
+                          type: string
+                          description: Primeiro nome do contato
+                          example: Joao
+                  pagination:
+                    type: object
+                    properties:
+                      totalRecords:
+                        type: integer
+                        description: Total de contatos apos filtragem
+                      totalDeviceContacts:
+                        type: integer
+                        description: Total bruto de contatos no dispositivo
+                      pageSize:
+                        type: integer
+                        description: Quantidade de itens por pagina
+                      currentPage:
+                        type: integer
+                        description: Pagina atual
+                      totalPages:
+                        type: integer
+                        description: Numero total de paginas
+                      hasNextPage:
+                        type: boolean
+                        description: Indica se existe uma proxima pagina
+                      hasPreviousPage:
+                        type: boolean
+                        description: Indica se existe pagina anterior
+        '401':
+          description: Token nao fornecido ou invalido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: No session
+        '500':
+          description: Erro interno do servidor ao recuperar contatos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Mensagem detalhando o erro encontrado
   /contact/add:
     post:
       tags:

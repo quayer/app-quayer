@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
-import { useAuth } from '@/lib/auth/auth-context'
+import { useAuth } from '@/lib/auth/auth-provider'
 
 interface CreateProjectDialogProps {
   isOpen: boolean

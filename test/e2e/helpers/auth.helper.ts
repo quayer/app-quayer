@@ -154,14 +154,14 @@ export async function createAuthenticatedContext(
 /**
  * Helper para testes que precisam de role específica
  */
-export async function requireRole(tokens: AuthTokens, expectedRole: string): boolean {
+export function requireRole(tokens: AuthTokens, expectedRole: string): boolean {
   return tokens.user.role === expectedRole;
 }
 
 /**
  * Helper para testes que precisam de org role específica
  */
-export async function requireOrgRole(tokens: AuthTokens, expectedOrgRole: string): boolean {
+export function requireOrgRole(tokens: AuthTokens, expectedOrgRole: string): boolean {
   return tokens.user.organizationRole === expectedOrgRole;
 }
 

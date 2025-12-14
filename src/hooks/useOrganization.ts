@@ -16,7 +16,7 @@ export function useOrganizations() {
   return useQuery({
     queryKey: ['organizations'],
     queryFn: async () => {
-      const result = await api.organizations.list.query();
+      const result = await api.organizations.list.query({ query: {} });
       return result;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -32,13 +32,18 @@ export function useSwitchOrganization() {
 
   return useMutation({
     mutationFn: async (organizationId: string) => {
-      const result = await api.auth.switchOrganization.mutate({ organizationId });
+      const result = await api.auth.switchOrganization.mutate({ body: { organizationId } });
       return result;
     },
     onSuccess: (data: any) => {
-      // Update access token in localStorage
-      if (data.accessToken) {
-        localStorage.setItem('auth_token', data.accessToken);
+      // ✅ CORREÇÃO BRUTAL: Extrair data corretamente
+      const responseData = data?.data || data;
+
+      // Update access token in localStorage AND cookie
+      if (responseData.accessToken) {
+        // ✅ Usar 'accessToken' (não 'auth_token')
+        localStorage.setItem('accessToken', responseData.accessToken);
+        document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax`;
       }
 
       // Invalidate all queries to refetch with new organization context
@@ -47,7 +52,7 @@ export function useSwitchOrganization() {
       toast.success('Organização alterada com sucesso!');
 
       // Refresh page to update all contexts
-      router.refresh();
+      window.location.reload();
     },
     onError: (error: any) => {
       const message = error?.response?.data?.error || error.message || 'Erro ao trocar organização';

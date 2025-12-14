@@ -8,7 +8,7 @@ import { igniter } from '@/igniter';
 import { PrismaClient } from '@prisma/client';
 import { completeOnboardingSchema } from '../onboarding.schemas';
 import { signAccessToken } from '@/lib/auth/jwt';
-import { UserRole } from '@/lib/auth/roles';
+import { UserRole, OrganizationRole } from '@/lib/auth/roles';
 
 const db = new PrismaClient();
 
@@ -30,7 +30,7 @@ export const onboardingController = igniter.controller({
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
         if (!userId) {
-          return response.unauthorized({ error: 'Not authenticated' });
+          return response.unauthorized('Not authenticated');
         }
 
         const {
@@ -46,12 +46,12 @@ export const onboardingController = igniter.controller({
         // Fetch user
         const user = await db.user.findUnique({ where: { id: userId } });
         if (!user) {
-          return response.notFound({ error: 'User not found' });
+          return response.notFound('User not found');
         }
 
         // Check if onboarding already completed
         if (user.onboardingCompleted) {
-          return response.badRequest({ error: 'Onboarding already completed' });
+          return response.badRequest('Onboarding already completed');
         }
 
         // Check if document already exists
@@ -60,7 +60,7 @@ export const onboardingController = igniter.controller({
         });
 
         if (existingOrg) {
-          return response.badRequest({ error: 'Documento já cadastrado para outra organização' });
+          return response.badRequest('Documento já cadastrado para outra organização');
         }
 
         // Generate organization slug
@@ -116,7 +116,7 @@ export const onboardingController = igniter.controller({
           email: user.email,
           role: user.role as UserRole,
           currentOrgId: organization.id,
-          organizationRole: 'master',
+          organizationRole: OrganizationRole.MASTER,
         });
 
         return response.success({

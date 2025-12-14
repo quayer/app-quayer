@@ -21,6 +21,7 @@ import { database } from '@/services/database';
  */
 export const labelsController = igniter.controller({
   name: 'labels',
+  path: '/labels',
   description: 'Sistema de categorização com labels',
 
   actions: {
@@ -41,27 +42,24 @@ export const labelsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { name, slug, description, backgroundColor, icon, category } = context.body;
-        const { currentOrgId } = context.user;
+        const { name, slug, description, backgroundColor, icon, category } = request.body;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se slug já existe nesta organização
         const existing = await database.label.findFirst({
           where: {
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
             slug,
           },
         });
 
         if (existing) {
-          return response.error({
-            message: 'Já existe uma label com este slug nesta organização',
-            status: 400,
-          });
+          return response.badRequest('Já existe uma label com este slug nesta organização');
         }
 
         const label = await database.label.create({
           data: {
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
             name,
             slug,
             description,
@@ -93,11 +91,11 @@ export const labelsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { page, limit, category, isActive, search } = context.query;
-        const { currentOrgId } = context.user;
+        const { page, limit, category, isActive, search } = request.query as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const where: any = {
-          organizationId: currentOrgId,
+          organizationId: currentOrgId!,
         };
 
         if (category) {
@@ -144,26 +142,20 @@ export const labelsController = igniter.controller({
      */
     getById: igniter.query({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const label = await database.label.findFirst({
           where: {
             id,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!label) {
-          return response.error({
-            message: 'Label não encontrada',
-            status: 404,
-          });
+          return response.notFound('Label não encontrada');
         }
 
         return response.success({
@@ -179,9 +171,6 @@ export const labelsController = igniter.controller({
     update: igniter.mutation({
       path: '/:id',
       method: 'PUT',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       body: z.object({
         name: z.string().min(1).optional(),
         slug: z.string().min(1).optional(),
@@ -192,40 +181,34 @@ export const labelsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { name, slug, description, backgroundColor, icon, category } = context.body;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { name, slug, description, backgroundColor, icon, category } = request.body;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         // Verificar se label existe
         const existing = await database.label.findFirst({
           where: {
             id,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Label não encontrada',
-            status: 404,
-          });
+          return response.notFound('Label não encontrada');
         }
 
         // Se atualizando slug, verificar duplicação
         if (slug && slug !== existing.slug) {
           const duplicate = await database.label.findFirst({
             where: {
-              organizationId: currentOrgId,
+              organizationId: currentOrgId!,
               slug,
               id: { not: id },
             },
           });
 
           if (duplicate) {
-            return response.error({
-              message: 'Já existe uma label com este slug nesta organização',
-              status: 400,
-            });
+            return response.badRequest('Já existe uma label com este slug nesta organização');
           }
         }
 
@@ -255,26 +238,20 @@ export const labelsController = igniter.controller({
     delete: igniter.mutation({
       path: '/:id',
       method: 'DELETE',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const label = await database.label.findFirst({
           where: {
             id,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!label) {
-          return response.error({
-            message: 'Label não encontrada',
-            status: 404,
-          });
+          return response.notFound('Label não encontrada');
         }
 
         await database.label.delete({
@@ -293,26 +270,20 @@ export const labelsController = igniter.controller({
      */
     getStats: igniter.query({
       path: '/:id/stats',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const label = await database.label.findFirst({
           where: {
             id,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!label) {
-          return response.error({
-            message: 'Label não encontrada',
-            status: 404,
-          });
+          return response.notFound('Label não encontrada');
         }
 
         // Aqui você pode adicionar queries para contar onde a label é usada
@@ -342,26 +313,20 @@ export const labelsController = igniter.controller({
     toggleActive: igniter.mutation({
       path: '/:id/toggle-active',
       method: 'PATCH',
-      params: z.object({
-        id: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const label = await database.label.findFirst({
           where: {
             id,
-            organizationId: currentOrgId,
+            organizationId: currentOrgId!,
           },
         });
 
         if (!label) {
-          return response.error({
-            message: 'Label não encontrada',
-            status: 404,
-          });
+          return response.notFound('Label não encontrada');
         }
 
         const updated = await database.label.update({
@@ -384,20 +349,17 @@ export const labelsController = igniter.controller({
      */
     getByCategory: igniter.query({
       path: '/by-category/:category',
-      params: z.object({
-        category: z.string(),
-      }),
       query: z.object({
         isActive: z.coerce.boolean().optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { category } = context.params;
-        const { isActive } = context.query;
-        const { currentOrgId } = context.user;
+        const { category } = request.params as any;
+        const { isActive } = request.query as any;
+        const { currentOrgId } = context.auth?.session?.user!;
 
         const where: any = {
-          organizationId: currentOrgId,
+          organizationId: currentOrgId!,
           category,
         };
 

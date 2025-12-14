@@ -14,16 +14,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Save, AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
 import { api } from '@/igniter.client'
-import type { Instance } from '@prisma/client'
+import { ConnectionStatus, type Connection as Instance } from '@prisma/client'
 import { z } from 'zod'
+import { useAuth } from '@/lib/auth/auth-provider'
 
 const instanceEditSchema = z.object({
   name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
   phoneNumber: z.string().optional(),
+  assignedCustomerId: z.string().optional(),
 })
 
 type InstanceEditData = z.infer<typeof instanceEditSchema>
@@ -41,19 +42,44 @@ export function EditInstanceModal({
   instance,
   onSuccess,
 }: EditInstanceModalProps) {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
+
   const [formData, setFormData] = useState<InstanceEditData>({
     name: '',
     phoneNumber: '',
+    assignedCustomerId: undefined,
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string>('')
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const [customers, setCustomers] = useState<{ id: string; name: string; email: string }[]>([])
+  const [loadingCustomers, setLoadingCustomers] = useState(false)
+
+  // Fetch customers (admin only)
+  useEffect(() => {
+    if (isAdmin && isOpen) {
+      setLoadingCustomers(true)
+      api.auth.listUsers.query()
+        .then((result: any) => {
+          const data = result?.data || result
+          setCustomers(data.users || [])
+        })
+        .catch((err) => {
+          console.error('Error loading customers:', err)
+        })
+        .finally(() => {
+          setLoadingCustomers(false)
+        })
+    }
+  }, [isAdmin, isOpen])
 
   useEffect(() => {
     if (instance) {
       setFormData({
         name: instance.name,
         phoneNumber: instance.phoneNumber || '',
+        assignedCustomerId: (instance as any).assignedCustomerId || undefined,
       })
     }
   }, [instance])
@@ -98,11 +124,18 @@ export function EditInstanceModal({
     setError('')
 
     try {
+      const payload: any = {
+        name: formData.name,
+        phoneNumber: formData.phoneNumber || undefined,
+      }
+
+      // Admin pode atribuir instância a um cliente
+      if (isAdmin) {
+        payload.assignedCustomerId = formData.assignedCustomerId || null
+      }
+
       const response = await api.instances.update.mutate({
-        body: {
-          name: formData.name,
-          phoneNumber: formData.phoneNumber || undefined,
-        }
+        body: payload
       })
 
       if (response.error) {
@@ -120,7 +153,7 @@ export function EditInstanceModal({
   }
 
   const handleClose = () => {
-    setFormData({ name: '', phoneNumber: '' })
+    setFormData({ name: '', phoneNumber: '', assignedCustomerId: undefined })
     setError('')
     setValidationErrors({})
     onClose()
@@ -128,51 +161,43 @@ export function EditInstanceModal({
 
   if (!instance) return null
 
-  const isConnected = instance.status === 'connected'
+  // Verificar status da conexão - considerar uazStatus do UAZapi se disponível
+  const rawStatus = (instance as any).uazStatus || instance.status || 'unknown'
+  const normalizedStatus = rawStatus.toString().toLowerCase()
+  const isConnected = normalizedStatus === 'connected' || normalizedStatus === 'open' || rawStatus === ConnectionStatus.CONNECTED
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-2xl">Editar Integração</DialogTitle>
+          <DialogTitle>Editar Integração</DialogTitle>
           <DialogDescription>
             Atualize as informações da integração WhatsApp
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          {/* Status Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Status da Conexão</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-3">
-                {isConnected ? (
-                  <>
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    <Badge variant="default">Conectado</Badge>
-                  </>
-                ) : (
-                  <>
-                    <XCircle className="h-5 w-5 text-red-500" />
-                    <Badge variant="destructive">Desconectado</Badge>
-                  </>
-                )}
-                <span className="text-sm text-muted-foreground ml-auto">
-                  O status da conexão é gerenciado automaticamente pelo sistema
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Separator />
+        <div className="space-y-4 py-2">
+          {/* Status inline */}
+          <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+            {isConnected ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <Badge variant="default" className="text-xs">Conectado</Badge>
+              </>
+            ) : (
+              <>
+                <XCircle className="h-4 w-4 text-red-500" />
+                <Badge variant="destructive" className="text-xs">Desconectado</Badge>
+              </>
+            )}
+            <span className="text-xs text-muted-foreground ml-auto">
+              Status gerenciado automaticamente
+            </span>
+          </div>
 
           {/* Form Fields */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Informações Básicas</h3>
-
-            <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="space-y-1.5">
               <Label htmlFor="name">
                 Nome da Integração <span className="text-red-500">*</span>
               </Label>
@@ -189,7 +214,7 @@ export function EditInstanceModal({
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="phoneNumber">Telefone (opcional)</Label>
               <Input
                 id="phoneNumber"
@@ -199,27 +224,40 @@ export function EditInstanceModal({
                 disabled={isSubmitting}
               />
               <p className="text-xs text-muted-foreground">
-                Número no formato internacional (ex: 5511999999999)
+                Formato internacional (ex: 5511999999999)
               </p>
             </div>
           </div>
 
-          {/* Metadata Info */}
-          <Card className="bg-muted/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Informações do Sistema</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Provedor:</span>
-                <span className="font-medium">WhatsApp falecomigo.ai</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">ID:</span>
-                <span className="font-mono text-xs">{instance.id}</span>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Admin Only - Customer Assignment */}
+          {isAdmin && (
+            <div className="space-y-1.5 pt-2 border-t">
+              <Label htmlFor="assignedCustomerId">Cliente Atribuído (Admin)</Label>
+              <Select
+                value={formData.assignedCustomerId || '__none__'}
+                onValueChange={(value) => handleInputChange('assignedCustomerId', value === '__none__' ? '' : value)}
+                disabled={isSubmitting || loadingCustomers}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingCustomers ? 'Carregando...' : 'Selecione um cliente'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Nenhum (Sem atribuição)</SelectItem>
+                  {customers.map((customer) => (
+                    <SelectItem key={customer.id} value={customer.id}>
+                      {customer.name} ({customer.email})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Metadata - compact */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
+            <span>ID: <code className="font-mono">{instance.id ? instance.id.slice(0, 8) : (instance as any).uazInstanceId?.slice(0, 8) || 'N/A'}...</code></span>
+            <span>Provedor: UAZapi</span>
+          </div>
 
           {/* Error Alert */}
           {error && (

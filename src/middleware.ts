@@ -14,13 +14,11 @@ import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
  */
 const PUBLIC_PATHS = [
   '/login',
-  '/register',
   '/signup',
   '/connect',
   '/forgot-password',
   '/reset-password',
   '/google-callback',
-  '/verify-email',
   '/verify',
 ];
 

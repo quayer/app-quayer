@@ -31,6 +31,30 @@ model Organization {
   businessDays       String? // Format: "1,2,3,4,5" (Segunda a Sexta)
   timezone           String  @default("America/Sao_Paulo")
 
+  // Session & Automation Settings
+  sessionTimeoutHours  Int     @default(24) // 1-72 horas para encerrar sessão inativa
+  notificationsEnabled Boolean @default(true)
+  balancedDistribution Boolean @default(true) // Distribuir sessões entre agentes
+  typingIndicator      Boolean @default(true) // Mostrar "digitando..."
+  profanityFilter      Boolean @default(false) // Filtrar palavrões
+  autoGreeting         Boolean @default(false) // Saudação automática
+  greetingMessage      String? // Mensagem de saudação
+
+  // White-label Branding
+  logoUrl        String? // URL do logo customizado
+  primaryColor   String  @default("#000000") // Cor primária da marca
+  secondaryColor String? // Cor secundária
+  supportEmail   String? // Email de suporte personalizado
+  customDomain   String? // Domínio customizado
+
+  // Provider Configuration (Quayer Managed vs Own UAZapi)
+  providerType String  @default("quayer") // "quayer" (managed) or "uazapi" (own)
+  uazapiUrl    String? // URL da API UAZapi personalizada
+  uazapiKey    String? // Chave de API UAZapi (encriptada)
+
+  // SMTP Configuration
+  smtpConfig Json? // { host, port, user, pass, from }
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -92,11 +116,60 @@ model User {
   contactObservations ContactObservation[]
   files               File[]
   calls               Call[]
+  assignedConnections Connection[]         @relation("AssignedCustomer")
+
+  passkeyCredentials PasskeyCredential[]
 
   @@index([email])
   @@index([currentOrgId])
   @@index([role])
   @@index([resetToken])
+}
+
+// ============================================
+// PASSKEY / WEBAUTHN CREDENTIALS
+// ============================================
+
+model PasskeyCredential {
+  id                  String   @id @default(uuid())
+  userId              String
+  credentialId        String   @unique // Base64URL encoded credential ID
+  publicKey           Bytes    // COSE public key
+  counter             BigInt   @default(0) // Signature counter for clone detection
+  credentialDeviceType String  @default("singleDevice") // singleDevice or multiDevice
+  credentialBackedUp  Boolean  @default(false)
+  transports          String[] // Transports supported by authenticator (usb, ble, nfc, internal)
+  
+  // User-friendly name for the passkey
+  name                String   @default("Minha Passkey")
+  
+  // AAGUID for device identification (optional)
+  aaguid              String?
+  
+  createdAt           DateTime @default(now())
+  lastUsedAt          DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([credentialId])
+  @@index([lastUsedAt])
+}
+
+// Temporary challenge for WebAuthn operations
+model PasskeyChallenge {
+  id          String   @id @default(uuid())
+  challenge   String   @unique // Base64URL encoded challenge
+  userId      String?  // Optional for registration (user not yet authenticated)
+  email       String?  // For login without userId
+  type        String   // "registration" or "authentication"
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([challenge])
+  @@index([userId])
+  @@index([email])
+  @@index([expiresAt])
 }
 
 // Temporary user for signup (before email verification)
@@ -252,6 +325,12 @@ model Connection {
   lastDisconnect       DateTime?
   lastDisconnectReason String?
 
+  // WhatsApp Cloud API Integration (Official Meta API)
+  cloudApiAccessToken   String?   @map("cloud_api_access_token") @db.Text // System User Token (pode ser longo)
+  cloudApiPhoneNumberId String?   @map("cloud_api_phone_number_id") // Phone Number ID do Meta Business
+  cloudApiWabaId        String?   @map("cloud_api_waba_id") // WhatsApp Business Account ID
+  cloudApiVerifiedName  String?   @map("cloud_api_verified_name") // Nome verificado da conta business
+
   // n8n Integration (AI Agent)
   n8nWebhookUrl  String? // URL do workflow n8n
   n8nWorkflowId  String? // ID do workflow
@@ -259,8 +338,11 @@ model Connection {
   agentConfig    Json? // { prompt, tools, model, temperature }
 
   // Organization & Project
-  organizationId String
+  organizationId String? // Nullable para permitir instâncias sem organização (admin)
   projectId      String?
+
+  // Customer Assignment (Admin only)
+  assignedCustomerId String? // ID do cliente/usuário atribuído pelo admin
 
   // Message Delay Config
   msgDelayMin Int @default(2)
@@ -273,8 +355,9 @@ model Connection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project                Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedCustomer       User?                   @relation("AssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
   webhooks               Webhook[]
   chatSessions           ChatSession[]
   messages               Message[]
@@ -288,6 +371,7 @@ model Connection {
   @@index([channel])
   @@index([provider])
   @@index([uazapiInstanceId])
+  @@index([cloudApiPhoneNumberId])
   @@index([shareToken])
   @@index([n8nWorkflowId])
   @@map("connections")
@@ -424,9 +508,46 @@ model AuditLog {
 }
 
 // ============================================
-// ACCESS LEVELS (Permissões Customizadas)
+// ACCESS LEVELS & PERMISSIONS (Sistema Dinâmico)
 // ============================================
 
+// Define recursos e ações disponíveis no sistema
+model PermissionResource {
+  id          String   @id @default(uuid())
+  resource    String   @unique // organizations, users, connections, messages, etc
+  displayName String // Nome amigável
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+
+  @@index([resource])
+  @@index([isActive])
+  @@map("permission_resources")
+}
+
+// Mapeia permissões por role
+model RolePermission {
+  id         String @id @default(uuid())
+  resourceId String
+  role       String // admin, master, manager, agent, viewer
+  actions    String[] // create, read, update, delete, manage, export, etc
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  resource PermissionResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, role])
+  @@index([role])
+  @@index([resourceId])
+  @@map("role_permissions")
+}
+
+// Access Levels customizados por organização
 model AccessLevel {
   id             String   @id @default(uuid())
   name           String // "Custom Manager", "Limited User", etc
@@ -464,6 +585,28 @@ model Contact {
   // Metadata
   tags         String[] @default([])
   customFields Json?
+
+  // Custom Fields (inspired by UAZapi/Chatwoot fieldMap)
+  contactField01 String? @db.VarChar(255)
+  contactField02 String? @db.VarChar(255)
+  contactField03 String? @db.VarChar(255)
+  contactField04 String? @db.VarChar(255)
+  contactField05 String? @db.VarChar(255)
+  contactField06 String? @db.VarChar(255)
+  contactField07 String? @db.VarChar(255)
+  contactField08 String? @db.VarChar(255)
+  contactField09 String? @db.VarChar(255)
+  contactField10 String? @db.VarChar(255)
+  contactField11 String? @db.VarChar(255)
+  contactField12 String? @db.VarChar(255)
+  contactField13 String? @db.VarChar(255)
+  contactField14 String? @db.VarChar(255)
+  contactField15 String? @db.VarChar(255)
+  contactField16 String? @db.VarChar(255)
+  contactField17 String? @db.VarChar(255)
+  contactField18 String? @db.VarChar(255)
+  contactField19 String? @db.VarChar(255)
+  contactField20 String? @db.VarChar(255)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -505,10 +648,39 @@ model ChatSession {
   aiBlockedUntil DateTime?
   aiBlockReason  String?
 
+  // AI Agent Configuration (qual agente IA está atendendo)
+  aiAgentConfigId String? // FK para AIAgentConfig
+  aiAgentId       String? // ID do agente IA ativo (pode ser de sistema externo)
+  aiAgentName     String? // Nome do agente IA
+  aiAgentTarget   String? // Target/objetivo do agente (ex: "vendas", "suporte")
+  aiAgentBehavior String? // Comportamento específico do agente
+  aiAgentContext  Json? // Contexto adicional do agente
+
+  // Customer Journey Tracking
+  customerJourney       String?   @default("new") // new, returning, qualified, etc
+  journeyStage          String? // Estágio atual na jornada
+  journeyUpdatedAt      DateTime? // Última atualização da jornada
+  leadScore             Int? // Score do lead (0-100)
+  conversionProbability Float? // Probabilidade de conversão (0-1)
+
+  // Session Analytics
+  totalMessages      Int   @default(0)
+  totalAiMessages    Int   @default(0)
+  totalAgentMessages Int   @default(0)
+  totalMediaMessages Int   @default(0)
+  avgResponseTime    Int? // Tempo médio de resposta em segundos
+  sessionDuration    Int? // Duração total em segundos
+  totalAiCost        Float @default(0) // Custo total de IA da sessão
+
+  // Timing & Expiration
+  lastMessageAt DateTime  @default(now())
+  expiresAt     DateTime? // Calculated expiration based on org timeout
+  pausedUntil   DateTime? // For @pausar command with time limit
+  pausedBy      String? // Who paused: "command", "agent", "system"
+
   // Concatenação
-  lastMessageAt DateTime @default(now())
-  isConcat      Boolean  @default(false)
-  concatTimeout Int      @default(8)
+  isConcat      Boolean @default(false)
+  concatTimeout Int     @default(8)
 
   // Metadata
   tags         String[] @default([])
@@ -523,6 +695,7 @@ model ChatSession {
   connection         Connection          @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department         Department?         @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  aiAgentConfig      AIAgentConfig?      @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
   messages           Message[]
   sessionTabulations SessionTabulation[]
 
@@ -532,9 +705,13 @@ model ChatSession {
   @@index([status])
   @@index([aiBlockedUntil])
   @@index([lastMessageAt])
+  @@index([expiresAt])
+  @@index([pausedUntil])
   @@index([assignedDepartmentId])
   @@index([assignedAgentId])
   @@index([externalId])
+  @@index([aiAgentConfigId])
+  @@index([customerJourney])
 }
 
 enum SessionStatus {
@@ -563,6 +740,10 @@ model Message {
   author      MessageAuthor    @default(CUSTOMER)
   content     String           @db.Text
 
+  // Conteúdo Formatado/Raw (para tracking de transformações)
+  rawContent       String? @db.Text // Conteúdo original antes de sanitização
+  formattedContent String? @db.Text // Conteúdo formatado/processado
+
   // Mídia
   mediaUrl      String?
   mediaType     String?
@@ -589,10 +770,29 @@ model Message {
   isConcatenated Boolean @default(false)
   concatGroupId  String?
 
+  // AI Response Tracking (quando a mensagem é resposta de IA)
+  aiModel      String? // gpt-4o, claude-3, etc
+  aiAgentId    String? // ID do agente que respondeu
+  aiAgentName  String? // Nome do agente
+  inputTokens  Int? // Tokens de entrada (prompt)
+  outputTokens Int? // Tokens de saída (completion)
+  cachedTokens Int? // Tokens em cache (economia)
+  inputCost    Float? // Custo dos tokens de entrada
+  outputCost   Float? // Custo dos tokens de saída
+  cacheSavings Float? // Economia por cache
+  totalCost    Float? // Custo total da chamada
+  aiLatency    Int? // Latência da resposta em ms
+  aiProvider   String? // openai, anthropic, groq, etc
+
+  // Callback/Webhook Origin
+  callbackSource  String? // webhook_id ou "n8n", "make", etc
+  callbackPayload Json? // Payload original do callback
+
   // Metadata
   quotedMessageId String?
   isForwarded     Boolean @default(false)
   forwardedInfo   Json?
+  metadata        Json? // Metadata adicional flexível
 
   createdAt DateTime @default(now())
 
@@ -607,6 +807,8 @@ model Message {
   @@index([waMessageId])
   @@index([concatGroupId])
   @@index([transcriptionStatus])
+  @@index([aiAgentId])
+  @@index([aiModel])
   @@index([createdAt])
 }
 
@@ -948,4 +1150,435 @@ enum CallStatus {
   BUSY // Ocupado
   FAILED // Falhou
   ENDED // Finalizada
+}
+
+// ============================================
+// INTEGRATION CONFIGURATIONS (Provider Settings)
+// ============================================
+
+model IntegrationConfig {
+  id             String          @id @default(uuid())
+  organizationId String
+  type           IntegrationType
+  name           String
+  isActive       Boolean         @default(true)
+  isDefault      Boolean         @default(false)
+
+  // Encrypted credentials (use encryption at app level)
+  apiKey        String?
+  apiSecret     String?
+  apiUrl        String?
+  webhookUrl    String?
+  webhookSecret String?
+
+  // Additional settings as JSON
+  settings Json?
+  metadata Json?
+
+  // Rate limiting
+  rateLimit       Int?
+  rateLimitPeriod Int? // in seconds
+
+  // Health check
+  lastHealthCheck DateTime?
+  healthStatus    String?   @default("unknown")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, type, name])
+  @@index([organizationId])
+  @@index([type])
+  @@index([isActive])
+}
+
+enum IntegrationType {
+  // AI Providers
+  OPENAI
+  ANTHROPIC
+  GROQ
+  TOGETHER_AI
+  OLLAMA
+
+  // Transcription Providers
+  DEEPGRAM
+  WHISPER_API
+  ASSEMBLY_AI
+
+  // Storage Providers
+  SUPABASE
+  AWS_S3
+  CLOUDFLARE_R2
+
+  // Database Providers
+  POSTGRESQL
+  REDIS
+  MONGODB
+
+  // Messaging Channels
+  UAZAPI
+  CHATWOOT
+  WHATSAPP_CLOUD
+  TELEGRAM
+  MESSENGER
+
+  // Other
+  CUSTOM
+}
+
+// Configurations at system/admin level (global defaults)
+model SystemConfig {
+  id          String  @id @default(uuid())
+  key         String  @unique
+  value       String
+  type        String  @default("string") // string, number, boolean, json
+  category    String  @default("general")
+  description String?
+  isEncrypted Boolean @default(false)
+  isEditable  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([key])
+}
+
+// AI Agent Configuration per Organization
+model AIAgentConfig {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  isActive       Boolean @default(true)
+
+  // Model settings
+  provider    String @default("openai") // openai, anthropic, groq
+  model       String @default("gpt-4o")
+  temperature Float  @default(0.7)
+  maxTokens   Int    @default(4096)
+
+  // System prompt
+  systemPrompt String? @db.Text
+  personality  String?
+
+  // Agent Identity (para tracking e analytics)
+  agentTarget   String? // "vendas", "suporte", "atendimento"
+  agentBehavior String? // Comportamento padrão
+  agentAvatar   String? // URL do avatar
+
+  // Memory settings
+  useMemory    Boolean @default(true)
+  memoryWindow Int     @default(10) // Number of messages to remember
+
+  // RAG settings
+  useRAG          Boolean @default(false)
+  ragCollectionId String?
+
+  // Tool settings
+  enabledTools String[] @default([])
+
+  // TTS Settings (Text-to-Speech)
+  enableTTS     Boolean @default(false)
+  ttsProvider   String? // "elevenlabs", "openai", "google"
+  ttsVoiceId    String? // ID da voz (ex: ElevenLabs voice ID)
+  ttsModel      String? // Modelo TTS
+  ttsSpeechRate Float?  @default(1.0) // Velocidade da fala
+
+  // Callback settings
+  callbackUrl    String?
+  callbackSecret String?
+
+  // Cost tracking (agregado por agente)
+  totalInputTokens  Int   @default(0)
+  totalOutputTokens Int   @default(0)
+  totalCachedTokens Int   @default(0)
+  totalCost         Float @default(0)
+  totalCacheSavings Float @default(0)
+  totalCalls        Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos
+  sessions ChatSession[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+// ============================================
+// SYSTEM SETTINGS (Global Platform Config)
+// ============================================
+
+model SystemSettings {
+  id        String   @id @default(uuid())
+  category  String   // uazapi, email, ai, concatenation, oauth, security, system
+  key       String   // setting key within category
+  value     String   @db.Text // setting value (JSON for complex values)
+  encrypted Boolean  @default(false) // whether value is encrypted
+
+  description String? // human-readable description
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String?  // user id who last updated
+
+  @@unique([category, key])
+  @@index([category])
+}
+
+// Email Templates (customizable by admin)
+model EmailTemplate {
+  id          String  @id @default(uuid())
+  name        String  @unique // welcome, verification, reset_password, invitation
+  subject     String
+  htmlContent String  @db.Text
+  textContent String? @db.Text
+  variables   String[] // available variables like {{name}}, {{link}}
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([name])
+}
+
+// AI Prompts (customizable by admin)
+model AIPrompt {
+  id          String  @id @default(uuid())
+  name        String  @unique // image_description, audio_transcription, text_analysis
+  description String?
+  prompt      String  @db.Text
+  model       String? // gpt-4-vision, whisper-1, etc
+  isActive    Boolean @default(true)
+
+  // Usage tracking
+  usageCount  Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([name])
+}
+
+// ============================================
+// API KEYS (Programmatic API Access)
+// ============================================
+
+model ApiKey {
+  id   String @id @default(uuid())
+  name String // User-friendly name (e.g., "Production Server", "CI/CD Pipeline")
+
+  // Key Storage (never store plain text)
+  keyHash String @unique // SHA-256 hash of the full key
+  prefix  String // First 8 chars for display (e.g., "qk_live_a")
+
+  // Ownership
+  organizationId String
+  userId         String // Creator of the key
+
+  // Permissions & Scope
+  scopes String[] @default(["read"]) // read, write, admin, webhooks, instances, etc
+
+  // Expiration (null = never expires)
+  expiresAt DateTime?
+
+  // Usage Tracking
+  lastUsedAt DateTime?
+  lastUsedIp String?
+  usageCount Int       @default(0)
+
+  // Status
+  isActive  Boolean   @default(true)
+  revokedAt DateTime?
+  revokedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([prefix])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@map("api_keys")
+}
+
+// ============================================
+// SYSTEM LOGS (Real-time Logging & AI Analysis)
+// ============================================
+
+model LogEntry {
+  id        String   @id @default(uuid())
+  timestamp DateTime @default(now())
+
+  // Log Classification
+  level   LogLevel  @default(INFO)
+  source  String    // auth, webhook, api, database, whatsapp, ai, system
+  action  String?   // login, message.received, webhook.failed, etc
+
+  // Content
+  message    String  @db.Text
+  details    String? @db.Text // Detailed description
+  stackTrace String? @db.Text
+
+  // Context (JSON)
+  context   Json? // { userId, orgId, connectionId, sessionId, requestId, etc }
+  metadata  Json? // Additional metadata
+
+  // Request tracking
+  requestId    String? // For request correlation
+  requestPath  String? // /api/v1/auth/login
+  requestMethod String? // GET, POST, etc
+  statusCode   Int?    // HTTP status code
+  duration     Int?    // Request duration in ms
+
+  // User context
+  userId         String?
+  organizationId String?
+  connectionId   String?
+  sessionId      String?
+  ipAddress      String?
+  userAgent      String?
+
+  // AI Analysis
+  aiAnalysis      String?   @db.Text // AI-generated analysis
+  aiAnalyzedAt    DateTime?
+  aiPatternMatch  String?   // Detected pattern type
+  aiSeverity      Int?      @default(0) // 0-10 severity score
+  aiSuggestion    String?   @db.Text // AI suggestion for fix
+
+  // Tags for filtering
+  tags String[] @default([])
+
+  // Indexes
+  @@index([timestamp])
+  @@index([level])
+  @@index([source])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([connectionId])
+  @@index([sessionId])
+  @@index([requestId])
+  @@index([aiPatternMatch])
+  @@index([aiSeverity])
+  @@map("log_entries")
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}
+
+// AI Log Analysis Results (cached analyses)
+model LogAnalysis {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  // Time range analyzed
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Analysis type
+  type String // hourly, daily, realtime, pattern
+
+  // Results
+  summary       String  @db.Text // Human-readable summary
+  patterns      Json    // Detected patterns
+  anomalies     Json    // Detected anomalies
+  suggestions   Json    // AI suggestions
+  metrics       Json    // Key metrics
+  severity      Int     @default(0) // 0-10
+
+  // Model info
+  aiModel   String? // gpt-4o, claude-3, etc
+  aiTokens  Int?
+  aiCost    Float?
+  aiLatency Int?    // ms
+
+  @@index([createdAt])
+  @@index([type])
+  @@index([periodStart, periodEnd])
+  @@map("log_analyses")
+}
+
+// ============================================
+// NOTIFICATIONS (User & System Notifications)
+// ============================================
+
+model Notification {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Target (who receives the notification)
+  userId         String? // Specific user
+  organizationId String? // All users in organization
+  role           String? // All users with role (admin, master, manager, etc)
+  isGlobal       Boolean @default(false) // All users
+
+  // Content
+  type        NotificationType
+  title       String
+  description String           @db.Text
+  actionUrl   String? // URL to navigate on click
+  actionLabel String? // Button label (e.g., "Ver detalhes")
+
+  // Metadata
+  source   String? // auth, webhook, message, system, instance, etc
+  sourceId String? // ID of related entity
+  metadata Json? // Additional context data
+
+  // Scheduling
+  scheduledFor DateTime? // Future notification
+  expiresAt    DateTime? // Auto-delete after
+
+  // Status
+  isActive Boolean @default(true)
+
+  // Relations
+  reads NotificationRead[]
+
+  // Indexes
+  @@index([userId])
+  @@index([organizationId])
+  @@index([role])
+  @@index([type])
+  @@index([isGlobal])
+  @@index([createdAt])
+  @@index([scheduledFor])
+  @@index([expiresAt])
+  @@map("notifications")
+}
+
+// User's read status for notifications
+model NotificationRead {
+  id             String   @id @default(uuid())
+  notificationId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+  @@index([notificationId])
+  @@map("notification_reads")
+}
+
+enum NotificationType {
+  MESSAGE // Nova mensagem
+  USER // Relacionado a usuários
+  WARNING // Alerta/Aviso
+  INFO // Informativo
+  SUCCESS // Sucesso/Confirmação
+  ERROR // Erro
+  SYSTEM // Sistema
+  CONNECTION // Status de conexão
 }

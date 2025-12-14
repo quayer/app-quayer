@@ -7,11 +7,11 @@
 
 import { redis } from '@/services/redis';
 import { database } from '@/services/database';
-import { jobs } from '@/services/jobs';
+import { chatwootSyncService } from '@/features/chatwoot';
 import type { MessageDirection, MessageType } from '@prisma/client';
 
 export interface IncomingMessage {
-  instanceId: string;
+  connectionId: string;
   waMessageId: string;
   type: MessageType;
   content: string;
@@ -25,7 +25,6 @@ export interface IncomingMessage {
 export class MessageConcatenator {
   private readonly CONCAT_TIMEOUT: number;
   private readonly REDIS_PREFIX = 'concat:';
-  private readonly JOB_PREFIX = 'concat_job:';
 
   constructor(timeoutSeconds: number = 8) {
     this.CONCAT_TIMEOUT = timeoutSeconds;
@@ -33,7 +32,7 @@ export class MessageConcatenator {
 
   /**
    * Adicionar mensagem ao grupo de concatenação
-   * Agora usa BullMQ delayed jobs ao invés de Redis SETEX
+   * Usa Redis SETEX com TTL para auto-processamento
    */
   async addMessage(
     sessionId: string,
@@ -41,84 +40,54 @@ export class MessageConcatenator {
     message: IncomingMessage
   ): Promise<'queued' | 'processing'> {
     const key = `${this.REDIS_PREFIX}${sessionId}:${contactId}`;
-    const jobKey = `${this.JOB_PREFIX}${sessionId}:${contactId}`;
 
     console.log(`[Concat] Adding message to ${key}`);
 
     // Verificar se já existe grupo de concatenação ativo
     const existing = await redis.get(key);
-    const existingJobId = await redis.get(jobKey);
 
     if (existing) {
       // Adicionar à lista existente
       const messages: IncomingMessage[] = JSON.parse(existing);
       messages.push(message);
 
-      // Atualizar mensagens no Redis (sem expiration agora)
-      await redis.set(key, JSON.stringify(messages));
+      // Atualizar mensagens no Redis com TTL estendido
+      await redis.setex(key, this.CONCAT_TIMEOUT, JSON.stringify(messages));
 
-      // CANCELAR job antigo (se existir) e criar novo com delay resetado
-      if (existingJobId) {
-        try {
-          const oldJob = await jobs.getQueue('concatenation').getJob(existingJobId);
-          if (oldJob) {
-            await oldJob.remove();
-            console.log(`[Concat] Cancelled old job ${existingJobId}`);
-          }
-        } catch (error) {
-          console.error(`[Concat] Error cancelling old job:`, error);
-        }
-      }
-
-      // Criar novo job com delay resetado
-      const job = await jobs.dispatch('concatenation', 'processConcatenatedMessages', {
-        sessionId,
-        contactId,
-      }, {
-        delay: this.CONCAT_TIMEOUT * 1000, // converter para ms
-      });
-
-      // Salvar job ID no Redis para poder cancelar depois
-      await redis.set(jobKey, job.id!);
-
-      console.log(`[Concat] Message added to existing group (${messages.length} total), job ${job.id} scheduled`);
+      console.log(`[Concat] Message added to existing group (${messages.length} total)`);
       return 'queued';
     } else {
-      // Iniciar novo grupo
-      await redis.set(key, JSON.stringify([message]));
+      // Iniciar novo grupo com TTL
+      await redis.setex(key, this.CONCAT_TIMEOUT, JSON.stringify([message]));
 
-      // Criar job com delay
-      const job = await jobs.dispatch('concatenation', 'processConcatenatedMessages', {
-        sessionId,
-        contactId,
-      }, {
-        delay: this.CONCAT_TIMEOUT * 1000, // converter para ms
-      });
+      // Agendar processamento após timeout usando setTimeout (em-memory)
+      // Note: Em produção, considerar usar BullMQ diretamente ou Redis keyspace notifications
+      setTimeout(async () => {
+        try {
+          await this.processConcatenatedMessages(sessionId, contactId);
+        } catch (error) {
+          console.error(`[Concat] Error processing messages:`, error);
+        }
+      }, this.CONCAT_TIMEOUT * 1000);
 
-      // Salvar job ID no Redis
-      await redis.set(jobKey, job.id!);
-
-      console.log(`[Concat] New concatenation group started, job ${job.id} will process in ${this.CONCAT_TIMEOUT}s`);
+      console.log(`[Concat] New concatenation group started, will process in ${this.CONCAT_TIMEOUT}s`);
       return 'processing';
     }
   }
 
   /**
    * Processar grupo de mensagens concatenadas
-   * Chamado pelo BullMQ job quando delay expira
+   * Chamado após o timeout expirar
    */
   async processConcatenatedMessages(
     sessionId: string,
     contactId: string
   ): Promise<void> {
     const key = `${this.REDIS_PREFIX}${sessionId}:${contactId}`;
-    const jobKey = `${this.JOB_PREFIX}${sessionId}:${contactId}`;
     const data = await redis.get(key);
 
     if (!data) {
       console.log(`[Concat] No messages to process for ${key}`);
-      // Limpar job ID se existir
-      await redis.del(jobKey);
       return;
     }
 
@@ -126,11 +95,8 @@ export class MessageConcatenator {
 
     console.log(`[Concat] Processing ${messages.length} concatenated messages`);
 
-    // Deletar do Redis (mensagens e job ID)
-    await Promise.all([
-      redis.del(key),
-      redis.del(jobKey),
-    ]);
+    // Deletar do Redis
+    await redis.del(key);
 
     // Concatenar apenas mensagens de texto
     const textMessages = messages.filter(m => m.type === 'text');
@@ -150,7 +116,7 @@ export class MessageConcatenator {
         data: {
           sessionId,
           contactId,
-          instanceId: messages[0].instanceId,
+          connectionId: messages[0].connectionId,
           waMessageId: `concat_${concatGroupId}`,
           direction: 'INBOUND',
           type: 'text',
@@ -165,6 +131,32 @@ export class MessageConcatenator {
 
       // Processar mensagem final (IA, etc)
       await this.processMessage(finalMessage);
+
+      // ⭐ CHATWOOT SYNC: Sincronizar mensagem concatenada com Chatwoot
+      try {
+        const contact = await database.contact.findUnique({
+          where: { id: contactId },
+          select: { phoneNumber: true, name: true },
+        });
+        const instance = await database.instance.findUnique({
+          where: { id: messages[0].connectionId },
+          select: { organizationId: true },
+        });
+        
+        if (contact && instance?.organizationId) {
+          await chatwootSyncService.syncIncomingMessage({
+            instanceId: messages[0].connectionId,
+            organizationId: instance.organizationId,
+            phoneNumber: contact.phoneNumber,
+            contactName: contact.name || contact.phoneNumber,
+            messageContent: concatenatedText,
+            messageType: 'text',
+            isFromGroup: contact.phoneNumber.includes('@g.us'),
+          });
+        }
+      } catch (chatwootError) {
+        console.error('[Concat] Chatwoot sync failed (non-blocking):', chatwootError);
+      }
     }
 
     // Salvar mensagens individuais de mídia
@@ -177,7 +169,7 @@ export class MessageConcatenator {
             data: {
               sessionId,
               contactId,
-              instanceId: msg.instanceId,
+              connectionId: msg.connectionId,
               waMessageId: msg.waMessageId,
               direction: msg.direction,
               type: msg.type,
@@ -210,7 +202,7 @@ export class MessageConcatenator {
           data: {
             sessionId,
             contactId,
-            instanceId: msg.instanceId,
+            connectionId: msg.connectionId,
             waMessageId: msg.waMessageId,
             direction: msg.direction,
             type: msg.type,
@@ -270,7 +262,7 @@ export class MessageConcatenator {
     // Enfileirar transcrição
     await transcriptionQueue.add('transcribe-media', {
       messageId,
-      instanceId: message.instanceId,
+      instanceId: message.connectionId, // Note: transcriptionQueue still uses 'instanceId' parameter name
       mediaType: message.type,
       mediaUrl: message.mediaUrl!,
       mimeType: message.mimeType,
@@ -304,31 +296,13 @@ export class MessageConcatenator {
   }
 
   /**
-   * Limpar grupo de concatenação (cancelar job e remover dados)
+   * Limpar grupo de concatenação (remover dados do Redis)
    */
   async clearGroup(sessionId: string, contactId: string): Promise<void> {
     const key = `${this.REDIS_PREFIX}${sessionId}:${contactId}`;
-    const jobKey = `${this.JOB_PREFIX}${sessionId}:${contactId}`;
-
-    // Cancelar job se existir
-    const existingJobId = await redis.get(jobKey);
-    if (existingJobId) {
-      try {
-        const job = await jobs.getQueue('concatenation').getJob(existingJobId);
-        if (job) {
-          await job.remove();
-          console.log(`[Concat] Cancelled job ${existingJobId}`);
-        }
-      } catch (error) {
-        console.error(`[Concat] Error cancelling job:`, error);
-      }
-    }
 
     // Deletar dados do Redis
-    await Promise.all([
-      redis.del(key),
-      redis.del(jobKey),
-    ]);
+    await redis.del(key);
 
     console.log(`[Concat] Cleared concatenation group: ${key}`);
   }

@@ -11,7 +11,7 @@
  *
  * To modify the client API, update your controller files instead.
  *
- * Generated: 2025-10-16T03:12:17.421Z
+ * Generated: 2025-12-03T10:35:54.787Z
  * Framework: nextjs
  * Output: src/
  */
@@ -223,6 +223,11 @@ export const AppRouterSchema = {
           "path": "/switch-organization",
           "method": "POST",
           "description": "Switch current organization",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {},
           "bodySchema": {
             "type": "object",
@@ -249,6 +254,31 @@ export const AppRouterSchema = {
             }
           ],
           "$Infer": {}
+        },
+        "toggleUserActive": {
+          "name": "Toggle User Active",
+          "type": "mutation",
+          "path": "/users/:userId/active",
+          "method": "PATCH",
+          "description": "Enable or disable a user account (admin only)",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "isActive"
+            ],
+            "additionalProperties": false
+          }
         },
         "forgotPassword": {
           "name": "Forgot Password",
@@ -537,6 +567,102 @@ export const AppRouterSchema = {
         }
       }
     },
+    "analytics": {
+      "name": "analytics",
+      "path": "/analytics",
+      "actions": {
+        "receiveUIEvents": {
+          "type": "mutation",
+          "path": "/ui-events",
+          "method": "POST",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "click",
+                        "navigation",
+                        "form_submit",
+                        "form_error",
+                        "modal_open",
+                        "modal_close",
+                        "api_call",
+                        "api_success",
+                        "api_error",
+                        "page_load",
+                        "error",
+                        "warning",
+                        "info",
+                        "performance"
+                      ]
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "number"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "timestamp",
+                    "sessionId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "events"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "getEventsSummary": {
+          "path": "/ui-events/summary",
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "userId": {
+                "type": "string"
+              },
+              "startDate": {
+                "type": "string"
+              },
+              "endDate": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "onboarding": {
       "name": "onboarding",
       "path": "/onboarding",
@@ -645,6 +771,14 @@ export const AppRouterSchema = {
                   "pro",
                   "enterprise"
                 ]
+              },
+              "adminName": {
+                "type": "string",
+                "minLength": 2
+              },
+              "adminEmail": {
+                "type": "string",
+                "format": "email"
               }
             },
             "required": [
@@ -727,6 +861,7 @@ export const AppRouterSchema = {
         "update": {
           "type": "mutation",
           "path": "/:id",
+          "method": "PUT",
           "use": [
             {
               "name": "AuthProcedure"
@@ -762,6 +897,59 @@ export const AppRouterSchema = {
               },
               "isActive": {
                 "type": "boolean"
+              },
+              "businessHoursStart": {
+                "type": "string",
+                "pattern": "^\\d{2}:\\d{2}$",
+                "nullable": true
+              },
+              "businessHoursEnd": {
+                "type": "string",
+                "pattern": "^\\d{2}:\\d{2}$",
+                "nullable": true
+              },
+              "businessDays": {
+                "type": "string",
+                "pattern": "^[0-6](,[0-6])*$",
+                "nullable": true
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "sessionTimeoutHours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 72
+              },
+              "notificationsEnabled": {
+                "type": "boolean"
+              },
+              "balancedDistribution": {
+                "type": "boolean"
+              },
+              "typingIndicator": {
+                "type": "boolean"
+              },
+              "profanityFilter": {
+                "type": "boolean"
+              },
+              "autoGreeting": {
+                "type": "boolean"
+              },
+              "greetingMessage": {
+                "type": "string",
+                "maxLength": 500,
+                "nullable": true
+              },
+              "dbConfig": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "redisConfig": {
+                "type": "object",
+                "additionalProperties": {}
               }
             },
             "additionalProperties": false
@@ -770,6 +958,7 @@ export const AppRouterSchema = {
         "delete": {
           "type": "mutation",
           "path": "/:id",
+          "method": "DELETE",
           "use": [
             {
               "name": "AuthProcedure"
@@ -790,6 +979,7 @@ export const AppRouterSchema = {
         "addMember": {
           "type": "mutation",
           "path": "/:id/members",
+          "method": "POST",
           "use": [
             {
               "name": "AuthProcedure"
@@ -818,6 +1008,45 @@ export const AppRouterSchema = {
             ],
             "additionalProperties": false
           }
+        },
+        "updateMember": {
+          "type": "mutation",
+          "path": "/:id/members/:userId",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "master",
+                  "manager",
+                  "user"
+                ]
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "removeMember": {
+          "type": "mutation",
+          "path": "/:id/members/:userId",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
         }
       }
     },
@@ -908,6 +1137,1033 @@ export const AppRouterSchema = {
             }
           ],
           "$Infer": {}
+        },
+        "getOverview": {
+          "path": "/overview",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "startDate": {
+                "type": "string"
+              },
+              "endDate": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getAttendance": {
+          "path": "/attendance",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "startDate": {
+                "type": "string"
+              },
+              "endDate": {
+                "type": "string"
+              },
+              "departmentId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getPerformance": {
+          "path": "/performance",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "startDate": {
+                "type": "string"
+              },
+              "endDate": {
+                "type": "string"
+              },
+              "groupBy": {
+                "type": "string",
+                "enum": [
+                  "department",
+                  "agent",
+                  "instance"
+                ],
+                "default": "department"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getConversations": {
+          "path": "/conversations",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "startDate": {
+                "type": "string"
+              },
+              "endDate": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "departments": {
+      "name": "departments",
+      "path": "/departments",
+      "description": "Gerenciamento hierárquico de departamentos",
+      "actions": {
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 10
+              },
+              "search": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "support",
+                  "sales",
+                  "custom"
+                ]
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "create": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "support",
+                  "sales",
+                  "custom"
+                ],
+                "default": "support"
+              }
+            },
+            "required": [
+              "name",
+              "slug"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "support",
+                  "sales",
+                  "custom"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "getById": {
+          "path": "/:departmentId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:departmentId",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "toggleActive": {
+          "type": "mutation",
+          "path": "/:departmentId/toggle-active",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        }
+      }
+    },
+    "attribute": {
+      "name": "attribute",
+      "path": "/attribute",
+      "description": "Gerenciamento de definições de atributos customizados",
+      "actions": {
+        "create": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TEXT",
+                  "DATE",
+                  "DATETIME",
+                  "INTEGER",
+                  "FLOAT",
+                  "DOCUMENT"
+                ]
+              },
+              "isRequired": {
+                "type": "boolean",
+                "default": false
+              },
+              "defaultValue": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TEXT",
+                  "DATE",
+                  "DATETIME",
+                  "INTEGER",
+                  "FLOAT",
+                  "DOCUMENT"
+                ]
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getById": {
+          "path": "/:id",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TEXT",
+                  "DATE",
+                  "DATETIME",
+                  "INTEGER",
+                  "FLOAT",
+                  "DOCUMENT"
+                ]
+              },
+              "isRequired": {
+                "type": "boolean"
+              },
+              "defaultValue": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "force": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "contact-attribute": {
+      "name": "contact-attribute",
+      "path": "/contact-attribute",
+      "description": "Gerenciamento de valores de atributos para contatos",
+      "actions": {
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              },
+              "contactId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "attributeId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "createOrUpdate": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "contactId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "attributeId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "contactId",
+              "attributeId",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "getByContact": {
+          "path": "/contact/:contactId",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        }
+      }
+    },
+    "contacts": {
+      "name": "contacts",
+      "path": "/contacts",
+      "description": "Gerenciamento de contatos",
+      "actions": {
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              },
+              "search": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getById": {
+          "path": "/:id",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "bypassBots": {
+                "type": "boolean"
+              },
+              "customFields": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "getSessions": {
+          "path": "/:id/sessions",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 20
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "labels": {
+      "name": "labels",
+      "path": "/labels",
+      "description": "Sistema de categorização com labels",
+      "actions": {
+        "create": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "backgroundColor": {
+                "type": "string",
+                "default": "#ffffff"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "slug"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              },
+              "category": {
+                "type": "string"
+              },
+              "isActive": {
+                "type": "boolean"
+              },
+              "search": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getById": {
+          "path": "/:id",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "backgroundColor": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "getStats": {
+          "path": "/:id/stats",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "toggleActive": {
+          "type": "mutation",
+          "path": "/:id/toggle-active",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "getByCategory": {
+          "path": "/by-category/:category",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "contact-observation": {
+      "name": "contact-observation",
+      "path": "/contact-observation",
+      "description": "Gerenciamento de observações para contatos",
+      "actions": {
+        "create": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "contactId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "note",
+                  "warning",
+                  "important"
+                ],
+                "default": "note"
+              }
+            },
+            "required": [
+              "contactId",
+              "content"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "getByContact": {
+          "path": "/contact/:contactId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "note",
+                  "warning",
+                  "important"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "update": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "note",
+                  "warning",
+                  "important"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
         }
       }
     },
@@ -923,7 +2179,44 @@ export const AppRouterSchema = {
               "name": "AuthProcedure"
             }
           ],
-          "$Infer": {}
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "limit": {
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0,
+                "maximum": 100,
+                "default": 50
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "search": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "unread",
+                  "groups",
+                  "pinned"
+                ]
+              }
+            },
+            "required": [
+              "instanceId"
+            ],
+            "additionalProperties": false
+          }
         },
         "count": {
           "path": "/count",
@@ -944,17 +2237,318 @@ export const AppRouterSchema = {
               "name": "AuthProcedure"
             }
           ],
-          "$Infer": {}
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "chatId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "instanceId",
+              "chatId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "archive": {
+          "type": "mutation",
+          "path": "/:chatId/archive",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "instanceId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:chatId",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "instanceId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "block": {
+          "type": "mutation",
+          "path": "/:chatId/block",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "block": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "required": [
+              "instanceId"
+            ],
+            "additionalProperties": false
+          }
         }
       }
     },
     "messages": {
       "name": "messages",
       "path": "/messages",
+      "description": "Gerenciamento de mensagens do sistema",
       "actions": {
+        "create": {
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "image",
+                  "audio",
+                  "video",
+                  "document",
+                  "location",
+                  "contact",
+                  "list",
+                  "buttons"
+                ]
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "INBOUND",
+                  "OUTBOUND"
+                ],
+                "default": "OUTBOUND"
+              },
+              "author": {
+                "type": "string",
+                "enum": [
+                  "CUSTOMER",
+                  "AGENT",
+                  "AI",
+                  "BUSINESS",
+                  "SYSTEM",
+                  "AGENT_PLATFORM"
+                ],
+                "default": "AGENT"
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pauseSession": {
+                "type": "boolean",
+                "default": false
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "sent",
+                  "delivered",
+                  "read",
+                  "failed"
+                ],
+                "default": "pending"
+              },
+              "externalId": {
+                "type": "string"
+              },
+              "sendExternalMessage": {
+                "type": "boolean",
+                "default": true
+              },
+              "mediaUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "caption": {
+                "type": "string"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "delayMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30000,
+                "default": 0
+              },
+              "showTyping": {
+                "type": "boolean",
+                "default": false
+              },
+              "interactiveData": {}
+            },
+            "required": [
+              "sessionId",
+              "type",
+              "content"
+            ],
+            "additionalProperties": false
+          }
+        },
         "list": {
-          "path": "/list",
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "contactId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "INBOUND",
+                  "OUTBOUND"
+                ]
+              },
+              "author": {
+                "type": "string",
+                "enum": [
+                  "CUSTOMER",
+                  "AGENT",
+                  "AI",
+                  "BUSINESS",
+                  "SYSTEM",
+                  "AGENT_PLATFORM"
+                ]
+              },
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getById": {
+          "path": "/:id",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "downloadMedia": {
+          "path": "/:id/download",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "react": {
+          "type": "mutation",
+          "path": "/:id/react",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "emoji": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10
+              }
+            },
+            "required": [
+              "emoji"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "delete": {
+          "type": "mutation",
+          "path": "/:id",
+          "method": "DELETE",
           "use": [
             {
               "name": "AuthProcedure"
@@ -962,32 +2556,10 @@ export const AppRouterSchema = {
           ],
           "$Infer": {}
         },
-        "sendText": {
+        "markAsRead": {
           "type": "mutation",
-          "path": "/send-text",
-          "method": "POST",
-          "use": [
-            {
-              "name": "AuthProcedure"
-            }
-          ],
-          "$Infer": {}
-        },
-        "sendImage": {
-          "type": "mutation",
-          "path": "/send-image",
-          "method": "POST",
-          "use": [
-            {
-              "name": "AuthProcedure"
-            }
-          ],
-          "$Infer": {}
-        },
-        "sendFile": {
-          "type": "mutation",
-          "path": "/send-file",
-          "method": "POST",
+          "path": "/:id/mark-read",
+          "method": "PATCH",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1010,7 +2582,43 @@ export const AppRouterSchema = {
               "name": "AuthProcedure"
             }
           ],
-          "$Infer": {}
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "chatId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mediaUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "mediaBase64": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fileName": {
+                "type": "string"
+              },
+              "caption": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "chatId",
+              "mimeType"
+            ],
+            "additionalProperties": false
+          }
         },
         "sendDocument": {
           "type": "mutation",
@@ -1021,7 +2629,43 @@ export const AppRouterSchema = {
               "name": "AuthProcedure"
             }
           ],
-          "$Infer": {}
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "chatId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mediaUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "mediaBase64": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fileName": {
+                "type": "string"
+              },
+              "caption": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "chatId",
+              "mimeType"
+            ],
+            "additionalProperties": false
+          }
         }
       }
     },
@@ -1045,7 +2689,7 @@ export const AppRouterSchema = {
               "organizationId": {
                 "type": "string"
               },
-              "instanceId": {
+              "connectionId": {
                 "type": "string"
               },
               "contactId": {
@@ -1077,26 +2721,6 @@ export const AppRouterSchema = {
         },
         "get": {
           "path": "/:id",
-          "params": {
-            "_def": {
-              "unknownKeys": "strip",
-              "catchall": {
-                "_def": {
-                  "typeName": "ZodNever"
-                },
-                "~standard": {
-                  "version": 1,
-                  "vendor": "zod"
-                }
-              },
-              "typeName": "ZodObject"
-            },
-            "~standard": {
-              "version": 1,
-              "vendor": "zod"
-            },
-            "_cached": null
-          },
           "use": [
             {
               "name": "AuthProcedure"
@@ -1124,6 +2748,7 @@ export const AppRouterSchema = {
         "blockAI": {
           "type": "mutation",
           "path": "/:id/block-ai",
+          "method": "POST",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1150,6 +2775,7 @@ export const AppRouterSchema = {
         "unblockAI": {
           "type": "mutation",
           "path": "/:id/unblock-ai",
+          "method": "POST",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1160,6 +2786,7 @@ export const AppRouterSchema = {
         "close": {
           "type": "mutation",
           "path": "/:id/close",
+          "method": "POST",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1170,6 +2797,7 @@ export const AppRouterSchema = {
         "updateStatus": {
           "type": "mutation",
           "path": "/:id/status",
+          "method": "PATCH",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1195,9 +2823,34 @@ export const AppRouterSchema = {
             "additionalProperties": false
           }
         },
+        "updateDepartment": {
+          "type": "mutation",
+          "path": "/:id/department",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "departmentId": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "departmentId"
+            ],
+            "additionalProperties": false
+          }
+        },
         "addTags": {
           "type": "mutation",
           "path": "/:id/tags",
+          "method": "POST",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1224,6 +2877,7 @@ export const AppRouterSchema = {
         "removeTags": {
           "type": "mutation",
           "path": "/:id/tags",
+          "method": "DELETE",
           "use": [
             {
               "name": "AuthProcedure"
@@ -1249,26 +2903,6 @@ export const AppRouterSchema = {
         },
         "checkAIStatus": {
           "path": "/:id/ai-status",
-          "params": {
-            "_def": {
-              "unknownKeys": "strip",
-              "catchall": {
-                "_def": {
-                  "typeName": "ZodNever"
-                },
-                "~standard": {
-                  "version": 1,
-                  "vendor": "zod"
-                }
-              },
-              "typeName": "ZodObject"
-            },
-            "~standard": {
-              "version": 1,
-              "vendor": "zod"
-            },
-            "_cached": null
-          },
           "use": [
             {
               "name": "AuthProcedure"
@@ -1276,6 +2910,386 @@ export const AppRouterSchema = {
           ],
           "method": "GET",
           "$Infer": {}
+        },
+        "byContact": {
+          "path": "/by-contact/:contactId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "blacklist": {
+          "path": "/blacklist",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              },
+              "search": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "addToBlacklist": {
+          "type": "mutation",
+          "path": "/contacts/:contactId/blacklist",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "removeFromBlacklist": {
+          "type": "mutation",
+          "path": "/contacts/:contactId/blacklist",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "updateContactLabels": {
+          "type": "mutation",
+          "path": "/contacts/:contactId/labels",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "labelIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "addLabelId": {
+                "type": "string"
+              },
+              "removeLabelId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateSessionLabels": {
+          "type": "mutation",
+          "path": "/:sessionId/labels",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "labelIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "addLabelId": {
+                "type": "string"
+              },
+              "removeLabelId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "listTabulations": {
+          "path": "/tabulations",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "contactsView": {
+          "path": "/contacts",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 10
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "QUEUED",
+                  "ACTIVE",
+                  "PAUSED",
+                  "CLOSED"
+                ]
+              },
+              "responseFilter": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "unanswered",
+                  "answered"
+                ],
+                "default": "all"
+              },
+              "search": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateContactLead": {
+          "type": "mutation",
+          "path": "/contacts/:contactId/lead",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "contactField01": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField02": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField03": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField04": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField05": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField06": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField07": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField08": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField09": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField10": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField11": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField12": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField13": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField14": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField15": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField16": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField17": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField18": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField19": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              },
+              "contactField20": {
+                "type": "string",
+                "maxLength": 255,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateSessionLead": {
+          "type": "mutation",
+          "path": "/:sessionId/lead",
+          "method": "PATCH",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "QUEUED",
+                  "ACTIVE",
+                  "PAUSED",
+                  "CLOSED"
+                ]
+              },
+              "assignedAgentId": {
+                "type": "string",
+                "nullable": true
+              },
+              "assignedDepartmentId": {
+                "type": "string",
+                "nullable": true
+              },
+              "journeyStage": {
+                "type": "string"
+              },
+              "customerJourney": {
+                "type": "string"
+              },
+              "leadScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "nullable": true
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "statusReason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
         }
       }
     },
@@ -1286,6 +3300,7 @@ export const AppRouterSchema = {
         "create": {
           "type": "mutation",
           "path": "/",
+          "method": "POST",
           "$Infer": {},
           "bodySchema": {
             "type": "object",
@@ -1351,6 +3366,7 @@ export const AppRouterSchema = {
         "update": {
           "type": "mutation",
           "path": "/:id",
+          "method": "PUT",
           "$Infer": {},
           "bodySchema": {
             "type": "object",
@@ -1375,33 +3391,36 @@ export const AppRouterSchema = {
         "delete": {
           "type": "mutation",
           "path": "/:id",
+          "method": "DELETE",
           "$Infer": {}
         },
-        "linkInstance": {
+        "linkConnection": {
           "type": "mutation",
-          "path": "/:id/instances",
+          "path": "/:id/connections",
+          "method": "POST",
           "$Infer": {},
           "bodySchema": {
             "type": "object",
             "properties": {
-              "instanceId": {
+              "connectionId": {
                 "type": "string",
                 "format": "uuid"
               }
             },
             "required": [
-              "instanceId"
+              "connectionId"
             ],
             "additionalProperties": false
           }
         },
-        "unlinkInstance": {
+        "unlinkConnection": {
           "type": "mutation",
-          "path": "/:id/instances/:instanceId",
+          "path": "/:id/connections/:connectionId",
+          "method": "DELETE",
           "$Infer": {}
         },
-        "listInstances": {
-          "path": "/:id/instances",
+        "listConnections": {
+          "path": "/:id/connections",
           "method": "GET",
           "$Infer": {}
         }
@@ -1414,6 +3433,12 @@ export const AppRouterSchema = {
         "create": {
           "type": "mutation",
           "path": "/",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {},
           "bodySchema": {
             "type": "object",
@@ -1453,6 +3478,56 @@ export const AppRouterSchema = {
               "organizationId": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "excludeMessages": {
+                "type": "boolean",
+                "default": false
+              },
+              "addUrlEvents": {
+                "type": "boolean",
+                "default": false
+              },
+              "addUrlTypesMessages": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "image",
+                    "audio",
+                    "video",
+                    "document",
+                    "location",
+                    "contact",
+                    "list",
+                    "buttons"
+                  ]
+                },
+                "default": []
+              },
+              "pathParams": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "maxRetries": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "default": 3
+              },
+              "retryDelay": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 60000,
+                "default": 5000
+              },
+              "timeout": {
+                "type": "integer",
+                "minimum": 5000,
+                "maximum": 120000,
+                "default": 30000
               }
             },
             "required": [
@@ -1465,6 +3540,11 @@ export const AppRouterSchema = {
         },
         "list": {
           "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "method": "GET",
           "$Infer": {},
           "querySchema": {
@@ -1494,12 +3574,23 @@ export const AppRouterSchema = {
         },
         "get": {
           "path": "/:id",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "method": "GET",
           "$Infer": {}
         },
         "update": {
           "type": "mutation",
           "path": "/:id",
+          "method": "PUT",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {},
           "bodySchema": {
             "type": "object",
@@ -1538,6 +3629,50 @@ export const AppRouterSchema = {
               },
               "isActive": {
                 "type": "boolean"
+              },
+              "excludeMessages": {
+                "type": "boolean"
+              },
+              "addUrlEvents": {
+                "type": "boolean"
+              },
+              "addUrlTypesMessages": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "image",
+                    "audio",
+                    "video",
+                    "document",
+                    "location",
+                    "contact",
+                    "list",
+                    "buttons"
+                  ]
+                }
+              },
+              "pathParams": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "maxRetries": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "retryDelay": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 60000
+              },
+              "timeout": {
+                "type": "integer",
+                "minimum": 5000,
+                "maximum": 120000
               }
             },
             "additionalProperties": false
@@ -1546,10 +3681,21 @@ export const AppRouterSchema = {
         "delete": {
           "type": "mutation",
           "path": "/:id",
+          "method": "DELETE",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {}
         },
         "listDeliveries": {
           "path": "/:id/deliveries",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "method": "GET",
           "$Infer": {},
           "querySchema": {
@@ -1585,6 +3731,192 @@ export const AppRouterSchema = {
         "retryDelivery": {
           "type": "mutation",
           "path": "/deliveries/:deliveryId/retry",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        }
+      }
+    },
+    "calls": {
+      "name": "calls",
+      "path": "/calls",
+      "description": "Gerenciamento de chamadas do WhatsApp",
+      "actions": {
+        "make": {
+          "type": "mutation",
+          "path": "/make",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "number": {
+                "type": "string",
+                "minLength": 10,
+                "pattern": "^\\d+@s\\.whatsapp\\.net$|^\\d+$"
+              }
+            },
+            "required": [
+              "instanceId",
+              "number"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reject": {
+          "type": "mutation",
+          "path": "/reject",
+          "method": "POST",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "callId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "instanceId",
+              "callId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "path": "/",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {},
+          "querySchema": {
+            "type": "object",
+            "properties": {
+              "instanceId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "INITIATED",
+                  "RINGING",
+                  "ANSWERED",
+                  "MISSED",
+                  "REJECTED",
+                  "BUSY",
+                  "FAILED",
+                  "ENDED"
+                ]
+              },
+              "page": {
+                "type": "number",
+                "minimum": 1,
+                "default": 1
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 20
+              }
+            },
+            "required": [
+              "instanceId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "get": {
+          "path": "/:callId",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        }
+      }
+    },
+    "sse": {
+      "name": "sse",
+      "path": "/sse",
+      "description": "Server-Sent Events para streaming de dados em tempo real",
+      "actions": {
+        "streamInstance": {
+          "path": "/instance/:instanceId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "streamOrganization": {
+          "path": "/organization/:organizationId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
+          "$Infer": {}
+        },
+        "streamSession": {
+          "path": "/session/:sessionId",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "method": "GET",
           "$Infer": {}
         }
       }
@@ -1633,21 +3965,32 @@ export const AppRouterSchema = {
                 "type": "string",
                 "pattern": "^\\+?[1-9]\\d{1,14}$"
               },
-              "brokerType": {
+              "provider": {
                 "type": "string",
                 "enum": [
-                  "uazapi"
+                  "WHATSAPP_WEB",
+                  "WHATSAPP_CLOUD_API",
+                  "WHATSAPP_BUSINESS_API",
+                  "INSTAGRAM_META",
+                  "TELEGRAM_BOT",
+                  "EMAIL_SMTP"
                 ],
-                "default": "uazapi"
+                "default": "WHATSAPP_WEB"
               },
-              "webhookUrl": {
+              "channel": {
                 "type": "string",
-                "format": "uri"
+                "enum": [
+                  "WHATSAPP",
+                  "INSTAGRAM",
+                  "TELEGRAM",
+                  "EMAIL"
+                ],
+                "default": "WHATSAPP"
               },
               "uazapiToken": {
                 "type": "string"
               },
-              "brokerId": {
+              "uazapiInstanceId": {
                 "type": "string"
               },
               "organizationId": {
@@ -1751,20 +4094,30 @@ export const AppRouterSchema = {
                 "type": "string",
                 "pattern": "^\\+?[1-9]\\d{1,14}$"
               },
-              "brokerType": {
+              "provider": {
                 "type": "string",
                 "enum": [
-                  "uazapi"
+                  "WHATSAPP_WEB",
+                  "WHATSAPP_CLOUD_API",
+                  "WHATSAPP_BUSINESS_API",
+                  "INSTAGRAM_META",
+                  "TELEGRAM_BOT",
+                  "EMAIL_SMTP"
                 ]
               },
-              "webhookUrl": {
+              "channel": {
                 "type": "string",
-                "format": "uri"
+                "enum": [
+                  "WHATSAPP",
+                  "INSTAGRAM",
+                  "TELEGRAM",
+                  "EMAIL"
+                ]
               },
               "uazapiToken": {
                 "type": "string"
               },
-              "brokerId": {
+              "uazapiInstanceId": {
                 "type": "string"
               }
             },
@@ -1863,7 +4216,27 @@ export const AppRouterSchema = {
               "name": "instancesProcedure"
             }
           ],
-          "$Infer": {}
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "webhookUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "webhookUrl",
+              "events"
+            ],
+            "additionalProperties": false
+          }
         },
         "getWebhook": {
           "name": "GetInstanceWebhook",
@@ -1920,66 +4293,1091 @@ export const AppRouterSchema = {
             }
           ],
           "$Infer": {}
+        },
+        "updateProfileName": {
+          "name": "UpdateProfileName",
+          "type": "mutation",
+          "path": "/:id/profile/name",
+          "method": "PUT",
+          "description": "Atualizar nome do perfil WhatsApp",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            },
+            {
+              "name": "instancesProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "updateProfileImage": {
+          "name": "UpdateProfileImage",
+          "type": "mutation",
+          "path": "/:id/profile/image",
+          "method": "PUT",
+          "description": "Atualizar foto do perfil WhatsApp",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            },
+            {
+              "name": "instancesProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "restart": {
+          "name": "RestartInstance",
+          "type": "mutation",
+          "path": "/:id/restart",
+          "method": "POST",
+          "description": "Reiniciar instância WhatsApp (desconecta e reconecta)",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            },
+            {
+              "name": "instancesProcedure"
+            }
+          ],
+          "$Infer": {}
         }
       }
     },
-    "share": {
-      "name": "share",
-      "path": "/share",
+    "system-settings": {
+      "name": "systemSettings",
+      "path": "/system-settings",
+      "description": "System settings management (admin only)",
       "actions": {
-        "generate": {
+        "getAll": {
+          "name": "Get All Settings",
+          "description": "Get all system settings",
+          "path": "/",
+          "method": "GET",
+          "$Infer": {}
+        },
+        "getByCategory": {
+          "name": "Get Settings by Category",
+          "description": "Get settings for a specific category",
+          "path": "/category/:category",
+          "method": "GET",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "$Infer": {}
+        },
+        "updateUazapi": {
+          "name": "Update UAZapi Settings",
           "type": "mutation",
-          "path": "/generate",
-          "method": "POST",
+          "path": "/uazapi",
+          "method": "PUT",
+          "description": "Update UAZapi configuration",
           "$Infer": {},
           "bodySchema": {
             "type": "object",
             "properties": {
-              "instanceId": {
+              "baseUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "adminToken": {
+                "type": "string",
+                "minLength": 1
+              },
+              "webhookUrl": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "not": {}
+                      },
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      ""
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "baseUrl",
+              "adminToken"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "updateEmail": {
+          "name": "Update Email Settings",
+          "type": "mutation",
+          "path": "/email",
+          "method": "PUT",
+          "description": "Update email/SMTP configuration",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "mock",
+                  "resend",
+                  "smtp"
+                ]
+              },
+              "from": {
+                "type": "string",
+                "format": "email"
+              },
+              "resendApiKey": {
+                "type": "string"
+              },
+              "smtp": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "port": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "secure": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "user": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pass": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "host",
+                  "port",
+                  "user",
+                  "pass"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "provider",
+              "from"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "updateAI": {
+          "name": "Update AI Settings",
+          "type": "mutation",
+          "path": "/ai",
+          "method": "PUT",
+          "description": "Update AI/OpenAI configuration",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "openaiApiKey": {
+                "type": "string"
+              },
+              "defaultModel": {
+                "type": "string",
+                "default": "gpt-4o-mini"
+              },
+              "imageDescriptionEnabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "audioTranscriptionEnabled": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateConcatenation": {
+          "name": "Update Concatenation Settings",
+          "type": "mutation",
+          "path": "/concatenation",
+          "method": "PUT",
+          "description": "Update message concatenation configuration",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "timeout": {
+                "type": "number",
+                "minimum": 1000,
+                "maximum": 60000,
+                "default": 8000
+              },
+              "maxMessages": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 10
+              },
+              "sameTypeOnly": {
+                "type": "boolean",
+                "default": false
+              },
+              "sameSenderOnly": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateOAuth": {
+          "name": "Update OAuth Settings",
+          "type": "mutation",
+          "path": "/oauth",
+          "method": "PUT",
+          "description": "Update OAuth/Google configuration",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "googleClientId": {
+                "type": "string"
+              },
+              "googleClientSecret": {
+                "type": "string"
+              },
+              "googleRedirectUri": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "not": {}
+                      },
+                      {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      ""
+                    ]
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "updateSecurity": {
+          "name": "Update Security Settings",
+          "type": "mutation",
+          "path": "/security",
+          "method": "PUT",
+          "description": "Update security configuration",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "accessTokenExpiresIn": {
+                "type": "string",
+                "pattern": "^\\d+[smhd]$",
+                "default": "15m"
+              },
+              "refreshTokenExpiresIn": {
+                "type": "string",
+                "pattern": "^\\d+[smhd]$",
+                "default": "7d"
+              },
+              "logLevel": {
+                "type": "string",
+                "enum": [
+                  "debug",
+                  "info",
+                  "warn",
+                  "error"
+                ],
+                "default": "info"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "getEmailTemplates": {
+          "name": "Get Email Templates",
+          "description": "Get all email templates",
+          "path": "/email-templates",
+          "method": "GET",
+          "$Infer": {}
+        },
+        "getEmailTemplate": {
+          "name": "Get Email Template",
+          "description": "Get a specific email template by name",
+          "path": "/email-templates/:name",
+          "method": "GET",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "$Infer": {}
+        },
+        "upsertEmailTemplate": {
+          "name": "Upsert Email Template",
+          "type": "mutation",
+          "path": "/email-templates",
+          "method": "POST",
+          "description": "Create or update an email template",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1
+              },
+              "htmlContent": {
+                "type": "string",
+                "minLength": 1
+              },
+              "textContent": {
+                "type": "string"
+              },
+              "variables": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "isActive": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "required": [
+              "name",
+              "subject",
+              "htmlContent"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "deleteEmailTemplate": {
+          "name": "Delete Email Template",
+          "type": "mutation",
+          "path": "/email-templates/:id",
+          "method": "DELETE",
+          "description": "Delete an email template",
+          "$Infer": {}
+        },
+        "getAIPrompts": {
+          "name": "Get AI Prompts",
+          "description": "Get all AI prompts",
+          "path": "/ai-prompts",
+          "method": "GET",
+          "$Infer": {}
+        },
+        "getAIPrompt": {
+          "name": "Get AI Prompt",
+          "description": "Get a specific AI prompt by name",
+          "path": "/ai-prompts/:name",
+          "method": "GET",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "$Infer": {}
+        },
+        "upsertAIPrompt": {
+          "name": "Upsert AI Prompt",
+          "type": "mutation",
+          "path": "/ai-prompts",
+          "method": "POST",
+          "description": "Create or update an AI prompt",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "temperature": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "maxTokens": {
+                "type": "number"
+              },
+              "isActive": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "deleteAIPrompt": {
+          "name": "Delete AI Prompt",
+          "type": "mutation",
+          "path": "/ai-prompts/:id",
+          "method": "DELETE",
+          "description": "Delete an AI prompt",
+          "$Infer": {}
+        },
+        "testUazapiConnection": {
+          "name": "Test UAZapi Connection",
+          "type": "mutation",
+          "path": "/test/uazapi",
+          "method": "POST",
+          "description": "Test UAZapi API connectivity",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "baseUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "adminToken": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "baseUrl",
+              "adminToken"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "testSmtpConnection": {
+          "name": "Test SMTP Connection",
+          "type": "mutation",
+          "path": "/test/smtp",
+          "method": "POST",
+          "description": "Test SMTP/email connectivity",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "port": {
+                "type": "number"
+              },
+              "secure": {
+                "type": "boolean"
+              },
+              "user": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pass": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "host",
+              "port",
+              "secure",
+              "user",
+              "pass"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "testOpenAIConnection": {
+          "name": "Test OpenAI Connection",
+          "type": "mutation",
+          "path": "/test/openai",
+          "method": "POST",
+          "description": "Test OpenAI API connectivity",
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "apiKey": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "apiKey"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "initializeDefaults": {
+          "name": "Initialize Defaults",
+          "type": "mutation",
+          "path": "/initialize",
+          "method": "POST",
+          "description": "Initialize default system settings",
+          "$Infer": {}
+        },
+        "getSystemInfo": {
+          "name": "Get System Info",
+          "description": "Get system runtime information",
+          "path": "/info",
+          "method": "GET",
+          "$Infer": {}
+        }
+      }
+    },
+    "logs": {
+      "name": "logs",
+      "path": "/logs",
+      "description": "Log management and AI analysis (admin only)",
+      "actions": {
+        "list": {
+          "name": "List Logs",
+          "description": "List logs with filters",
+          "path": "/",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "querySchema": {
+            "anyOf": [
+              {
+                "not": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "DEBUG",
+                      "INFO",
+                      "WARN",
+                      "ERROR",
+                      "CRITICAL"
+                    ]
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "userId": {
+                    "type": "string"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "search": {
+                    "type": "string"
+                  },
+                  "startDate": {
+                    "type": "string"
+                  },
+                  "endDate": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 100
+                  },
+                  "offset": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "stats": {
+          "name": "Get Log Stats",
+          "description": "Get log statistics",
+          "path": "/stats",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "querySchema": {
+            "anyOf": [
+              {
+                "not": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "period": {
+                    "type": "string",
+                    "enum": [
+                      "hour",
+                      "day",
+                      "week"
+                    ],
+                    "default": "day"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "analyze": {
+          "name": "AI Analyze Logs",
+          "type": "mutation",
+          "path": "/analyze",
+          "method": "POST",
+          "description": "Analyze logs using AI",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "anyOf": [
+              {
+                "not": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "startDate": {
+                    "type": "string"
+                  },
+                  "endDate": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "level": {
+                    "type": "string",
+                    "enum": [
+                      "DEBUG",
+                      "INFO",
+                      "WARN",
+                      "ERROR",
+                      "CRITICAL"
+                    ]
+                  },
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 500
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "analyzeError": {
+          "name": "Analyze Error",
+          "type": "mutation",
+          "path": "/analyze/:id",
+          "method": "POST",
+          "description": "AI analysis of a specific error",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "recentAnalyses": {
+          "name": "Get Recent Analyses",
+          "description": "Get recent AI analyses",
+          "path": "/analyses",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "querySchema": {
+            "anyOf": [
+              {
+                "not": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 10
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "create": {
+          "name": "Create Log",
+          "type": "mutation",
+          "path": "/",
+          "method": "POST",
+          "description": "Create a log entry manually",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "level": {
+                "type": "string",
+                "enum": [
+                  "DEBUG",
+                  "INFO",
+                  "WARN",
+                  "ERROR",
+                  "CRITICAL"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string"
+              },
+              "details": {
+                "type": "string"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "level",
+              "message",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "name": "Get Log Sources",
+          "description": "Get list of log sources",
+          "path": "/sources",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        }
+      }
+    },
+    "logs-sse": {
+      "name": "logsSSE",
+      "path": "/logs",
+      "description": "Real-time log streaming via SSE",
+      "actions": {
+        "stream": {
+          "name": "Log Stream",
+          "description": "Stream logs in real-time via SSE",
+          "path": "/stream",
+          "method": "GET",
+          "stream": true,
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        }
+      }
+    },
+    "permissions": {
+      "name": "permissions",
+      "path": "/permissions",
+      "description": "Permission management (admin only)",
+      "actions": {
+        "getMatrix": {
+          "name": "Get Permission Matrix",
+          "description": "Get the full permission matrix",
+          "path": "/matrix",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "list": {
+          "name": "List Permissions",
+          "description": "List all permission resources",
+          "path": "/",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "getByRole": {
+          "name": "Get Permissions by Role",
+          "description": "Get permissions for a specific role",
+          "path": "/role/:role",
+          "method": "GET",
+          "params": {
+            "_def": {
+              "unknownKeys": "strip",
+              "catchall": {
+                "_def": {
+                  "typeName": "ZodNever"
+                },
+                "~standard": {
+                  "version": 1,
+                  "vendor": "zod"
+                }
+              },
+              "typeName": "ZodObject"
+            },
+            "~standard": {
+              "version": 1,
+              "vendor": "zod"
+            },
+            "_cached": null
+          },
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {}
+        },
+        "updateRolePermission": {
+          "name": "Update Role Permission",
+          "type": "mutation",
+          "path": "/update",
+          "method": "POST",
+          "description": "Update permissions for a role on a resource",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
+          "$Infer": {},
+          "bodySchema": {
+            "type": "object",
+            "properties": {
+              "resourceId": {
                 "type": "string",
                 "format": "uuid"
               },
-              "expiresInHours": {
-                "type": "number",
-                "exclusiveMinimum": true,
-                "minimum": 0,
-                "default": 24
+              "role": {
+                "type": "string",
+                "enum": [
+                  "admin",
+                  "master",
+                  "manager",
+                  "agent",
+                  "viewer"
+                ]
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "read",
+                    "update",
+                    "delete",
+                    "manage",
+                    "export",
+                    "import",
+                    "connect",
+                    "disconnect"
+                  ]
+                }
               }
             },
             "required": [
-              "instanceId"
+              "resourceId",
+              "role",
+              "actions"
             ],
             "additionalProperties": false
           }
         },
-        "validate": {
-          "path": "/validate/:token",
-          "method": "GET",
+        "initialize": {
+          "name": "Initialize Permissions",
+          "type": "mutation",
+          "path": "/initialize",
+          "method": "POST",
+          "description": "Initialize/reset default permissions",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {}
         },
-        "generateQR": {
-          "type": "mutation",
-          "path": "/qr",
-          "method": "POST",
+        "check": {
+          "name": "Check Permission",
+          "description": "Check if a role has a specific permission",
+          "path": "/check",
+          "method": "GET",
+          "use": [
+            {
+              "name": "AuthProcedure"
+            }
+          ],
           "$Infer": {},
-          "bodySchema": {
+          "querySchema": {
             "type": "object",
             "properties": {
-              "token": {
+              "role": {
                 "type": "string",
-                "format": "uuid"
+                "enum": [
+                  "admin",
+                  "master",
+                  "manager",
+                  "agent",
+                  "viewer"
+                ]
+              },
+              "resource": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "read",
+                  "update",
+                  "delete",
+                  "manage",
+                  "export",
+                  "import",
+                  "connect",
+                  "disconnect"
+                ]
               }
             },
             "required": [
-              "token"
+              "role",
+              "resource",
+              "action"
             ],
             "additionalProperties": false
           }
-        },
-        "checkStatus": {
-          "path": "/status/:token",
-          "method": "GET",
-          "$Infer": {}
         }
       }
     }

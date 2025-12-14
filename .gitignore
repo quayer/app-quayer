@@ -117,7 +117,8 @@ $RECYCLE.BIN/
 # ===========================================
 # 📝 LOGS
 # ===========================================
-logs/
+# Only exclude root-level logs folder (not src/app/admin/logs/)
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -261,3 +262,11 @@ Default module.openapi.json
 # Arquivos de configuração de teste
 .env.test
 .env.test.example
+
+# Pastas de arquivos arquivados/temporários
+archive/temp/
+archive/test-files/
+archive/scripts-backup/
+
+# Artefatos locais de ferramentas
+.kiro/

@@ -17,6 +17,7 @@ import { database } from '@/services/database';
  */
 export const departmentsController = igniter.controller({
   name: 'departments',
+  path: '/departments',
   description: 'Gerenciamento hierárquico de departamentos',
 
   actions: {
@@ -35,8 +36,8 @@ export const departmentsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { page, limit, search, type, isActive } = context.query;
-        const { currentOrgId } = context.user;
+        const { page = 1, limit = 10, search, type, isActive } = request.query;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
 
         const where: any = {
           organizationId: currentOrgId,
@@ -114,8 +115,12 @@ export const departmentsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { name, slug, description, type } = context.body;
-        const { currentOrgId } = context.user;
+        const { name, slug, description, type } = request.body;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         // Verificar se slug já existe nesta organização
         const existing = await database.department.findFirst({
@@ -126,10 +131,7 @@ export const departmentsController = igniter.controller({
         });
 
         if (existing) {
-          return response.error({
-            message: 'Já existe um departamento com este slug nesta organização',
-            status: 400,
-          });
+          return response.badRequest('Já existe um departamento com este slug nesta organização');
         }
 
         const department = await database.department.create({
@@ -167,8 +169,12 @@ export const departmentsController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id, name, slug, description, type } = context.body;
-        const { currentOrgId } = context.user;
+        const { id, name, slug, description, type } = request.body;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         // Verificar se departamento existe e pertence à organização
         const existing = await database.department.findFirst({
@@ -179,10 +185,7 @@ export const departmentsController = igniter.controller({
         });
 
         if (!existing) {
-          return response.error({
-            message: 'Departamento não encontrado',
-            status: 404,
-          });
+          return response.notFound('Departamento não encontrado');
         }
 
         // Se atualizando slug, verificar duplicação
@@ -196,10 +199,7 @@ export const departmentsController = igniter.controller({
           });
 
           if (duplicate) {
-            return response.error({
-              message: 'Já existe um departamento com este slug nesta organização',
-              status: 400,
-            });
+            return response.badRequest('Já existe um departamento com este slug nesta organização');
           }
         }
 
@@ -226,13 +226,15 @@ export const departmentsController = igniter.controller({
      */
     getById: igniter.query({
       path: '/:departmentId',
-      params: z.object({
-        departmentId: z.string().uuid(),
-      }),
+      query: z.object({}),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { departmentId } = context.params;
-        const { currentOrgId } = context.user;
+        const departmentId = (request.params as { departmentId: string }).departmentId;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const department = await database.department.findFirst({
           where: {
@@ -267,10 +269,7 @@ export const departmentsController = igniter.controller({
         });
 
         if (!department) {
-          return response.error({
-            message: 'Departamento não encontrado',
-            status: 404,
-          });
+          return response.notFound('Departamento não encontrado');
         }
 
         return response.success({
@@ -300,13 +299,14 @@ export const departmentsController = igniter.controller({
     delete: igniter.mutation({
       path: '/:departmentId',
       method: 'DELETE',
-      params: z.object({
-        departmentId: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { departmentId } = context.params;
-        const { currentOrgId } = context.user;
+        const departmentId = (request.params as { departmentId: string }).departmentId;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         // Verificar se departamento existe e pertence à organização
         const department = await database.department.findFirst({
@@ -324,18 +324,12 @@ export const departmentsController = igniter.controller({
         });
 
         if (!department) {
-          return response.error({
-            message: 'Departamento não encontrado',
-            status: 404,
-          });
+          return response.notFound('Departamento não encontrado');
         }
 
         // Verificar se há sessões vinculadas
         if (department._count.chatSessions > 0) {
-          return response.error({
-            message: `Não é possível deletar o departamento pois existem ${department._count.chatSessions} sessões vinculadas a ele`,
-            status: 400,
-          });
+          return response.badRequest(`Não é possível deletar o departamento pois existem ${department._count.chatSessions} sessões vinculadas a ele`);
         }
 
         await database.department.delete({
@@ -355,13 +349,14 @@ export const departmentsController = igniter.controller({
     toggleActive: igniter.mutation({
       path: '/:departmentId/toggle-active',
       method: 'PATCH',
-      params: z.object({
-        departmentId: z.string().uuid(),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { departmentId } = context.params;
-        const { currentOrgId } = context.user;
+        const departmentId = (request.params as { departmentId: string }).departmentId;
+        const currentOrgId = context.auth?.session?.user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const department = await database.department.findFirst({
           where: {
@@ -371,10 +366,7 @@ export const departmentsController = igniter.controller({
         });
 
         if (!department) {
-          return response.error({
-            message: 'Departamento não encontrado',
-            status: 404,
-          });
+          return response.notFound('Departamento não encontrado');
         }
 
         const updated = await database.department.update({

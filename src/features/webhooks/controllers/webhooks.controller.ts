@@ -1,5 +1,7 @@
 /**
  * Webhooks Controller - CRUD + Delivery Management
+ *
+ * Corrigido para usar authProcedure padrão
  */
 
 import { igniter } from '@/igniter';
@@ -12,7 +14,7 @@ import {
   listWebhooksSchema,
   listDeliveriesSchema,
 } from '../webhooks.schemas';
-import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
+import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 
 export const webhooksController = igniter.controller({
   name: 'webhooks',
@@ -21,20 +23,21 @@ export const webhooksController = igniter.controller({
     // CREATE
     create: igniter.mutation({
       path: '/',
+      method: 'POST',
       body: createWebhookSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
         const { organizationId, ...webhookData } = request.body;
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
-        const orgRole = await organizationsRepository.getUserRole(organizationId, userId);
+        const isAdmin = user.role === 'admin';
+        const orgRole = await organizationsRepository.getUserRole(organizationId, user.id);
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
           return response.forbidden('Sem permissão para criar webhooks');
@@ -49,34 +52,35 @@ export const webhooksController = igniter.controller({
     list: igniter.query({
       path: '/',
       query: listWebhooksSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
         const { organizationId, ...filters } = request.query;
 
         // Admin can see all
-        if (isSystemAdmin(userRole as UserRole)) {
+        if (user.role === 'admin') {
           const result = await webhooksRepository.list({ ...filters, organizationId });
           return response.success(result);
         }
 
         // Regular users need organizationId
-        if (!organizationId) {
+        const targetOrgId = organizationId || user.currentOrgId;
+        if (!targetOrgId) {
           return response.badRequest('organizationId é obrigatório');
         }
 
         // Check membership
-        const isMember = await organizationsRepository.isMember(organizationId, userId);
+        const isMember = await organizationsRepository.isMember(targetOrgId, user.id);
         if (!isMember) {
           return response.forbidden('Sem acesso aos webhooks desta organização');
         }
 
-        const result = await webhooksRepository.list({ ...filters, organizationId });
+        const result = await webhooksRepository.list({ ...filters, organizationId: targetOrgId });
         return response.success(result);
       },
     }),
@@ -84,11 +88,11 @@ export const webhooksController = igniter.controller({
     // GET BY ID
     get: igniter.query({
       path: '/:id',
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
@@ -100,8 +104,8 @@ export const webhooksController = igniter.controller({
         }
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
-        const isMember = await organizationsRepository.isMember(webhook.organizationId, userId);
+        const isAdmin = user.role === 'admin';
+        const isMember = await organizationsRepository.isMember(webhook.organizationId!, user.id);
 
         if (!isAdmin && !isMember) {
           return response.forbidden('Sem permissão para visualizar este webhook');
@@ -125,12 +129,13 @@ export const webhooksController = igniter.controller({
     // UPDATE
     update: igniter.mutation({
       path: '/:id',
+      method: 'PUT',
       body: updateWebhookSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
@@ -142,8 +147,8 @@ export const webhooksController = igniter.controller({
         }
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
-        const orgRole = await organizationsRepository.getUserRole(webhook.organizationId, userId);
+        const isAdmin = user.role === 'admin';
+        const orgRole = await organizationsRepository.getUserRole(webhook.organizationId!, user.id);
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
           return response.forbidden('Sem permissão para atualizar webhooks');
@@ -157,11 +162,12 @@ export const webhooksController = igniter.controller({
     // DELETE
     delete: igniter.mutation({
       path: '/:id',
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      method: 'DELETE',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
@@ -173,8 +179,8 @@ export const webhooksController = igniter.controller({
         }
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
-        const orgRole = await organizationsRepository.getUserRole(webhook.organizationId, userId);
+        const isAdmin = user.role === 'admin';
+        const orgRole = await organizationsRepository.getUserRole(webhook.organizationId!, user.id);
 
         if (!isAdmin && orgRole !== 'master') {
           return response.forbidden('Apenas admins ou masters podem deletar webhooks');
@@ -189,11 +195,11 @@ export const webhooksController = igniter.controller({
     listDeliveries: igniter.query({
       path: '/:id/deliveries',
       query: listDeliveriesSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
@@ -205,8 +211,8 @@ export const webhooksController = igniter.controller({
         }
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
-        const isMember = await organizationsRepository.isMember(webhook.organizationId, userId);
+        const isAdmin = user.role === 'admin';
+        const isMember = await organizationsRepository.isMember(webhook.organizationId!, user.id);
 
         if (!isAdmin && !isMember) {
           return response.forbidden('Sem permissão');
@@ -224,11 +230,12 @@ export const webhooksController = igniter.controller({
     // RETRY DELIVERY
     retryDelivery: igniter.mutation({
       path: '/deliveries/:deliveryId/retry',
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
-        const userRole = request.headers.get('x-user-role');
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
 
-        if (!userId || !userRole) {
+        if (!user) {
           return response.unauthorized('Autenticação necessária');
         }
 
@@ -240,10 +247,10 @@ export const webhooksController = igniter.controller({
         }
 
         // Check permission
-        const isAdmin = isSystemAdmin(userRole as UserRole);
+        const isAdmin = user.role === 'admin';
         const orgRole = await organizationsRepository.getUserRole(
-          delivery.webhook.organizationId,
-          userId
+          delivery.webhook.organizationId!,
+          user.id
         );
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {

@@ -36,7 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import type { Instance } from '@prisma/client'
+import { ConnectionStatus, type Connection as Instance } from '@prisma/client'
 import { useDisconnectInstance, useDeleteInstance, useProfilePicture } from '@/hooks/useInstance'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -69,24 +69,24 @@ export function InstanceCard({
   const deleteMutation = useDeleteInstance()
 
   // Business Logic: Buscar foto de perfil se instância estiver conectada
-  const { data: profileData } = useProfilePicture(instance.status === 'connected' ? instance.id : '')
+  const { data: profileData } = useProfilePicture(instance.status === ConnectionStatus.CONNECTED ? instance.id : '')
 
   // Business Logic: Determinar cor e ícone do status
-  const getStatusConfig = (status: string) => {
+  const getStatusConfig = (status: ConnectionStatus) => {
     switch (status) {
-      case 'connected':
+      case ConnectionStatus.CONNECTED:
         return {
           color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
           icon: CheckCircle,
           label: 'Conectado'
         }
-      case 'connecting':
+      case ConnectionStatus.CONNECTING:
         return {
           color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
           icon: Loader2,
           label: 'Conectando'
         }
-      case 'disconnected':
+      case ConnectionStatus.DISCONNECTED:
       default:
         return {
           color: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -102,16 +102,22 @@ export function InstanceCard({
   // Business Logic: Formatar última conexão
   const formatLastConnected = () => {
     if (!instance.lastConnected) return 'Nunca conectado'
-    return formatDistanceToNow(new Date(instance.lastConnected), {
-      addSuffix: true,
-      locale: ptBR
-    })
+    try {
+      const d = new Date(instance.lastConnected)
+      if (isNaN(d.getTime())) return 'Data inválida'
+      return formatDistanceToNow(d, {
+        addSuffix: true,
+        locale: ptBR
+      })
+    } catch {
+      return 'Data inválida'
+    }
   }
 
   // Business Logic: Verificar se pode conectar
-  const canConnect = instance.status === 'disconnected'
-  const canDisconnect = instance.status === 'connected'
-  const isLoading = isLoadingConnect || isLoadingDelete || disconnectMutation.loading || deleteMutation.loading
+  const canConnect = instance.status === ConnectionStatus.DISCONNECTED
+  const canDisconnect = instance.status === ConnectionStatus.CONNECTED
+  const isLoading = isLoadingConnect || isLoadingDelete || disconnectMutation.isPending || deleteMutation.isPending
 
   const handleConnect = () => {
     onConnect(instance)
@@ -143,7 +149,7 @@ export function InstanceCard({
               {/* Avatar com foto de perfil */}
               <Avatar className="h-12 w-12 border-2 border-gray-700">
                 <AvatarImage
-                  src={profileData?.profilePictureUrl || instance.profilePictureUrl || undefined}
+                  src={(profileData as any)?.profilePictureUrl || instance.profilePictureUrl || undefined}
                   alt={instance.name}
                 />
                 <AvatarFallback className="bg-gray-700 text-gray-300">
@@ -213,11 +219,11 @@ export function InstanceCard({
               variant="outline" 
               className={`${statusConfig.color} border`}
             >
-              <StatusIcon className={`h-3 w-3 mr-1 ${instance.status === 'connecting' ? 'animate-spin' : ''}`} />
+              <StatusIcon className={`h-3 w-3 mr-1 ${instance.status === ConnectionStatus.CONNECTING ? 'animate-spin' : ''}`} />
               {statusConfig.label}
             </Badge>
             
-            {instance.status === 'connected' && (
+            {instance.status === ConnectionStatus.CONNECTED && (
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Clock className="h-3 w-3" />
                 {formatLastConnected()}
@@ -229,13 +235,13 @@ export function InstanceCard({
           <div className="space-y-2 text-sm text-gray-400">
             <div className="flex items-center justify-between">
               <span>Broker:</span>
-              <span className="text-gray-300 capitalize">{instance.brokerType}</span>
+              <span className="text-gray-300 capitalize">{(instance as any).brokerType || instance.provider}</span>
             </div>
-            {instance.brokerId && (
+            {(instance as any).brokerId && (
               <div className="flex items-center justify-between">
                 <span>ID Broker:</span>
                 <span className="text-gray-300 font-mono text-xs">
-                  {instance.brokerId.slice(0, 8)}...
+                  {(instance as any).brokerId.slice(0, 8)}...
                 </span>
               </div>
             )}
@@ -266,7 +272,7 @@ export function InstanceCard({
               </Button>
             )}
             
-            {instance.status === 'connecting' && (
+            {instance.status === ConnectionStatus.CONNECTING && (
               <Button 
                 disabled
                 variant="outline"
@@ -298,10 +304,10 @@ export function InstanceCard({
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              disabled={deleteMutation.loading}
+              disabled={deleteMutation.isPending}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
-              {deleteMutation.loading ? (
+              {deleteMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   Deletando...

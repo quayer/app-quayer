@@ -110,10 +110,13 @@ export async function check(
 
       // Increment counter
       const newCount = count + 1
-      await redis.set(rateLimitKey, newCount.toString(), {
-        px: windowMs,
-        nx: count === 0, // Only set TTL on first request
-      })
+      if (count === 0) {
+        // First request - set with TTL using NX (only if not exists)
+        await redis.set(rateLimitKey, newCount.toString(), 'PX', windowMs, 'NX')
+      } else {
+        // Subsequent request - just update the value (keep existing TTL)
+        await redis.set(rateLimitKey, newCount.toString(), 'KEEPTTL')
+      }
 
       return {
         allowed: true,

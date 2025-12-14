@@ -25,8 +25,13 @@ export class UAZapiService {
   private readonly token: string
 
   constructor() {
-    this.baseURL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+    // Suporta ambas variações do nome da variável para compatibilidade
+    this.baseURL = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
     this.token = process.env.UAZAPI_ADMIN_TOKEN || process.env.UAZAPI_TOKEN || ''
+
+    if (!this.token) {
+      console.warn('[UAZapiService] UAZAPI_ADMIN_TOKEN não configurado - listagem de todas instâncias não funcionará')
+    }
   }
 
   private getHeaders(useAdminToken: boolean = false): Record<string, string> {
@@ -347,6 +352,65 @@ export class UAZapiService {
         success: false,
         error: error instanceof Error ? error.message : 'Erro desconhecido',
         message: 'Falha ao obter configuração do webhook'
+      }
+    }
+  }
+  /**
+   * @method findChats
+   * @description Busca chats da instância
+   * @param {string} instanceToken - Token da instância
+   * @returns {Promise<UAZapiResponse<any[]>>} Lista de chats
+   */
+  async findChats(instanceToken: string): Promise<UAZapiResponse<any[]>> {
+    try {
+      // Tenta padrão POST /chat/find (Evolution API custom/v1.5)
+      const response = await fetch(`${this.baseURL}/chat/find`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({
+          count: 100,
+          limit: 100,
+          page: 1
+        })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: 'Falha ao buscar chats'
+      }
+    }
+  }
+
+  /**
+   * @method findMessages
+   * @description Busca mensagens de um chat
+   * @param {string} instanceToken - Token da instância
+   * @param {string} chatId - ID do chat
+   * @param {number} limit - Limite de mensagens
+   * @returns {Promise<UAZapiResponse<any[]>>} Lista de mensagens
+   */
+  async findMessages(instanceToken: string, chatId: string, limit: number = 50): Promise<UAZapiResponse<any[]>> {
+    try {
+      // Tenta padrão POST /chat/findMessages (Evolution API)
+      const response = await fetch(`${this.baseURL}/chat/findMessages/${chatId}`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({
+          count: limit,
+          limit: limit,
+          page: 1
+        })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: 'Falha ao buscar mensagens'
       }
     }
   }

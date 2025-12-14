@@ -1,15 +1,59 @@
 /**
  * Email Service - SMTP Provider with Gmail
  * Uses nodemailer for real email sending
+ * Supports editable templates from database
  */
 
 import nodemailer from 'nodemailer';
+import { systemSettingsRepository } from '@/features/system-settings/system-settings.repository';
 import { getWelcomeEmailTemplate } from './templates/welcome';
 import { getVerificationEmailTemplate } from './templates/verification';
-import { getPasswordResetEmailTemplate } from './templates/password-reset';
 import { getLoginCodeEmailTemplate } from './templates/login-code';
 import { getWelcomeSignupEmailTemplate } from './templates/welcome-signup';
 import { invitationTemplate } from './templates';
+
+/**
+ * Replace template variables like {{name}} with actual values
+ */
+function replaceTemplateVariables(template: string, variables: Record<string, string>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(variables)) {
+    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+    result = result.replace(regex, value || '');
+  }
+  return result;
+}
+
+/**
+ * Get template from database or fallback to hardcoded
+ */
+async function getTemplateFromDatabase(
+  templateName: string,
+  variables: Record<string, string>,
+  fallbackHtml: string,
+  fallbackSubject: string
+): Promise<{ html: string; subject: string }> {
+  try {
+    const dbTemplate = await systemSettingsRepository.getEmailTemplate(templateName);
+
+    if (dbTemplate && dbTemplate.isActive) {
+      console.log(`[EmailService] Using database template: ${templateName}`);
+      return {
+        html: replaceTemplateVariables(dbTemplate.htmlContent, variables),
+        subject: replaceTemplateVariables(dbTemplate.subject, variables),
+      };
+    }
+  } catch (error) {
+    console.warn(`[EmailService] Failed to get template from DB, using fallback: ${templateName}`, error);
+  }
+
+  // Fallback to hardcoded template
+  console.log(`[EmailService] Using fallback template: ${templateName}`);
+  return {
+    html: fallbackHtml,
+    subject: fallbackSubject,
+  };
+}
 
 export interface EmailProvider {
   send(params: SendEmailParams): Promise<void>;
@@ -31,6 +75,7 @@ export interface SendEmailParams {
  */
 class SMTPEmailProvider implements EmailProvider {
   private transporter: nodemailer.Transporter;
+  private isVerified: boolean = false;
 
   constructor() {
     this.transporter = nodemailer.createTransport({
@@ -41,6 +86,10 @@ class SMTPEmailProvider implements EmailProvider {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASSWORD,
       },
+      // Timeouts para evitar bloqueio
+      connectionTimeout: 10000, // 10 segundos para conectar
+      greetingTimeout: 10000,   // 10 segundos para greeting
+      socketTimeout: 30000,     // 30 segundos para operações
     });
 
     console.log('📧 SMTP Email Provider initialized with:', {
@@ -48,6 +97,20 @@ class SMTPEmailProvider implements EmailProvider {
       port: process.env.SMTP_PORT,
       user: process.env.SMTP_USER,
     });
+
+    // Verificar conexão SMTP em background (não bloqueia)
+    this.verifyConnection();
+  }
+
+  private async verifyConnection(): Promise<void> {
+    try {
+      await this.transporter.verify();
+      this.isVerified = true;
+      console.log('✅ SMTP connection verified successfully');
+    } catch (error) {
+      console.error('⚠️ SMTP connection verification failed:', error);
+      this.isVerified = false;
+    }
   }
 
   async send(params: SendEmailParams): Promise<void> {
@@ -57,10 +120,16 @@ class SMTPEmailProvider implements EmailProvider {
     console.log('Para:', params.to);
     console.log('Assunto:', params.subject);
     console.log('De:', from);
+    console.log('SMTP Verified:', this.isVerified);
     console.log('==========================================\n');
 
-    try {
-      const info = await this.transporter.sendMail({
+    // Timeout wrapper para evitar bloqueio infinito
+    const sendWithTimeout = async (): Promise<void> => {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('SMTP timeout after 30 seconds')), 30000);
+      });
+
+      const sendPromise = this.transporter.sendMail({
         from,
         to: Array.isArray(params.to) ? params.to.join(', ') : params.to,
         subject: params.subject,
@@ -71,13 +140,21 @@ class SMTPEmailProvider implements EmailProvider {
         bcc: params.bcc?.join(', '),
       });
 
-      console.log('✅ Email enviado com sucesso!');
-      console.log('Message ID:', info.messageId);
-      console.log('Response:', info.response);
-      console.log('==========================================\n');
-    } catch (error) {
-      console.error('❌ Erro ao enviar email:', error);
-      throw error;
+      return Promise.race([sendPromise, timeoutPromise]).then((info: any) => {
+        console.log('✅ Email enviado com sucesso!');
+        console.log('Message ID:', info.messageId);
+        console.log('Response:', info.response);
+        console.log('==========================================\n');
+      });
+    };
+
+    try {
+      await sendWithTimeout();
+    } catch (error: any) {
+      console.error('❌ Erro ao enviar email:', error.message || error);
+      // Não lançar erro para não bloquear o fluxo de autenticação
+      // O usuário receberá um código OTP mesmo se o email falhar
+      console.warn('⚠️ Email não enviado, mas fluxo continua...');
     }
   }
 }
@@ -121,48 +198,56 @@ class EmailService {
   }
 
   async sendWelcomeEmail(to: string, name: string, dashboardUrl?: string): Promise<void> {
-    const html = getWelcomeEmailTemplate({ name, dashboardUrl });
-    return this.send({
-      to,
-      subject: 'Bem-vindo ao Quayer! 🎉',
-      html,
-    });
-  }
+    const fallbackHtml = getWelcomeEmailTemplate({ name, dashboardUrl });
+    const appUrl = dashboardUrl || process.env.NEXT_PUBLIC_APP_URL || 'https://quayer.com';
 
-  async sendPasswordResetEmail(to: string, name: string, resetUrl: string, expirationMinutes?: number): Promise<void> {
-    const html = getPasswordResetEmailTemplate({ name, resetUrl, expirationMinutes });
-    return this.send({
-      to,
-      subject: 'Recuperação de Senha - Quayer',
-      html,
-    });
+    const { html, subject } = await getTemplateFromDatabase(
+      'welcome',
+      { name, appUrl },
+      fallbackHtml,
+      'Bem-vindo ao Quayer!'
+    );
+
+    return this.send({ to, subject, html });
   }
 
   async sendVerificationEmail(to: string, name: string, code: string, expirationMinutes?: number): Promise<void> {
-    const html = getVerificationEmailTemplate({ name, code, expirationMinutes });
-    return this.send({
-      to,
-      subject: 'Verificação de E-mail - Quayer',
-      html,
-    });
+    const fallbackHtml = getVerificationEmailTemplate({ name, code, expirationMinutes });
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'verification',
+      { name, code, expirationMinutes: String(expirationMinutes || 10) },
+      fallbackHtml,
+      'Verificacao de E-mail - Quayer'
+    );
+
+    return this.send({ to, subject, html });
   }
 
   async sendLoginCodeEmail(to: string, name: string, code: string, magicLink: string, expirationMinutes?: number): Promise<void> {
-    const html = getLoginCodeEmailTemplate({ name, code, magicLink, expirationMinutes });
-    return this.send({
-      to,
-      subject: `Código ${code} - Login Quayer 🔐`,
-      html,
-    });
+    const fallbackHtml = getLoginCodeEmailTemplate({ name, code, magicLink, expirationMinutes });
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'login_code',
+      { name, code, magicLink, expirationMinutes: String(expirationMinutes || 10) },
+      fallbackHtml,
+      `Codigo ${code} - Login Quayer`
+    );
+
+    return this.send({ to, subject, html });
   }
 
   async sendWelcomeSignupEmail(to: string, name: string, code: string, magicLink: string, expirationMinutes?: number): Promise<void> {
-    const html = getWelcomeSignupEmailTemplate({ name, code, magicLink, expirationMinutes });
-    return this.send({
-      to,
-      subject: `Código ${code} - Bem-vindo ao Quayer! 🎉`,
-      html,
-    });
+    const fallbackHtml = getWelcomeSignupEmailTemplate({ name, code, magicLink, expirationMinutes });
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'welcome_signup',
+      { name, code, magicLink, expirationMinutes: String(expirationMinutes || 10) },
+      fallbackHtml,
+      `Codigo ${code} - Bem-vindo ao Quayer!`
+    );
+
+    return this.send({ to, subject, html });
   }
 
   async sendInvitationEmail(
@@ -172,17 +257,66 @@ class EmailService {
     invitationUrl: string,
     role: string
   ): Promise<void> {
-    const html = invitationTemplate({
+    const fallbackHtml = invitationTemplate({
       inviterName,
       organizationName,
       invitationUrl,
       role,
     });
-    return this.send({
-      to,
-      subject: `Você foi convidado para ${organizationName} - Quayer 🎊`,
-      html,
-    });
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'invitation',
+      { inviterName, organizationName, invitationUrl, role },
+      fallbackHtml,
+      `Voce foi convidado para ${organizationName} - Quayer`
+    );
+
+    return this.send({ to, subject, html });
+  }
+
+  async sendPasswordResetEmail(
+    to: string,
+    name: string,
+    resetUrl: string,
+    expirationMinutes?: number
+  ): Promise<void> {
+    const expMinutes = expirationMinutes || 60;
+    const fallbackHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .button { display: inline-block; padding: 12px 24px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 4px; }
+          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h2>Redefinicao de Senha</h2>
+          <p>Ola ${name},</p>
+          <p>Voce solicitou a redefinicao da sua senha. Clique no botao abaixo para criar uma nova senha:</p>
+          <p><a href="${resetUrl}" class="button">Redefinir Senha</a></p>
+          <p>Se voce nao solicitou a redefinicao de senha, ignore este email.</p>
+          <p>Este link expira em ${expMinutes} minutos.</p>
+          <div class="footer">
+            <p>Quayer - Sistema de Gestao de WhatsApp</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'password_reset',
+      { name, resetUrl, expirationMinutes: String(expMinutes) },
+      fallbackHtml,
+      'Redefinicao de Senha - Quayer'
+    );
+
+    return this.send({ to, subject, html });
   }
 }
 

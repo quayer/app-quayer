@@ -22,7 +22,7 @@ export class ProjectsRepository {
       include: {
         _count: {
           select: {
-            instances: true,
+            connections: true,
           },
         },
       },
@@ -39,10 +39,10 @@ export class ProjectsRepository {
         ? {
             _count: {
               select: {
-                instances: true,
+                connections: true,
               },
             },
-            instances: true,
+            connections: true,
           }
         : undefined,
     });
@@ -88,7 +88,7 @@ export class ProjectsRepository {
         include: {
           _count: {
             select: {
-              instances: true,
+              connections: true,
             },
           },
         },
@@ -117,7 +117,7 @@ export class ProjectsRepository {
       include: {
         _count: {
           select: {
-            instances: true,
+            connections: true,
           },
         },
       },
@@ -134,7 +134,7 @@ export class ProjectsRepository {
       include: {
         _count: {
           select: {
-            instances: true,
+            connections: true,
           },
         },
       },
@@ -151,40 +151,40 @@ export class ProjectsRepository {
   }
 
   /**
-   * Link instance to project
+   * Link connection to project
    */
-  async linkInstance(projectId: string, instanceId: string): Promise<void> {
-    await database.instance.update({
-      where: { id: instanceId },
+  async linkConnection(projectId: string, connectionId: string): Promise<void> {
+    await database.connection.update({
+      where: { id: connectionId },
       data: { projectId },
     });
   }
 
   /**
-   * Unlink instance from project
+   * Unlink connection from project
    */
-  async unlinkInstance(instanceId: string): Promise<void> {
-    await database.instance.update({
-      where: { id: instanceId },
+  async unlinkConnection(connectionId: string): Promise<void> {
+    await database.connection.update({
+      where: { id: connectionId },
       data: { projectId: null },
     });
   }
 
   /**
-   * List instances in project
+   * List connections in project
    */
-  async listInstances(projectId: string) {
-    return database.instance.findMany({
+  async listConnections(projectId: string) {
+    return database.connection.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   /**
-   * Count instances in project
+   * Count connections in project
    */
-  async countInstances(projectId: string): Promise<number> {
-    return database.instance.count({
+  async countConnections(projectId: string): Promise<number> {
+    return database.connection.count({
       where: { projectId },
     });
   }

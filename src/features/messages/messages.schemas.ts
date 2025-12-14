@@ -8,8 +8,8 @@ import { z } from 'zod';
 // Schema para listar chats
 export const listChatsSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  limit: z.number().int().positive().max(100).optional().default(50),
-  offset: z.number().int().min(0).optional().default(0),
+  limit: z.coerce.number().int().positive().max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
   search: z.string().optional(),
   status: z.enum(['all', 'unread', 'groups', 'pinned']).optional(),
 });
@@ -17,9 +17,11 @@ export const listChatsSchema = z.object({
 // Schema para buscar mensagens de um chat
 export const listMessagesSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  chatId: z.string().min(1, 'Chat ID é obrigatório'),
-  limit: z.number().int().positive().max(100).optional().default(50),
-  offset: z.number().int().min(0).optional().default(0),
+  limit: z.coerce.number().int().positive().max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  sessionId: z.string().optional(), // Fallback
+  chatId: z.string().optional(), // Fallback
 });
 
 // Schema para enviar mensagem de texto

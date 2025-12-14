@@ -91,7 +91,7 @@ export const analyticsController = igniter.controller({
             eventsCount: events.length,
           })
 
-          return response.internalServerError('Failed to process events')
+          throw new Error('Failed to process events')
         }
       },
     }),

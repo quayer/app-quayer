@@ -2,6 +2,7 @@ import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { authProcedure } from '@/features/auth/procedures/auth.procedure'
 import { database } from '@/services/database'
+import { ConnectionStatus } from '@prisma/client'
 
 /**
  * @controller MediaController
@@ -33,45 +34,33 @@ export const mediaController = igniter.controller({
       path: '/image',
       method: 'POST',
       use: [authProcedure({ required: true })],
-      input: sendMediaSchema,
-      handler: async ({ request, response, context, input }) => {
+      body: sendMediaSchema,
+      handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, caption } = input
+          const { instanceId, chatId, mediaUrl, mediaBase64, caption } = request.body
 
           // Buscar instância
           const instance = await database.instance.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazToken: true, status: true, organizationId: true }
+            select: { id: true, uazapiToken: true, status: true, organizationId: true }
           })
 
           if (!instance) {
-            return response.error({
-              message: 'Instância não encontrada',
-              status: 404
-            })
+            return response.notFound('Instância não encontrada')
           }
 
           // Verificar permissão de organização
-          const orgId = context.auth?.session?.currentOrgId
+          const orgId = context.auth?.session?.user?.currentOrgId
           if (instance.organizationId !== orgId) {
-            return response.error({
-              message: 'Sem permissão para acessar esta instância',
-              status: 403
-            })
+            return response.forbidden('Sem permissão para acessar esta instância')
           }
 
-          if (instance.status !== 'connected') {
-            return response.error({
-              message: 'Instância não está conectada',
-              status: 400
-            })
+          if (instance.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Instância não está conectada')
           }
 
-          if (!instance.uazToken) {
-            return response.error({
-              message: 'Token UAZ não configurado',
-              status: 400
-            })
+          if (!instance.uazapiToken) {
+            return response.badRequest('Token UAZ não configurado')
           }
 
           // Preparar payload para UAZapi
@@ -86,10 +75,7 @@ export const mediaController = igniter.controller({
           } else if (mediaBase64) {
             payload.media = mediaBase64
           } else {
-            return response.error({
-              message: 'mediaUrl ou mediaBase64 é obrigatório',
-              status: 400
-            })
+            return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
           }
 
           // Enviar para UAZapi
@@ -99,7 +85,7 @@ export const mediaController = igniter.controller({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazToken
+              'token': instance.uazapiToken
             },
             body: JSON.stringify(payload)
           })
@@ -107,10 +93,7 @@ export const mediaController = igniter.controller({
           const uazData = await uazResponse.json()
 
           if (!uazResponse.ok) {
-            return response.error({
-              message: uazData.message || 'Erro ao enviar imagem',
-              status: uazResponse.status
-            })
+            return response.badRequest(uazData.message || 'Erro ao enviar imagem')
           }
 
           return response.success({
@@ -124,10 +107,7 @@ export const mediaController = igniter.controller({
 
         } catch (error: any) {
           console.error('Erro ao enviar imagem:', error)
-          return response.error({
-            message: error.message || 'Erro ao enviar imagem',
-            status: 500
-          })
+          return response.badRequest(error.message || 'Erro ao enviar imagem')
         }
       }
     }),
@@ -141,45 +121,33 @@ export const mediaController = igniter.controller({
       path: '/document',
       method: 'POST',
       use: [authProcedure({ required: true })],
-      input: sendMediaSchema,
-      handler: async ({ request, response, context, input }) => {
+      body: sendMediaSchema,
+      handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, fileName, caption } = input
+          const { instanceId, chatId, mediaUrl, mediaBase64, fileName, caption } = request.body
 
           // Buscar instância
           const instance = await database.instance.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazToken: true, status: true, organizationId: true }
+            select: { id: true, uazapiToken: true, status: true, organizationId: true }
           })
 
           if (!instance) {
-            return response.error({
-              message: 'Instância não encontrada',
-              status: 404
-            })
+            return response.notFound('Instância não encontrada')
           }
 
           // Verificar permissão
-          const orgId = context.auth?.session?.currentOrgId
+          const orgId = context.auth?.session?.user?.currentOrgId
           if (instance.organizationId !== orgId) {
-            return response.error({
-              message: 'Sem permissão para acessar esta instância',
-              status: 403
-            })
+            return response.forbidden('Sem permissão para acessar esta instância')
           }
 
-          if (instance.status !== 'connected') {
-            return response.error({
-              message: 'Instância não está conectada',
-              status: 400
-            })
+          if (instance.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Instância não está conectada')
           }
 
-          if (!instance.uazToken) {
-            return response.error({
-              message: 'Token UAZ não configurado',
-              status: 400
-            })
+          if (!instance.uazapiToken) {
+            return response.badRequest('Token UAZ não configurado')
           }
 
           // Preparar payload
@@ -194,10 +162,7 @@ export const mediaController = igniter.controller({
           } else if (mediaBase64) {
             payload.media = mediaBase64
           } else {
-            return response.error({
-              message: 'mediaUrl ou mediaBase64 é obrigatório',
-              status: 400
-            })
+            return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
           }
 
           // Enviar para UAZapi
@@ -207,7 +172,7 @@ export const mediaController = igniter.controller({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazToken
+              'token': instance.uazapiToken
             },
             body: JSON.stringify(payload)
           })
@@ -215,10 +180,7 @@ export const mediaController = igniter.controller({
           const uazData = await uazResponse.json()
 
           if (!uazResponse.ok) {
-            return response.error({
-              message: uazData.message || 'Erro ao enviar documento',
-              status: uazResponse.status
-            })
+            return response.badRequest(uazData.message || 'Erro ao enviar documento')
           }
 
           return response.success({
@@ -232,10 +194,7 @@ export const mediaController = igniter.controller({
 
         } catch (error: any) {
           console.error('Erro ao enviar documento:', error)
-          return response.error({
-            message: error.message || 'Erro ao enviar documento',
-            status: 500
-          })
+          return response.badRequest(error.message || 'Erro ao enviar documento')
         }
       }
     }),

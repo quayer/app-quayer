@@ -126,14 +126,14 @@ export async function cleanDatabase(): Promise<void> {
   const client = getPrismaTestClient()
 
   // Order matters due to foreign key constraints
+  // Use actual PostgreSQL table names (some are mapped via @@map)
   const tables = [
     'RefreshToken',
     'TempUser',
     'Message',
-    'Session',
-    'Instance',
-    'Connection',
-    'OrganizationUser',
+    'ChatSession',
+    'connections', // Connection model mapped to "connections"
+    'UserOrganization',
     'Organization',
     'User',
     // Add more tables as needed
@@ -168,6 +168,7 @@ export async function seedTestData(): Promise<void> {
         email: 'admin@test.com',
         name: 'Test Admin',
         role: 'admin',
+        password: '$2a$10$1234567890123456789012', // Hashed password placeholder for tests
         emailVerified: new Date(),
       },
     })
@@ -181,7 +182,8 @@ export async function seedTestData(): Promise<void> {
       create: {
         name: 'Test Organization',
         slug: 'test-org',
-        createdById: adminUser.id,
+        document: '12345678901', // CPF test
+        type: 'pf',
       },
     })
 
@@ -195,6 +197,7 @@ export async function seedTestData(): Promise<void> {
         email: 'master@test.com',
         name: 'Test Master',
         role: 'user',
+        password: '$2a$10$1234567890123456789012', // Hashed password placeholder for tests
         emailVerified: new Date(),
         currentOrgId: testOrg.id,
       },
@@ -203,7 +206,7 @@ export async function seedTestData(): Promise<void> {
     console.log('  ✓ Created master user:', masterUser.email)
 
     // Link master to organization
-    await client.organizationUser.upsert({
+    await client.userOrganization.upsert({
       where: {
         userId_organizationId: {
           userId: masterUser.id,
@@ -221,19 +224,23 @@ export async function seedTestData(): Promise<void> {
 
     console.log('  ✓ Linked master to organization')
 
-    // Create test instance
-    const testInstance = await client.instance.upsert({
-      where: { name: 'test-instance' },
-      update: {},
-      create: {
-        name: 'test-instance',
-        organizationId: testOrg.id,
-        status: 'disconnected',
-        qrCode: null,
-      },
+    // Create test connection (find existing or create new)
+    let testConnection = await client.connection.findFirst({
+      where: { name: 'test-connection', organizationId: testOrg.id },
     })
 
-    console.log('  ✓ Created test instance:', testInstance.name)
+    if (!testConnection) {
+      testConnection = await client.connection.create({
+        data: {
+          name: 'test-connection',
+          organizationId: testOrg.id,
+          status: 'DISCONNECTED',
+          qrCode: null,
+        },
+      })
+    }
+
+    console.log('  ✓ Created test connection:', testConnection.name)
 
     console.log('✅ Test data seeded successfully')
   } catch (error: any) {
@@ -250,6 +257,7 @@ export async function createTestUser(data: {
   name: string
   role?: 'admin' | 'user'
   organizationId?: string
+  password?: string
 }): Promise<any> {
   const client = getPrismaTestClient()
 
@@ -258,6 +266,7 @@ export async function createTestUser(data: {
       email: data.email,
       name: data.name,
       role: data.role || 'user',
+      password: data.password || '$2a$10$1234567890123456789012', // Hashed password placeholder
       emailVerified: new Date(),
       currentOrgId: data.organizationId,
     },
@@ -272,7 +281,8 @@ export async function createTestUser(data: {
 export async function createTestOrganization(data: {
   name: string
   slug: string
-  createdById: string
+  document?: string
+  type?: 'pf' | 'pj'
 }): Promise<any> {
   const client = getPrismaTestClient()
 
@@ -280,7 +290,8 @@ export async function createTestOrganization(data: {
     data: {
       name: data.name,
       slug: data.slug,
-      createdById: data.createdById,
+      document: data.document || '12345678901',
+      type: data.type || 'pf',
     },
   })
 
@@ -288,23 +299,23 @@ export async function createTestOrganization(data: {
 }
 
 /**
- * Create a test instance
+ * Create a test connection
  */
-export async function createTestInstance(data: {
+export async function createTestConnection(data: {
   name: string
   organizationId: string
-  status?: string
+  status?: 'CONNECTED' | 'DISCONNECTED' | 'CONNECTING' | 'ERROR'
 }): Promise<any> {
   const client = getPrismaTestClient()
 
-  const instance = await client.instance.create({
+  const connection = await client.connection.create({
     data: {
       name: data.name,
       organizationId: data.organizationId,
-      status: data.status || 'disconnected',
+      status: data.status || 'DISCONNECTED',
       qrCode: null,
     },
   })
 
-  return instance
+  return connection
 }

@@ -24,7 +24,7 @@ export function useCompleteOnboarding() {
 
   return useMutation({
     mutationFn: async (data: CompleteOnboardingData) => {
-      const result = await api.onboarding.complete.mutate(data);
+      const result = await api.onboarding.complete.mutate({ body: data });
       return result;
     },
     onSuccess: (data: any) => {

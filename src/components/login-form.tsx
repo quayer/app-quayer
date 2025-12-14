@@ -53,14 +53,15 @@ export function LoginForm({
         body: { email, password }
       });
 
-      if (data?.accessToken) {
-        localStorage.setItem('accessToken', data.accessToken);
-        if (data.refreshToken) {
-          localStorage.setItem('refreshToken', data.refreshToken);
+      const loginData = data as any
+      if (loginData?.accessToken) {
+        localStorage.setItem('accessToken', loginData.accessToken);
+        if (loginData.refreshToken) {
+          localStorage.setItem('refreshToken', loginData.refreshToken);
         }
 
         // Redirecionar baseado no role
-        const userRole = data.user?.role;
+        const userRole = loginData.user?.role;
         if (userRole === 'admin') {
           router.push('/admin');
         } else {

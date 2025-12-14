@@ -33,13 +33,14 @@ const rejectCallSchema = z.object({
  */
 const listCallsSchema = z.object({
   instanceId: z.string().uuid('ID da instância inválido'),
-  status: z.enum(['INCOMING', 'OUTGOING', 'MISSED', 'REJECTED']).optional(),
+  status: z.enum(['INITIATED', 'RINGING', 'ANSWERED', 'MISSED', 'REJECTED', 'BUSY', 'FAILED', 'ENDED']).optional(),
   page: z.number().min(1).default(1),
   limit: z.number().min(1).max(100).default(20),
 });
 
 export const callsController = igniter.controller({
   name: 'calls',
+  path: '/calls',
   description: 'Gerenciamento de chamadas do WhatsApp',
 
   actions: {
@@ -54,6 +55,8 @@ export const callsController = igniter.controller({
      * }
      */
     make: igniter.mutation({
+      path: '/make',
+      method: 'POST',
       body: makeCallSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -90,7 +93,7 @@ export const callsController = igniter.controller({
 
           // 3. Fazer chamada via UAZ API
           const callResult = await uazService.makeCall(
-            instance.token,
+            instance.uazapiToken!,
             normalizedNumber
           );
 
@@ -100,10 +103,7 @@ export const callsController = igniter.controller({
           // Buscar ou criar contato
           const contact = await database.contact.upsert({
             where: {
-              phoneNumber_organizationId: {
-                phoneNumber,
-                organizationId: instance.organizationId,
-              },
+              phoneNumber,
             },
             create: {
               phoneNumber,
@@ -113,10 +113,15 @@ export const callsController = igniter.controller({
             update: {},
           });
 
+          // Verificar se instancia tem organizacao
+          if (!instance.organizationId) {
+            return response.badRequest('Instancia nao possui organizacao vinculada');
+          }
+
           // Registrar chamada
           const call = await database.call.create({
             data: {
-              instanceId: instance.id,
+              connectionId: instance.id,
               contactId: contact.id,
               organizationId: instance.organizationId,
               direction: 'OUTGOING',
@@ -152,9 +157,7 @@ export const callsController = igniter.controller({
             number,
           });
 
-          return response.error('Erro ao fazer chamada', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao fazer chamada: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -170,6 +173,8 @@ export const callsController = igniter.controller({
      * }
      */
     reject: igniter.mutation({
+      path: '/reject',
+      method: 'POST',
       body: rejectCallSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -200,7 +205,7 @@ export const callsController = igniter.controller({
 
           // 2. Rejeitar chamada via UAZ API
           const rejectResult = await uazService.rejectCall(
-            instance.token,
+            instance.uazapiToken!,
             callId
           );
 
@@ -208,7 +213,7 @@ export const callsController = igniter.controller({
           const call = await database.call.findFirst({
             where: {
               externalId: callId,
-              instanceId: instance.id,
+              connectionId: instance.id,
             },
           });
 
@@ -240,9 +245,7 @@ export const callsController = igniter.controller({
             callId,
           });
 
-          return response.error('Erro ao rejeitar chamada', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao rejeitar chamada: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -257,6 +260,7 @@ export const callsController = igniter.controller({
      * @query limit - Itens por página (padrão: 20, máx: 100)
      */
     list: igniter.query({
+      path: '/',
       query: listCallsSchema,
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -265,7 +269,7 @@ export const callsController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { instanceId, status, page, limit } = request.query;
+        const { instanceId, status, page = 1, limit = 20 } = request.query;
 
         try {
           // 1. Verificar permissão
@@ -283,7 +287,7 @@ export const callsController = igniter.controller({
 
           // 2. Buscar chamadas com paginação
           const where = {
-            instanceId,
+            connectionId: instanceId,
             ...(status && { status }),
           };
 
@@ -296,7 +300,7 @@ export const callsController = igniter.controller({
                     id: true,
                     name: true,
                     phoneNumber: true,
-                    profilePicture: true,
+                    profilePicUrl: true,
                   },
                 },
                 user: {
@@ -331,9 +335,7 @@ export const callsController = igniter.controller({
             instanceId,
           });
 
-          return response.error('Erro ao listar chamadas', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao listar chamadas: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),
@@ -342,19 +344,16 @@ export const callsController = igniter.controller({
      * GET /calls/:callId
      * Buscar detalhes de uma chamada específica
      */
-    get: igniter.query({
+    get: (igniter.query as any)({
       path: '/:callId',
-      params: z.object({
-        callId: z.string().uuid('ID da chamada inválido'),
-      }),
       use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
+      handler: async ({ request, response, context }: any) => {
         const user = context.auth?.session?.user;
         if (!user) {
           return response.unauthorized('Usuário não autenticado');
         }
 
-        const { callId } = request.params;
+        const { callId } = request.params as { callId: string };
 
         try {
           const call = await database.call.findUnique({
@@ -365,7 +364,7 @@ export const callsController = igniter.controller({
                   id: true,
                   name: true,
                   phoneNumber: true,
-                  profilePicture: true,
+                  profilePicUrl: true,
                 },
               },
               user: {
@@ -375,7 +374,7 @@ export const callsController = igniter.controller({
                   email: true,
                 },
               },
-              instance: {
+              connection: {
                 select: {
                   id: true,
                   name: true,
@@ -389,7 +388,7 @@ export const callsController = igniter.controller({
             return response.notFound('Chamada não encontrada');
           }
 
-          if (user.role !== 'admin' && call.instance.organizationId !== user.currentOrgId) {
+          if (user.role !== 'admin' && call.connection.organizationId !== user.currentOrgId) {
             return response.forbidden('Acesso negado a esta chamada');
           }
 
@@ -400,9 +399,7 @@ export const callsController = igniter.controller({
             callId,
           });
 
-          return response.error('Erro ao buscar chamada', {
-            error: error instanceof Error ? error.message : 'Erro desconhecido',
-          });
+          return response.badRequest(`Erro ao buscar chamada: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
       },
     }),

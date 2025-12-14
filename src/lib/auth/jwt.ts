@@ -4,7 +4,7 @@
  * Gerenciamento de Access Tokens e Refresh Tokens
  */
 
-import jwt, { JwtPayload } from 'jsonwebtoken';
+import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
 import { UserRole, OrganizationRole } from './roles';
 
 /**
@@ -71,18 +71,20 @@ export interface MagicLinkTokenPayload {
  */
 export function signAccessToken(
   payload: Omit<AccessTokenPayload, 'type'>,
-  expiresIn: string = ACCESS_TOKEN_EXPIRY
+  expiresIn: SignOptions['expiresIn'] = ACCESS_TOKEN_EXPIRY
 ): string {
   const fullPayload: AccessTokenPayload = {
     ...payload,
     type: 'access',
   };
 
-  return jwt.sign(fullPayload, JWT_SECRET, {
+  const options: SignOptions = {
     expiresIn,
     issuer: 'quayer',
     audience: 'quayer-api',
-  });
+  };
+
+  return jwt.sign(fullPayload, JWT_SECRET, options);
 }
 
 /**
@@ -102,18 +104,20 @@ export function signAccessToken(
  */
 export function signRefreshToken(
   payload: Omit<RefreshTokenPayload, 'type'>,
-  expiresIn: string = REFRESH_TOKEN_EXPIRY
+  expiresIn: SignOptions['expiresIn'] = REFRESH_TOKEN_EXPIRY
 ): string {
   const fullPayload: RefreshTokenPayload = {
     ...payload,
     type: 'refresh',
   };
 
-  return jwt.sign(fullPayload, JWT_REFRESH_SECRET, {
+  const options: SignOptions = {
     expiresIn,
     issuer: 'quayer',
     audience: 'quayer-api',
-  });
+  };
+
+  return jwt.sign(fullPayload, JWT_REFRESH_SECRET, options);
 }
 
 /**
@@ -279,7 +283,7 @@ export function getExpirationDate(expiresIn: string): Date {
  */
 export function signMagicLinkToken(
   payload: Omit<MagicLinkTokenPayload, 'type'> & { type: 'login' | 'signup'; name?: string },
-  expiresIn: string = '10m'
+  expiresIn: SignOptions['expiresIn'] = '10m'
 ): string {
   const fullPayload: MagicLinkTokenPayload = {
     email: payload.email,
@@ -288,11 +292,13 @@ export function signMagicLinkToken(
     ...(payload.name && { name: payload.name }),
   };
 
-  return jwt.sign(fullPayload, JWT_SECRET, {
+  const options: SignOptions = {
     expiresIn,
     issuer: 'quayer',
     audience: 'quayer-api',
-  });
+  };
+
+  return jwt.sign(fullPayload, JWT_SECRET, options);
 }
 
 /**

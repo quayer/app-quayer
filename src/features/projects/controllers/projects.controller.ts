@@ -9,7 +9,7 @@ import {
   createProjectSchema,
   updateProjectSchema,
   listProjectsSchema,
-  linkInstanceSchema,
+  linkConnectionSchema,
 } from '../projects.schemas';
 import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
 
@@ -20,6 +20,7 @@ export const projectsController = igniter.controller({
     // CREATE
     create: igniter.mutation({
       path: '/',
+      method: 'POST',
       body: createProjectSchema,
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
@@ -119,6 +120,7 @@ export const projectsController = igniter.controller({
     // UPDATE
     update: igniter.mutation({
       path: '/:id',
+      method: 'PUT',
       body: updateProjectSchema,
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
@@ -151,6 +153,7 @@ export const projectsController = igniter.controller({
     // DELETE
     delete: igniter.mutation({
       path: '/:id',
+      method: 'DELETE',
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
         const userRole = request.headers.get('x-user-role');
@@ -179,10 +182,11 @@ export const projectsController = igniter.controller({
       },
     }),
 
-    // LINK INSTANCE TO PROJECT
-    linkInstance: igniter.mutation({
-      path: '/:id/instances',
-      body: linkInstanceSchema,
+    // LINK CONNECTION TO PROJECT
+    linkConnection: igniter.mutation({
+      path: '/:id/connections',
+      method: 'POST',
+      body: linkConnectionSchema,
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
         const userRole = request.headers.get('x-user-role');
@@ -192,7 +196,7 @@ export const projectsController = igniter.controller({
         }
 
         const { id } = request.params as { id: string };
-        const { instanceId } = request.body;
+        const { connectionId } = request.body;
 
         const project = await projectsRepository.findById(id);
         if (!project) {
@@ -204,17 +208,18 @@ export const projectsController = igniter.controller({
         const orgRole = await organizationsRepository.getUserRole(project.organizationId, userId);
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
-          return response.forbidden('Sem permissão para vincular instâncias');
+          return response.forbidden('Sem permissão para vincular conexões');
         }
 
-        await projectsRepository.linkInstance(id, instanceId);
-        return response.success({ message: 'Instância vinculada ao projeto' });
+        await projectsRepository.linkConnection(id, connectionId);
+        return response.success({ message: 'Conexão vinculada ao projeto' });
       },
     }),
 
-    // UNLINK INSTANCE FROM PROJECT
-    unlinkInstance: igniter.mutation({
-      path: '/:id/instances/:instanceId',
+    // UNLINK CONNECTION FROM PROJECT
+    unlinkConnection: igniter.mutation({
+      path: '/:id/connections/:connectionId',
+      method: 'DELETE',
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
         const userRole = request.headers.get('x-user-role');
@@ -223,7 +228,7 @@ export const projectsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        const { id, instanceId } = request.params as { id: string; instanceId: string };
+        const { id, connectionId } = request.params as { id: string; connectionId: string };
 
         const project = await projectsRepository.findById(id);
         if (!project) {
@@ -235,17 +240,17 @@ export const projectsController = igniter.controller({
         const orgRole = await organizationsRepository.getUserRole(project.organizationId, userId);
 
         if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
-          return response.forbidden('Sem permissão para desvincular instâncias');
+          return response.forbidden('Sem permissão para desvincular conexões');
         }
 
-        await projectsRepository.unlinkInstance(instanceId);
-        return response.success({ message: 'Instância desvinculada do projeto' });
+        await projectsRepository.unlinkConnection(connectionId);
+        return response.success({ message: 'Conexão desvinculada do projeto' });
       },
     }),
 
-    // LIST PROJECT INSTANCES
-    listInstances: igniter.query({
-      path: '/:id/instances',
+    // LIST PROJECT CONNECTIONS
+    listConnections: igniter.query({
+      path: '/:id/connections',
       handler: async ({ request, response }) => {
         const userId = request.headers.get('x-user-id');
         const userRole = request.headers.get('x-user-role');
@@ -266,11 +271,11 @@ export const projectsController = igniter.controller({
         const isMember = await organizationsRepository.isMember(project.organizationId, userId);
 
         if (!isAdmin && !isMember) {
-          return response.forbidden('Você não tem permissão para visualizar as instâncias');
+          return response.forbidden('Você não tem permissão para visualizar as conexões');
         }
 
-        const instances = await projectsRepository.listInstances(id);
-        return response.success({ instances });
+        const connections = await projectsRepository.listConnections(id);
+        return response.success({ connections });
       },
     }),
   },

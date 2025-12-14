@@ -37,8 +37,8 @@ export const listProjectsSchema = z.object({
   isActive: z.coerce.boolean().optional(),
 });
 
-export const linkInstanceSchema = z.object({
-  instanceId: z.string().uuid('ID da instância inválido'),
+export const linkConnectionSchema = z.object({
+  connectionId: z.string().uuid('ID da conexão inválido'),
 });
 
 // ============================================
@@ -48,4 +48,4 @@ export const linkInstanceSchema = z.object({
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type ListProjectsQuery = z.infer<typeof listProjectsSchema>;
-export type LinkInstanceInput = z.infer<typeof linkInstanceSchema>;
+export type LinkConnectionInput = z.infer<typeof linkConnectionSchema>;

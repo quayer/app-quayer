@@ -53,7 +53,8 @@ export function LoginForm({
 
       if (apiError) {
         // Error específico por campo
-        const errorMsg = apiError.message || apiError.error?.message || 'Erro ao fazer login'
+        const err = apiError as any
+        const errorMsg = err.message || err.error?.message || 'Erro ao fazer login'
 
         if (errorMsg.toLowerCase().includes('email')) {
           setEmailError(errorMsg)
@@ -66,20 +67,21 @@ export function LoginForm({
         return
       }
 
-      if (data?.accessToken) {
-        localStorage.setItem("accessToken", data.accessToken)
-        if (data.refreshToken) {
-          localStorage.setItem("refreshToken", data.refreshToken)
+      const loginData = data as any
+      if (loginData?.accessToken) {
+        localStorage.setItem("accessToken", loginData.accessToken)
+        if (loginData.refreshToken) {
+          localStorage.setItem("refreshToken", loginData.refreshToken)
         }
 
         // Cookie com encoding seguro
-        const cookieValue = encodeURIComponent(data.accessToken)
+        const cookieValue = encodeURIComponent(loginData.accessToken)
         document.cookie = 'accessToken=' + cookieValue + '; path=/; max-age=86400; SameSite=Lax'
 
         // ✅ CORREÇÃO BRUTAL: Respeitar needsOnboarding antes de redirecionar
-        const userRole = data.user?.role
-        const needsOnboarding = data.needsOnboarding
-        
+        const userRole = loginData.user?.role
+        const needsOnboarding = loginData.needsOnboarding
+
         // Se precisa de onboarding, ir para /onboarding independente do role
         if (needsOnboarding) {
           window.location.href = "/onboarding"

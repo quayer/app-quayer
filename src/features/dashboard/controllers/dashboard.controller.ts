@@ -26,39 +26,39 @@ export const dashboardController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id;
-        const organizationId = context.auth?.session?.currentOrgId;
+        const organizationId = context.auth?.session?.user?.currentOrgId;
 
         if (!organizationId) {
           return response.badRequest('Nenhuma organização selecionada');
         }
 
         try {
-          // Buscar todas as instâncias da organização
-          const instances = await database.instance.findMany({
+          // Buscar todas as conexões da organização
+          const connections = await database.connection.findMany({
             where: {
               organizationId: organizationId,
             },
             select: {
               id: true,
-              uazToken: true,
+              uazapiToken: true,
               status: true,
             },
           });
 
           // Obter métricas agregadas
-          const metrics = await dashboardService.getAggregatedMetrics(instances);
+          const metrics = await dashboardService.getAggregatedMetrics(connections);
 
           return response.success({
             data: metrics,
             instances: {
-              total: instances.length,
-              connected: instances.filter((i) => i.status === 'connected').length,
-              disconnected: instances.filter((i) => i.status === 'disconnected').length,
+              total: connections.length,
+              connected: connections.filter((i) => i.status === 'CONNECTED').length,
+              disconnected: connections.filter((i) => i.status === 'DISCONNECTED').length,
             },
           });
         } catch (error: any) {
           console.error('Error fetching dashboard metrics:', error);
-          return response.serverError(error.message || 'Erro ao buscar métricas');
+          return response.error(error.message || 'Erro ao buscar métricas');
         }
       },
     }),
@@ -75,8 +75,13 @@ export const dashboardController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { startDate, endDate } = context.query;
-        const { currentOrgId } = context.user;
+        const { startDate, endDate } = request.query;
+        const user = context.auth?.session?.user;
+        const currentOrgId = user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
@@ -100,7 +105,7 @@ export const dashboardController = igniter.controller({
           }),
           database.message.count({
             where: {
-              instance: { organizationId: currentOrgId },
+              connection: { organizationId: currentOrgId },
               ...whereDate,
             },
           }),
@@ -109,7 +114,7 @@ export const dashboardController = igniter.controller({
           }),
           database.message.aggregate({
             where: {
-              instance: { organizationId: currentOrgId },
+              connection: { organizationId: currentOrgId },
               direction: 'OUTBOUND',
               sentAt: { not: null },
               ...whereDate,
@@ -168,8 +173,13 @@ export const dashboardController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { startDate, endDate, departmentId } = context.query;
-        const { currentOrgId } = context.user;
+        const { startDate, endDate, departmentId } = request.query;
+        const user = context.auth?.session?.user;
+        const currentOrgId = user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
@@ -269,8 +279,13 @@ export const dashboardController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { startDate, endDate, groupBy } = context.query;
-        const { currentOrgId } = context.user;
+        const { startDate, endDate, groupBy } = request.query;
+        const user = context.auth?.session?.user;
+        const currentOrgId = user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
@@ -328,8 +343,8 @@ export const dashboardController = igniter.controller({
             };
           });
         } else if (groupBy === 'instance') {
-          // Performance por instância
-          const instances = await database.instance.findMany({
+          // Performance por conexão
+          const connections = await database.connection.findMany({
             where: { organizationId: currentOrgId },
             include: {
               _count: {
@@ -345,13 +360,13 @@ export const dashboardController = igniter.controller({
             },
           });
 
-          performanceData = instances.map(inst => ({
-            id: inst.id,
-            name: inst.name,
-            phoneNumber: inst.phoneNumber,
-            status: inst.status,
-            totalSessions: inst._count.chatSessions,
-            totalMessages: inst._count.messages,
+          performanceData = connections.map(conn => ({
+            id: conn.id,
+            name: conn.name,
+            phoneNumber: conn.phoneNumber,
+            status: conn.status,
+            totalSessions: conn._count.chatSessions,
+            totalMessages: conn._count.messages,
           }));
         }
 
@@ -380,8 +395,13 @@ export const dashboardController = igniter.controller({
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { startDate, endDate } = context.query;
-        const { currentOrgId } = context.user;
+        const { startDate, endDate } = request.query;
+        const user = context.auth?.session?.user;
+        const currentOrgId = user?.currentOrgId;
+
+        if (!currentOrgId) {
+          return response.badRequest('Nenhuma organização selecionada');
+        }
 
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
@@ -413,7 +433,7 @@ export const dashboardController = igniter.controller({
         const messagesByType = await database.message.groupBy({
           by: ['type'],
           where: {
-            instance: { organizationId: currentOrgId },
+            connection: { organizationId: currentOrgId },
             ...whereDate,
           },
           _count: true,
@@ -423,7 +443,7 @@ export const dashboardController = igniter.controller({
         const messagesByDirection = await database.message.groupBy({
           by: ['direction'],
           where: {
-            instance: { organizationId: currentOrgId },
+            connection: { organizationId: currentOrgId },
             ...whereDate,
           },
           _count: true,

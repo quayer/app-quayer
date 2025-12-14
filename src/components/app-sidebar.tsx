@@ -15,6 +15,8 @@ import {
   Shield,
   UserCog,
   Mail,
+  Bell,
+  Wrench,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -44,7 +46,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const orgRole = (user as any)?.organizationRole || 'user'
 
   // ✅ CORREÇÃO BRUTAL: Buscar nome da organização atual via getCurrent
-  const selectedOrgName = currentOrgData?.name || null
+  const selectedOrgName = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name || null
 
   const data = React.useMemo(() => {
     const adminMenu = isSystemAdmin ? [{
@@ -93,6 +95,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           url: "/admin/permissions",
           icon: ShieldCheck,
         },
+        {
+          title: "Notificações",
+          url: "/admin/notificacoes",
+          icon: Bell,
+        },
+        {
+          title: "Configurações",
+          url: "/admin/settings",
+          icon: Settings2,
+        },
       ],
     }] : [];
 
@@ -107,7 +119,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         icon: LayoutDashboard,
       },
       {
-        title: "Integrações",
+        title: "Canais",
         url: "/integracoes",
         icon: Plug,
       },
@@ -117,7 +129,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         icon: MessagesSquare,
       },
       {
-        title: "Usuários",
+        title: "Contatos",
+        url: "/contatos",
+        icon: UserCog,
+      },
+      {
+        title: "Equipe",
         url: "/integracoes/users",
         icon: Users,
       },
@@ -125,6 +142,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Webhooks",
         url: "/configuracoes/webhooks",
         icon: Webhook,
+      },
+      {
+        title: "Ferramentas",
+        url: "/ferramentas",
+        icon: Wrench,
       },
       {
         title: "Configurações",
@@ -136,7 +158,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     // User menu (simplified) - AGORA INCLUI CONFIGURAÇÕES
     const userMenu = (!isSystemAdmin && orgRole === 'user') ? [
       {
-        title: "Minhas Integrações",
+        title: "Canais",
         url: "/integracoes",
         icon: Plug,
       },
@@ -144,6 +166,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Conversas",
         url: "/conversas",
         icon: MessagesSquare,
+      },
+      {
+        title: "Contatos",
+        url: "/contatos",
+        icon: Users,
       },
       {
         title: "Configurações",
@@ -204,8 +231,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
         {/* Organization Menu (for admin viewing as org, or master/manager) */}
         {data.orgMenu.length > 0 && (
-          <NavMain 
-            items={data.orgMenu} 
+          <NavMain
+            items={data.orgMenu}
             label={data.selectedOrgName || "Organização"}
           />
         )}

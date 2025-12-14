@@ -15,6 +15,7 @@ export enum BrokerType {
   BAILEYS = 'BAILEYS',
   OFFICIAL = 'OFFICIAL',
   WPPCONNECT = 'WPPCONNECT',
+  CLOUDAPI = 'CLOUDAPI', // WhatsApp Cloud API (Official Meta API)
 }
 
 export enum ErrorCode {
@@ -52,6 +53,8 @@ const webhookUrlSchema = z.union([
 /**
  * @constant CreateInstanceRequestDTO
  * @description Schema Zod para validação da criação de nova instância WhatsApp
+ * ✅ CORREÇÃO: Campos alinhados com o modelo Prisma Connection
+ * ✅ ADICIONADO: Suporte a WhatsApp Cloud API (provider = WHATSAPP_CLOUD_API)
  */
 export const CreateInstanceRequestDTO = z.object({
   name: z.string()
@@ -59,16 +62,27 @@ export const CreateInstanceRequestDTO = z.object({
     .max(100, "Nome deve ter no máximo 100 caracteres")
     .regex(/^[a-zA-Z0-9\s-_]+$/, "Nome deve conter apenas letras, números, espaços, hífens e underscores"),
   phoneNumber: phoneNumberSchema,
-  brokerType: z.nativeEnum(BrokerType).default(BrokerType.UAZAPI),
-  webhookUrl: webhookUrlSchema,
-  uazToken: z.string().optional(),  // Fixed: Changed from uazapiToken to uazToken
-  uazInstanceId: z.string().optional(),  // Fixed: Changed from brokerId to uazInstanceId
+  // Campos do Prisma schema
+  provider: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API', 'WHATSAPP_BUSINESS_API', 'INSTAGRAM_META', 'TELEGRAM_BOT', 'EMAIL_SMTP']).default('WHATSAPP_WEB'),
+  channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM', 'EMAIL']).default('WHATSAPP'),
+  // Status - para Cloud API pode ser definido como CONNECTED diretamente
+  status: z.enum(['DISCONNECTED', 'CONNECTED', 'CONNECTING', 'AWAITING_QR', 'ERROR']).optional(),
+  // UAZapi fields
+  uazapiToken: z.string().optional(),
+  uazapiInstanceId: z.string().optional(),
   organizationId: z.string().uuid().optional(),
+  // WhatsApp Cloud API fields (required when provider = WHATSAPP_CLOUD_API)
+  cloudApiAccessToken: z.string().optional(),
+  cloudApiPhoneNumberId: z.string().optional(),
+  cloudApiWabaId: z.string().optional(),
+  cloudApiVerifiedName: z.string().optional(),
 });
 
 /**
  * @constant UpdateInstanceRequestDTO
  * @description Schema Zod para validação da atualização de instância
+ * ✅ CORREÇÃO: Campos alinhados com o modelo Prisma Connection
+ * ✅ ADICIONADO: Suporte a WhatsApp Cloud API
  */
 export const UpdateInstanceRequestDTO = z.object({
   name: z.string()
@@ -77,10 +91,15 @@ export const UpdateInstanceRequestDTO = z.object({
     .regex(/^[a-zA-Z0-9\s-_]+$/, "Nome deve conter apenas letras, números, espaços, hífens e underscores")
     .optional(),
   phoneNumber: phoneNumberSchema,
-  brokerType: z.nativeEnum(BrokerType).optional(),
-  webhookUrl: webhookUrlSchema,
-  uazToken: z.string().optional(),  // Fixed: Changed from uazapiToken to uazToken
-  uazInstanceId: z.string().optional(),  // Fixed: Changed from brokerId to uazInstanceId
+  provider: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API', 'WHATSAPP_BUSINESS_API', 'INSTAGRAM_META', 'TELEGRAM_BOT', 'EMAIL_SMTP']).optional(),
+  channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM', 'EMAIL']).optional(),
+  // UAZapi fields
+  uazapiToken: z.string().optional(),
+  uazapiInstanceId: z.string().optional(),
+  // WhatsApp Cloud API fields
+  cloudApiAccessToken: z.string().optional(),
+  cloudApiPhoneNumberId: z.string().optional(),
+  cloudApiWabaId: z.string().optional(),
 });
 
 /**
@@ -107,17 +126,25 @@ export const ListInstancesQueryDTO = z.object({
 /**
  * @constant InstanceResponseDTO
  * @description Schema Zod para resposta de instância individual
+ * ✅ CORREÇÃO: Campos alinhados com o modelo Prisma Connection
+ * ✅ ADICIONADO: Campos do WhatsApp Cloud API
  */
 export const InstanceResponseDTO = z.object({
   id: z.string().uuid(),
   name: z.string(),
   phoneNumber: z.string().nullable(),
-  status: z.enum(['connected', 'disconnected', 'connecting', 'error']),
+  status: z.enum(['CONNECTED', 'DISCONNECTED', 'CONNECTING', 'ERROR']),
   qrCode: z.string().nullable(),
   pairingCode: z.string().nullable(),
-  brokerType: z.nativeEnum(BrokerType),
-  webhookUrl: z.string().nullable(),
-  brokerId: z.string().nullable(),
+  provider: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API', 'WHATSAPP_BUSINESS_API', 'INSTAGRAM_META', 'TELEGRAM_BOT', 'EMAIL_SMTP']),
+  channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM', 'EMAIL']),
+  // UAZapi fields
+  uazapiInstanceId: z.string().nullable(),
+  // Cloud API fields (não expor o token por segurança)
+  cloudApiPhoneNumberId: z.string().nullable().optional(),
+  cloudApiWabaId: z.string().nullable().optional(),
+  cloudApiVerifiedName: z.string().nullable().optional(),
+  // Common fields
   organizationId: z.string().uuid(),
   createdAt: z.date(),
   updatedAt: z.date(),

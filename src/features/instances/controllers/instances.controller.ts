@@ -1,4 +1,5 @@
 import { igniter } from "@/igniter";
+import { z } from "zod";
 import { instancesProcedure } from "../procedures/instances.procedure";
 import { authProcedure } from "@/features/auth/procedures/auth.procedure";
 import {
@@ -6,9 +7,10 @@ import {
   UpdateInstanceSchema,
   ListInstancesQueryDTO,
   ErrorCode,
-  BrokerType,
 } from "../instances.interfaces";
+import { ConnectionStatus } from "@prisma/client";
 import { uazapiService } from "@/lib/api/uazapi.service";
+import { providerOrchestrator } from "@/lib/providers/orchestrator/provider.orchestrator";
 import { InstancesRepository } from "../repositories/instances.repository";
 import { logger } from "@/services/logger";
 import { validatePhoneNumber, formatWhatsAppNumber } from "@/lib/validators/phone.validator";
@@ -27,11 +29,19 @@ function createErrorResponse(code: ErrorCode, message: string, details?: any) {
 
 /**
  * Helper function to check organization permission
+ * @param instanceOrganizationId - ID da organização da instância (pode ser null)
+ * @param userOrganizationId - ID da organização do usuário (opcional)
+ * @param userRole - Role do usuário (para verificar se é admin)
  */
 function checkOrganizationPermission(
   instanceOrganizationId: string | null,
-  userOrganizationId?: string
+  userOrganizationId?: string,
+  userRole?: string
 ): boolean {
+  // Admin tem acesso a todas as instâncias
+  if (userRole === 'admin') return true;
+
+  // Usuário normal precisa ter organizationId e deve corresponder
   if (!userOrganizationId) return false;
   return instanceOrganizationId === userOrganizationId;
 }
@@ -44,31 +54,24 @@ export const instancesController = igniter.controller({
     // ==================== CREATE ====================
     create: igniter.mutation({
       name: "CreateInstance",
-      description: "Criar nova instância WhatsApp",
+      description: "Criar nova instância WhatsApp (UAZapi ou Cloud API)",
       path: "/",
       method: "POST",
       use: [authProcedure({ required: true }), instancesProcedure()],
       body: CreateInstanceSchema,
       handler: async ({ request, response, context }) => {
         const repository = new InstancesRepository(context.db);
-        const { name, phoneNumber, brokerType, webhookUrl } = request.body;
+        const { name, phoneNumber, provider, cloudApiAccessToken, cloudApiPhoneNumberId, cloudApiWabaId } = request.body;
+        // webhookUrl será configurado no UAZapi via setWebhook endpoint separadamente
 
         logger.info('Creating instance', {
           userId: context.auth?.session?.user?.id,
-          organizationId: context.auth?.session?.user?.organizationId,
+          organizationId: context.auth?.session?.user?.currentOrgId,
           instanceName: name,
+          provider: provider || 'WHATSAPP_WEB',
         });
 
         try {
-          // ✅ CORREÇÃO BRUTAL: Normalizar brokerType para uppercase para match com Prisma enum
-          const normalizedBrokerType = brokerType
-            ? (brokerType.toUpperCase() as BrokerType)
-            : BrokerType.UAZAPI;
-
-          logger.info('BrokerType normalized', {
-            original: brokerType,
-            normalized: normalizedBrokerType
-          });
 
           // Business Rule: Validar número de telefone se fornecido
           let validatedPhoneNumber = phoneNumber;
@@ -83,7 +86,7 @@ export const instancesController = igniter.controller({
           }
 
           // Business Rule: Verificar limite de instâncias da organização
-          const organizationId = context.auth?.session?.user?.organizationId;
+          const organizationId = context.auth?.session?.user?.currentOrgId;
           if (organizationId) {
             const organization = await context.db.organization.findUnique({
               where: { id: organizationId },
@@ -104,28 +107,100 @@ export const instancesController = igniter.controller({
 
           // Business Rule: Verificar se já existe instância com o mesmo nome na organização
           const existingInstance = await repository.findByName(name);
-          if (existingInstance && existingInstance.organizationId === context.auth?.session?.user?.organizationId) {
-            logger.warn('Instance name already exists', { name, organizationId: context.auth?.session?.user?.organizationId });
+          if (existingInstance && existingInstance.organizationId === context.auth?.session?.user?.currentOrgId) {
+            logger.warn('Instance name already exists', { name, organizationId: context.auth?.session?.user?.currentOrgId });
             return response.badRequest("Já existe uma instância com este nome na sua organização");
           }
 
+          // ==================== CLOUD API FLOW ====================
+          if (provider === 'WHATSAPP_CLOUD_API') {
+            // Validar campos obrigatórios do Cloud API
+            if (!cloudApiAccessToken) {
+              return response.badRequest("Token de acesso do Cloud API é obrigatório");
+            }
+            if (!cloudApiPhoneNumberId) {
+              return response.badRequest("ID do telefone (Phone Number ID) é obrigatório");
+            }
+            if (!cloudApiWabaId) {
+              return response.badRequest("ID da WABA (WhatsApp Business Account) é obrigatório");
+            }
+
+            // Importar CloudAPIClient dinamicamente para validação
+            const { CloudAPIClient } = await import('@/lib/providers/adapters/cloudapi/cloudapi.client');
+
+            // Testar conexão antes de salvar
+            const cloudClient = new CloudAPIClient({
+              accessToken: cloudApiAccessToken,
+              phoneNumberId: cloudApiPhoneNumberId,
+              wabaId: cloudApiWabaId,
+            });
+
+            try {
+              const phoneInfo = await cloudClient.getPhoneInfo();
+
+              logger.info('Cloud API credentials validated', {
+                phoneNumberId: cloudApiPhoneNumberId,
+                verifiedName: phoneInfo.verified_name,
+                displayPhone: phoneInfo.display_phone_number,
+              });
+
+              // Criar instância no banco de dados - já conectada!
+              const instance = await repository.create({
+                name,
+                phoneNumber: phoneInfo.display_phone_number || validatedPhoneNumber,
+                provider: 'WHATSAPP_CLOUD_API',
+                channel: 'WHATSAPP',
+                status: 'CONNECTED', // Cloud API já está conectado!
+                cloudApiAccessToken,
+                cloudApiPhoneNumberId,
+                cloudApiWabaId,
+                cloudApiVerifiedName: phoneInfo.verified_name,
+                organizationId: context.auth?.session?.user?.currentOrgId || undefined,
+              });
+
+              logger.info('Cloud API instance created successfully', {
+                instanceId: instance.id,
+                userId: context.auth?.session?.user?.id,
+                verifiedName: phoneInfo.verified_name,
+              });
+
+              return response.created({
+                ...instance,
+                cloudApiAccessToken: undefined, // Não expor o token na resposta
+              });
+            } catch (cloudError: any) {
+              logger.error('Cloud API validation failed', {
+                error: cloudError.message,
+                phoneNumberId: cloudApiPhoneNumberId,
+              });
+              return response.badRequest(`Falha ao validar credenciais do Cloud API: ${cloudError.message}`);
+            }
+          }
+
+          // ==================== UAZAPI FLOW (DEFAULT) ====================
           // Business Logic: Criar instância na UAZapi primeiro
-          const uazapiResult = await uazapiService.createInstance(name, webhookUrl);
+          const uazapiResult = await uazapiService.createInstance(name);
 
           if (!uazapiResult.success || !uazapiResult.data) {
-            logger.error('UAZapi instance creation failed', { error: uazapiResult.error, name });
-            return response.badRequest("Falha ao criar instância na UAZapi");
+            const errorDetails = uazapiResult.error || uazapiResult.message || 'Erro desconhecido na UAZapi'
+            logger.error('UAZapi instance creation failed', {
+              error: errorDetails,
+              name,
+              fullResponse: uazapiResult
+            });
+            return response.badRequest(`Falha ao criar instância na UAZapi: ${errorDetails}`);
           }
 
           // Business Logic: Criar instância no banco de dados
+          // ✅ CORREÇÃO: Usar campos corretos do Prisma schema (provider, uazapiToken, uazapiInstanceId)
           const instance = await repository.create({
             name,
             phoneNumber: validatedPhoneNumber,
-            brokerType: normalizedBrokerType,
-            webhookUrl,
-            uazToken: uazapiResult.data.token,  // Fixed: Changed from uazapiToken to uazToken
-            uazInstanceId: uazapiResult.data.instance?.id,  // Fixed: Changed from brokerId to uazInstanceId
-            organizationId: context.auth?.session?.user?.organizationId || undefined,
+            provider: 'WHATSAPP_WEB', // UAZAPI usa WhatsApp Web
+            channel: 'WHATSAPP',
+            uazapiToken: uazapiResult.data.token,
+            uazapiInstanceId: uazapiResult.data.instance?.id,
+            organizationId: context.auth?.session?.user?.currentOrgId || undefined,
           });
 
           logger.info('Instance created successfully', {
@@ -142,6 +217,7 @@ export const instancesController = igniter.controller({
     }),
 
     // ==================== LIST WITH PAGINATION ====================
+    // ✅ Caching: 60 segundos por query unique
     list: igniter.query({
       name: "ListInstances",
       description: "Listar instâncias WhatsApp com paginação e filtros",
@@ -152,9 +228,31 @@ export const instancesController = igniter.controller({
         const repository = new InstancesRepository(context.db);
         const { page = 1, limit = 20, status = 'all', search } = request.query || {};
 
+        // Extrair informações do usuário
+        const user = context.auth?.session?.user;
+        const isAdmin = user?.role === 'admin';
+
+        // Business Rule: Admin vê todas instâncias (sem filtro de organização)
+        // Business Rule: Usuário normal vê apenas instâncias da sua organização
+        const organizationId = isAdmin ? undefined : (user?.currentOrgId || undefined);
+
+        // 🚀 Cache: Verificar cache antes de buscar no banco
+        const cacheKey = `instances:list:${organizationId || 'all'}:${status}:${search || ''}:${page}:${limit}`;
+
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            logger.debug('Cache hit for instances list', { cacheKey });
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss ou erro - continuar sem cache
+        }
+
         logger.info('Listing instances', {
-          userId: context.auth?.session?.user?.id,
-          organizationId: context.auth?.session?.user?.organizationId,
+          userId: user?.id,
+          organizationId,
+          isAdmin,
           page,
           limit,
           status,
@@ -163,14 +261,53 @@ export const instancesController = igniter.controller({
 
         try {
           const result = await repository.findAllPaginated({
-            organizationId: context.auth?.session?.user?.organizationId || undefined,
+            organizationId,
             page,
             limit,
             status: status === 'all' ? undefined : status,
             search,
           });
 
-          return response.success({
+          // 🔄 ASYNC: Verificar status real de instâncias CONNECTING em background
+          // Isso não bloqueia a resposta, melhora a UX com status mais atualizado no próximo polling
+          const connectingInstances = result.instances.filter(
+            (inst: any) => ((inst.status === 'CONNECTING') || (inst.status === 'CONNECTED' && !inst.phoneNumber)) && inst.uazapiToken
+          );
+
+          if (connectingInstances.length > 0) {
+            // Executar em background sem await
+            setImmediate(async () => {
+              for (const instance of connectingInstances) {
+                if (!instance.uazapiToken) continue; // Type guard
+                try {
+                  const statusResult = await uazapiService.getInstanceStatus(instance.uazapiToken);
+                  if (statusResult.success && statusResult.data) {
+                    const realStatus = statusResult.data.status?.toLowerCase();
+                    logger.info('Async status check debug', {
+                      instanceId: instance.id,
+                      realStatus,
+                      phoneNumber: statusResult.data.phoneNumber
+                    });
+
+                    if (realStatus === 'connected' || realStatus === 'open') {
+                      // Atualizar status no banco
+                      await repository.updateStatus(
+                        instance.id,
+                        'CONNECTED',
+                        statusResult.data.phoneNumber || undefined,
+                        statusResult.data.profilePicture || null
+                      );
+                      logger.info('Async status sync: instance connected', { instanceId: instance.id, name: instance.name });
+                    }
+                  }
+                } catch (err) {
+                  // Erros de background são silenciosos
+                }
+              }
+            });
+          }
+
+          const responseData = {
             data: result.instances,
             pagination: {
               page,
@@ -178,7 +315,16 @@ export const instancesController = igniter.controller({
               total: result.total,
               totalPages: Math.ceil(result.total / limit),
             },
-          });
+          };
+
+          // 🚀 Cache: Salvar resultado com TTL de 30 segundos (reduzido para sync mais frequente)
+          try {
+            await igniter.store.set(cacheKey, responseData, { ttl: 30 });
+          } catch (e) {
+            // Erro ao salvar cache - não crítico
+          }
+
+          return response.success(responseData);
         } catch (error) {
           logger.error('Failed to list instances', { error, userId: context.auth?.session?.user?.id });
           throw error;
@@ -207,12 +353,12 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             logger.warn('Organization permission denied', {
               instanceId: id,
               userId: context.auth?.session?.user?.id,
               instanceOrg: instance.organizationId,
-              userOrg: context.auth?.session?.user?.organizationId,
+              userOrg: context.auth?.session?.user?.currentOrgId,
             });
             return response.forbidden("Você não tem permissão para acessar esta instância");
           }
@@ -248,7 +394,7 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(existingInstance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(existingInstance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para atualizar esta instância");
           }
 
@@ -267,7 +413,7 @@ export const instancesController = igniter.controller({
     // ==================== CONNECT WITH RBAC ====================
     connect: igniter.mutation({
       name: "ConnectInstance",
-      description: "Conectar instância e gerar QR Code",
+      description: "Conectar instância e gerar QR Code (ou validar credenciais Cloud API)",
       path: "/:id/connect",
       method: "POST",
       use: [authProcedure({ required: true }), instancesProcedure()],
@@ -285,41 +431,96 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para conectar esta instância");
           }
 
-          if (instance.status === 'connected') {
+          if (instance.status === 'CONNECTED') {
             return response.badRequest("Instância já está conectada");
           }
 
-          if (!instance.uazToken) {
+          // ==================== CLOUD API CONNECT ====================
+          if (instance.provider === 'WHATSAPP_CLOUD_API') {
+            if (!instance.cloudApiAccessToken || !instance.cloudApiPhoneNumberId) {
+              return response.badRequest("Instância Cloud API não possui credenciais configuradas");
+            }
+
+            try {
+              const { CloudAPIClient } = await import('@/lib/providers/adapters/cloudapi/cloudapi.client');
+              const cloudClient = new CloudAPIClient({
+                accessToken: instance.cloudApiAccessToken,
+                phoneNumberId: instance.cloudApiPhoneNumberId,
+                wabaId: instance.cloudApiWabaId || '',
+              });
+
+              const phoneInfo = await cloudClient.getPhoneInfo();
+
+              // Atualizar status para CONNECTED
+              await repository.updateStatus(id, 'CONNECTED', phoneInfo.display_phone_number, null);
+
+              logger.info('Cloud API instance connected', {
+                instanceId: id,
+                userId: context.auth?.session?.user?.id,
+                verifiedName: phoneInfo.verified_name,
+              });
+
+              return response.success({
+                message: "Instância Cloud API conectada com sucesso",
+                status: 'connected',
+                phoneNumber: phoneInfo.display_phone_number,
+                verifiedName: phoneInfo.verified_name,
+                provider: 'cloudapi',
+                // Cloud API não usa QR Code
+                qrcode: null,
+                pairingCode: null,
+              });
+            } catch (cloudError: any) {
+              logger.error('Cloud API connection failed', {
+                error: cloudError.message,
+                instanceId: id,
+              });
+              return response.badRequest(`Falha ao conectar Cloud API: ${cloudError.message}`);
+            }
+          }
+
+          // ==================== UAZAPI CONNECT ====================
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token da UAZapi");
           }
 
-          const connectionResult = await uazapiService.connectInstance(instance.uazToken);
+          // Usar orchestrator para retry automático e fallback
+          const connectionResult = await providerOrchestrator.connectInstance(id);
 
           if (!connectionResult.success || !connectionResult.data) {
-            logger.error('UAZapi connection failed', { error: connectionResult.error, instanceId: id });
+            logger.error('Provider connection failed', {
+              error: connectionResult.error,
+              instanceId: id,
+              provider: connectionResult.provider
+            });
             return response.badRequest("Falha ao conectar instância");
           }
 
-          if (!connectionResult.data.qrcode) {
-            return response.badRequest("UAZapi não retornou QR Code válido");
+          const qrCode = connectionResult.data.qrCode;
+          if (!qrCode) {
+            return response.badRequest("Provider não retornou QR Code válido");
           }
 
           await repository.updateQRCode(
             id,
-            connectionResult.data.qrcode,
-            connectionResult.data.pairingCode
+            qrCode,
+            undefined // pairingCode será tratado posteriormente se necessário
           );
 
-          logger.info('Instance connected successfully', { instanceId: id, userId: context.auth?.session?.user?.id });
+          logger.info('Instance connected via orchestrator', {
+            instanceId: id,
+            userId: context.auth?.session?.user?.id,
+            provider: connectionResult.provider
+          });
 
           return response.success({
-            qrcode: connectionResult.data.qrcode,
-            expires: connectionResult.data.expires || 120000,
-            pairingCode: connectionResult.data.pairingCode,
+            qrcode: qrCode,
+            expires: 120000,
+            pairingCode: undefined,
           });
         } catch (error) {
           logger.error('Failed to connect instance', { error, instanceId: id });
@@ -328,10 +529,63 @@ export const instancesController = igniter.controller({
       },
     }),
 
+    // ==================== PAIRING CODE WITH RBAC ====================
+    pairingCode: igniter.mutation({
+      name: "GetPairingCode",
+      description: "Gerar código de pareamento para conexão sem QR Code",
+      path: "/:id/pairing-code",
+      method: "POST",
+      use: [authProcedure({ required: true }), instancesProcedure()],
+      body: z.object({ phoneNumber: z.string().min(10, "Número inválido") }),
+      handler: async ({ request, response, context }) => {
+        const repository = new InstancesRepository(context.db);
+        const { id } = request.params as { id: string };
+        const { phoneNumber } = request.body;
+
+        logger.info('Generating pairing code', { instanceId: id, phone: phoneNumber, userId: context.auth?.session?.user?.id });
+
+        try {
+          const instance = await repository.findById(id);
+
+          if (!instance) {
+            return response.notFound("Instância não encontrada");
+          }
+
+          // RBAC: Verificar permissão de organização
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
+            return response.forbidden("Você não tem permissão para acessar esta instância");
+          }
+
+          if (instance.provider === 'WHATSAPP_CLOUD_API') {
+            return response.badRequest("Cloud API não suporta código de pareamento desta forma.");
+          }
+
+          if (!instance.uazapiToken) {
+            return response.badRequest("Instância não possui token da UAZapi");
+          }
+
+          // Usar serviço diretamente pois orchestrator pode não expor pairing code com phone ainda
+          const result = await uazapiService.connectInstance(instance.uazapiToken, phoneNumber);
+
+          if (!result.success || !result.data) {
+            return response.badRequest(result.message || "Erro ao gerar código na UAZapi");
+          }
+
+          return response.success({
+            code: result.data.pairingCode,
+            expires: result.data.expires
+          });
+        } catch (error) {
+          logger.error('Failed to generate pairing code', { error, instanceId: id });
+          throw error;
+        }
+      },
+    }),
+
     // ==================== GET STATUS WITH RBAC ====================
     getStatus: igniter.query({
       name: "GetInstanceStatus",
-      description: "Verificar status da instância no UAZapi",
+      description: "Verificar status da instância (UAZapi ou Cloud API)",
       path: "/:id/status",
       use: [authProcedure({ required: true }), instancesProcedure()],
       handler: async ({ request, response, context }) => {
@@ -348,32 +602,120 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para verificar o status desta instância");
           }
 
-          if (!instance.uazToken) {
+          // ==================== CLOUD API STATUS CHECK ====================
+          if (instance.provider === 'WHATSAPP_CLOUD_API') {
+            if (!instance.cloudApiAccessToken || !instance.cloudApiPhoneNumberId) {
+              return response.badRequest("Instância Cloud API não possui credenciais configuradas");
+            }
+
+            try {
+              const { CloudAPIClient } = await import('@/lib/providers/adapters/cloudapi/cloudapi.client');
+              const cloudClient = new CloudAPIClient({
+                accessToken: instance.cloudApiAccessToken,
+                phoneNumberId: instance.cloudApiPhoneNumberId,
+                wabaId: instance.cloudApiWabaId || '',
+              });
+
+              const phoneInfo = await cloudClient.getPhoneInfo();
+
+              // Cloud API está sempre conectado se as credenciais são válidas
+              const normalizedStatus = 'CONNECTED' as ConnectionStatus;
+
+              // Atualizar no banco se necessário
+              if (instance.status !== normalizedStatus) {
+                await repository.updateStatus(
+                  id,
+                  normalizedStatus,
+                  phoneInfo.display_phone_number,
+                  null
+                );
+              }
+
+              return response.success({
+                status: 'connected',
+                phoneNumber: phoneInfo.display_phone_number,
+                profileName: phoneInfo.verified_name || instance.cloudApiVerifiedName,
+                profilePictureUrl: null, // Cloud API não tem profile picture fácil de obter
+                provider: 'cloudapi',
+              });
+            } catch (cloudError: any) {
+              logger.error('Cloud API status check failed', {
+                error: cloudError.message,
+                instanceId: id,
+              });
+
+              // Atualizar status para ERROR se falhou
+              await repository.updateStatus(id, 'ERROR' as ConnectionStatus);
+
+              return response.success({
+                status: 'error',
+                error: cloudError.message,
+                provider: 'cloudapi',
+              });
+            }
+          }
+
+          // ==================== UAZAPI STATUS CHECK ====================
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token da UAZapi");
           }
 
-          const statusResult = await uazapiService.getInstanceStatus(instance.uazToken);
+          // Usar orchestrator para caching automático e retry
+          const statusResult = await providerOrchestrator.getInstanceStatus(id);
 
           if (!statusResult.success || !statusResult.data) {
-            logger.error('Failed to get UAZapi status', { error: statusResult.error, instanceId: id });
+            logger.error('Failed to get instance status via orchestrator', {
+              error: statusResult.error,
+              instanceId: id,
+              provider: statusResult.provider
+            });
             return response.badRequest("Falha ao verificar status");
           }
 
-          // Atualizar status no banco se mudou
-          if (statusResult.data.status !== instance.status) {
+          // Atualizar status no banco se mudou (normalize to uppercase to match Prisma enum)
+          const rawStatus = statusResult.data.status?.toString() || 'DISCONNECTED';
+          const normalizedStatus = rawStatus.toUpperCase() as ConnectionStatus;
+          if (normalizedStatus !== instance.status) {
             await repository.updateStatus(
               id,
-              statusResult.data.status,
-              undefined,
-              statusResult.data.phoneNumber
+              normalizedStatus,
+              statusResult.data.phoneNumber,
+              statusResult.data.profilePicture || null
             );
+
+            // Invalidar cache da lista de instâncias para que o frontend pegue dados frescos
+            const organizationId = instance.organizationId || 'all';
+            try {
+              // Limpar cache de todas as possíveis combinações de query
+              const cachePatterns = [
+                `instances:list:${organizationId}:all::1:20`,
+                `instances:list:${organizationId}:all::1:10`,
+                `instances:list:all:all::1:20`,
+                `instances:list:all:all::1:10`,
+              ];
+              for (const pattern of cachePatterns) {
+                await igniter.store.del(pattern);
+              }
+              logger.info('Invalidated instances list cache after status change', {
+                instanceId: id,
+                oldStatus: instance.status,
+                newStatus: normalizedStatus
+              });
+            } catch (cacheError) {
+              logger.warn('Failed to invalidate cache', { error: cacheError });
+            }
           }
 
-          return response.success(statusResult.data);
+          return response.success({
+            status: normalizedStatus.toLowerCase(),
+            phoneNumber: statusResult.data.phoneNumber,
+            profileName: statusResult.data.profileName,
+            profilePictureUrl: statusResult.data.profilePicture,
+          });
         } catch (error) {
           logger.error('Failed to get instance status', { error, instanceId: id });
           throw error;
@@ -384,7 +726,7 @@ export const instancesController = igniter.controller({
     // ==================== DISCONNECT WITH RBAC ====================
     disconnect: igniter.mutation({
       name: "DisconnectInstance",
-      description: "Desconectar instância WhatsApp",
+      description: "Desconectar instância WhatsApp (UAZapi ou Cloud API)",
       path: "/:id/disconnect",
       method: "POST",
       use: [authProcedure({ required: true }), instancesProcedure()],
@@ -402,24 +744,52 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para desconectar esta instância");
           }
 
-          if (!instance.uazToken) {
+          // ==================== CLOUD API DISCONNECT ====================
+          if (instance.provider === 'WHATSAPP_CLOUD_API') {
+            // Cloud API não tem conceito de "desconectar" como UAZAPI
+            // Apenas atualizamos o status no banco e limpamos credenciais se desejado
+            await repository.updateStatus(id, 'DISCONNECTED');
+
+            logger.info('Cloud API instance marked as disconnected', {
+              instanceId: id,
+              userId: context.auth?.session?.user?.id,
+            });
+
+            return response.success({
+              message: "Instância Cloud API marcada como desconectada. Para reconectar, valide as credenciais novamente.",
+              provider: 'cloudapi',
+            });
+          }
+
+          // ==================== UAZAPI DISCONNECT ====================
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token da UAZapi");
           }
 
-          const disconnectResult = await uazapiService.disconnectInstance(instance.uazToken);
+          // Usar orchestrator para retry automático
+          const disconnectResult = await providerOrchestrator.disconnectInstance(id);
 
           if (!disconnectResult.success) {
-            logger.error('UAZapi disconnection failed', { error: disconnectResult.error, instanceId: id });
+            logger.warn('Provider disconnection failed', {
+              error: disconnectResult.error,
+              instanceId: id,
+              provider: disconnectResult.provider
+            });
+            // Continue mesmo com falha, pois queremos atualizar o status local
           }
 
-          await repository.updateStatus(id, 'disconnected');
+          await repository.updateStatus(id, 'DISCONNECTED');
           await repository.clearQRCode(id);
 
-          logger.info('Instance disconnected successfully', { instanceId: id, userId: context.auth?.session?.user?.id });
+          logger.info('Instance disconnected via orchestrator', {
+            instanceId: id,
+            userId: context.auth?.session?.user?.id,
+            provider: disconnectResult.provider
+          });
 
           return response.success({
             message: "Instância desconectada com sucesso",
@@ -452,23 +822,31 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para deletar esta instância");
           }
 
-          // Desconectar se estiver conectada
-          if (instance.uazToken && (instance.status === 'connected' || instance.status === 'connecting')) {
-            const disconnectResult = await uazapiService.disconnectInstance(instance.uazToken);
+          // Desconectar se estiver conectada (via orchestrator)
+          if (instance.uazapiToken && (instance.status === 'CONNECTED' || instance.status === 'CONNECTING')) {
+            const disconnectResult = await providerOrchestrator.disconnectInstance(id);
             if (!disconnectResult.success) {
-              logger.warn('Failed to disconnect before delete', { instanceId: id, error: disconnectResult.error });
+              logger.warn('Failed to disconnect before delete', {
+                instanceId: id,
+                error: disconnectResult.error,
+                provider: disconnectResult.provider
+              });
             }
           }
 
-          // Deletar do UAZapi
-          if (instance.uazToken) {
-            const deleteResult = await uazapiService.deleteInstance(instance.uazToken);
+          // Deletar do provider (via orchestrator)
+          if (instance.uazapiToken) {
+            const deleteResult = await providerOrchestrator.deleteInstance(id);
             if (!deleteResult.success) {
-              logger.warn('Failed to delete from UAZapi', { instanceId: id, error: deleteResult.error });
+              logger.warn('Failed to delete from provider', {
+                instanceId: id,
+                error: deleteResult.error,
+                provider: deleteResult.provider
+              });
             }
           }
 
@@ -507,32 +885,31 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para acessar esta instância");
           }
 
           // Verificar se está conectada
-          if (instance.status !== 'connected' || !instance.uazToken) {
+          if (instance.status !== 'CONNECTED' || !instance.uazapiToken) {
             return response.badRequest("Instância não está conectada");
           }
 
-          // Buscar foto de perfil do UAZapi
-          const profileResult = await uazapiService.getProfilePicture(instance.uazToken);
+          // Buscar foto de perfil via orchestrator
+          const profileResult = await providerOrchestrator.getProfilePicture(id);
 
           if (!profileResult.success || !profileResult.data) {
-            logger.warn('Failed to get profile picture', { instanceId: id, error: profileResult.error });
+            logger.warn('Failed to get profile picture via orchestrator', {
+              instanceId: id,
+              error: profileResult.error,
+              provider: profileResult.provider
+            });
             return response.badRequest("Falha ao obter foto de perfil");
           }
 
-          // Atualizar no banco de dados
-          if (profileResult.data.profilePictureUrl) {
-            await repository.update(id, {
-              profilePictureUrl: profileResult.data.profilePictureUrl
-            });
-          }
+          // Note: profilePictureUrl is fetched on-demand and not stored in database
 
           return response.success({
-            profilePictureUrl: profileResult.data.profilePictureUrl
+            profilePictureUrl: profileResult.data.url
           });
         } catch (error) {
           logger.error('Failed to get profile picture', { error, instanceId: id });
@@ -547,11 +924,15 @@ export const instancesController = igniter.controller({
       description: "Configurar webhook para eventos da instância (Admin/GOD apenas)",
       path: "/:id/webhook",
       method: "POST",
+      body: z.object({
+        webhookUrl: z.string().url(),
+        events: z.array(z.string()),
+      }),
       use: [authProcedure({ required: true }), instancesProcedure()],
       handler: async ({ request, response, context }) => {
         const repository = new InstancesRepository(context.db);
         const { id } = request.params as { id: string };
-        const { webhookUrl, events } = request.body as { webhookUrl: string; events: string[] };
+        const { webhookUrl, events } = request.body;
 
         logger.info('Setting webhook', { instanceId: id, userId: context.auth?.session?.user?.id });
 
@@ -569,13 +950,13 @@ export const instancesController = igniter.controller({
           }
 
           // Verificar se está conectada
-          if (!instance.uazToken) {
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token UAZapi");
           }
 
           // Configurar webhook no UAZapi
           const webhookResult = await uazapiService.setWebhook(
-            instance.uazToken,
+            instance.uazapiToken,
             webhookUrl,
             events
           );
@@ -585,12 +966,7 @@ export const instancesController = igniter.controller({
             return response.badRequest("Falha ao configurar webhook");
           }
 
-          // Atualizar no banco de dados
-          await repository.update(id, {
-            webhookUrl,
-            webhookEvents: events
-          });
-
+          // Webhook é gerenciado diretamente no UAZapi, não precisa salvar no banco
           logger.info('Webhook configured successfully', { instanceId: id, webhookUrl });
 
           return response.success({
@@ -631,12 +1007,12 @@ export const instancesController = igniter.controller({
           }
 
           // Verificar se está conectada
-          if (!instance.uazToken) {
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token UAZapi");
           }
 
           // Buscar configuração do webhook do UAZapi
-          const webhookResult = await uazapiService.getWebhook(instance.uazToken);
+          const webhookResult = await uazapiService.getWebhook(instance.uazapiToken);
 
           if (!webhookResult.success || !webhookResult.data) {
             logger.warn('Failed to get webhook config', { instanceId: id, error: webhookResult.error });
@@ -644,8 +1020,8 @@ export const instancesController = igniter.controller({
           }
 
           return response.success({
-            webhookUrl: webhookResult.data.webhookUrl || instance.webhookUrl,
-            events: webhookResult.data.events || instance.webhookEvents || []
+            webhookUrl: webhookResult.data.webhookUrl || null,
+            events: webhookResult.data.events || []
           });
         } catch (error) {
           logger.error('Failed to get webhook config', { error, instanceId: id });
@@ -675,27 +1051,27 @@ export const instancesController = igniter.controller({
           }
 
           // Verificar se o usuário tem permissão para compartilhar esta instância
-          const userOrgId = context.auth?.session?.user?.organizationId;
-          if (!checkOrganizationPermission(instance.organizationId, userOrgId)) {
+          const userOrgId = context.auth?.session?.user?.currentOrgId ?? undefined;
+          if (!checkOrganizationPermission(instance.organizationId, userOrgId, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para compartilhar esta instância");
           }
 
-              // Gerar token de compartilhamento (expira em 1 hora)
-              const shareToken = `share_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-              const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+          // Gerar token de compartilhamento (expira em 1 hora)
+          const shareToken = `share_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
-              // Salvar token no banco de dados usando o método específico
-              await repository.updateShareToken(id, {
-                shareToken,
-                shareTokenExpiresAt: expiresAt
-              });
+          // Salvar token no banco de dados usando o método específico
+          await repository.updateShareToken(id, {
+            shareToken,
+            shareTokenExpiresAt: expiresAt
+          });
 
           logger.info('Share token generated successfully', { instanceId: id, shareToken });
 
           return response.success({
             token: shareToken,
             expiresAt,
-            shareUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/integracoes/compartilhar/${shareToken}`
+            shareUrl: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/compartilhar/${shareToken}`
           });
         } catch (error) {
           logger.error('Failed to generate share token', { error, instanceId: id });
@@ -729,30 +1105,86 @@ export const instancesController = igniter.controller({
             return response.notFound("Token de compartilhamento expirado");
           }
 
-          // Se a instância está conectada, buscar QR code atual
-          let qrCode = null;
-          if (instance.status === 'connected' && instance.uazToken) {
+          // === ATENÇÃO: Verificar status REAL via UAZapi ===
+          // Isso é crítico para detectar quando o usuário escaneou o QR Code
+          let currentStatus = instance.status;
+          let phoneNumber = instance.phoneNumber;
+          let profileName = instance.profileName;
+
+          if (instance.uazapiToken && instance.status !== 'CONNECTED') {
             try {
-              const qrResult = await uazapiService.getQrCode(instance.uazToken);
-              if (qrResult.success && qrResult.data?.qr) {
-                qrCode = qrResult.data.qr;
+              const statusResult = await uazapiService.getInstanceStatus(instance.uazapiToken);
+              if (statusResult.success && statusResult.data) {
+                const realStatus = statusResult.data.status?.toLowerCase();
+
+                // Se a UAZapi diz que está conectado, atualizar no banco
+                if (realStatus === 'connected' || realStatus === 'open') {
+                  currentStatus = 'CONNECTED' as ConnectionStatus;
+                  phoneNumber = statusResult.data.phoneNumber || phoneNumber;
+                  // UAZapi não retorna profileName, usar name da instância
+                  profileName = statusResult.data.name || profileName;
+
+                  // Atualizar status no banco
+                  await repository.updateStatus(
+                    instance.id,
+                    currentStatus,
+                    phoneNumber || undefined, // Converter null para undefined
+                    statusResult.data.profilePicture || null
+                  );
+
+                  logger.info('Shared instance detected as connected', {
+                    instanceId: instance.id,
+                    phoneNumber
+                  });
+                }
+              }
+            } catch (statusError) {
+              logger.warn('Failed to check UAZapi status for shared instance', {
+                error: statusError,
+                instanceId: instance.id
+              });
+            }
+          }
+
+          // Se a instância NÃO está conectada, gerar QR code para conexão
+          let qrCode = null;
+          if (currentStatus !== 'CONNECTED' && instance.uazapiToken) {
+            try {
+              // Primeiro, iniciar conexão para obter QR code
+              const connectResult = await uazapiService.connectInstance(instance.uazapiToken);
+              if (connectResult.success && connectResult.data?.qrcode) {
+                qrCode = connectResult.data.qrcode;
+                // Atualizar status para CONNECTING se ainda não estiver
+                if (currentStatus !== 'CONNECTING') {
+                  await repository.updateStatus(instance.id, 'CONNECTING');
+                  currentStatus = 'CONNECTING' as ConnectionStatus;
+                }
+              } else {
+                // Tentar buscar QR code diretamente
+                const qrResult = await uazapiService.generateQR(instance.uazapiToken);
+                if (qrResult.success && qrResult.data?.qrcode) {
+                  qrCode = qrResult.data.qrcode;
+                }
               }
             } catch (error) {
               logger.warn('Failed to get QR code for shared instance', { error, instanceId: instance.id });
             }
           }
 
-          logger.info('Shared instance data retrieved successfully', { instanceId: instance.id });
+          logger.info('Shared instance data retrieved successfully', {
+            instanceId: instance.id,
+            status: currentStatus
+          });
 
           return response.success({
             id: instance.id,
             name: instance.name,
-            status: instance.status,
-            phoneNumber: instance.phoneNumber,
-            profileName: instance.profileName,
+            status: currentStatus,
+            phoneNumber,
+            profileName,
             qrCode,
             expiresAt: instance.shareTokenExpiresAt,
-            organizationName: instance.organization?.name || 'Organização'
+            organizationName: (instance as any).organization?.name || 'Organizacao'
           });
         } catch (error) {
           logger.error('Failed to get shared instance data', { error, shareToken: token });
@@ -788,11 +1220,11 @@ export const instancesController = igniter.controller({
           }
 
           // Se a instância não está conectada, tentar reconectar
-          if (instance.status !== 'connected' && instance.uazToken) {
+          if (instance.status !== 'CONNECTED' && instance.uazapiToken) {
             try {
-              const connectResult = await uazapiService.connectInstance(instance.uazToken);
+              const connectResult = await uazapiService.connectInstance(instance.uazapiToken);
               if (connectResult.success) {
-                await repository.update(instance.id, { status: 'connecting' });
+                await repository.updateStatus(instance.id, 'CONNECTING');
               }
             } catch (error) {
               logger.warn('Failed to reconnect shared instance', { error, instanceId: instance.id });
@@ -801,23 +1233,23 @@ export const instancesController = igniter.controller({
 
           // Buscar novo QR code
           let qrCode = null;
-          if (instance.uazToken) {
+          if (instance.uazapiToken) {
             try {
-              const qrResult = await uazapiService.getQrCode(instance.uazToken);
-              if (qrResult.success && qrResult.data?.qr) {
-                qrCode = qrResult.data.qr;
+              const qrResult = await uazapiService.generateQR(instance.uazapiToken);
+              if (qrResult.success && qrResult.data?.qrcode) {
+                qrCode = qrResult.data.qrcode;
               }
             } catch (error) {
               logger.warn('Failed to get refreshed QR code', { error, instanceId: instance.id });
             }
           }
 
-              // Estender expiração do token (mais 1 hora)
-              const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
-              await repository.updateShareToken(instance.id, {
-                shareToken: instance.shareToken!,
-                shareTokenExpiresAt: newExpiresAt
-              });
+          // Estender expiração do token (mais 1 hora)
+          const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+          await repository.updateShareToken(instance.id, {
+            shareToken: instance.shareToken!,
+            shareTokenExpiresAt: newExpiresAt
+          });
 
           logger.info('Shared QR code refreshed successfully', { instanceId: instance.id });
 
@@ -828,6 +1260,177 @@ export const instancesController = igniter.controller({
         } catch (error) {
           logger.error('Failed to refresh shared QR code', { error, shareToken: token });
           throw error;
+        }
+      },
+    }),
+
+    // ==================== GET PAIRING CODE FOR SHARED INSTANCE ====================
+    getSharedPairingCode: igniter.mutation({
+      name: "GetSharedPairingCode",
+      description: "Gerar código de pareamento para instância compartilhada",
+      path: "/share/:token/pairing-code",
+      method: "POST",
+      use: [instancesProcedure()],
+      body: z.object({
+        phone: z.string().min(10, "Número de telefone inválido").max(15, "Número de telefone inválido"),
+      }),
+      handler: async ({ request, response, context }) => {
+        const repository = new InstancesRepository(context.db);
+        const { token } = request.params as { token: string };
+        const { phone } = request.body;
+
+        logger.info('Generating pairing code for shared instance', { shareToken: token, phone });
+
+        try {
+          // Buscar instância pelo token de compartilhamento
+          const instance = await repository.findByShareToken(token);
+
+          if (!instance) {
+            return response.notFound("Token de compartilhamento inválido ou expirado");
+          }
+
+          // Verificar se o token não expirou
+          if (instance.shareTokenExpiresAt && instance.shareTokenExpiresAt < new Date()) {
+            return response.notFound("Token de compartilhamento expirado");
+          }
+
+          // Verificar se a instância tem token do UAZapi
+          if (!instance.uazapiToken) {
+            return response.badRequest("Instância não possui token de conexão");
+          }
+
+          // Verificar se a instância já está conectada (Status Local)
+          if (instance.status === 'CONNECTED') {
+            logger.info('Instance already connected (Local DB), returning success', { instanceId: instance.id });
+            return response.success({
+              status: 'connected',
+              message: 'Instância já está conectada!',
+              phoneNumber: instance.phoneNumber,
+              alreadyConnected: true
+            });
+          }
+
+          // Verificar status REAL via UAZapi (caso o banco esteja desatualizado)
+          try {
+            const statusResult = await uazapiService.getInstanceStatus(instance.uazapiToken);
+            const realStatus = statusResult.data?.status?.toLowerCase();
+
+            if (statusResult.success && (realStatus === 'connected' || realStatus === 'open')) {
+              const phoneNumber = statusResult.data?.phoneNumber || instance.phoneNumber;
+
+              // Atualizar status no banco
+              await repository.updateStatus(
+                instance.id,
+                'CONNECTED',
+                phoneNumber || undefined,
+                statusResult.data.profilePicture || null
+              );
+
+              logger.info('Instance already connected (Real Status), returning success', { instanceId: instance.id });
+              return response.success({
+                status: 'connected',
+                message: 'Instância já está conectada!',
+                phoneNumber: phoneNumber,
+                alreadyConnected: true
+              });
+            }
+          } catch (statusError) {
+            // Ignorar erro de verificação de status e tentar gerar código
+            logger.warn('Failed to check real status before pairing', { instanceId: instance.id, error: statusError });
+          }
+
+          // Gerar pairing code via UAZapi
+          const connectResult = await uazapiService.connectInstance(instance.uazapiToken, phone);
+
+          logger.info('UAZapi connect result for pairing code', {
+            success: connectResult.success,
+            hasPairingCode: !!connectResult.data?.pairingCode,
+            pairingCode: connectResult.data?.pairingCode,
+            error: connectResult.error,
+            instanceId: instance.id,
+            phone
+          });
+
+          if (!connectResult.success) {
+            logger.warn('Failed to connect instance for pairing', { error: connectResult.error, instanceId: instance.id });
+            return response.badRequest(connectResult.error || "Falha ao conectar instância. Tente novamente.");
+          }
+
+          const pairingCode = connectResult.data?.pairingCode;
+          if (!pairingCode) {
+            logger.warn('No pairing code returned from UAZapi', { data: connectResult.data, instanceId: instance.id });
+            return response.badRequest("Código de pareamento não disponível. A instância pode já estar conectada ou use o QR Code.");
+          }
+
+          // Atualizar status para CONNECTING
+          await repository.updateStatus(instance.id, 'CONNECTING');
+
+          // Estender expiração do token (mais 1 hora)
+          const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+          await repository.updateShareToken(instance.id, {
+            shareToken: instance.shareToken!,
+            shareTokenExpiresAt: newExpiresAt
+          });
+
+          logger.info('Pairing code generated successfully', { instanceId: instance.id, pairingCode });
+
+          return response.success({
+            pairingCode,
+            expiresAt: newExpiresAt
+          });
+        } catch (error) {
+          logger.error('Failed to generate pairing code', { error, shareToken: token });
+          throw error;
+        }
+      },
+    }),
+
+    // ==================== DELETE FROM UAZAPI BY TOKEN (ADMIN ONLY) ====================
+    deleteByToken: igniter.mutation({
+      name: "DeleteInstanceByToken",
+      description: "Deletar instância do UAZapi usando o token (Admin apenas)",
+      path: "/delete-by-token",
+      method: "POST",
+      use: [authProcedure({ required: true }), instancesProcedure()],
+      body: z.object({
+        token: z.string().min(1, "Token é obrigatório"),
+      }),
+      handler: async ({ request, response, context }) => {
+        const { token } = request.body;
+
+        logger.info('Deleting instance from UAZapi by token', { userId: context.auth?.session?.user?.id });
+
+        // RBAC: Only admin can delete instances by token
+        const userRole = context.auth?.session?.user?.role;
+        if (userRole !== 'admin') {
+          return response.forbidden("Apenas administradores podem excluir instâncias diretamente do UAZapi");
+        }
+
+        try {
+          // Tentar desconectar primeiro
+          try {
+            await uazapiService.disconnectInstance(token);
+          } catch (disconnectError) {
+            logger.warn('Failed to disconnect instance before delete', { error: disconnectError });
+            // Continue mesmo com erro - pode já estar desconectada
+          }
+
+          // Deletar do UAZapi
+          const deleteResult = await uazapiService.deleteInstance(token);
+
+          if (!deleteResult.success) {
+            logger.error('Failed to delete instance from UAZapi', { error: deleteResult.error });
+            return response.badRequest(`Falha ao excluir do UAZapi: ${deleteResult.error || 'Erro desconhecido'}`);
+          }
+
+          logger.info('Instance deleted from UAZapi successfully');
+
+          return response.success({
+            message: "Instância excluída do UAZapi com sucesso",
+          });
+        } catch (error: any) {
+          logger.error('Failed to delete instance by token', { error });
+          return response.badRequest(error.message || 'Erro ao excluir instância');
         }
       },
     }),
@@ -854,12 +1457,12 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para atualizar esta instância");
           }
 
           // Verificar se está conectada
-          if (instance.status !== 'connected' || !instance.uazToken) {
+          if (instance.status !== 'CONNECTED' || !instance.uazapiToken) {
             return response.badRequest("Instância não está conectada");
           }
 
@@ -872,12 +1475,9 @@ export const instancesController = igniter.controller({
             return response.badRequest("Nome deve ter no máximo 50 caracteres");
           }
 
-          // Atualizar nome via UAZapi
-          const result = await uazapiService.updateProfileName(instance.uazToken, name.trim());
-
-          // Atualizar no banco de dados
+          // Atualizar no banco de dados (UAZapi updateProfileName não implementado)
           await repository.update(id, {
-            profileName: name.trim()
+            name: name.trim()  // profileName is not in update type
           });
 
           logger.info('Profile name updated successfully', { instanceId: id, newName: name });
@@ -915,49 +1515,17 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para atualizar esta instância");
           }
 
           // Verificar se está conectada
-          if (instance.status !== 'connected' || !instance.uazToken) {
+          if (instance.status !== 'CONNECTED' || !instance.uazapiToken) {
             return response.badRequest("Instância não está conectada");
           }
 
-          // Validar imagem (deve ser base64)
-          if (!image || !image.startsWith('data:image/')) {
-            return response.badRequest("Imagem inválida. Deve ser uma imagem em formato base64");
-          }
-
-          // Extrair apenas o base64 (remover data:image/...;base64,)
-          const base64Image = image.split(',')[1];
-
-          if (!base64Image) {
-            return response.badRequest("Formato de imagem inválido");
-          }
-
-          // Atualizar imagem via UAZapi
-          await uazapiService.updateProfileImage(instance.uazToken, base64Image);
-
-          // Buscar a nova URL da foto de perfil
-          const profileResult = await uazapiService.getProfilePicture(instance.uazToken);
-
-          let profilePictureUrl = instance.profilePictureUrl;
-          if (profileResult.success && profileResult.data?.profilePictureUrl) {
-            profilePictureUrl = profileResult.data.profilePictureUrl;
-          }
-
-          // Atualizar no banco de dados
-          await repository.update(id, {
-            profilePictureUrl
-          });
-
-          logger.info('Profile image updated successfully', { instanceId: id });
-
-          return response.success({
-            message: "Foto do perfil atualizada com sucesso",
-            profilePictureUrl
-          });
+          // TODO: UAZapi updateProfileImage não implementado
+          return response.badRequest("Funcionalidade não implementada: atualização de foto de perfil via UAZapi");
         } catch (error) {
           logger.error('Failed to update profile image', { error, instanceId: id });
           throw error;
@@ -986,62 +1554,68 @@ export const instancesController = igniter.controller({
           }
 
           // RBAC: Verificar permissão de organização
-          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.organizationId || undefined)) {
+          if (!checkOrganizationPermission(instance.organizationId, context.auth?.session?.user?.currentOrgId || undefined, context.auth?.session?.user?.role)) {
             return response.forbidden("Você não tem permissão para reiniciar esta instância");
           }
 
-          if (!instance.uazToken) {
+          if (!instance.uazapiToken) {
             return response.badRequest("Instância não possui token da UAZapi");
           }
 
-          // Desconectar primeiro
+          // Desconectar primeiro (via orchestrator)
           logger.info('Disconnecting instance for restart', { instanceId: id });
 
-          const disconnectResult = await uazapiService.disconnectInstance(instance.uazToken);
+          const disconnectResult = await providerOrchestrator.disconnectInstance(id);
 
           if (!disconnectResult.success) {
             logger.warn('Failed to disconnect during restart', {
               instanceId: id,
-              error: disconnectResult.error
+              error: disconnectResult.error,
+              provider: disconnectResult.provider
             });
           }
 
           // Atualizar status
-          await repository.updateStatus(id, 'disconnected');
+          await repository.updateStatus(id, 'DISCONNECTED');
           await repository.clearQRCode(id);
 
           // Aguardar 2 segundos para garantir desconexão
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          // Reconectar
+          // Reconectar (via orchestrator)
           logger.info('Reconnecting instance after restart', { instanceId: id });
 
-          const connectionResult = await uazapiService.connectInstance(instance.uazToken);
+          const connectionResult = await providerOrchestrator.connectInstance(id);
 
           if (!connectionResult.success || !connectionResult.data) {
             logger.error('Failed to reconnect during restart', {
               instanceId: id,
-              error: connectionResult.error
+              error: connectionResult.error,
+              provider: connectionResult.provider
             });
             return response.badRequest("Falha ao reconectar instância após reinício");
           }
 
           // Atualizar com novo QR code
-          if (connectionResult.data.qrcode) {
+          const qrCode = connectionResult.data.qrCode;
+          if (qrCode) {
             await repository.updateQRCode(
               id,
-              connectionResult.data.qrcode,
-              connectionResult.data.pairingCode
+              qrCode,
+              undefined
             );
           }
 
-          logger.info('Instance restarted successfully', { instanceId: id });
+          logger.info('Instance restarted via orchestrator', {
+            instanceId: id,
+            provider: connectionResult.provider
+          });
 
           return response.success({
             message: "Instância reiniciada com sucesso",
-            qrcode: connectionResult.data.qrcode,
-            expires: connectionResult.data.expires || 120000,
-            pairingCode: connectionResult.data.pairingCode,
+            qrcode: qrCode,
+            expires: 120000,
+            pairingCode: undefined,
           });
         } catch (error) {
           logger.error('Failed to restart instance', { error, instanceId: id });

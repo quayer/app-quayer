@@ -27,10 +27,12 @@ export default defineConfig({
       reporter: ['text', 'json', 'html', 'lcov'],
       reportsDirectory: './coverage',
       all: true,
-      lines: 70,
-      functions: 70,
-      branches: 70,
-      statements: 70
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 70,
+        statements: 70
+      }
     },
     globals: true,
     include: ['test/unit/**/*.test.ts', 'test/integration/**/*.test.ts'],

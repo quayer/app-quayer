@@ -1,85 +1,90 @@
-/**
- * Contacts Controller
- * ⭐ CRÍTICO - Inspirado em falecomigo.ai
- *
- * Gerenciamento completo de contatos (CRM)
- * - CRUD de contatos
- * - Tabulações (tags/categorias)
- * - Observações
- * - Busca por telefone
- */
-
 import { igniter } from '@/igniter';
 import { z } from 'zod';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { database } from '@/services/database';
 
+/**
+ * Contacts Controller
+ *
+ * Gerenciamento de contatos do sistema
+ * Contatos são criados automaticamente a partir de interações WhatsApp
+ *
+ * Rotas:
+ * - GET    /api/contacts                - Listar contatos
+ * - GET    /api/contacts/:id            - Buscar por ID
+ * - PUT    /api/contacts/:id            - Atualizar contato
+ * - DELETE /api/contacts/:id            - Deletar contato
+ * - GET    /api/contacts/:id/sessions   - Histórico de sessões do contato
+ */
 export const contactsController = igniter.controller({
   name: 'contacts',
-  description: 'Gerenciamento de contatos do sistema',
+  path: '/contacts',
+  description: 'Gerenciamento de contatos',
 
   actions: {
     /**
-     * GET /contacts
-     * Lista todos os contatos da organização com paginação
+     * GET /api/contacts
+     * Listar contatos com filtros e paginação
      */
     list: igniter.query({
       path: '/',
       query: z.object({
         page: z.coerce.number().min(1).default(1),
-        limit: z.coerce.number().min(1).max(100).default(10),
-        search: z.string().optional(), // Buscar por nome ou telefone
-        tabulationId: z.string().uuid().optional(), // Filtrar por tabulação
+        limit: z.coerce.number().min(1).max(100).default(50),
+        search: z.string().optional(),
+        tag: z.string().optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { page, limit, search, tabulationId } = context.query;
-        const { currentOrgId } = context.user;
+        const { page = 1, limit = 50, search, tag } = request.query;
+        const user = context.auth?.session?.user;
 
-        const skip = (page - 1) * limit;
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
 
-        // Construir filtros
-        const where: any = {
-          organizationId: currentOrgId,
-        };
+        // Admin pode ver todos os contatos, outros usuários veem apenas da sua org
+        const organizationId = user.role === 'admin' ? undefined : user.currentOrgId;
 
+        const where: any = {};
+
+        // Filtrar por organização se não for admin
+        if (organizationId) {
+          where.organizationId = organizationId;
+        }
+
+        // Busca por nome, telefone ou email
         if (search) {
           where.OR = [
             { name: { contains: search, mode: 'insensitive' } },
-            { phoneNumber: { contains: search } },
+            { phoneNumber: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
           ];
         }
 
-        if (tabulationId) {
-          where.contactTabulations = {
-            some: {
-              tabulationId,
-            },
-          };
+        // Filtrar por tag
+        if (tag) {
+          where.tags = { has: tag };
         }
 
-        // Buscar contatos com relacionamentos
         const [contacts, total] = await Promise.all([
           database.contact.findMany({
             where,
-            skip,
+            skip: (page - 1) * limit,
             take: limit,
             orderBy: { updatedAt: 'desc' },
             include: {
-              contactTabulations: {
-                include: {
-                  tabulation: true,
-                },
-              },
+              // Incluir última sessão para mostrar última interação
               chatSessions: {
-                where: { status: { in: ['QUEUED', 'ACTIVE'] } },
-                select: { id: true, status: true },
-              },
-              _count: {
+                take: 1,
+                orderBy: { updatedAt: 'desc' },
                 select: {
-                  chatSessions: true,
-                  messages: true,
+                  id: true,
+                  status: true,
+                  updatedAt: true,
+                  organization: {
+                    select: { id: true, name: true },
+                  },
                 },
               },
             },
@@ -87,24 +92,19 @@ export const contactsController = igniter.controller({
           database.contact.count({ where }),
         ]);
 
+        // Formatar resposta com última interação
+        const formattedContacts = contacts.map((contact) => ({
+          ...contact,
+          lastInteractionAt: contact.chatSessions[0]?.updatedAt || contact.updatedAt,
+          lastSessionStatus: contact.chatSessions[0]?.status || null,
+          organizationName: contact.chatSessions[0]?.organization?.name || null,
+        }));
+
         return response.success({
-          data: contacts.map((contact) => ({
-            id: contact.id,
-            name: contact.name,
-            phoneNumber: contact.phoneNumber,
-            email: contact.email,
-            profilePicture: contact.profilePicUrl,
-            isBotMuted: contact.bypassBots,
-            createdAt: contact.createdAt,
-            updatedAt: contact.updatedAt,
-            tabulations: contact.contactTabulations.map((ct) => ct.tabulation),
-            activeSessions: contact.chatSessions.length,
-            totalSessions: contact._count.chatSessions,
-            totalMessages: contact._count.messages,
-          })),
+          data: formattedContacts,
           pagination: {
-            total_data: total,
-            total_pages: Math.ceil(total / limit),
+            total,
+            totalPages: Math.ceil(total / limit),
             page,
             limit,
           },
@@ -113,324 +113,226 @@ export const contactsController = igniter.controller({
     }),
 
     /**
-     * GET /contacts/:id
-     * Buscar contato por ID com todos os detalhes
+     * GET /api/contacts/:id
+     * Buscar contato por ID
      */
     getById: igniter.query({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid('ID do contato inválido'),
-      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as { id: string };
+        const user = context.auth?.session?.user;
 
-        const contact = await database.contact.findFirst({
-          where: {
-            id,
-            organizationId: currentOrgId,
-          },
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const contact = await database.contact.findUnique({
+          where: { id },
           include: {
-            contactTabulations: {
-              include: {
-                tabulation: true,
-              },
-            },
             chatSessions: {
-              orderBy: { updatedAt: 'desc' },
               take: 10,
-              include: {
-                instance: {
-                  select: {
-                    id: true,
-                    name: true,
-                    phoneNumber: true,
-                  },
+              orderBy: { updatedAt: 'desc' },
+              select: {
+                id: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                organization: {
+                  select: { id: true, name: true },
                 },
               },
             },
-            _count: {
-              select: {
-                chatSessions: true,
-                messages: true,
-              },
-            },
-          },
-        });
-
-        if (!contact) {
-          return response.notFound({
-            message: 'Contato não encontrado',
-          });
-        }
-
-        return response.success({
-          id: contact.id,
-          name: contact.name,
-          phoneNumber: contact.phoneNumber,
-          email: contact.email,
-          profilePicture: contact.profilePicUrl,
-          isBotMuted: contact.bypassBots,
-          createdAt: contact.createdAt,
-          updatedAt: contact.updatedAt,
-          tabulations: contact.contactTabulations.map((ct) => ct.tabulation),
-          recentSessions: contact.chatSessions,
-          totalSessions: contact._count.chatSessions,
-          totalMessages: contact._count.messages,
-        });
-      },
-    }),
-
-    /**
-     * GET /contacts/by-phone/:phone
-     * Buscar contato por número de telefone
-     */
-    getByPhone: igniter.query({
-      path: '/by-phone/:phone',
-      params: z.object({
-        phone: z.string().min(10, 'Número de telefone inválido'),
-      }),
-      use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const { phone } = context.params;
-        const { currentOrgId } = context.user;
-
-        // Normalizar telefone (remover caracteres especiais)
-        const normalizedPhone = phone.replace(/\D/g, '');
-
-        const contact = await database.contact.findFirst({
-          where: {
-            phoneNumber: normalizedPhone,
-            organizationId: currentOrgId,
-          },
-          include: {
-            contactTabulations: {
+            contactAttributes: {
               include: {
-                tabulation: true,
+                attribute: true,
               },
             },
-            _count: {
-              select: {
-                chatSessions: true,
-                messages: true,
+            contactObservations: {
+              take: 10,
+              orderBy: { createdAt: 'desc' },
+              include: {
+                user: {
+                  select: { id: true, name: true, email: true },
+                },
               },
             },
           },
         });
 
         if (!contact) {
-          return response.notFound({
-            message: 'Contato não encontrado',
-          });
+          return response.notFound('Contato não encontrado');
+        }
+
+        // Verificar permissão (admin pode ver qualquer contato)
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado a este contato');
         }
 
         return response.success({
-          id: contact.id,
-          name: contact.name,
-          phoneNumber: contact.phoneNumber,
-          email: contact.email,
-          profilePicture: contact.profilePicUrl,
-          isBotMuted: contact.bypassBots,
-          createdAt: contact.createdAt,
-          updatedAt: contact.updatedAt,
-          tabulations: contact.contactTabulations.map((ct) => ct.tabulation),
-          totalSessions: contact._count.chatSessions,
-          totalMessages: contact._count.messages,
+          data: contact,
         });
       },
     }),
 
     /**
-     * PATCH /contacts/:id
-     * Atualizar informações do contato
+     * PUT /api/contacts/:id
+     * Atualizar contato
      */
     update: igniter.mutation({
       path: '/:id',
-      params: z.object({
-        id: z.string().uuid('ID do contato inválido'),
-      }),
+      method: 'PUT',
       body: z.object({
-        name: z.string().min(1).optional(),
-        email: z.string().email().optional().nullable(),
-        profilePicUrl: z.string().url().optional().nullable(),
+        name: z.string().optional(),
+        email: z.string().email().optional(),
+        tags: z.array(z.string()).optional(),
         bypassBots: z.boolean().optional(),
+        customFields: z.record(z.any()).optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { currentOrgId } = context.user;
-        const data = context.body;
+        const { id } = request.params as { id: string };
+        const { name, email, tags, bypassBots, customFields } = request.body;
+        const user = context.auth?.session?.user;
 
-        // Verificar se contato existe e pertence à organização
-        const contact = await database.contact.findFirst({
-          where: {
-            id,
-            organizationId: currentOrgId,
-          },
-        });
-
-        if (!contact) {
-          return response.notFound({
-            message: 'Contato não encontrado',
-          });
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
         }
 
-        // Atualizar contato
-        const updated = await database.contact.update({
+        // Verificar se contato existe
+        const existing = await database.contact.findUnique({
           where: { id },
-          data,
-          include: {
-            contactTabulations: {
-              include: {
-                tabulation: true,
-              },
-            },
+        });
+
+        if (!existing) {
+          return response.notFound('Contato não encontrado');
+        }
+
+        // Verificar permissão
+        if (user.role !== 'admin' && existing.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado a este contato');
+        }
+
+        const contact = await database.contact.update({
+          where: { id },
+          data: {
+            ...(name !== undefined && { name }),
+            ...(email !== undefined && { email }),
+            ...(tags !== undefined && { tags }),
+            ...(bypassBots !== undefined && { bypassBots }),
+            ...(customFields !== undefined && { customFields }),
           },
         });
 
         return response.success({
-          id: updated.id,
-          name: updated.name,
-          phoneNumber: updated.phoneNumber,
-          email: updated.email,
-          profilePicture: updated.profilePicUrl,
-          isBotMuted: updated.bypassBots,
-          updatedAt: updated.updatedAt,
-          tabulations: updated.contactTabulations.map((ct) => ct.tabulation),
+          data: contact,
+          message: 'Contato atualizado com sucesso',
         });
       },
     }),
 
     /**
-     * POST /contacts/:id/tabulations
-     * Adicionar tabulações (tags) ao contato
+     * DELETE /api/contacts/:id
+     * Deletar contato
      */
-    addTabulations: igniter.mutation({
-      path: '/:id/tabulations',
-      params: z.object({
-        id: z.string().uuid('ID do contato inválido'),
-      }),
-      body: z.object({
-        tabulationIds: z.array(z.string().uuid()).min(1, 'Informe pelo menos uma tabulação'),
-      }),
+    delete: igniter.mutation({
+      path: '/:id',
+      method: 'DELETE',
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { tabulationIds } = context.body;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as { id: string };
+        const user = context.auth?.session?.user;
 
-        // Verificar se contato existe
-        const contact = await database.contact.findFirst({
-          where: {
-            id,
-            organizationId: currentOrgId,
-          },
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const contact = await database.contact.findUnique({
+          where: { id },
         });
 
         if (!contact) {
-          return response.notFound({
-            message: 'Contato não encontrado',
-          });
+          return response.notFound('Contato não encontrado');
         }
 
-        // Verificar se tabulações existem e pertencem à organização
-        const tabulations = await database.tabulation.findMany({
-          where: {
-            id: { in: tabulationIds },
-            organizationId: currentOrgId,
-          },
-        });
-
-        if (tabulations.length !== tabulationIds.length) {
-          return response.badRequest({
-            message: 'Uma ou mais tabulações não foram encontradas',
-          });
+        // Verificar permissão
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado a este contato');
         }
 
-        // Adicionar tabulações (createMany ignora duplicatas)
-        await database.contactTabulation.createMany({
-          data: tabulationIds.map((tabulationId) => ({
-            contactId: id,
-            tabulationId,
-          })),
-          skipDuplicates: true,
-        });
-
-        // Retornar contato atualizado
-        const updated = await database.contact.findUnique({
+        await database.contact.delete({
           where: { id },
-          include: {
-            contactTabulations: {
-              include: {
-                tabulation: true,
-              },
-            },
-          },
         });
 
         return response.success({
-          id: updated!.id,
-          tabulations: updated!.contactTabulations.map((ct) => ct.tabulation),
+          message: 'Contato deletado com sucesso',
         });
       },
     }),
 
     /**
-     * DELETE /contacts/:id/tabulations
-     * Remover tabulações (tags) do contato
+     * GET /api/contacts/:id/sessions
+     * Histórico de sessões do contato
      */
-    removeTabulations: igniter.mutation({
-      path: '/:id/tabulations',
-      params: z.object({
-        id: z.string().uuid('ID do contato inválido'),
-      }),
-      body: z.object({
-        tabulationIds: z.array(z.string().uuid()).min(1, 'Informe pelo menos uma tabulação'),
+    getSessions: igniter.query({
+      path: '/:id/sessions',
+      query: z.object({
+        page: z.coerce.number().min(1).default(1),
+        limit: z.coerce.number().min(1).max(50).default(20),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
-        const { id } = context.params;
-        const { tabulationIds } = context.body;
-        const { currentOrgId } = context.user;
+        const { id } = request.params as { id: string };
+        const { page = 1, limit = 20 } = request.query;
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
 
         // Verificar se contato existe
-        const contact = await database.contact.findFirst({
-          where: {
-            id,
-            organizationId: currentOrgId,
-          },
+        const contact = await database.contact.findUnique({
+          where: { id },
         });
 
         if (!contact) {
-          return response.notFound({
-            message: 'Contato não encontrado',
-          });
+          return response.notFound('Contato não encontrado');
         }
 
-        // Remover tabulações
-        await database.contactTabulation.deleteMany({
-          where: {
-            contactId: id,
-            tabulationId: { in: tabulationIds },
-          },
-        });
+        // Verificar permissão
+        if (user.role !== 'admin' && contact.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado');
+        }
 
-        // Retornar contato atualizado
-        const updated = await database.contact.findUnique({
-          where: { id },
-          include: {
-            contactTabulations: {
-              include: {
-                tabulation: true,
+        const [sessions, total] = await Promise.all([
+          database.chatSession.findMany({
+            where: { contactId: id },
+            skip: (page - 1) * limit,
+            take: limit,
+            orderBy: { updatedAt: 'desc' },
+            include: {
+              organization: {
+                select: { id: true, name: true },
+              },
+              connection: {
+                select: { id: true, name: true, phoneNumber: true },
+              },
+              _count: {
+                select: { messages: true },
               },
             },
-          },
-        });
+          }),
+          database.chatSession.count({ where: { contactId: id } }),
+        ]);
 
         return response.success({
-          id: updated!.id,
-          tabulations: updated!.contactTabulations.map((ct) => ct.tabulation),
+          data: sessions,
+          pagination: {
+            total,
+            totalPages: Math.ceil(total / limit),
+            page,
+            limit,
+          },
         });
       },
     }),
