@@ -50,17 +50,26 @@ jobs:
             git checkout main
             git pull origin main
             
+            # Detectar comando do Docker Compose
+            if command -v docker-compose &> /dev/null; then
+              COMPOSE_CMD="docker-compose"
+            else
+              COMPOSE_CMD="docker compose"
+            fi
+            
+            echo "🐳 Usando comando: $COMPOSE_CMD"
+            
             echo "🏗️ Construindo containers..."
             # Parar app antes do build para liberar memória
-            docker-compose -f docker-compose.prod.yml stop app || true
+            $COMPOSE_CMD -f docker-compose.prod.yml stop app || true
             
             # Build sem cache para garantir
-            docker-compose -f docker-compose.prod.yml build --no-cache app
+            $COMPOSE_CMD -f docker-compose.prod.yml build --no-cache app
             
             echo "🚀 Subindo aplicação..."
-            docker-compose -f docker-compose.prod.yml up -d --force-recreate app
+            $COMPOSE_CMD -f docker-compose.prod.yml up -d --force-recreate app
             
             echo "🧹 Limpando imagens antigas..."
-            docker image prune -f
+            docker image prune -f || true
             
             echo "✅ Deploy concluído com sucesso!"
