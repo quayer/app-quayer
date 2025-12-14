@@ -21,28 +21,46 @@ jobs:
           port: 22
           script: |
             set -e # Falha o script se qualquer comando falhar
-            cd /opt/quayer
+            
+            # Diretório da aplicação
+            APP_DIR="/opt/quayer"
             
             echo "🔥 Iniciando Deploy Brutal..."
             
-            # Reset total do repositório para evitar conflitos
-            git fetch --all
-            git reset --hard origin/main
-            git clean -fd
+            # Verificar se o diretório existe e é um repositório git
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "⚠️ Repositório não encontrado ou inválido. Refazendo clone..."
+              rm -rf "$APP_DIR"
+              mkdir -p "$APP_DIR"
+              git clone https://github.com/quayer/app-quayer.git "$APP_DIR"
+              cd "$APP_DIR"
+            else
+              cd "$APP_DIR"
+              echo "✅ Repositório encontrado. Resetando estado..."
+              git fetch --all
+              git reset --hard origin/main
+            fi
+            
+            # Limpeza garantindo que .env seja PRESERVADO
+            # -f: force, -d: directories, -X: ignored files (NÃO usar -X ou -x para manter .env se estiver ignorado)
+            # -e .env: exclude from cleaning specifically
+            git clean -fd -e .env
             
             # Garantir que estamos na main atualizada
             git checkout main
             git pull origin main
             
             echo "🏗️ Construindo containers..."
-            # Forçar recriação para garantir que mudanças de código entrem
+            # Parar app antes do build para liberar memória
             docker-compose -f docker-compose.prod.yml stop app || true
+            
+            # Build sem cache para garantir
             docker-compose -f docker-compose.prod.yml build --no-cache app
             
             echo "🚀 Subindo aplicação..."
             docker-compose -f docker-compose.prod.yml up -d --force-recreate app
             
-            echo "🧹 Limpando..."
+            echo "🧹 Limpando imagens antigas..."
             docker image prune -f
             
             echo "✅ Deploy concluído com sucesso!"
