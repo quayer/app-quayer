@@ -117,6 +117,26 @@ npm run test:uazapi        # 4 testes UAZAPI
 O pipeline roda automaticamente em PRs e na `main`:
 - Lint, typecheck e testes (vitest + build) via [GitHub Actions](.github/workflows/ci.yml)
 
+## 🚀 Automação de Deploy (CI/CD)
+
+O projeto possui uma pipeline automática via **GitHub Actions** que realiza o deploy em produção sempre que uma nova Release é publicada.
+
+### Configuração Necessária (GitHub Secrets)
+
+Para que a automação funcione, configure os seguintes *Secrets* no repositório GitHub (`Settings` -> `Secrets and variables` -> `Actions`):
+
+| Secret | Descrição | Exemplo |
+|--------|-----------|---------|
+| `HOST` | IP do servidor de produção | `91.98.142.177` |
+| `USERNAME` | Usuário SSH (recomendado: root ou usuário com permissão docker) | `root` |
+| `PASSWORD` | Senha SSH | `******` |
+
+### Como Fazer Deploy
+
+1. Crie uma nova **Release** no GitHub (ex: `v1.0.1`).
+2. A Action `Production Deploy` será disparada automaticamente.
+3. Acompanhe o progresso na aba **Actions**.
+
 ### Filosofia de Testes
 - ✅ **100% Real** - Zero mocks
 - ✅ **PostgreSQL Real** - Banco real

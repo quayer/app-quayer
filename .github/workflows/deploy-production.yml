@@ -1,0 +1,37 @@
+name: Production Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: 22
+          script: |
+            cd /opt/quayer
+            # Atualiza código
+            git fetch --all
+            git checkout ${{ github.ref_name }}
+            git pull origin ${{ github.ref_name }}
+            
+            # Atualiza deps e build (usando Docker para consistência)
+            # Otimizado para evitar rebuild total se não necessário
+            docker-compose -f docker-compose.prod.yml build app
+            
+            # Migrations (opcional, descomentar se necessário automatizar)
+            # docker-compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
+            
+            # Reinicia aplicação com zero-downtime se possível (rolling update)
+            docker-compose -f docker-compose.prod.yml up -d app
+            
+            # Limpa imagens antigas para economizar espaço
+            docker image prune -f
