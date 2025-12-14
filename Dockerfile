@@ -23,7 +23,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install dependencies
-RUN npm ci --only=production --ignore-scripts && \
+# Install dependencies with legacy peer deps for robustness
+RUN npm install --only=production --ignore-scripts --legacy-peer-deps && \
     npm cache clean --force
 
 # ==================================
@@ -39,7 +40,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install ALL dependencies (including devDependencies)
-RUN npm ci --ignore-scripts
+# Using npm install instead of ci to avoid cross-platform lockfile issues
+RUN npm install --ignore-scripts --legacy-peer-deps
 
 # Copy application code
 COPY . .
@@ -103,7 +105,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if(r.statusCode !== 200) throw new Error('Health check failed')})" || exit 1
+    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if(r.statusCode !== 200) throw new Error('Health check failed')})" || exit 1
 
 # Use tini as init system (handles signals properly)
 ENTRYPOINT ["/sbin/tini", "--"]

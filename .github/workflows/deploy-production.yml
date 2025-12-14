@@ -59,8 +59,12 @@ jobs:
             
             echo "🐳 Usando comando: $COMPOSE_CMD"
             
+            echo "🧹 Limpeza Pré-Build (Liberando espaço)..."
+            # Remove containeres parados e imagens sem tag para garantir espaço em disco
+            docker system prune -f || true
+            
             echo "🏗️ Construindo containers..."
-            # Parar app antes do build para liberar memória
+            # Parar app antes do build para liberar memória e evitar locks
             $COMPOSE_CMD -f docker-compose.prod.yml stop app || true
             
             # Build sem cache para garantir
