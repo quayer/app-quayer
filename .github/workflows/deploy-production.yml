@@ -20,21 +20,29 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           port: 22
           script: |
+            set -e # Falha o script se qualquer comando falhar
             cd /opt/quayer
-            # Atualiza código
+            
+            echo "🔥 Iniciando Deploy Brutal..."
+            
+            # Reset total do repositório para evitar conflitos
             git fetch --all
-            git checkout ${{ github.ref_name }}
-            git pull origin ${{ github.ref_name }}
+            git reset --hard origin/main
+            git clean -fd
             
-            # Atualiza deps e build (usando Docker para consistência)
-            # Otimizado para evitar rebuild total se não necessário
-            docker-compose -f docker-compose.prod.yml build app
+            # Garantir que estamos na main atualizada
+            git checkout main
+            git pull origin main
             
-            # Migrations (opcional, descomentar se necessário automatizar)
-            # docker-compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
+            echo "🏗️ Construindo containers..."
+            # Forçar recriação para garantir que mudanças de código entrem
+            docker-compose -f docker-compose.prod.yml stop app || true
+            docker-compose -f docker-compose.prod.yml build --no-cache app
             
-            # Reinicia aplicação com zero-downtime se possível (rolling update)
-            docker-compose -f docker-compose.prod.yml up -d app
+            echo "🚀 Subindo aplicação..."
+            docker-compose -f docker-compose.prod.yml up -d --force-recreate app
             
-            # Limpa imagens antigas para economizar espaço
+            echo "🧹 Limpando..."
             docker image prune -f
+            
+            echo "✅ Deploy concluído com sucesso!"
