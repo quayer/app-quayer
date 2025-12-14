@@ -10,7 +10,7 @@
 [![Type Safety](https://img.shields.io/badge/Type%20Safety-100%25-green)](.)
 [![No Mocks](https://img.shields.io/badge/Mocks-0%25-success)](.)
 [![Quality](https://img.shields.io/badge/Quality-Enterprise-gold)](.)
-[![CI](https://github.com/quayer/app-quayer/actions/workflows/ci.yml/badge.svg)](https://github.com/quayer/app-quayer/actions/workflows/ci.yml)
+[![Production Deploy](https://github.com/quayer/app-quayer/actions/workflows/deploy-production.yml/badge.svg)](https://github.com/quayer/app-quayer/actions/workflows/deploy-production.yml)
 
 ---
 
