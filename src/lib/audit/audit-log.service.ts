@@ -17,6 +17,7 @@ export type AuditAction =
   | 'login'
   | 'logout'
   | 'login_failed'
+  | 'passkey_login'
   | 'register'
   | 'connect'
   | 'disconnect'
@@ -79,7 +80,7 @@ export interface AuditLogError {
 class AuditLogService {
   private static instance: AuditLogService
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): AuditLogService {
     if (!AuditLogService.instance) {
@@ -214,7 +215,7 @@ class AuditLogService {
    * Log authentication events
    */
   async logAuth(
-    action: 'login' | 'logout' | 'login_failed' | 'register',
+    action: 'login' | 'logout' | 'login_failed' | 'passkey_login' | 'register',
     userId: string,
     metadata?: Record<string, unknown>,
     ipAddress?: string

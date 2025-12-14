@@ -72,7 +72,7 @@ services:
     networks:
       - quayer-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health')"]
+      test: [ "CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,7 +103,7 @@ services:
     networks:
       - quayer-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-docker}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-docker}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -114,19 +114,7 @@ services:
         max-size: "10m"
         max-file: "3"
     command: >
-      postgres
-      -c shared_buffers=256MB
-      -c max_connections=200
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=2621kB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
+      postgres -c shared_buffers=256MB -c max_connections=200 -c effective_cache_size=1GB -c maintenance_work_mem=64MB -c checkpoint_completion_target=0.9 -c wal_buffers=16MB -c default_statistics_target=100 -c random_page_cost=1.1 -c effective_io_concurrency=200 -c work_mem=2621kB -c min_wal_size=1GB -c max_wal_size=4GB
 
   # ==================================
   # 🔴 REDIS
@@ -142,7 +130,7 @@ services:
     networks:
       - quayer-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -153,12 +141,7 @@ services:
         max-size: "10m"
         max-file: "3"
     command: >
-      redis-server
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
-      --appendonly yes
-      --appendfsync everysec
+      redis-server --maxmemory 256mb --maxmemory-policy noeviction --save 60 1000 --appendonly yes --appendfsync everysec
 
 # ==================================
 # 📦 VOLUMES

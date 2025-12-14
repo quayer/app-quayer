@@ -38,7 +38,6 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
-import type { AuthenticatorTransportFuture } from '@simplewebauthn/types';
 import {
   hashPassword,
   verifyPassword,
@@ -1029,6 +1028,8 @@ export const authController = igniter.controller({
       },
     }),
 
+
+
     /**
      * Send Verification Email - Enviar código de verificação
      */
@@ -1095,13 +1096,13 @@ export const authController = igniter.controller({
         }
 
         // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
-        const isTestMode = process.env.NODE_ENV === 'test' || 
-                          process.env.TEST_MODE === 'true' ||
-                          process.env.TESTSPRITE_MODE === 'true';
-        
+        const isTestMode = process.env.NODE_ENV === 'test' ||
+          process.env.TEST_MODE === 'true' ||
+          process.env.TESTSPRITE_MODE === 'true';
+
         const testCodes = ['123456', '999999'];
         const normalizedCode = String(code).trim();
-        
+
         // Business Rule: Em modo de teste, bypassar validação de código e expiração
         if (isTestMode && testCodes.includes(normalizedCode)) {
           console.log('🧪 [verifyEmail] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
@@ -1262,13 +1263,13 @@ export const authController = igniter.controller({
 
         // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
         // Aceitar códigos de teste específicos quando em ambiente de teste
-        const isTestMode = process.env.NODE_ENV === 'test' || 
-                          process.env.TEST_MODE === 'true' ||
-                          process.env.TESTSPRITE_MODE === 'true';
-        
+        const isTestMode = process.env.NODE_ENV === 'test' ||
+          process.env.TEST_MODE === 'true' ||
+          process.env.TESTSPRITE_MODE === 'true';
+
         const testCodes = ['123456', '999999']; // Códigos válidos para testes
         const normalizedCode = String(code).trim();
-        
+
         // Business Rule: Em modo de teste, bypassar validação de código e expiração
         if (isTestMode && testCodes.includes(normalizedCode)) {
           console.log('🧪 [verifySignupOTP] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
@@ -1585,8 +1586,8 @@ export const authController = igniter.controller({
         // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
         // Aceitar códigos de teste específicos quando em ambiente de teste
         const isTestMode = process.env.NODE_ENV === 'test' ||
-                          process.env.TEST_MODE === 'true' ||
-                          process.env.TESTSPRITE_MODE === 'true';
+          process.env.TEST_MODE === 'true' ||
+          process.env.TESTSPRITE_MODE === 'true';
 
         const testCodes = ['123456', '999999']; // Códigos válidos para testes
         const normalizedCode = String(code).trim();
@@ -1617,8 +1618,8 @@ export const authController = igniter.controller({
         } else {
           // ✅ CORREÇÃO: Aceitar código do VerificationCode, recovery token ou user resetToken
           const isValidCode = !!verificationCode ||
-                            normalizedCode === normalizedRecoveryToken ||
-                            normalizedCode === normalizedUserToken;
+            normalizedCode === normalizedRecoveryToken ||
+            normalizedCode === normalizedUserToken;
 
           console.log('🔍 [verifyLoginOTP] DEBUG COMPLETO:', {
             email,
@@ -2066,7 +2067,7 @@ export const authController = igniter.controller({
           attestationType: 'none',
           excludeCredentials: user.passkeyCredentials.map((cred) => ({
             id: cred.credentialId,
-            transports: cred.transports as AuthenticatorTransportFuture[],
+            transports: cred.transports as any[],
           })),
           authenticatorSelection: {
             residentKey: 'preferred',
@@ -2137,14 +2138,14 @@ export const authController = igniter.controller({
             return response.status(400).json({ error: 'Verificação de passkey falhou' });
           }
 
-          const { credential: verifiedCredential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+          const { credential: verifiedCredential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo as any;
 
           // Salvar credencial no banco
           await db.passkeyCredential.create({
             data: {
               userId: user.id,
               credentialId: verifiedCredential.id,
-              publicKey: Buffer.from(verifiedCredential.publicKey),
+              publicKey: Buffer.from(verifiedCredential.publicKey) as unknown as Uint8Array,
               counter: BigInt(verifiedCredential.counter),
               credentialDeviceType,
               credentialBackedUp,
@@ -2203,7 +2204,7 @@ export const authController = igniter.controller({
           rpID,
           allowCredentials: user.passkeyCredentials.map((cred) => ({
             id: cred.credentialId,
-            transports: cred.transports as AuthenticatorTransportFuture[],
+            transports: cred.transports as any[],
           })),
           userVerification: 'preferred',
           timeout: 60000,
@@ -2296,9 +2297,9 @@ export const authController = igniter.controller({
             expectedRPID: rpID,
             credential: {
               id: storedCredential.credentialId,
-              publicKey: storedCredential.publicKey,
+              publicKey: storedCredential.publicKey as unknown as Uint8Array,
               counter: Number(storedCredential.counter),
-              transports: storedCredential.transports as AuthenticatorTransportFuture[],
+              transports: storedCredential.transports as any[],
             },
           });
 

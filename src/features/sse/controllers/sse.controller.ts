@@ -58,47 +58,64 @@ export const sseController = igniter.controller({
         // 3. Criar ReadableStream para SSE com Redis Pub/Sub
         const stream = new ReadableStream({
           async start(controller) {
-            const encoder = new TextEncoder();
-            const sendEvent = (event: string, data: any) => {
-              try {
-                const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-                controller.enqueue(encoder.encode(message));
-              } catch (error) {
-                console.error('[SSE] Error sending event:', error);
-              }
-            };
-
-            // Evento inicial de conexão
-            sendEvent('connected', {
-              instanceId,
-              timestamp: new Date().toISOString(),
-              message: 'Conectado ao stream SSE via Redis Pub/Sub',
-            });
-
-            // Heartbeat para manter conexão viva
-            const heartbeatInterval = setInterval(() => {
-              sendEvent('heartbeat', { timestamp: new Date().toISOString() });
-            }, 30000);
-
-            // Subscribe to instance-specific channel via Redis
-            const channel = `instance:status:${instanceId}`;
-            const unsubscribe = await sseEvents.subscribe(channel, (payload: SSEEventPayload) => {
-              sendEvent(payload.event, payload.data);
-            });
-
-            // Also subscribe to organization events for this instance (if org exists)
-            if (connection.organizationId) {
-              const orgChannel = sseEvents.getOrgChannel(connection.organizationId);
-              await sseEvents.subscribe(orgChannel, (payload: SSEEventPayload) => {
-                // Filter events related to this instance
-                if (payload.data?.connectionId === instanceId || payload.data?.instanceId === instanceId) {
-                  sendEvent(payload.event, payload.data);
+            try {
+              const encoder = new TextEncoder();
+              const sendEvent = (event: string, data: any) => {
+                try {
+                  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+                  controller.enqueue(encoder.encode(message));
+                } catch (error) {
+                  console.error('[SSE] Error sending event:', error);
                 }
-              });
-            }
+              };
 
-            // Note: Cleanup would ideally be triggered by client disconnect
-            // For now, heartbeat keeps connection alive
+              // Evento inicial de conexão
+              sendEvent('connected', {
+                instanceId,
+                timestamp: new Date().toISOString(),
+                message: 'Conectado ao stream SSE via Redis Pub/Sub',
+              });
+
+              // Heartbeat para manter conexão viva
+              const heartbeatInterval = setInterval(() => {
+                sendEvent('heartbeat', { timestamp: new Date().toISOString() });
+              }, 30000);
+
+              // Subscribe to instance-specific channel via Redis
+              const channel = `instance:status:${instanceId}`;
+
+              // Wrap subscription in try/catch to avoid unhandled rejections
+              try {
+                await sseEvents.subscribe(channel, (payload: SSEEventPayload) => {
+                  sendEvent(payload.event, payload.data);
+                });
+
+                // Also subscribe to organization events for this instance (if org exists)
+                if (connection.organizationId) {
+                  const orgChannel = sseEvents.getOrgChannel(connection.organizationId);
+                  await sseEvents.subscribe(orgChannel, (payload: SSEEventPayload) => {
+                    // Filter events related to this instance
+                    if (payload.data?.connectionId === instanceId || payload.data?.instanceId === instanceId) {
+                      sendEvent(payload.event, payload.data);
+                    }
+                  });
+                }
+              } catch (subError) {
+                console.error('[SSE] Subscription error:', subError);
+                sendEvent('error', { message: 'Failed to subscribe to events' });
+              }
+
+              // Cleanup on abort
+              // Cleanup on abort
+              (request.raw as any).signal?.addEventListener('abort', () => {
+                clearInterval(heartbeatInterval);
+                // TODO: Unsubscribe functionality
+              });
+
+            } catch (error) {
+              console.error('[SSE] Stream start error:', error);
+              controller.error(error);
+            }
           },
         });
 
@@ -137,34 +154,47 @@ export const sseController = igniter.controller({
         // Criar ReadableStream com Redis Pub/Sub
         const stream = new ReadableStream({
           async start(controller) {
-            const encoder = new TextEncoder();
-            const sendEvent = (event: string, data: any) => {
+            try {
+              const encoder = new TextEncoder();
+              const sendEvent = (event: string, data: any) => {
+                try {
+                  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+                  controller.enqueue(encoder.encode(message));
+                } catch (error) {
+                  console.error('[SSE] Error sending event:', error);
+                }
+              };
+
+              // Evento inicial
+              sendEvent('connected', {
+                organizationId,
+                timestamp: new Date().toISOString(),
+                message: 'Conectado ao stream SSE da organização via Redis Pub/Sub',
+              });
+
+              // Heartbeat
+              const heartbeatInterval = setInterval(() => {
+                sendEvent('heartbeat', { timestamp: new Date().toISOString() });
+              }, 30000);
+
+              // Subscribe to organization channel via Redis Pub/Sub
               try {
-                const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-                controller.enqueue(encoder.encode(message));
-              } catch (error) {
-                console.error('[SSE] Error sending event:', error);
+                await sseEvents.subscribeToOrg(organizationId, (payload: SSEEventPayload) => {
+                  sendEvent(payload.event, payload.data);
+                });
+              } catch (subError) {
+                console.error('[SSE] Subscription error:', subError);
+                sendEvent('error', { message: 'Failed to subscribe to organization events' });
               }
-            };
 
-            // Evento inicial
-            sendEvent('connected', {
-              organizationId,
-              timestamp: new Date().toISOString(),
-              message: 'Conectado ao stream SSE da organização via Redis Pub/Sub',
-            });
-
-            // Heartbeat
-            const heartbeatInterval = setInterval(() => {
-              sendEvent('heartbeat', { timestamp: new Date().toISOString() });
-            }, 30000);
-
-            // Subscribe to organization channel via Redis Pub/Sub
-            const unsubscribe = await sseEvents.subscribeToOrg(organizationId, (payload: SSEEventPayload) => {
-              sendEvent(payload.event, payload.data);
-            });
-
-            // Note: Cleanup handled by stream end
+              // Cleanup on abort
+              request.raw.signal.addEventListener('abort', () => {
+                clearInterval(heartbeatInterval);
+              });
+            } catch (error) {
+              console.error('[SSE] Stream start error:', error);
+              controller.error(error);
+            }
           },
         });
 
@@ -211,43 +241,58 @@ export const sseController = igniter.controller({
         // Criar ReadableStream com Redis Pub/Sub
         const stream = new ReadableStream({
           async start(controller) {
-            const encoder = new TextEncoder();
-            const sendEvent = (event: string, data: any) => {
+            try {
+              const encoder = new TextEncoder();
+              const sendEvent = (event: string, data: any) => {
+                try {
+                  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+                  controller.enqueue(encoder.encode(message));
+                } catch (error) {
+                  console.error('[SSE] Error sending event:', error);
+                }
+              };
+
+              // Evento inicial
+              sendEvent('connected', {
+                sessionId,
+                timestamp: new Date().toISOString(),
+                message: 'Conectado ao stream SSE da sessão via Redis Pub/Sub',
+              });
+
+              // Heartbeat
+              const heartbeatInterval = setInterval(() => {
+                sendEvent('heartbeat', { timestamp: new Date().toISOString() });
+              }, 30000);
+
+              // Subscribe to session-specific channel via Redis
+              const channel = `session:events:${sessionId}`;
+
               try {
-                const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-                controller.enqueue(encoder.encode(message));
-              } catch (error) {
-                console.error('[SSE] Error sending event:', error);
+                await sseEvents.subscribe(channel, (payload: SSEEventPayload) => {
+                  sendEvent(payload.event, payload.data);
+                });
+
+                // Also subscribe to organization events for messages in this session
+                await sseEvents.subscribeToOrg(session.organizationId, (payload: SSEEventPayload) => {
+                  // Filter events related to this session
+                  if (payload.data?.sessionId === sessionId) {
+                    sendEvent(payload.event, payload.data);
+                  }
+                });
+              } catch (subError) {
+                console.error('[SSE] Subscription error:', subError);
+                sendEvent('error', { message: 'Failed to subscribe to session events' });
               }
-            };
 
-            // Evento inicial
-            sendEvent('connected', {
-              sessionId,
-              timestamp: new Date().toISOString(),
-              message: 'Conectado ao stream SSE da sessão via Redis Pub/Sub',
-            });
+              // Cleanup
+              request.raw.signal.addEventListener('abort', () => {
+                clearInterval(heartbeatInterval);
+              });
 
-            // Heartbeat
-            const heartbeatInterval = setInterval(() => {
-              sendEvent('heartbeat', { timestamp: new Date().toISOString() });
-            }, 30000);
-
-            // Subscribe to session-specific channel via Redis
-            const channel = `session:events:${sessionId}`;
-            const unsubscribe = await sseEvents.subscribe(channel, (payload: SSEEventPayload) => {
-              sendEvent(payload.event, payload.data);
-            });
-
-            // Also subscribe to organization events for messages in this session
-            const unsubscribeOrg = await sseEvents.subscribeToOrg(session.organizationId, (payload: SSEEventPayload) => {
-              // Filter events related to this session
-              if (payload.data?.sessionId === sessionId) {
-                sendEvent(payload.event, payload.data);
-              }
-            });
-
-            // Note: Cleanup handled by stream end
+            } catch (error) {
+              console.error('[SSE] Stream start error:', error);
+              controller.error(error);
+            }
           },
         });
 
