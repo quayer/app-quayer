@@ -52,9 +52,13 @@ jobs:
             
             # Verificar se .env existe
             if [ -f .env ]; then
-              echo "✅ Arquivo .env encontrado."
+              echo "✅ Arquivo .env encontrado. Carregando variáveis..."
+              # Exportar variáveis do .env para o shell atual para garantir que o Docker Compose as veja
+              set -a
+              source .env
+              set +a
             else
-              echo "⚠️ AVISO: Arquivo .env NÃO encontrado! O deploy pode falhar."
+              echo "⚠️ AVISO: Arquivo .env NÃO encontrado! O deploy deve falhar."
               ls -la
             fi
 
