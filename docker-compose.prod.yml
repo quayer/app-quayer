@@ -143,6 +143,47 @@ services:
     command: >
       redis-server --maxmemory 256mb --maxmemory-policy noeviction --save 60 1000 --appendonly yes --appendfsync everysec
 
+  # ==================================
+  # 🗄️ SUPABASE POSTGRES META
+  # ==================================
+  meta:
+    image: supabase/postgres-meta:v0.84.2
+    container_name: quayer-meta
+    restart: always
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: postgres
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${DB_NAME:-docker}
+      PG_META_DB_USER: ${DB_USER:-docker}
+      PG_META_DB_PASSWORD: ${DB_PASSWORD:-docker}
+    networks:
+      - quayer-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ==================================
+  # 🖥️ SUPABASE STUDIO
+  # ==================================
+  studio:
+    image: supabase/studio:20250113-8833078
+    container_name: quayer-studio
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-docker}
+      SUPABASE_URL: http://meta:8080
+      DEFAULT_PROJECT_NAME: Quayer
+      DEFAULT_ORGANIZATION_NAME: QuayerOrg
+    networks:
+      - quayer-network
+    depends_on:
+      meta:
+        condition: service_started
+
 # ==================================
 # 📦 VOLUMES
 # ==================================

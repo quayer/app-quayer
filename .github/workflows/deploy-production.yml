@@ -77,7 +77,7 @@ jobs:
             
             echo "🔥 Removendo containers antigos (Fix KeyError)..."
             # Remove containers explicitamente para evitar erro de inspeção do compose antigo
-            docker rm -f quayer-app quayer-redis quayer-postgres || true
+            docker rm -f quayer-app quayer-redis quayer-postgres quayer-meta quayer-studio || true
             
             echo "🏗️ Construindo containers..."
             $COMPOSE_CMD -f docker-compose.prod.yml build --no-cache app
