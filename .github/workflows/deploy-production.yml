@@ -50,28 +50,40 @@ jobs:
             git checkout main
             git pull origin main
             
-            # Detectar comando do Docker Compose
-            if command -v docker-compose &> /dev/null; then
-              COMPOSE_CMD="docker-compose"
+            # Verificar se .env existe
+            if [ -f .env ]; then
+              echo "✅ Arquivo .env encontrado."
             else
+              echo "⚠️ AVISO: Arquivo .env NÃO encontrado! O deploy pode falhar."
+              ls -la
+            fi
+
+            # Priorizar docker compose v2 (Go) sobre docker-compose v1 (Python deprecated/buggy)
+            if docker compose version &> /dev/null; then
               COMPOSE_CMD="docker compose"
+              echo "✅ Usando Docker Compose v2 (Plugin)"
+            elif command -v docker-compose &> /dev/null; then
+              COMPOSE_CMD="docker-compose"
+              echo "⚠️ Usando Docker Compose v1 (Legacy) - Pode causar erros"
+            else
+              echo "❌ Docker Compose não encontrado!"
+              exit 1
             fi
             
-            echo "🐳 Usando comando: $COMPOSE_CMD"
+            echo "🐳 Comando selecionado: $COMPOSE_CMD"
             
             echo "🧹 Limpeza Pré-Build (Liberando espaço)..."
-            # Remove containeres parados e imagens sem tag para garantir espaço em disco
             docker system prune -f || true
             
-            echo "🏗️ Construindo containers..."
-            # Parar app antes do build para liberar memória e evitar locks
-            $COMPOSE_CMD -f docker-compose.prod.yml stop app || true
+            echo "🔥 Removendo containers antigos (Fix KeyError)..."
+            # Remove containers explicitamente para evitar erro de inspeção do compose antigo
+            docker rm -f quayer-app quayer-redis quayer-postgres || true
             
-            # Build sem cache para garantir
+            echo "🏗️ Construindo containers..."
             $COMPOSE_CMD -f docker-compose.prod.yml build --no-cache app
             
             echo "🚀 Subindo aplicação..."
-            $COMPOSE_CMD -f docker-compose.prod.yml up -d --force-recreate app
+            $COMPOSE_CMD -f docker-compose.prod.yml up -d --force-recreate
             
             echo "🧹 Limpando imagens antigas..."
             docker image prune -f || true
