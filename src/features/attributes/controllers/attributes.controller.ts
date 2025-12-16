@@ -367,11 +367,7 @@ export const attributesController = igniter.controller({
           data: { isActive: false },
         });
 
-        return response.success({
-          message: force
-            ? `Atributo deletado com sucesso (${existingAttribute._count.contactAttributes} valores removidos)`
-            : 'Atributo marcado como inativo com sucesso',
-        });
+        return response.noContent();
       },
     }),
   },

@@ -390,9 +390,7 @@ export const invitationsController = igniter.controller({
       // Deletar convite
       await invitationsRepository.delete(invitationId);
 
-      return response.success({
-        message: 'Convite cancelado com sucesso',
-      });
+      return response.noContent();
     },
   }),
 

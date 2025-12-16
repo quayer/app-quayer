@@ -1,14 +1,18 @@
 import { store } from '@/services/store'
 import { createBullMQAdapter } from '@igniter-js/adapter-bullmq'
 import { z } from 'zod'
+import { createJobHooks } from '@/services/metrics'
 
 /**
  * Job queue adapter for background processing.
  * ✅ OTIMIZADO: Concurrency 5, retry strategies, auto-cleanup
  * ✅ v0.3.0: Suporte a repeatable jobs para crons
+ * ✅ v0.4.0: Lifecycle hooks para métricas e observabilidade
+ * ✅ v0.4.0: Multi-tenancy prefix para isolamento
  */
 export const jobs = createBullMQAdapter({
   store,
+  globalPrefix: process.env.QUEUE_PREFIX || 'quayer',
   autoStartWorker: {
     concurrency: parseInt(process.env.BULL_CONCURRENCY || '5'),
     queues: ['*']
@@ -23,7 +27,8 @@ export const REGISTERED_JOBS = jobs.merge({
         input: z.object({ message: z.string() }),
         handler: async ({ input }) => {
           console.log(input.message)
-        }
+        },
+        ...createJobHooks('system.sampleJob'),
       })
     }
   }),
@@ -41,7 +46,10 @@ export const REGISTERED_JOBS = jobs.merge({
             input.sessionId,
             input.contactId
           );
-        }
+        },
+        ...createJobHooks('concatenation.processConcatenatedMessages'),
+        retryStrategy: 'exponential',
+        attempts: 3,
       })
     }
   }),
@@ -64,7 +72,8 @@ export const REGISTERED_JOBS = jobs.merge({
           if (count > 0) {
             console.log(`[Cron] unblockExpiredAIs: ${count} sessions unblocked`);
           }
-        }
+        },
+        ...createJobHooks('cron.unblockExpiredAIs'),
       }),
 
       /**
@@ -80,7 +89,8 @@ export const REGISTERED_JOBS = jobs.merge({
           if (result.closed > 0) {
             console.log(`[Cron] closeExpiredSessions: ${result.closed} sessions closed`);
           }
-        }
+        },
+        ...createJobHooks('cron.closeExpiredSessions'),
       }),
 
       /**
@@ -96,7 +106,8 @@ export const REGISTERED_JOBS = jobs.merge({
           if (count > 0) {
             console.log(`[Cron] resumePausedSessions: ${count} sessions resumed`);
           }
-        }
+        },
+        ...createJobHooks('cron.resumePausedSessions'),
       }),
 
       /**
@@ -164,7 +175,8 @@ export const REGISTERED_JOBS = jobs.merge({
           } catch (error) {
             console.error('[Cron] syncConnectingInstances error:', error);
           }
-        }
+        },
+        ...createJobHooks('cron.syncConnectingInstances'),
       }),
     }
   })

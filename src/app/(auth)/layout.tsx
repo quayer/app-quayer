@@ -1,6 +1,9 @@
 import { Suspense } from 'react'
 import { StarsBackground } from '@/components/ui/stars-background'
 
+// Force dynamic rendering for all auth pages
+export const dynamic = 'force-dynamic'
+
 export default function AuthLayout({
   children,
 }: {

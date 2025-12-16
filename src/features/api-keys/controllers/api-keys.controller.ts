@@ -222,10 +222,7 @@ export const apiKeysController = igniter.controller({
 
         try {
           await apiKeysRepository.delete(id)
-          return response.json({
-            success: true,
-            message: 'API Key deletada permanentemente',
-          })
+          return response.noContent()
         } catch (error: any) {
           console.error('Error deleting API key:', error)
           return response.status(500).json({ error: 'Erro ao deletar API Key' })

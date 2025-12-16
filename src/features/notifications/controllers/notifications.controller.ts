@@ -263,10 +263,7 @@ export const notificationsController = igniter.controller({
 
         try {
           await notificationsRepository.delete(id)
-          return response.json({
-            success: true,
-            message: 'Notificação excluída com sucesso',
-          })
+          return response.noContent()
         } catch (error: any) {
           console.error('Error deleting notification:', error)
           return response.status(500).json({ error: 'Erro ao excluir notificação' })

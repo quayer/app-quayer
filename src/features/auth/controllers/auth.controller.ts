@@ -2455,7 +2455,7 @@ export const authController = igniter.controller({
 
         await db.passkeyCredential.delete({ where: { id } });
 
-        return response.success({ message: 'Passkey removida com sucesso' });
+        return response.noContent();
       },
     }),
   },

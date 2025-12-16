@@ -337,9 +337,7 @@ export const contactAttributeController = igniter.controller({
           where: { id },
         });
 
-        return response.success({
-          message: 'Valor de atributo deletado com sucesso',
-        });
+        return response.noContent();
       },
     }),
   },

@@ -254,7 +254,7 @@ export const systemSettingsController = igniter.controller({
       handler: async ({ request, context, response }) => {
         const { id } = request.params as { id: string }
         await systemSettingsRepository.deleteEmailTemplate(id)
-        return response.json({ success: true, message: 'Template deletado' })
+        return response.noContent()
       },
     }),
 
@@ -323,10 +323,10 @@ export const systemSettingsController = igniter.controller({
       path: '/ai-prompts/:id',
       method: 'DELETE',
       use: [adminProcedure()],
-      handler: async ({ request, context, response }) => {
+      handler: async ({ request, response }) => {
         const { id } = request.params as { id: string }
         await systemSettingsRepository.deleteAIPrompt(id)
-        return response.json({ success: true, message: 'Prompt deletado' })
+        return response.noContent()
       },
     }),
 

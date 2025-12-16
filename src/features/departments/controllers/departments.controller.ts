@@ -336,9 +336,7 @@ export const departmentsController = igniter.controller({
           where: { id: departmentId },
         });
 
-        return response.success({
-          message: 'Departamento deletado com sucesso',
-        });
+        return response.noContent();
       },
     }),
 

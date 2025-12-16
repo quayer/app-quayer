@@ -1,9 +1,7 @@
 import { igniter } from '@/igniter'
-import { exampleController } from '@/features/example'
 import { instancesController } from '@/features/instances/controllers/instances.controller'
 import { authController } from '@/features/auth/controllers/auth.controller'
 import { organizationsController } from '@/features/organizations'
-import { projectsController } from '@/features/projects'
 import { webhooksController } from '@/features/webhooks'
 import { onboardingController } from '@/features/onboarding/controllers/onboarding.controller'
 import { invitationsController } from '@/features/invitations'
@@ -24,6 +22,7 @@ import { permissionsController } from '@/features/permissions'
 import { apiKeysController } from '@/features/api-keys'
 import { notificationsController } from '@/features/notifications'
 import { chatwootController } from '@/features/chatwoot'
+import { healthController } from '@/features/health'
 
 /**
  * @description Main application router configuration
@@ -47,11 +46,9 @@ export const AppRouter = igniter.router({
     messages: messagesController,
     media: mediaController,
     sessions: sessionsController,
-    projects: projectsController,
     webhooks: webhooksController,
     calls: callsController,
     sse: sseController,
-    example: exampleController,
     instances: instancesController,
     'system-settings': systemSettingsController,
     logs: logsController,
@@ -60,6 +57,7 @@ export const AppRouter = igniter.router({
     'api-keys': apiKeysController,
     notifications: notificationsController,
     chatwoot: chatwootController,
+    health: healthController,
   }
 })
 

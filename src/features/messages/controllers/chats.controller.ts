@@ -421,7 +421,7 @@ export const chatsController = igniter.controller({
             },
           });
 
-          return response.success({ message: 'Chat deletado com sucesso' });
+          return response.noContent();
         } catch (error) {
           return response.badRequest('Erro ao deletar chat');
         }

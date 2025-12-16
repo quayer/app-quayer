@@ -222,9 +222,7 @@ export const observationsController = igniter.controller({
           where: { id },
         });
 
-        return response.success({
-          message: 'Observação deletada com sucesso',
-        });
+        return response.noContent();
       },
     }),
   },

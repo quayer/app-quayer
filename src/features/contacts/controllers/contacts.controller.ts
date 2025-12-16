@@ -264,9 +264,7 @@ export const contactsController = igniter.controller({
           where: { id },
         });
 
-        return response.success({
-          message: 'Contato deletado com sucesso',
-        });
+        return response.noContent();
       },
     }),
 

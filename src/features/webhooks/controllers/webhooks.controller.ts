@@ -187,7 +187,7 @@ export const webhooksController = igniter.controller({
         }
 
         await webhooksRepository.softDelete(id);
-        return response.success({ message: 'Webhook desativado' });
+        return response.noContent();
       },
     }),
 

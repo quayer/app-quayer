@@ -303,9 +303,7 @@ export const chatwootController = igniter.controller({
           return response.notFound('Configuração não encontrada');
         }
 
-        return response.success({
-          message: 'Configuração do Chatwoot removida com sucesso',
-        });
+        return response.noContent();
       },
     }),
 

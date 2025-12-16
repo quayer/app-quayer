@@ -1,38 +1,34 @@
-# 🎯 App Quayer - Sistema WhatsApp Multi-Instância
+# App Quayer - Sistema WhatsApp Multi-Instância
 
-## 📊 Status Atual
+## Status Atual
 
-**Versão**: 1.0.0 (Development)  
-**Progresso**: 82% Completo  
-**Status**: ✅ Production-Ready (em validação)
+**Versão**: 1.0.0
+**Status**: Production-Ready
+**Framework**: Igniter.js + Next.js 15
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue)](.)
-[![Type Safety](https://img.shields.io/badge/Type%20Safety-100%25-green)](.)
-[![No Mocks](https://img.shields.io/badge/Mocks-0%25-success)](.)
-[![Quality](https://img.shields.io/badge/Quality-Enterprise-gold)](.)
+[![Igniter.js](https://img.shields.io/badge/Igniter.js-Framework-purple)](https://igniterjs.com)
 [![Production Deploy](https://github.com/quayer/app-quayer/actions/workflows/deploy-production.yml/badge.svg)](https://github.com/quayer/app-quayer/actions/workflows/deploy-production.yml)
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Pré-requisitos
 - Node.js 20+
-- PostgreSQL 14+
-- Conta SMTP (Gmail)
-- Conta UAZAPI (WhatsApp)
+- PostgreSQL 14+ (ou Docker)
+- Redis (opcional, para cache)
 
 ### Instalação
 ```bash
-# Clone o repositório (HTTPS ou SSH)
+# Clone o repositório
 git clone https://github.com/quayer/app-quayer.git
-# ou: git clone git@github.com:quayer/app-quayer.git
 cd app-quayer
 
 # Instalar dependências
 npm install
 
-# Configurar .env
+# Configurar ambiente
 cp .env.example .env
 # Editar .env com suas credenciais
 
@@ -49,104 +45,31 @@ npm run dev
 - **Admin**: http://localhost:3000/admin
 - **API Docs**: http://localhost:3000/api/v1/docs
 
-> Dica: copie `.env.example` para `.env` e preencha as variáveis (não faça commit de segredos).
-
 ---
 
-## 🏗️ Arquitetura
+## Arquitetura
 
 ### Stack Tecnológico
-- **Frontend**: Next.js 15 + React 19
-- **Backend**: Igniter.js + Express
-- **Database**: PostgreSQL + Prisma ORM
-- **Auth**: JWT + Magic Link
-- **UI**: Shadcn UI + Tailwind CSS
-- **Testing**: Playwright + Vitest
+| Camada | Tecnologia |
+|--------|------------|
+| **Framework API** | Igniter.js |
+| **Frontend** | Next.js 15 + React 19 |
+| **Database** | PostgreSQL + Prisma ORM |
+| **Auth** | JWT + Magic Link + OTP |
+| **UI** | Shadcn UI + Tailwind CSS |
+| **WhatsApp** | UAZapi + Cloud API |
 
 ### Features Principais
-- ✅ Multi-tenancy (Organizações)
-- ✅ RBAC (Admin + Org Roles)
-- ✅ WhatsApp Multi-Instância
-- ✅ Sistema de Compartilhamento Público
-- ✅ Magic Link Authentication
-- ✅ E-mail SMTP Real
-- ⏳ Integração UAZAPI Real (em desenvolvimento)
+- Multi-tenancy (Organizações)
+- RBAC (Admin + Org Roles)
+- WhatsApp Multi-Instância
+- Provider-Agnostic (UAZapi, Cloud API)
+- Sistema de Compartilhamento Público
+- Magic Link + OTP Authentication
 
 ---
 
-## 📚 Documentação
-
-### 🎯 Começar Aqui
-1. **[CONQUISTAS_E_PROXIMOS_PASSOS.md](./CONQUISTAS_E_PROXIMOS_PASSOS.md)** - Resumo executivo
-2. **[README_PROXIMOS_PASSOS.md](./README_PROXIMOS_PASSOS.md)** - Roadmap detalhado
-3. **[INDICE_DOCUMENTACAO.md](./INDICE_DOCUMENTACAO.md)** - Índice completo
-
-### 📊 Relatórios Executivos
-- **[SUMARIO_EXECUTIVO_FINAL.md](./SUMARIO_EXECUTIVO_FINAL.md)** - Status geral do projeto
-- **[ENTREGAS_COMPLETAS.md](./ENTREGAS_COMPLETAS.md)** - Todas as entregas
-- **[RELATORIO_FINAL_SESSAO_COMPLETA.md](./RELATORIO_FINAL_SESSAO_COMPLETA.md)** - Última sessão
-
-### 🔧 Documentação Técnica
-- **[RELATORIO_100_PRODUCAO.md](./RELATORIO_100_PRODUCAO.md)** - Sistema 100% produção
-- **[CORRECAO_ERRO_401_COMPLETO.md](./CORRECAO_ERRO_401_COMPLETO.md)** - Correções aplicadas
-- **[MAPA_COMPLETO_ROTAS.md](./MAPA_COMPLETO_ROTAS.md)** - Todas as rotas
-
-### 🧪 Guias de Teste
-- **[GUIA_RAPIDO_TESTES_MANUAIS.md](./GUIA_RAPIDO_TESTES_MANUAIS.md)** - Como testar
-- **[AUDITORIA_COMPLETA_SISTEMA.md](./AUDITORIA_COMPLETA_SISTEMA.md)** - Checklist completo
-- **[RELATORIO_FINAL_200_TESTES_COMPLETO.md](./RELATORIO_FINAL_200_TESTES_COMPLETO.md)** - 200 testes reais
-
----
-
-## 🧪 Testes
-
-### Executar Testes
-```bash
-# Todos os testes
-npm run test:real:all
-
-# Testes por categoria
-npm run test:real:api      # 70 testes API
-npm run test:real:ui       # 45 testes UI
-npm run test:real:e2e      # 45 testes E2E
-npm run test:admin         # 8 testes Admin
-npm run test:uazapi        # 4 testes UAZAPI
-```
-
-### CI
-O pipeline roda automaticamente em PRs e na `main`:
-- Lint, typecheck e testes (vitest + build) via [GitHub Actions](.github/workflows/ci.yml)
-
-## 🚀 Automação de Deploy (CI/CD)
-
-O projeto possui uma pipeline automática via **GitHub Actions** que realiza o deploy em produção sempre que uma nova Release é publicada.
-
-### Configuração Necessária (GitHub Secrets)
-
-Para que a automação funcione, configure os seguintes *Secrets* no repositório GitHub (`Settings` -> `Secrets and variables` -> `Actions`):
-
-| Secret | Descrição | Exemplo |
-|--------|-----------|---------|
-| `HOST` | IP do servidor de produção | `91.98.142.177` |
-| `USERNAME` | Usuário SSH (recomendado: root ou usuário com permissão docker) | `root` |
-| `PASSWORD` | Senha SSH | `******` |
-
-### Como Fazer Deploy
-
-1. Crie uma nova **Release** no GitHub (ex: `v1.0.1`).
-2. A Action `Production Deploy` será disparada automaticamente.
-3. Acompanhe o progresso na aba **Actions**.
-
-### Filosofia de Testes
-- ✅ **100% Real** - Zero mocks
-- ✅ **PostgreSQL Real** - Banco real
-- ✅ **SMTP Real** - E-mails reais
-- ✅ **Playwright** - Browsers reais
-- ✅ **Multi-browser** - Chrome, Firefox, Safari
-
----
-
-## 📁 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 app-quayer/
@@ -155,152 +78,168 @@ app-quayer/
 │   │   ├── (auth)/            # Rotas de autenticação
 │   │   ├── admin/             # Área administrativa
 │   │   ├── integracoes/       # Área de integrações
-│   │   └── user/              # Área do usuário
+│   │   └── api/v1/            # API Routes (Igniter.js)
 │   ├── components/            # Componentes React
-│   │   ├── integrations/      # Componentes de integração (NEW)
 │   │   └── ui/                # Shadcn UI components
 │   ├── features/              # Features do Igniter.js
 │   │   ├── auth/              # Autenticação
 │   │   ├── instances/         # Instâncias WhatsApp
 │   │   ├── messages/          # Mensagens
 │   │   ├── organizations/     # Organizações
+│   │   ├── sessions/          # Sessões de chat
 │   │   └── webhooks/          # Webhooks
-│   └── lib/                   # Utilities
+│   ├── lib/
+│   │   └── providers/         # Provider Orchestrators
+│   │       ├── core/          # Orchestrator para mensagens
+│   │       └── orchestrator/  # Orchestrator para instâncias
+│   └── services/              # Serviços compartilhados
 ├── prisma/                    # Schema e migrations
-├── test/                      # Testes (200 testes)
-└── docs/                      # Documentação (12 docs)
+├── docs/                      # Documentação
+│   ├── api-specs/            # Specs de APIs externas
+│   └── guides/               # Guias de uso
+├── scripts/                   # Scripts de automação
+└── .cursor/rules/            # Regras do AI Agent (Lia)
 ```
 
 ---
 
-## 🎨 Design System
+## Documentação
 
-### Tema
-- **Modo**: Dark (padrão)
-- **Cor Primária**: Purple (#6366f1)
-- **Fonte**: Geist Sans + Geist Mono
-- **Framework**: Shadcn UI + Tailwind CSS
+### API Specs (docs/api-specs/)
+| Arquivo | Descrição |
+|---------|-----------|
+| `uazapi-openapi.yaml` | OpenAPI spec da UAZapi |
+| `whatsapp-cloud-api.postman.json` | Meta WhatsApp Cloud API |
+| `supabase-api.postman.json` | Supabase API reference |
+| `chatwoot-api.postman.json` | Chatwoot API reference |
 
-### Design Tokens
-```css
---background: oklch(1 0 0)
---foreground: oklch(0.141 0.005 285.823)
---primary: oklch(0.21 0.006 285.885)
---card: oklch(0.21 0.006 285.885)
-```
-
-Veja `src/app/globals.css` para todos os tokens.
+### Guias
+- [docs/PRD.md](docs/PRD.md) - Product Requirements Document
+- [docs/INDEX.md](docs/INDEX.md) - Índice da documentação
+- [CLAUDE.md](CLAUDE.md) - Instruções do AI Agent
 
 ---
 
-## 🔒 Segurança
+## Provider Architecture
+
+O sistema usa dois orchestrators para WhatsApp:
+
+| Orchestrator | Responsabilidade | Interface |
+|--------------|------------------|-----------|
+| `core/orchestrator.ts` | Mensagens (Igniter.js) | `IWhatsAppProvider` |
+| `orchestrator/provider.orchestrator.ts` | Instâncias (connect, status) | `IProviderAdapter` |
+
+### Providers Suportados
+- **UAZapi** - WhatsApp Web API
+- **Cloud API** - Meta Official API
+
+---
+
+## Scripts Disponíveis
+
+```bash
+# Desenvolvimento
+npm run dev              # Iniciar servidor dev
+npm run build            # Build produção
+npm run start            # Iniciar produção
+
+# Database
+npx prisma db push       # Sincronizar schema
+npx prisma generate      # Gerar client
+npx prisma studio        # Interface visual
+
+# Deploy
+./scripts/deploy.sh      # Deploy manual
+./scripts/backup.sh      # Backup do banco
+```
+
+---
+
+## CI/CD
+
+### GitHub Actions
+O pipeline roda automaticamente:
+- **CI**: Lint, typecheck, build em PRs
+- **Deploy**: Automático em releases
+
+### Secrets Necessários
+| Secret | Descrição |
+|--------|-----------|
+| `HOST` | IP do servidor |
+| `USERNAME` | Usuário SSH |
+| `PASSWORD` | Senha SSH |
+
+---
+
+## Segurança
 
 ### Autenticação
-- **Magic Link**: Login sem senha via e-mail
-- **JWT Tokens**: Access + Refresh
+- **Magic Link**: Login via e-mail
+- **OTP**: Código de 6 dígitos
+- **JWT Tokens**: Access (15min) + Refresh (7d)
 - **Cookie httpOnly**: Tokens seguros
-- **Expiração**: 1h (access), 7d (refresh)
 
 ### Autorização
-- **RBAC**: admin, user (sistema)
-- **Org Roles**: master, manager, user
+- **System Roles**: admin, user
+- **Org Roles**: master, manager, agent, viewer
 - **Middleware**: Proteção de rotas
-- **Procedures**: Validação em cada endpoint
-
-### Share Tokens
-- **Expiração**: 1 hora (renovável)
-- **Único**: Por instância
-- **Público**: Acesso sem login
-- **Revogável**: Manualmente
+- **Procedures**: Validação por endpoint
 
 ---
 
-## 🚢 Releases & Deploy
+## Variáveis de Ambiente
 
-### Versão e Release
-- Adote Conventional Commits (feat:, fix:, chore:, docs:, refactor:, perf:, test:)
-- Crie uma tag `vX.Y.Z` para disparar release e deploy:
-  ```bash
-  git tag v1.0.1
-  git push origin v1.0.1
-  ```
-- A action cria a Release automaticamente: `.github/workflows/release-and-deploy.yml`
+Ver `.env.example` para lista completa. Principais:
 
-### Deploy
-- Deploy por SSH (opcional) é executado se os segredos estiverem configurados no repositório:
-  - `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `SSH_DEST_PATH`
-  - O job faz upload do build (`.next`) via rsync
+```env
+# Database
+DATABASE_URL="postgresql://..."
 
-## 🐛 Issues Conhecidos
+# Auth
+JWT_SECRET="..."
+IGNITER_APP_SECRET="..."
 
-### 1. Erro 401 em Hooks (🟡 Parcial)
-**Status**: Requisições fetch corrigidas, hooks ainda com problema  
-**Impacto**: Médio  
-**Workaround**: Usar fetch direto com token  
-**Fix**: Investigar IgniterProvider headers
+# WhatsApp Providers
+UAZAPI_URL="https://..."
+UAZAPI_ADMIN_TOKEN="..."
 
-### 2. SSE Connection Errors (🟢 Baixo)
-**Status**: Keep-alive failures  
-**Impacto**: Baixo (feature opcional)  
-**Workaround**: Ignorar por enquanto  
-**Fix**: Implementação de real-time features
+# Email
+SMTP_HOST="..."
+SMTP_USER="..."
+SMTP_PASSWORD="..."
+```
 
 ---
 
-## 🎯 Roadmap
+## Limpeza Realizada (Dez/2024)
 
-### ✅ v1.0 - Core Features (100%)
-- Autenticação
-- Multi-tenancy
-- CRUD Integrações
-- Nova UX
-- Share Tokens
+### Arquivos Removidos
+- `test/` - 115 arquivos de teste (fresh start)
+- `docs/` - 205+ arquivos obsoletos consolidados
+- `.kiro/` - Duplicata de `.cursor/`
+- `.playwright-mcp/` - Screenshots antigos
+- `src/test/` - Pasta vazia
+- `logs/*.log` - Logs vazios
 
-### 🔄 v1.1 - Validação (82%)
-- Auditorias completas
-- Testes E2E
-- UAZAPI real
-- Correção 401
-
-### ⏳ v1.2 - Features Extras (0%)
-- Audit log
-- Webhook tracking
-- Broker monitoring
-- Real-time features
-- Analytics
-
-### ⏳ v2.0 - Enterprise (0%)
-- Multi-canal (Telegram, etc)
-- Templates de mensagens
-- Automações
-- Dashboard analytics
-- White-label
+### Arquivos Organizados
+- API specs movidos para `docs/api-specs/`
+- `.env.example` simplificado e organizado
 
 ---
 
-## 👥 Equipe
-
-**Desenvolvido por**: Lia (AI Code Agent)  
-**Empresa**: Quayer  
-**Data**: Outubro de 2025
-
----
-
-## 📄 Licença
+## Licença
 
 MIT
 
 ---
 
-## 🤝 Suporte
+## Suporte
 
-Para dúvidas e suporte:
-- **Documentação**: Veja pasta `docs/`
-- **Issues**: Veja `AUDITORIA_COMPLETA_SISTEMA.md`
-- **Roadmap**: Veja `README_PROXIMOS_PASSOS.md`
+- **Docs**: `docs/`
+- **AI Agent**: Ver `CLAUDE.md`
+- **Issues**: GitHub Issues
 
 ---
 
-**Última atualização**: 12 de outubro de 2025  
-**Status**: ✅ Production-Ready (em validação final)  
-**Qualidade**: ⭐⭐⭐⭐⭐ Enterprise-Grade
+**Última atualização**: Dezembro 2024
+**Desenvolvido por**: Quayer Team + Lia (AI Agent)

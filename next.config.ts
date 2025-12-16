@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   // Output standalone for Docker optimization
   output: 'standalone',
 
+  // Skip trailing slash redirects
+  skipTrailingSlashRedirect: true,
+
   eslint: {
     ignoreDuringBuilds: true
   },

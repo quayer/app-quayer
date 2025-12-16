@@ -258,9 +258,7 @@ export const labelsController = igniter.controller({
           where: { id },
         });
 
-        return response.success({
-          message: 'Label deletada com sucesso',
-        });
+        return response.noContent();
       },
     }),
 

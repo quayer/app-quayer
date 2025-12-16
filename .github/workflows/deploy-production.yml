@@ -53,10 +53,7 @@ jobs:
 
             # Verificar se .env existe
             if [ -f .env ]; then
-              echo "✅ Arquivo .env encontrado. Carregando variáveis..."
-              set -a
-              source .env
-              set +a
+              echo "✅ Arquivo .env encontrado."
             else
               echo "❌ ERRO: Arquivo .env NÃO encontrado!"
               echo "Configure o .env no servidor antes do deploy."

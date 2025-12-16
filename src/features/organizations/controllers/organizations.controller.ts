@@ -256,7 +256,7 @@ export const organizationsController = igniter.controller({
         }
 
         await organizationsRepository.softDelete(id);
-        return response.success({ message: 'Organização desativada' });
+        return response.noContent();
       },
     }),
 
@@ -489,9 +489,7 @@ export const organizationsController = igniter.controller({
           });
         }
 
-        return response.success({
-          message: 'Membro removido com sucesso',
-        });
+        return response.noContent();
       },
     }),
   },

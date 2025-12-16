@@ -1,6 +1,9 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 
+// Force dynamic rendering - uses cookies()
+export const dynamic = 'force-dynamic'
+
 /**
  * Root Page - Server Component
  * Redirects based on authentication status
