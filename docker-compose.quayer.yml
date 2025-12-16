@@ -1,0 +1,196 @@
+# ==================================
+# DOCKER COMPOSE - QUAYER (Coexiste com Supabase)
+# ==================================
+# Stack para produção que coexiste com Supabase no mesmo servidor
+# Usa porta 5433 para PostgreSQL (evita conflito com Supabase 5432)
+# Conecta na rede supabase_default para Kong poder rotear
+#
+# Comando: docker compose -f docker-compose.quayer.yml up -d
+
+version: '3.8'
+
+services:
+  # ==================================
+  # APPLICATION
+  # ==================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    container_name: quayer-app
+    image: quayer-app:latest
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      # Application
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+
+      # Database (internal network)
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@quayer-postgres:5432/${DB_NAME}?schema=public
+
+      # Redis (internal network)
+      - REDIS_URL=redis://quayer-redis:6379
+      - REDIS_HOST=quayer-redis
+      - REDIS_PORT=6379
+
+      # Auth
+      - JWT_SECRET=${JWT_SECRET}
+      - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+      # Igniter.js
+      - IGNITER_APP_NAME=quayer
+      - NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_APP_URL}/
+      - NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
+      - IGNITER_JOBS_QUEUE_PREFIX=quayer
+      - IGNITER_LOG_LEVEL=info
+
+      # Email
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+
+      # WhatsApp (UAZapi)
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_WEBHOOK_URL=${UAZAPI_WEBHOOK_URL}
+
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # Google OAuth
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+
+      # Message Concatenation
+      - MESSAGE_CONCAT_TIMEOUT=${MESSAGE_CONCAT_TIMEOUT:-8000}
+      - MESSAGE_CONCAT_MAX=${MESSAGE_CONCAT_MAX:-10}
+      - MESSAGE_CONCAT_SAME_TYPE=${MESSAGE_CONCAT_SAME_TYPE:-false}
+      - MESSAGE_CONCAT_SAME_SENDER=${MESSAGE_CONCAT_SAME_SENDER:-true}
+
+    depends_on:
+      quayer-postgres:
+        condition: service_healthy
+      quayer-redis:
+        condition: service_healthy
+    networks:
+      - quayer-internal
+      - supabase_default
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==================================
+  # POSTGRESQL (Porta 5433 externa)
+  # ==================================
+  quayer-postgres:
+    image: postgres:15-alpine
+    container_name: quayer-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-quayer}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-quayer}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432"
+    volumes:
+      - quayer_postgres_data:/var/lib/postgresql/data
+    networks:
+      - quayer-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-quayer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c max_connections=200
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2621kB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # ==================================
+  # REDIS
+  # ==================================
+  quayer-redis:
+    image: redis:7-alpine
+    container_name: quayer-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - quayer_redis_data:/data
+    networks:
+      - quayer-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+
+# ==================================
+# VOLUMES
+# ==================================
+volumes:
+  quayer_postgres_data:
+    driver: local
+    name: quayer-postgres-data
+  quayer_redis_data:
+    driver: local
+    name: quayer-redis-data
+
+# ==================================
+# NETWORKS
+# ==================================
+networks:
+  quayer-internal:
+    driver: bridge
+    name: quayer-internal
+  supabase_default:
+    external: true

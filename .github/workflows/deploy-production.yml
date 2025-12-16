@@ -21,12 +21,15 @@ jobs:
           port: 22
           script: |
             set -e # Falha o script se qualquer comando falhar
-            
+
             # Diretório da aplicação
             APP_DIR="/opt/quayer"
-            
-            echo "🔥 Iniciando Deploy Brutal..."
-            
+
+            # Arquivo compose para coexistir com Supabase
+            COMPOSE_FILE="docker-compose.quayer.yml"
+
+            echo "🔥 Iniciando Deploy Quayer..."
+
             # Verificar se o diretório existe e é um repositório git
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "⚠️ Repositório não encontrado ou inválido. Refazendo clone..."
@@ -40,56 +43,71 @@ jobs:
               git fetch --all
               git reset --hard origin/main
             fi
-            
+
             # Limpeza garantindo que .env seja PRESERVADO
-            # -f: force, -d: directories, -X: ignored files (NÃO usar -X ou -x para manter .env se estiver ignorado)
-            # -e .env: exclude from cleaning specifically
             git clean -fd -e .env
-            
+
             # Garantir que estamos na main atualizada
             git checkout main
             git pull origin main
-            
+
             # Verificar se .env existe
             if [ -f .env ]; then
               echo "✅ Arquivo .env encontrado. Carregando variáveis..."
-              # Exportar variáveis do .env para o shell atual para garantir que o Docker Compose as veja
               set -a
               source .env
               set +a
             else
-              echo "⚠️ AVISO: Arquivo .env NÃO encontrado! O deploy deve falhar."
-              ls -la
+              echo "❌ ERRO: Arquivo .env NÃO encontrado!"
+              echo "Configure o .env no servidor antes do deploy."
+              exit 1
             fi
 
-            # Priorizar docker compose v2 (Go) sobre docker-compose v1 (Python deprecated/buggy)
+            # Verificar se rede supabase_default existe
+            if ! docker network inspect supabase_default &> /dev/null; then
+              echo "⚠️ Rede supabase_default não existe. Criando..."
+              docker network create supabase_default || true
+            fi
+
+            # Priorizar docker compose v2
             if docker compose version &> /dev/null; then
               COMPOSE_CMD="docker compose"
               echo "✅ Usando Docker Compose v2 (Plugin)"
             elif command -v docker-compose &> /dev/null; then
               COMPOSE_CMD="docker-compose"
-              echo "⚠️ Usando Docker Compose v1 (Legacy) - Pode causar erros"
+              echo "⚠️ Usando Docker Compose v1 (Legacy)"
             else
               echo "❌ Docker Compose não encontrado!"
               exit 1
             fi
-            
-            echo "🐳 Comando selecionado: $COMPOSE_CMD"
-            
-            echo "🧹 Limpeza Pré-Build (Liberando espaço)..."
+
+            echo "🐳 Usando: $COMPOSE_CMD -f $COMPOSE_FILE"
+
+            echo "🧹 Limpeza Pré-Build..."
             docker system prune -f || true
-            
-            echo "🔥 Removendo containers antigos (Fix KeyError)..."
-            # Remove containers explicitamente para evitar erro de inspeção do compose antigo
-            docker rm -f quayer-app quayer-redis quayer-postgres quayer-meta quayer-studio || true
-            
-            echo "🏗️ Construindo containers..."
-            $COMPOSE_CMD -f docker-compose.prod.yml build --no-cache app
-            
+
+            echo "🔥 Parando containers antigos..."
+            $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans || true
+
+            echo "🏗️ Construindo imagem..."
+            $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
+
             echo "🚀 Subindo aplicação..."
-            $COMPOSE_CMD -f docker-compose.prod.yml up -d --force-recreate
-            
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate
+
+            echo "⏳ Aguardando health check..."
+            sleep 30
+
+            # Verificar se app está healthy
+            if docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null | grep -q "healthy"; then
+              echo "✅ App está healthy!"
+            else
+              echo "⚠️ App ainda não está healthy, verificando logs..."
+              docker logs quayer-app --tail 20
+            fi
+
             echo "🧹 Limpando imagens antigas..."
             docker image prune -f || true
-            
+
             echo "✅ Deploy concluído com sucesso!"
+            echo "🌐 App disponível em: https://app.quayer.com"
