@@ -8,7 +8,7 @@ export async function createOrganizationAction(formData: FormData) {
     const document = formData.get('document') as string
     const type = formData.get('type') as 'pf' | 'pj'
 
-    // ✅ CORREÇÃO BRUTAL: Obter token dos cookies
+    // Obter token dos cookies
     const cookieStore = await cookies()
     const accessToken = cookieStore.get('accessToken')?.value
 
@@ -19,7 +19,7 @@ export async function createOrganizationAction(formData: FormData) {
       }
     }
 
-    // ✅ CORREÇÃO BRUTAL: Fazer fetch HTTP para a API (mesmo padrão do loginAction)
+    // Fazer fetch HTTP para a API
     const response = await fetch(`${process.env.NEXT_PUBLIC_IGNITER_API_URL || 'http://localhost:3000'}/api/v1/organizations`, {
       method: 'POST',
       headers: {
@@ -37,18 +37,41 @@ export async function createOrganizationAction(formData: FormData) {
     })
 
     const result = await response.json()
+    console.log('📦 Organization API Response:', JSON.stringify(result, null, 2))
 
     if (!response.ok) {
+      // Extrair erro de diferentes formatos de resposta
+      const errorMessage = result.error || result.message || result.data?.error || 'Erro ao criar organização'
+      console.error('❌ Organization creation failed:', errorMessage)
       return {
         success: false,
-        error: result.error || result.data?.error || 'Erro ao criar organização'
+        error: errorMessage
       }
     }
 
-    const orgData = result.data
+    // O endpoint retorna: { message, organization, accessToken } dentro de data
+    const orgData = result.data || result
 
+    if (orgData?.organization && orgData?.accessToken) {
+      // O endpoint já retorna o novo accessToken com currentOrgId e needsOnboarding: false
+      // Atualizar cookie diretamente com o token retornado
+      const newCookieStore = await cookies()
+      newCookieStore.set('accessToken', orgData.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24, // 24 hours
+        path: '/',
+      })
+      console.log('✅ Access token updated with currentOrgId from organization creation')
+
+      return { success: true, organization: orgData.organization }
+    }
+
+    // Fallback: se não veio accessToken, tentar endpoint de complete
     if (orgData?.organization) {
-      // ✅ CORREÇÃO BRUTAL: Marcar onboarding como completo e obter novo token
+      console.log('⚠️ No accessToken in response, calling onboarding/complete...')
+
       const completeResponse = await fetch(`${process.env.NEXT_PUBLIC_IGNITER_API_URL || 'http://localhost:3000'}/api/v1/auth/onboarding/complete`, {
         method: 'POST',
         headers: {
@@ -60,24 +83,27 @@ export async function createOrganizationAction(formData: FormData) {
         const completeData = await completeResponse.json()
         console.log('✅ Onboarding complete response:', completeData)
 
-        // ✅ CORREÇÃO BRUTAL: Atualizar cookie com novo accessToken que contém currentOrgId
         if (completeData.data?.accessToken) {
-          const cookieStore = await cookies()
-          cookieStore.set('accessToken', completeData.data.accessToken, {
+          const newCookieStore = await cookies()
+          newCookieStore.set('accessToken', completeData.data.accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
-            maxAge: 60 * 60 * 24, // 24 hours
+            maxAge: 60 * 60 * 24,
             path: '/',
           })
-          console.log('✅ Access token updated with currentOrgId')
         }
-      } else {
-        console.error('❌ Erro ao completar onboarding:', await completeResponse.text())
       }
+
+      return { success: true, organization: orgData.organization }
     }
 
-    return { success: true, organization: orgData?.organization }
+    // Se chegou aqui, algo deu errado
+    console.error('❌ Unexpected response format:', result)
+    return {
+      success: false,
+      error: 'Resposta inesperada do servidor'
+    }
   } catch (error: any) {
     console.error('❌ Server Action Error:', error)
     return {
@@ -86,4 +112,3 @@ export async function createOrganizationAction(formData: FormData) {
     }
   }
 }
-
