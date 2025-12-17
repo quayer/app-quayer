@@ -17,6 +17,7 @@ import { useMutation } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
 import { PageContainer, PageHeader } from '@/components/layout/page-layout'
 import { ApiKeysSettings } from '@/components/admin-settings/ApiKeysSettings'
+import { PasskeyManager } from '@/components/settings/passkey-manager'
 
 // ============================================
 // TYPES
@@ -310,6 +311,9 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Security / Passkey Settings */}
+        <PasskeyManager className="border-muted/60 shadow-sm" />
 
         {/* Integrations/Providers Link */}
         <Card className="border-muted/60 shadow-sm hover:shadow-md transition-shadow">
