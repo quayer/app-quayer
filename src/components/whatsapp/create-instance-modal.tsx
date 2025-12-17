@@ -22,7 +22,6 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Plus, QrCode, Share2, ArrowLeft, ArrowRight, Copy, Check, Smartphone, Key, Cloud } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
@@ -352,7 +351,7 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={`${isCloudAPI ? 'sm:max-w-xl' : 'sm:max-w-md'} max-h-[90vh] overflow-y-auto`}>
         {/* Etapa 1: Formulario de criacao */}
         {step === 'form' && (
           <>

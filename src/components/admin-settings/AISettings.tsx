@@ -79,10 +79,20 @@ const PROMPT_ICONS: Record<string, any> = {
 }
 
 const MODELS = [
-  { value: 'gpt-4o', label: 'GPT-4o (Mais capaz)' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Custo-benefício)' },
+  // Modelos mais recentes
+  { value: 'gpt-4.1', label: 'GPT-4.1 (Mais recente)' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini (Custo-benefício)' },
+  { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (Ultra rápido)' },
+  // Modelos estáveis
+  { value: 'gpt-4o', label: 'GPT-4o (Estável)' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Econômico)' },
   { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-  { value: 'whisper-1', label: 'Whisper (Transcrição)' },
+  // Modelos de raciocínio
+  { value: 'o1', label: 'O1 (Raciocínio avançado)' },
+  { value: 'o1-mini', label: 'O1 Mini (Raciocínio rápido)' },
+  { value: 'o1-pro', label: 'O1 Pro (Máximo raciocínio)' },
+  // Transcrição
+  { value: 'whisper-1', label: 'Whisper (Transcrição de áudio)' },
 ]
 
 // Variables that can be used in prompts

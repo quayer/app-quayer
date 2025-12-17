@@ -190,6 +190,18 @@ export default function NotificationsAdminPage() {
     },
   })
 
+  // Helper to format datetime-local value to ISO string
+  const formatDatetimeToISO = (value: string): string | null => {
+    if (!value) return null
+    try {
+      // datetime-local returns "2024-01-15T10:30", convert to ISO 8601
+      const date = new Date(value)
+      return date.toISOString()
+    } catch {
+      return null
+    }
+  }
+
   // Mutations
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -205,8 +217,8 @@ export default function NotificationsAdminPage() {
           userId: data.userId || null,
           organizationId: data.organizationId || null,
           role: data.role || null,
-          scheduledFor: data.scheduledFor || null,
-          expiresAt: data.expiresAt || null,
+          scheduledFor: formatDatetimeToISO(data.scheduledFor),
+          expiresAt: formatDatetimeToISO(data.expiresAt),
         }),
       })
     },
@@ -224,8 +236,8 @@ export default function NotificationsAdminPage() {
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<typeof formData> }) => {
       return fetchWithAuth(`/api/v1/notifications/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ data }),
+        method: 'PUT',
+        body: JSON.stringify(data),
       })
     },
     onSuccess: () => {
@@ -259,7 +271,7 @@ export default function NotificationsAdminPage() {
 
   const cleanupMutation = useMutation({
     mutationFn: async () => {
-      return fetchWithAuth('/api/v1/notifications/cleanup-expired', {
+      return fetchWithAuth('/api/v1/notifications/cleanup', {
         method: 'POST',
       })
     },

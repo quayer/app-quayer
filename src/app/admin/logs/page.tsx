@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  FileText, Search, Download, AlertCircle, Info, AlertTriangle,
-  CheckCircle2, RefreshCcw, Brain, Sparkles, X, Loader2, Zap,
+  FileText, Search, AlertCircle, Info, AlertTriangle,
+  CheckCircle2, RefreshCcw, Brain, Sparkles, Loader2, Zap,
   Activity, Server, Database, Shield, Clock, TrendingUp, TrendingDown,
   Play, Pause, Bug, Skull, Radio
 } from 'lucide-react'
@@ -29,7 +29,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { formatDistanceToNow } from 'date-fns'
@@ -131,6 +130,16 @@ const sourceIcons: Record<string, any> = {
   default: FileText,
 }
 
+// Modelos LLM disponíveis para análise
+const AI_MODELS = [
+  { value: 'gpt-4.1', label: 'GPT-4.1 (Mais recente)' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  { value: 'gpt-4o', label: 'GPT-4o (Estável)' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { value: 'o1', label: 'O1 (Raciocínio)' },
+  { value: 'o1-mini', label: 'O1 Mini' },
+]
+
 export default function AdminLogsPage() {
   // Filters
   const [searchTerm, setSearchTerm] = useState('')
@@ -162,6 +171,7 @@ export default function AdminLogsPage() {
   const [cachedAnalysis, setCachedAnalysis] = useState<{ data: AIAnalysis; timestamp: Date; id: string } | null>(null)
   const [isLoadingCached, setIsLoadingCached] = useState(false)
   const [analysisSource, setAnalysisSource] = useState<'cache' | 'new' | null>(null)
+  const [selectedModel, setSelectedModel] = useState('gpt-4o')
 
   // Load logs
   const loadLogs = useCallback(async () => {
@@ -357,7 +367,7 @@ export default function AdminLogsPage() {
       setAnalysisSource('new')
       setIsAnalyzing(true)
 
-      const body: any = { limit: 500 }
+      const body: any = { limit: 500, model: selectedModel }
       if (levelFilter !== 'all') body.level = levelFilter
       if (sourceFilter !== 'all') body.source = sourceFilter
 
@@ -387,7 +397,7 @@ export default function AdminLogsPage() {
     } finally {
       setIsAnalyzing(false)
     }
-  }, [levelFilter, sourceFilter, fetchCachedAnalysis])
+  }, [levelFilter, sourceFilter, selectedModel, fetchCachedAnalysis])
 
   // Analyze single error
   const analyzeError = useCallback(async (logId: string) => {
@@ -910,7 +920,7 @@ export default function AdminLogsPage() {
           setAiError(null)
         }
       }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <div className="p-2 rounded-lg bg-gradient-to-br from-purple-500/20 to-blue-500/20">
@@ -924,19 +934,35 @@ export default function AdminLogsPage() {
                 </Badge>
               )}
             </DialogTitle>
-            <DialogDescription className="flex items-center justify-between">
-              <span>Análise automatizada usando GPT-4o com LangChain</span>
-              {analysisSource === 'cache' && !isAnalyzing && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => runAIAnalysis(true)}
-                  className="h-7"
-                >
-                  <RefreshCcw className="h-3 w-3 mr-1" />
-                  Nova Análise
-                </Button>
-              )}
+            <DialogDescription asChild>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">Modelo:</span>
+                  <Select value={selectedModel} onValueChange={setSelectedModel} disabled={isAnalyzing}>
+                    <SelectTrigger className="w-[180px] h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_MODELS.map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          {model.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {analysisSource === 'cache' && !isAnalyzing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runAIAnalysis(true)}
+                    className="h-7"
+                  >
+                    <RefreshCcw className="h-3 w-3 mr-1" />
+                    Nova Análise
+                  </Button>
+                )}
+              </div>
             </DialogDescription>
           </DialogHeader>
 
@@ -966,11 +992,11 @@ export default function AdminLogsPage() {
           ) : aiAnalysis ? (
             <ScrollArea className="h-[65vh]">
               <Tabs defaultValue="summary" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="summary">Resumo</TabsTrigger>
-                  <TabsTrigger value="patterns">Padrões</TabsTrigger>
-                  <TabsTrigger value="anomalies">Anomalias</TabsTrigger>
-                  <TabsTrigger value="suggestions">Sugestões</TabsTrigger>
+                <TabsList className="grid w-full grid-cols-4 h-10">
+                  <TabsTrigger value="summary" className="h-8">Resumo</TabsTrigger>
+                  <TabsTrigger value="patterns" className="h-8">Padrões</TabsTrigger>
+                  <TabsTrigger value="anomalies" className="h-8">Anomalias</TabsTrigger>
+                  <TabsTrigger value="suggestions" className="h-8">Sugestões</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="summary" className="mt-4 space-y-4">

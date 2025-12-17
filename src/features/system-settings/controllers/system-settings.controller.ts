@@ -20,6 +20,7 @@ import {
   testUazapiConnectionSchema,
   testSmtpConnectionSchema,
   testOpenAIConnectionSchema,
+  globalWebhookSettingsSchema,
 } from '../system-settings.schemas'
 import {
   DEFAULT_SETTINGS,
@@ -421,6 +422,64 @@ export const systemSettingsController = igniter.controller({
             error: `Falha OpenAI: ${error.message}`,
           })
         }
+      },
+    }),
+
+    // ==========================================
+    // GLOBAL WEBHOOK SETTINGS (UAZapi)
+    // ==========================================
+    getGlobalWebhook: igniter.query({
+      name: 'Get Global Webhook',
+      description: 'Get global webhook configuration for UAZapi',
+      path: '/webhook',
+      method: 'GET',
+      use: [adminProcedure()],
+      handler: async ({ context, response }) => {
+        const settings = await systemSettingsRepository.getByCategory('uazapi')
+        // Return webhook-specific fields
+        return response.json({
+          success: true,
+          data: settings?.webhook || null,
+        })
+      },
+    }),
+
+    updateGlobalWebhook: igniter.mutation({
+      name: 'Update Global Webhook',
+      description: 'Update global webhook configuration for UAZapi',
+      path: '/webhook',
+      method: 'POST',
+      body: globalWebhookSettingsSchema,
+      use: [adminProcedure()],
+      handler: async ({ request, context, response }) => {
+        const user = getAdminUser(context)
+
+        // Get current uazapi settings
+        const currentSettings = await systemSettingsRepository.getByCategory('uazapi') || {}
+
+        // Update with webhook config
+        await systemSettingsRepository.setCategory('uazapi', {
+          ...currentSettings,
+          webhook: request.body,
+        }, {
+          updatedBy: user?.id,
+        })
+
+        // Optionally sync to all UAZapi instances
+        let syncResult = null
+        try {
+          // Import uazapi client to sync webhook
+          const { uazapiClient } = await import('@/lib/providers/adapters/uazapi/uazapi.client')
+          syncResult = await uazapiClient.syncGlobalWebhook(request.body)
+        } catch (error: any) {
+          console.warn('Failed to sync webhook to instances:', error.message)
+        }
+
+        return response.json({
+          success: true,
+          message: 'Webhook global salvo',
+          sync: syncResult,
+        })
       },
     }),
 

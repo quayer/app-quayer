@@ -109,6 +109,15 @@ export const bulkUpdateSettingsSchema = z.object({
   settings: z.record(z.string(), z.any()),
 })
 
+// Global Webhook Settings (UAZapi)
+export const globalWebhookSettingsSchema = z.object({
+  url: z.string().url('URL do webhook inválida'),
+  events: z.array(z.string()).min(1, 'Selecione pelo menos um evento'),
+  excludeMessages: z.array(z.string()).default([]),
+  addUrlEvents: z.boolean().default(false),
+  addUrlTypesMessages: z.boolean().default(false),
+})
+
 // Test connection schemas
 export const testUazapiConnectionSchema = z.object({
   baseUrl: z.string().url(),
@@ -136,3 +145,4 @@ export type OAuthSettingsInput = z.infer<typeof oauthSettingsSchema>
 export type SecuritySettingsInput = z.infer<typeof securitySettingsSchema>
 export type EmailTemplateInput = z.infer<typeof emailTemplateSchema>
 export type AIPromptInput = z.infer<typeof aiPromptSchema>
+export type GlobalWebhookSettingsInput = z.infer<typeof globalWebhookSettingsSchema>

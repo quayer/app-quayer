@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -69,15 +68,15 @@ export function WebhookSettings() {
     data: globalWebhook,
     isLoading: isLoadingWebhook,
     error: webhookError,
-    refetch: refetchWebhook,
   } = useQuery({
     queryKey: ['uazapi-global-webhook'],
     queryFn: async () => {
       const token = localStorage.getItem('accessToken')
-      const response = await fetch('/api/v1/admin/settings/webhook', {
+      const response = await fetch('/api/v1/system-settings/webhook', {
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        credentials: 'include',
       })
 
       if (!response.ok) {
@@ -85,9 +84,9 @@ export function WebhookSettings() {
         throw new Error('Falha ao carregar configurações')
       }
 
-      const data = await response.json()
-      // Se retornar null (não configurado), retornamos null para o frontend tratar
-      return data
+      const result = await response.json()
+      // API returns { success: true, data: {...} }
+      return result.data
     },
     enabled: isMounted,
     retry: 1,
@@ -110,12 +109,13 @@ export function WebhookSettings() {
   const saveWebhookMutation = useMutation({
     mutationFn: async (config: WebhookConfig) => {
       const token = localStorage.getItem('accessToken')
-      const response = await fetch('/api/v1/admin/settings/webhook', {
+      const response = await fetch('/api/v1/system-settings/webhook', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        credentials: 'include',
         body: JSON.stringify(config),
       })
 

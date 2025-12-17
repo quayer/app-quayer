@@ -42,16 +42,21 @@ export const organizationsController = igniter.controller({
         const userRole = user.role as UserRole;
 
         // Permitir criação se:
-        // 1. É admin (sistema)
-        // 2. OU usuário não completou onboarding E não tem organização
+        // 1. É admin (sistema) - pode criar sempre
+        // 2. Usuário no onboarding (não tem organização ainda)
+        // 3. Usuário é master em pelo menos uma organização (multi-empresa)
         const isAdmin = isSystemAdmin(userRole);
 
         if (!isAdmin) {
-          // Verificar se está no onboarding
+          // Verificar permissões do usuário
           const userData = await db.user.findUnique({
             where: { id: userId },
             include: {
-              organizations: true,
+              organizations: {
+                include: {
+                  organization: true,
+                },
+              },
             },
           });
 
@@ -59,10 +64,18 @@ export const organizationsController = igniter.controller({
             return response.notFound('User not found');
           }
 
-          // Permitir apenas se não completou onboarding E não tem organização
-          if (userData.onboardingCompleted || userData.organizations.length > 0) {
+          // Cenário 1: Usuário no onboarding (sem organização) - permitir criar primeira org
+          const hasNoOrganizations = userData.organizations.length === 0;
+
+          // Cenário 2: Usuário é master em alguma organização - permitir criar novas orgs
+          const isMasterInAnyOrg = userData.organizations.some(
+            (orgUser) => orgUser.role === 'master'
+          );
+
+          // Bloquear se não está em nenhum dos cenários permitidos
+          if (!hasNoOrganizations && !isMasterInAnyOrg) {
             return response.forbidden(
-              'Apenas administradores podem criar novas organizações. Você já possui uma organização.'
+              'Apenas masters de organizações podem criar novas organizações.'
             );
           }
         }
