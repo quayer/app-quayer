@@ -60,16 +60,33 @@ export function PasskeyButton({
     })
 
     if (optionsError || !optionsData) {
-      const errorMsg = (optionsError as any)?.error?.message ||
-                      (optionsError as any)?.message ||
-                      'Erro ao obter opções de login'
+      // Extrair mensagem de erro de diferentes formatos possíveis
+      const errorData = optionsError as any
+      const errorMsg = errorData?.error?.message ||
+                      errorData?.error ||
+                      errorData?.message ||
+                      errorData?.data?.error ||
+                      (typeof errorData === 'string' ? errorData : 'Erro ao obter opções de login')
 
-      // Verificar se é erro de "nenhuma passkey registrada"
-      if (errorMsg.includes('Nenhuma passkey')) {
+      console.log('[Passkey Login] Error response:', {
+        optionsError,
+        extractedMsg: errorMsg,
+        errorData
+      })
+
+      // Verificar se é erro de "nenhuma passkey registrada" ou "usuário não encontrado"
+      const noPasskeyPatterns = [
+        'Nenhuma passkey',
+        'nenhuma passkey',
+        'not registered',
+        'Usuário não encontrado'
+      ]
+
+      if (noPasskeyPatterns.some(pattern => String(errorMsg).includes(pattern))) {
         return false // Sinaliza que não tem passkey
       }
 
-      throw new Error(errorMsg)
+      throw new Error(String(errorMsg))
     }
 
     setStatusText("Autenticando...")
@@ -133,10 +150,21 @@ export function PasskeyButton({
     })
 
     if (optionsError || !optionsData) {
-      const errorMsg = (optionsError as any)?.error?.message ||
-                      (optionsError as any)?.message ||
-                      'Erro ao obter opções de registro'
-      throw new Error(errorMsg)
+      // Extrair mensagem de erro de diferentes formatos possíveis
+      const errorData = optionsError as any
+      const errorMsg = errorData?.error?.message ||
+                      errorData?.error ||
+                      errorData?.message ||
+                      errorData?.data?.error ||
+                      (typeof errorData === 'string' ? errorData : 'Erro ao obter opções de registro')
+
+      console.log('[Passkey Register] Error response:', {
+        optionsError,
+        extractedMsg: errorMsg,
+        errorData
+      })
+
+      throw new Error(String(errorMsg))
     }
 
     setStatusText("Registrando passkey...")
@@ -244,7 +272,10 @@ export function PasskeyButton({
   }
 
   /**
-   * Modo Smart: Tenta login, se não tiver passkey, registra automaticamente
+   * Modo Smart: Fluxo inteligente de Passkey
+   * 1. Se usuário tem passkey → Login direto
+   * 2. Se usuário existe mas não tem passkey → Registra e faz login
+   * 3. Se usuário não existe → Orienta a criar conta
    */
   const handlePasskeySmart = async () => {
     if (!checkBrowserSupport()) return
@@ -261,35 +292,83 @@ export function PasskeyButton({
     setIsLoading(true)
 
     try {
-      // Primeiro tenta fazer login
+      // Primeiro tenta fazer login (verifica se tem passkey)
       const loginSuccess = await attemptPasskeyLogin()
 
       if (!loginSuccess) {
-        // Se não tem passkey, informa e oferece registro
+        // Usuário existe mas não tem passkey - tentar registrar
         toast({
-          title: "Nenhuma Passkey encontrada",
-          description: "Vamos registrar sua primeira Passkey agora...",
+          title: "Registrando Passkey",
+          description: "Vamos criar sua primeira Passkey...",
         })
 
-        // Aguarda um momento para o usuário ver a mensagem
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        setStatusText("Preparando registro...")
 
-        // Registra nova passkey
-        const registerSuccess = await attemptPasskeyRegister()
+        try {
+          // Tentar registrar passkey
+          const registerSuccess = await attemptPasskeyRegister()
 
-        if (registerSuccess) {
-          // Após registrar, faz login automaticamente
-          toast({
-            title: "Passkey criada!",
-            description: "Autenticando com sua nova Passkey...",
-          })
+          if (registerSuccess) {
+            // Sucesso no registro - agora fazer login
+            toast({
+              title: "Passkey criada!",
+              description: "Autenticando...",
+            })
 
-          await new Promise(resolve => setTimeout(resolve, 500))
-          await attemptPasskeyLogin()
+            setStatusText("Autenticando...")
+            await new Promise(resolve => setTimeout(resolve, 500))
+
+            // Fazer login com a passkey recém-criada
+            await attemptPasskeyLogin()
+          }
+        } catch (registerError: any) {
+          console.error('[Passkey Smart] Register error completo:', registerError)
+          console.error('[Passkey Smart] Register error name:', registerError?.name)
+          console.error('[Passkey Smart] Register error message:', registerError?.message)
+
+          // Extrair mensagem de erro de forma robusta
+          const errorMsg = registerError?.message ||
+                          registerError?.error?.message ||
+                          registerError?.error ||
+                          (typeof registerError === 'string' ? registerError : '')
+
+          console.log('[Passkey Smart] Register extracted error:', errorMsg)
+
+          if (String(errorMsg).includes('não encontrado') || String(errorMsg).toLowerCase().includes('not found')) {
+            toast({
+              title: "Conta não encontrada",
+              description: "Crie uma conta primeiro usando o botão 'Continuar com Email'",
+              variant: "destructive",
+            })
+          } else if (registerError.name === 'NotAllowedError') {
+            toast({
+              title: "Registro cancelado",
+              description: "Você cancelou o registro da Passkey",
+              variant: "destructive",
+            })
+          } else {
+            const displayError = String(errorMsg) || JSON.stringify(registerError) || "Erro desconhecido"
+            toast({
+              title: "Erro no registro",
+              description: displayError.substring(0, 200),
+              variant: "destructive",
+            })
+          }
         }
       }
     } catch (error: any) {
-      console.error('[Passkey Smart] Error:', error)
+      console.error('[Passkey Smart] Error completo:', error)
+      console.error('[Passkey Smart] Error name:', error?.name)
+      console.error('[Passkey Smart] Error message:', error?.message)
+      console.error('[Passkey Smart] Error stack:', error?.stack)
+
+      // Extrair mensagem de erro de forma robusta
+      const errorMsg = error?.message ||
+                      error?.error?.message ||
+                      error?.error ||
+                      (typeof error === 'string' ? error : '')
+
+      console.log('[Passkey Smart] Extracted error message:', errorMsg)
 
       if (error.name === 'NotAllowedError') {
         toast({
@@ -297,10 +376,18 @@ export function PasskeyButton({
           description: "Você cancelou a operação com Passkey",
           variant: "destructive",
         })
-      } else {
+      } else if (String(errorMsg).includes('não encontrado') || String(errorMsg).toLowerCase().includes('not found')) {
         toast({
-          title: "Erro",
-          description: error.message || "Não foi possível completar a operação",
+          title: "Conta não encontrada",
+          description: "Crie uma conta primeiro usando o botão 'Continuar com Email'",
+          variant: "destructive",
+        })
+      } else {
+        // Mostrar erro específico se disponível, senão mostrar o erro completo
+        const displayError = String(errorMsg) || JSON.stringify(error) || "Erro desconhecido"
+        toast({
+          title: "Erro na Passkey",
+          description: displayError.substring(0, 200), // Limitar tamanho
           variant: "destructive",
         })
       }
