@@ -59,10 +59,15 @@ export function PasskeyButton({
       body: { email: email! }
     })
 
-    if (optionsError || !optionsData) {
+    // Verificar erro - pode vir em optionsError OU em optionsData.error
+    const dataError = (optionsData as any)?.error
+    const hasError = optionsError || dataError || !optionsData
+
+    if (hasError) {
       // Extrair mensagem de erro de diferentes formatos possíveis
       const errorData = optionsError as any
-      const errorMsg = errorData?.error?.message ||
+      const errorMsg = dataError ||  // Erro vem em data.error
+                      errorData?.error?.message ||
                       errorData?.error ||
                       errorData?.message ||
                       errorData?.data?.error ||
@@ -70,8 +75,9 @@ export function PasskeyButton({
 
       console.log('[Passkey Login] Error response:', {
         optionsError,
-        extractedMsg: errorMsg,
-        errorData
+        optionsData,
+        dataError,
+        extractedMsg: errorMsg
       })
 
       // Verificar se é erro de "nenhuma passkey registrada" ou "usuário não encontrado"
@@ -149,10 +155,15 @@ export function PasskeyButton({
       body: { email: email! }
     })
 
-    if (optionsError || !optionsData) {
+    // Verificar erro - pode vir em optionsError OU em optionsData.error
+    const dataError = (optionsData as any)?.error
+    const hasError = optionsError || dataError || !optionsData
+
+    if (hasError) {
       // Extrair mensagem de erro de diferentes formatos possíveis
       const errorData = optionsError as any
-      const errorMsg = errorData?.error?.message ||
+      const errorMsg = dataError ||  // Erro vem em data.error
+                      errorData?.error?.message ||
                       errorData?.error ||
                       errorData?.message ||
                       errorData?.data?.error ||
@@ -160,8 +171,9 @@ export function PasskeyButton({
 
       console.log('[Passkey Register] Error response:', {
         optionsError,
-        extractedMsg: errorMsg,
-        errorData
+        optionsData,
+        dataError,
+        extractedMsg: errorMsg
       })
 
       throw new Error(String(errorMsg))
