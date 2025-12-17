@@ -59,24 +59,33 @@ export function PasskeyButton({
       body: { email: email! }
     })
 
-    // Verificar erro - pode vir em optionsError OU em optionsData.error
+    // DEBUG: Log completo para entender a estrutura
+    console.log('[Passkey Login] Full API response:', {
+      optionsData: JSON.stringify(optionsData),
+      optionsError: JSON.stringify(optionsError),
+      optionsDataType: typeof optionsData
+    })
+
+    // Verificar erro - pode vir em múltiplos formatos:
+    // 1. optionsError (erro do client)
+    // 2. optionsData.error (erro da API em data.error)
+    // 3. optionsData pode ser {error: "msg"} diretamente
     const dataError = (optionsData as any)?.error
     const hasError = optionsError || dataError || !optionsData
 
+    // Se há erro, extrair a mensagem
     if (hasError) {
-      // Extrair mensagem de erro de diferentes formatos possíveis
-      const errorData = optionsError as any
-      const errorMsg = dataError ||  // Erro vem em data.error
-                      errorData?.error?.message ||
-                      errorData?.error ||
-                      errorData?.message ||
-                      errorData?.data?.error ||
-                      (typeof errorData === 'string' ? errorData : 'Erro ao obter opções de login')
+      // Priorizar dataError pois é o formato que a API usa
+      const errorMsg = dataError ||
+                      (optionsError as any)?.error?.message ||
+                      (optionsError as any)?.error ||
+                      (optionsError as any)?.message ||
+                      (optionsError as any)?.data?.error ||
+                      'Erro ao obter opções de login'
 
-      console.log('[Passkey Login] Error response:', {
-        optionsError,
-        optionsData,
+      console.log('[Passkey Login] Detected error:', {
         dataError,
+        optionsError,
         extractedMsg: errorMsg
       })
 
@@ -85,14 +94,17 @@ export function PasskeyButton({
         'Nenhuma passkey',
         'nenhuma passkey',
         'not registered',
-        'Usuário não encontrado'
+        'Usuário não encontrado',
+        'Registre uma passkey'
       ]
 
-      if (noPasskeyPatterns.some(pattern => String(errorMsg).includes(pattern))) {
-        return false // Sinaliza que não tem passkey
+      const errorString = String(errorMsg)
+      if (noPasskeyPatterns.some(pattern => errorString.includes(pattern))) {
+        console.log('[Passkey Login] No passkey detected, returning false to trigger registration')
+        return false // Sinaliza que não tem passkey -> dispara registro
       }
 
-      throw new Error(String(errorMsg))
+      throw new Error(errorString)
     }
 
     setStatusText("Autenticando...")
@@ -306,13 +318,17 @@ export function PasskeyButton({
     }
 
     setIsLoading(true)
+    console.log('[Passkey Smart] Starting smart passkey flow for:', email)
 
     try {
       // Primeiro tenta fazer login (verifica se tem passkey)
+      console.log('[Passkey Smart] Step 1: Attempting login...')
       const loginSuccess = await attemptPasskeyLogin()
+      console.log('[Passkey Smart] Login result:', loginSuccess)
 
       if (!loginSuccess) {
         // Usuário existe mas não tem passkey - tentar registrar
+        console.log('[Passkey Smart] Step 2: No passkey found, starting registration flow...')
         toast({
           title: "Registrando Passkey",
           description: "Vamos criar sua primeira Passkey...",
