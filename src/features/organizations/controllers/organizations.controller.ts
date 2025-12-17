@@ -13,11 +13,11 @@ import {
   addMemberSchema,
   updateMemberSchema,
 } from '../organizations.schemas';
-import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
-import { z } from 'zod';
+import { UserRole, OrganizationRole, isSystemAdmin } from '@/lib/auth/roles';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { signAccessToken } from '@/lib/auth/jwt';
 
 const db = new PrismaClient();
 
@@ -120,15 +120,31 @@ export const organizationsController = igniter.controller({
           },
         });
 
-        // 4. Atualizar currentOrgId do usuário alvo
-        await db.user.update({
+        // 4. Atualizar currentOrgId do usuário alvo E marcar onboarding como completo
+        const updatedUser = await db.user.update({
           where: { id: targetUserId },
           data: {
             currentOrgId: organization.id,
+            onboardingCompleted: true, // ✅ CORREÇÃO BRUTAL: Marcar onboarding como completo
+            lastOrganizationId: organization.id,
           },
         });
 
-        return response.created({ message: 'Organização criada com sucesso', organization });
+        // 5. Gerar novo access token com needsOnboarding: false
+        const accessToken = signAccessToken({
+          userId: targetUserId,
+          email: updatedUser.email,
+          role: updatedUser.role as UserRole,
+          currentOrgId: organization.id,
+          organizationRole: OrganizationRole.MASTER,
+          needsOnboarding: false, // ✅ CRÍTICO: Token com onboarding completo
+        });
+
+        return response.created({
+          message: 'Organização criada com sucesso',
+          organization,
+          accessToken, // ✅ CORREÇÃO BRUTAL: Retornar novo token
+        });
       },
     }),
 

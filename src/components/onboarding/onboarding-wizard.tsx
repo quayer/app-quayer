@@ -59,37 +59,30 @@ export function OnboardingWizard() {
 
   // Mutation para criar organização
   const createOrgMutation = api.organizations.create.useMutation({
-    onSuccess: async (data) => {
+    onSuccess: async (data: any) => {
       toast.success('Organização criada com sucesso!')
 
-      // Marcar onboarding como completo
-      await markOnboardingComplete()
+      // ✅ CORREÇÃO BRUTAL: Atualizar token com o novo que vem da resposta
+      if (data?.accessToken) {
+        localStorage.setItem('accessToken', data.accessToken)
+        // Atualizar cookie também para o middleware
+        document.cookie = `accessToken=${encodeURIComponent(data.accessToken)}; path=/; max-age=86400; SameSite=Lax`
+        console.log('[Onboarding] Token atualizado com needsOnboarding: false')
+      }
 
+      // Mostrar tela de sucesso
       setCurrentStep('complete')
+
+      // ✅ CORREÇÃO BRUTAL: Usar window.location.href para forçar reload completo
+      // Isso garante que o middleware leia o novo cookie com o token atualizado
+      setTimeout(() => {
+        window.location.href = '/integracoes'
+      }, 2000)
     },
     onError: (error: any) => {
       toast.error(`Erro ao criar organização: ${error?.message || 'Erro desconhecido'}`)
     },
   })
-
-  // Mutation para marcar onboarding como completo
-  const completeOnboardingMutation = api.auth.completeOnboarding.useMutation({
-    onSuccess: () => {
-      // Redirecionar após 2 segundos
-      setTimeout(() => {
-        router.push('/integracoes')
-        router.refresh()
-      }, 2000)
-    },
-  })
-
-  const markOnboardingComplete = async () => {
-    try {
-      completeOnboardingMutation.mutate()
-    } catch (error) {
-      console.error('Erro ao marcar onboarding como completo:', error)
-    }
-  }
 
   const handleNext = () => {
     if (currentStep === 'welcome') {

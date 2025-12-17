@@ -110,13 +110,14 @@ export const onboardingController = igniter.controller({
           },
         });
 
-        // Generate new access token with organizationId
+        // Generate new access token with organizationId and needsOnboarding: false
         const accessToken = signAccessToken({
           userId: user.id,
           email: user.email,
           role: user.role as UserRole,
           currentOrgId: organization.id,
           organizationRole: OrganizationRole.MASTER,
+          needsOnboarding: false, // ✅ CRÍTICO: Token com onboarding completo
         });
 
         return response.success({
