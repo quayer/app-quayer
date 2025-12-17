@@ -108,8 +108,10 @@ export function PasskeyButton({
       }
     })
 
-    if (verifyError || !verifyData) {
-      throw new Error((verifyError as any)?.error?.message || 'Verificação falhou')
+    // Verificar erro na verificação
+    const verifyDataError = (verifyData as any)?.error
+    if (verifyError || verifyDataError || !verifyData) {
+      throw new Error(verifyDataError || (verifyError as any)?.error?.message || 'Verificação falhou')
     }
 
     // 4. Salvar tokens
@@ -192,8 +194,10 @@ export function PasskeyButton({
       }
     })
 
-    if (verifyError || !verifyData) {
-      throw new Error((verifyError as any)?.error?.message || 'Registro falhou')
+    // Verificar erro no registro
+    const verifyDataError = (verifyData as any)?.error
+    if (verifyError || verifyDataError || !verifyData) {
+      throw new Error(verifyDataError || (verifyError as any)?.error?.message || 'Registro falhou')
     }
 
     toast({
