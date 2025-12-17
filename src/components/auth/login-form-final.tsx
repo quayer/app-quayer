@@ -263,7 +263,7 @@ export function LoginFormFinal({
 
                 <Field>
                   <PasskeyButton
-                    mode="login"
+                    mode="smart"
                     email={email}
                     variant="outline"
                     className="w-full hover:bg-accent/50 transition-colors"

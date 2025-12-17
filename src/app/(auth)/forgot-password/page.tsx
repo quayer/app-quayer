@@ -14,7 +14,14 @@ import {
   FieldGroup,
 } from '@/components/ui/field'
 import { api } from '@/igniter.client'
-import { cn } from '@/lib/utils'
+import { AuthLayout } from "@/components/auth/auth-layout"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -44,99 +51,108 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className={cn("flex flex-col gap-6")}>
-          <form onSubmit={handleSubmit}>
-            <FieldGroup>
-              <div className="flex flex-col items-center gap-2 text-center">
-                <Link
-                  href="/login"
-                  className="flex flex-col items-center gap-2 font-medium"
-                >
-                  <div className="flex items-center justify-center">
-                    <Image
-                      src="/logo.svg"
-                      alt="Quayer Logo"
-                      width={160}
-                      height={38}
-                    />
-                  </div>
-                  <span className="sr-only">Quayer</span>
-                </Link>
-                <h1 className="text-xl font-bold mt-4">Esqueceu sua senha?</h1>
-                <FieldDescription>
-                  Digite seu e-mail e enviaremos instruções para redefinir sua senha
-                </FieldDescription>
-              </div>
+    <AuthLayout>
+      <div className="flex w-full flex-col gap-6">
+        <Link
+          href="/login"
+          className="flex items-center justify-center gap-2 font-medium group"
+          aria-label="Voltar para login"
+        >
+          <div className="relative">
+            <Image
+              src="/logo.svg"
+              alt="Quayer"
+              width={140}
+              height={32}
+              priority
+              className="relative z-10 transition-transform duration-300 group-hover:scale-105"
+            />
+            <div className="absolute inset-0 blur-xl bg-gradient-to-r from-purple-500/30 to-pink-500/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          </div>
+        </Link>
 
-              {error && (
-                <Alert variant="destructive" className="border-red-500/50 bg-red-500/10">
-                  <AlertDescription className="text-red-200">{error}</AlertDescription>
-                </Alert>
-              )}
+        <Card className="border-border/50 bg-card/80 backdrop-blur-sm shadow-xl">
+          <CardHeader className="text-center pb-4">
+            <CardTitle className="text-xl font-semibold">Esqueceu sua senha?</CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Digite seu e-mail e enviaremos instruções para redefinir sua senha
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit}>
+              <FieldGroup>
+                {error && (
+                  <Alert variant="destructive" className="border-red-500/50 bg-red-500/10">
+                    <AlertDescription className="text-red-200">{error}</AlertDescription>
+                  </Alert>
+                )}
 
-              {success && (
-                <Alert className="border-green-500/50 bg-green-500/10">
-                  <CheckCircle2 className="h-4 w-4 text-green-400" />
-                  <AlertDescription className="text-green-200">
-                    E-mail enviado com sucesso! Verifique sua caixa de entrada (e spam também).
-                  </AlertDescription>
-                </Alert>
-              )}
+                {success && (
+                  <Alert className="border-green-500/50 bg-green-500/10">
+                    <CheckCircle2 className="h-4 w-4 text-green-400" />
+                    <AlertDescription className="text-green-200">
+                      E-mail enviado com sucesso! Verifique sua caixa de entrada (e spam também).
+                    </AlertDescription>
+                  </Alert>
+                )}
 
-              <Field>
-                <FieldLabel htmlFor="email">E-mail</FieldLabel>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="voce@exemplo.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  disabled={isLoading || success}
-                  autoFocus
-                />
-              </Field>
+                <Field>
+                  <FieldLabel htmlFor="email">E-mail</FieldLabel>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="voce@exemplo.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={isLoading || success}
+                    autoFocus
+                  />
+                </Field>
 
-              <Field>
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isLoading || success}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Enviando...
-                    </>
-                  ) : success ? (
-                    <>
-                      <CheckCircle2 className="mr-2 h-4 w-4" />
-                      E-mail enviado
-                    </>
-                  ) : (
-                    'Enviar instruções'
-                  )}
-                </Button>
-              </Field>
+                <Field>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading || success}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Enviando...
+                      </>
+                    ) : success ? (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        E-mail enviado
+                      </>
+                    ) : (
+                      'Enviar instruções'
+                    )}
+                  </Button>
+                </Field>
 
-              <div className="text-center">
-                <Link
-                  href="/login"
-                  className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Voltar para login
-                </Link>
-              </div>
-            </FieldGroup>
-          </form>
-          <FieldDescription className="px-6 text-center text-xs">
-            Lembrou sua senha? <Link href="/login" className="underline underline-offset-4 hover:text-primary">Faça login</Link>
-          </FieldDescription>
-        </div>
+                <div className="text-center">
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Voltar para login
+                  </Link>
+                </div>
+              </FieldGroup>
+            </form>
+          </CardContent>
+        </Card>
+
+        <p className="text-center text-xs text-muted-foreground/70 px-4">
+          Lembrou sua senha?{" "}
+          <Link href="/login" className="underline underline-offset-4 hover:text-muted-foreground transition-colors">
+            Faça login
+          </Link>
+        </p>
       </div>
-    </div>
+    </AuthLayout>
   )
 }
