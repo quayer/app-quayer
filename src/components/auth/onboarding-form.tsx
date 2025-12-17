@@ -56,9 +56,9 @@ export function OnboardingForm({
       if (result.success) {
         console.log('✅ Organização criada:', result.organization)
         setStep("complete")
-        // ✅ CORREÇÃO BRUTAL: Redirecionar após sucesso
+        // Redirecionar para /integracoes (área do master, não /admin que é só para system admin)
         setTimeout(() => {
-          window.location.href = "/admin"
+          window.location.href = "/integracoes"
         }, 2000)
       } else {
         setError(result.error || "Erro ao criar organização")
