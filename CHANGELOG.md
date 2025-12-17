@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CI/CD: Workflow de hotfix para deploy rápido sem rebuild
+- CI/CD: Workflow de release com tags semânticas e changelog automático
+- CI/CD: Deploy com cache de Docker layers (mais rápido)
+- CI/CD: Opção de build com/sem cache no workflow principal
+
+### Fixed
+- Onboarding: Loop de redirecionamento após completar (token needsOnboarding)
+- Docker: Variáveis NEXT_PUBLIC_* agora são incluídas no build
+- Google OAuth: Configuração correta em produção
+
+---
+
+## [1.0.1] - 2024-12-17
+
+### Fixed
+- **Onboarding Loop**: Corrigido bug onde usuário ficava preso na tela de onboarding
+  - Token JWT agora inclui `needsOnboarding: false` após criar organização
+  - Cookie atualizado corretamente no frontend
+  - Usa `window.location.href` para forçar reload completo
+
+- **Google OAuth**: Corrigido erro "Erro ao conectar com Google"
+  - Variáveis NEXT_PUBLIC_* agora são definidas no build do Docker
+  - Redirect URI configurado corretamente
+
+### Added
+- **CI/CD Workflows**:
+  - `hotfix.yml`: Deploy rápido sem rebuild completo
+  - `release.yml`: Releases versionadas com changelog automático
+  - Deploy principal agora usa cache por padrão (mais rápido)
+
+### Changed
+- Dockerfile otimizado para melhor cache de layers
+- Deploy ignora mudanças em arquivos .md e docs/
+
+---
+
 ## [1.0.0] - 2025-10-11
 
 ### 🎉 Initial Production Release

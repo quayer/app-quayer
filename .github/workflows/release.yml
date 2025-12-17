@@ -1,0 +1,156 @@
+name: Release & Deploy
+
+# ============================================
+# RELEASE: Deploy com versionamento semântico
+# ============================================
+# Cria release automaticamente ao criar tag:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# Ou manualmente: Actions > Release & Deploy > Run workflow
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão (ex: 1.0.1)'
+        required: true
+      release_type:
+        description: 'Tipo de release'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch   # Bug fixes (1.0.0 -> 1.0.1)
+          - minor   # New features (1.0.0 -> 1.1.0)
+          - major   # Breaking changes (1.0.0 -> 2.0.0)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION"
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          # Pegar commits desde a última tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$LAST_TAG" ]; then
+            echo "📝 Commits desde $LAST_TAG:"
+            COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            echo "📝 Primeiros commits:"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+
+          # Salvar changelog para usar no release
+          echo "$COMMITS" > changelog.txt
+          cat changelog.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          body_path: changelog.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy Release v${{ needs.release.outputs.version }}
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: 22
+          script: |
+            set -e
+
+            VERSION="${{ needs.release.outputs.version }}"
+            APP_DIR="/opt/quayer"
+            COMPOSE_FILE="docker-compose.quayer.yml"
+
+            echo "🚀 Deploy Release v$VERSION"
+            echo "================================================"
+
+            cd "$APP_DIR"
+
+            # Detectar docker compose
+            if docker compose version &> /dev/null; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
+
+            # Atualizar código para a tag
+            echo "📥 Baixando release v$VERSION..."
+            git fetch --all --tags
+            git checkout "v$VERSION" || git checkout main
+
+            # Preservar .env
+            git clean -fd -e .env
+
+            # Verificar .env
+            if [ ! -f .env ]; then
+              echo "❌ ERRO: .env não encontrado!"
+              exit 1
+            fi
+
+            # Garantir rede existe
+            docker network inspect supabase_default &> /dev/null || docker network create supabase_default
+
+            echo "🏗️ Build da release..."
+            $COMPOSE_CMD -f $COMPOSE_FILE build app
+
+            echo "🔄 Atualizando containers..."
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
+
+            echo "⏳ Aguardando health check..."
+            sleep 30
+
+            # Verificar status
+            STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Release v$VERSION deployed successfully!"
+              echo "🌐 App: https://app.quayer.com"
+            else
+              echo "⚠️ App não está healthy. Logs:"
+              docker logs quayer-app --tail 30
+              exit 1
+            fi
+
+            # Limpar imagens antigas
+            docker image prune -f || true
+
+            echo ""
+            echo "📋 Release Notes:"
+            echo "================================================"
+            git log --oneline -10

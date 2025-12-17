@@ -1,0 +1,119 @@
+name: Hotfix Deploy (Fast)
+
+# ============================================
+# HOTFIX: Deploy rápido SEM rebuild de imagem
+# ============================================
+# Use para correções urgentes que não precisam rebuild:
+# - Correções de banco de dados
+# - Restart de containers
+# - Atualização de .env
+#
+# Trigger manual: Actions > Hotfix Deploy > Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Ação a executar'
+        required: true
+        default: 'restart'
+        type: choice
+        options:
+          - restart        # Apenas restart do container app
+          - pull-restart   # Git pull + restart (sem rebuild)
+          - rebuild-app    # Rebuild apenas da app (usa cache)
+          - full-rebuild   # Rebuild completo (sem cache)
+          - db-migrate     # Rodar migrations do Prisma
+          - logs           # Ver últimos logs
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Hotfix
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: 22
+          script: |
+            set -e
+
+            APP_DIR="/opt/quayer"
+            COMPOSE_FILE="docker-compose.quayer.yml"
+            ACTION="${{ github.event.inputs.action }}"
+
+            cd "$APP_DIR"
+
+            # Detectar docker compose
+            if docker compose version &> /dev/null; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
+
+            echo "🔧 Executando: $ACTION"
+            echo "================================================"
+
+            case "$ACTION" in
+              "restart")
+                echo "🔄 Reiniciando container app..."
+                $COMPOSE_CMD -f $COMPOSE_FILE restart app
+                ;;
+
+              "pull-restart")
+                echo "📥 Atualizando código..."
+                git fetch --all
+                git reset --hard origin/main
+                git clean -fd -e .env
+                echo "🔄 Reiniciando container..."
+                $COMPOSE_CMD -f $COMPOSE_FILE restart app
+                ;;
+
+              "rebuild-app")
+                echo "📥 Atualizando código..."
+                git fetch --all
+                git reset --hard origin/main
+                git clean -fd -e .env
+                echo "🏗️ Rebuild com cache..."
+                $COMPOSE_CMD -f $COMPOSE_FILE build app
+                $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
+                ;;
+
+              "full-rebuild")
+                echo "📥 Atualizando código..."
+                git fetch --all
+                git reset --hard origin/main
+                git clean -fd -e .env
+                echo "🏗️ Rebuild completo (sem cache)..."
+                $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
+                $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
+                ;;
+
+              "db-migrate")
+                echo "🗄️ Rodando migrations..."
+                docker exec quayer-app npx prisma migrate deploy
+                ;;
+
+              "logs")
+                echo "📋 Últimos logs:"
+                docker logs quayer-app --tail 100
+                exit 0
+                ;;
+            esac
+
+            echo ""
+            echo "⏳ Aguardando health check..."
+            sleep 15
+
+            # Verificar status
+            STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+            echo "📊 Status: $STATUS"
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Hotfix aplicado com sucesso!"
+            else
+              echo "⚠️ Container ainda não healthy. Logs recentes:"
+              docker logs quayer-app --tail 20
+            fi

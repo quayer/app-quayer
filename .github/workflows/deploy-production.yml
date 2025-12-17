@@ -1,12 +1,27 @@
 name: Production Deploy
 
+# ============================================
+# DEPLOY AUTOMÁTICO ao fazer push na main
+# ============================================
+# Para deploys mais rápidos ou específicos use:
+# - hotfix.yml: Restart/rebuild rápido
+# - release.yml: Deploy de versão com tag
+
 on:
   push:
     branches:
       - main
-  release:
-    types: [published]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Build sem cache (mais lento)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   deploy:
@@ -20,91 +35,85 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           port: 22
           script: |
-            set -e # Falha o script se qualquer comando falhar
+            set -e
 
-            # Diretório da aplicação
             APP_DIR="/opt/quayer"
-
-            # Arquivo compose para coexistir com Supabase
             COMPOSE_FILE="docker-compose.quayer.yml"
+            NO_CACHE="${{ github.event.inputs.no_cache }}"
 
             echo "🔥 Iniciando Deploy Quayer..."
+            echo "================================================"
 
-            # Verificar se o diretório existe e é um repositório git
+            # Verificar/clonar repositório
             if [ ! -d "$APP_DIR/.git" ]; then
-              echo "⚠️ Repositório não encontrado ou inválido. Refazendo clone..."
+              echo "⚠️ Repositório não encontrado. Clonando..."
               rm -rf "$APP_DIR"
               mkdir -p "$APP_DIR"
               git clone https://github.com/quayer/app-quayer.git "$APP_DIR"
               cd "$APP_DIR"
             else
               cd "$APP_DIR"
-              echo "✅ Repositório encontrado. Resetando estado..."
+              echo "📥 Atualizando código..."
               git fetch --all
               git reset --hard origin/main
             fi
 
-            # Limpeza garantindo que .env seja PRESERVADO
+            # Preservar .env
             git clean -fd -e .env
 
-            # Garantir que estamos na main atualizada
             git checkout main
             git pull origin main
 
-            # Verificar se .env existe
-            if [ -f .env ]; then
-              echo "✅ Arquivo .env encontrado."
-            else
-              echo "❌ ERRO: Arquivo .env NÃO encontrado!"
-              echo "Configure o .env no servidor antes do deploy."
+            # Verificar .env
+            if [ ! -f .env ]; then
+              echo "❌ ERRO: .env não encontrado!"
               exit 1
             fi
+            echo "✅ .env encontrado"
 
-            # Verificar se rede supabase_default existe
-            if ! docker network inspect supabase_default &> /dev/null; then
-              echo "⚠️ Rede supabase_default não existe. Criando..."
-              docker network create supabase_default || true
-            fi
+            # Garantir rede existe
+            docker network inspect supabase_default &> /dev/null || docker network create supabase_default
 
-            # Priorizar docker compose v2
+            # Detectar docker compose
             if docker compose version &> /dev/null; then
               COMPOSE_CMD="docker compose"
-              echo "✅ Usando Docker Compose v2 (Plugin)"
-            elif command -v docker-compose &> /dev/null; then
-              COMPOSE_CMD="docker-compose"
-              echo "⚠️ Usando Docker Compose v1 (Legacy)"
             else
-              echo "❌ Docker Compose não encontrado!"
-              exit 1
+              COMPOSE_CMD="docker-compose"
             fi
 
-            echo "🐳 Usando: $COMPOSE_CMD -f $COMPOSE_FILE"
+            echo "🐳 Usando: $COMPOSE_CMD"
 
-            echo "🧹 Limpeza Pré-Build..."
-            docker system prune -f || true
-
-            echo "🔥 Parando containers antigos..."
-            $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans || true
-
+            # Build (com ou sem cache)
             echo "🏗️ Construindo imagem..."
-            $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
+            if [ "$NO_CACHE" = "true" ]; then
+              echo "   (sem cache - mais lento)"
+              $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
+            else
+              echo "   (com cache - mais rápido)"
+              $COMPOSE_CMD -f $COMPOSE_FILE build app
+            fi
 
+            # Deploy
             echo "🚀 Subindo aplicação..."
-            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
 
+            # Aguardar health check
             echo "⏳ Aguardando health check..."
             sleep 30
 
-            # Verificar se app está healthy
-            if docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null | grep -q "healthy"; then
+            STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+
+            if [ "$STATUS" = "healthy" ]; then
               echo "✅ App está healthy!"
             else
-              echo "⚠️ App ainda não está healthy, verificando logs..."
-              docker logs quayer-app --tail 20
+              echo "⚠️ Status: $STATUS - Verificando logs..."
+              docker logs quayer-app --tail 30
             fi
 
-            echo "🧹 Limpando imagens antigas..."
+            # Limpar imagens antigas
             docker image prune -f || true
 
-            echo "✅ Deploy concluído com sucesso!"
-            echo "🌐 App disponível em: https://app.quayer.com"
+            echo ""
+            echo "================================================"
+            echo "✅ Deploy concluído!"
+            echo "🌐 https://app.quayer.com"
