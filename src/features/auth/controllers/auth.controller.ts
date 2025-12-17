@@ -2053,16 +2053,20 @@ export const authController = igniter.controller({
         }
 
         // Configuração do RP (Relying Party)
+        // IMPORTANTE: rpID deve ser o domínio sem protocolo (ex: app.quayer.com)
         const rpName = 'Quayer';
-        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+        const origin = appUrl;
+
+        console.log('[Passkey Register] Config:', { rpID, origin });
 
         // Gerar opções de registro
         const options = await generateRegistrationOptions({
           rpName,
           rpID,
           userName: user.email,
-          userDisplayName: user.name,
+          userDisplayName: user.name || user.email,
           userID: new TextEncoder().encode(user.id),
           attestationType: 'none',
           excludeCredentials: user.passkeyCredentials.map((cred) => ({
@@ -2072,7 +2076,9 @@ export const authController = igniter.controller({
           authenticatorSelection: {
             residentKey: 'preferred',
             userVerification: 'preferred',
-            authenticatorAttachment: 'platform',
+            // REMOVIDO authenticatorAttachment para permitir TODOS os tipos:
+            // - platform: Windows Hello, TouchID, FaceID
+            // - cross-platform: YubiKey, QR Code (celular), USB keys
           },
           timeout: 60000,
         });
@@ -2123,8 +2129,12 @@ export const authController = igniter.controller({
           return response.status(400).json({ error: 'Challenge expirado ou inválido. Tente novamente.' });
         }
 
-        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+        const origin = appUrl;
+
+        console.log('[Passkey Register Verify] Config:', { rpID, origin });
 
         try {
           const verification = await verifyRegistrationResponse({
@@ -2197,7 +2207,11 @@ export const authController = igniter.controller({
           return response.status(400).json({ error: 'Nenhuma passkey registrada. Registre uma passkey primeiro.' });
         }
 
-        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+
+        console.log('[Passkey Login Options] Config:', { rpID, appUrl });
 
         // Gerar opções de autenticação
         const options = await generateAuthenticationOptions({
@@ -2286,8 +2300,12 @@ export const authController = igniter.controller({
           return response.status(400).json({ error: 'Passkey não encontrada' });
         }
 
-        const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+        const origin = appUrl;
+
+        console.log('[Passkey Login Verify] Config:', { rpID, origin });
 
         try {
           const verification = await verifyAuthenticationResponse({
