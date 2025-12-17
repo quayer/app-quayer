@@ -56,6 +56,16 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# NEXT_PUBLIC_* variables must be set at build time
+# These are embedded into the JavaScript bundle
+ARG NEXT_PUBLIC_APP_URL=https://app.quayer.com
+ARG NEXT_PUBLIC_IGNITER_API_URL=https://app.quayer.com/
+ARG NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
+
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_IGNITER_API_URL=$NEXT_PUBLIC_IGNITER_API_URL
+ENV NEXT_PUBLIC_IGNITER_API_BASE_PATH=$NEXT_PUBLIC_IGNITER_API_BASE_PATH
+
 # Build Next.js application
 # This will create .next/standalone for optimal production bundle
 RUN npm run build
