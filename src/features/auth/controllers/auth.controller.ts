@@ -31,6 +31,8 @@ import {
   webAuthnRegisterVerifySchema,
   webAuthnLoginOptionsSchema,
   webAuthnLoginVerifySchema,
+  webAuthnLoginOptionsDiscoverableSchema,
+  webAuthnLoginVerifyDiscoverableSchema,
 } from '../auth.schemas';
 import {
   generateRegistrationOptions,
@@ -2074,7 +2076,10 @@ export const authController = igniter.controller({
             transports: cred.transports as any[],
           })),
           authenticatorSelection: {
-            residentKey: 'preferred',
+            // ✅ USERNAMELESS: residentKey 'required' para Discoverable Credentials
+            // Isso permite login SEM digitar email - a passkey armazena o userId
+            residentKey: 'required',
+            requireResidentKey: true,
             userVerification: 'preferred',
             // REMOVIDO authenticatorAttachment para permitir TODOS os tipos:
             // - platform: Windows Hello, TouchID, FaceID
@@ -2408,6 +2413,251 @@ export const authController = igniter.controller({
           });
         } catch (error: any) {
           console.error('[Passkey Login] Error:', error);
+          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
+        }
+      },
+    }),
+
+    // ============================================
+    // PASSKEY DISCOVERABLE (USERNAMELESS) - Login sem email
+    // ============================================
+
+    /**
+     * Passkey Login Options Discoverable - Login SEM email
+     * Usa Discoverable Credentials (Resident Keys) para permitir
+     * que o navegador mostre automaticamente as passkeys disponíveis
+     */
+    passkeyLoginOptionsDiscoverable: igniter.mutation({
+      name: 'Passkey Login Options Discoverable',
+      description: 'Generate WebAuthn authentication options for usernameless login',
+      path: '/passkey/login/options/discoverable',
+      method: 'POST',
+      body: webAuthnLoginOptionsDiscoverableSchema,
+      handler: async ({ response }) => {
+        // Extrair rpID do NEXT_PUBLIC_APP_URL
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+
+        console.log('[Passkey Discoverable Options] Config:', { rpID, appUrl });
+
+        // Gerar opções de autenticação SEM allowCredentials
+        // Isso faz o navegador mostrar TODAS as passkeys disponíveis para este rpID
+        const options = await generateAuthenticationOptions({
+          rpID,
+          // ✅ CRÍTICO: NÃO passar allowCredentials para habilitar discoverable
+          userVerification: 'preferred',
+          timeout: 60000,
+        });
+
+        // Salvar challenge no banco (sem userId pois não sabemos quem é)
+        await db.passkeyChallenge.create({
+          data: {
+            challenge: options.challenge,
+            // userId é null para login discoverable
+            type: 'authentication_discoverable',
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+          },
+        });
+
+        return response.success(options);
+      },
+    }),
+
+    /**
+     * Passkey Login Verify Discoverable - Verificar login SEM email
+     * O userHandle na credential contém o userId codificado
+     */
+    passkeyLoginVerifyDiscoverable: igniter.mutation({
+      name: 'Passkey Login Verify Discoverable',
+      description: 'Verify passkey and authenticate user without email',
+      path: '/passkey/login/verify/discoverable',
+      method: 'POST',
+      body: webAuthnLoginVerifyDiscoverableSchema,
+      handler: async ({ request, response }) => {
+        const identifier = getClientIdentifier(request);
+        const rateLimit = await authRateLimiter.check(identifier);
+
+        if (!rateLimit.success) {
+          return response.status(429).json({
+            error: 'Too many requests',
+            retryAfter: rateLimit.retryAfter,
+          });
+        }
+
+        const { credential, rememberMe } = request.body;
+
+        // O userHandle contém o userId codificado
+        if (!credential.response?.userHandle) {
+          return response.status(400).json({
+            error: 'Passkey inválida. Esta passkey não suporta login sem email.'
+          });
+        }
+
+        // Decodificar userHandle para obter userId
+        const userHandle = credential.response.userHandle;
+        let userId: string;
+
+        try {
+          // userHandle pode ser base64url encoded
+          userId = typeof userHandle === 'string'
+            ? Buffer.from(userHandle, 'base64url').toString('utf-8')
+            : new TextDecoder().decode(new Uint8Array(userHandle));
+        } catch (e) {
+          console.error('[Passkey Discoverable] Error decoding userHandle:', e);
+          return response.status(400).json({ error: 'Erro ao processar passkey' });
+        }
+
+        console.log('[Passkey Discoverable Verify] userId from userHandle:', userId);
+
+        // Buscar usuário pelo userId extraído do userHandle
+        const user = await db.user.findUnique({
+          where: { id: userId },
+          include: {
+            passkeyCredentials: true,
+            organizations: {
+              where: { isActive: true },
+              include: { organization: true },
+            },
+          },
+        });
+
+        if (!user) {
+          return response.status(400).json({ error: 'Usuário não encontrado' });
+        }
+
+        // Buscar challenge discoverable
+        const challengeRecord = await db.passkeyChallenge.findFirst({
+          where: {
+            type: 'authentication_discoverable',
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!challengeRecord) {
+          return response.status(400).json({ error: 'Challenge expirado. Tente novamente.' });
+        }
+
+        // Buscar credencial usada
+        const storedCredential = user.passkeyCredentials.find(
+          (cred) => cred.credentialId === credential.id
+        );
+
+        if (!storedCredential) {
+          return response.status(400).json({ error: 'Passkey não encontrada' });
+        }
+
+        // Configuração
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
+        const origin = appUrl;
+
+        console.log('[Passkey Discoverable Verify] Config:', { rpID, origin, userId: user.id });
+
+        try {
+          const verification = await verifyAuthenticationResponse({
+            response: credential,
+            expectedChallenge: challengeRecord.challenge,
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+            credential: {
+              id: storedCredential.credentialId,
+              publicKey: storedCredential.publicKey as unknown as Uint8Array,
+              counter: Number(storedCredential.counter),
+              transports: storedCredential.transports as any[],
+            },
+          });
+
+          if (!verification.verified) {
+            return response.status(400).json({ error: 'Verificação de passkey falhou' });
+          }
+
+          // Atualizar counter
+          await db.passkeyCredential.update({
+            where: { id: storedCredential.id },
+            data: {
+              counter: BigInt(verification.authenticationInfo.newCounter),
+              lastUsedAt: new Date(),
+            },
+          });
+
+          // Limpar challenge usado
+          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
+
+          // Verificar se usuário está ativo
+          if (!user.isActive) {
+            return response.status(403).json({ error: 'Conta desabilitada' });
+          }
+
+          // Se admin não tem org setada, setar primeira org disponível
+          let currentOrgId = user.currentOrgId;
+          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+            currentOrgId = user.organizations[0].organizationId;
+            await db.user.update({
+              where: { id: user.id },
+              data: { currentOrgId },
+            });
+          }
+
+          // Obter role na organização atual
+          const currentOrgRelation = user.organizations.find(
+            (org) => org.organizationId === currentOrgId
+          );
+
+          // Criar access token
+          const accessToken = signAccessToken({
+            userId: user.id,
+            email: user.email,
+            role: user.role as UserRole,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role as any,
+            needsOnboarding: !user.onboardingCompleted,
+          }, rememberMe ? '7d' : '24h');
+
+          // Criar refresh token
+          const refreshTokenData = await db.refreshToken.create({
+            data: {
+              userId: user.id,
+              token: signRefreshToken({ userId: user.id, tokenId: '' }),
+              expiresAt: getExpirationDate(rememberMe ? '30d' : '7d'),
+            },
+          });
+
+          const refreshToken = signRefreshToken({
+            userId: user.id,
+            tokenId: refreshTokenData.id,
+          });
+
+          await db.refreshToken.update({
+            where: { id: refreshTokenData.id },
+            data: { token: refreshToken },
+          });
+
+          // Log de auditoria (usando 'passkey_login' que é o tipo válido)
+          await auditLog.logAuth('passkey_login', user.id, {
+            email: user.email,
+            currentOrgId,
+            passkeyId: storedCredential.id,
+            usernameless: true, // Flag para indicar login discoverable
+          }, identifier);
+
+          console.log('[Passkey Discoverable] ✅ Login successful for:', user.email);
+
+          return response.success({
+            accessToken,
+            refreshToken,
+            needsOnboarding: !user.onboardingCompleted,
+            user: {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              currentOrgId,
+              organizationRole: currentOrgRelation?.role,
+            },
+          });
+        } catch (error: any) {
+          console.error('[Passkey Discoverable] Error:', error);
           return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
         }
       },

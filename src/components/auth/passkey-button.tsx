@@ -48,7 +48,75 @@ export function PasskeyButton({
   }
 
   /**
-   * Tenta fazer login com passkey existente
+   * Login DISCOVERABLE (sem email) - Usernameless
+   * O navegador mostra todas as passkeys disponíveis para o usuário escolher
+   */
+  const attemptDiscoverableLogin = async (): Promise<boolean> => {
+    setStatusText("Buscando suas passkeys...")
+
+    // 1. Obter opções de autenticação discoverable (sem email)
+    const { data: optionsData, error: optionsError } = await (api.auth as any).passkeyLoginOptionsDiscoverable.mutate({
+      body: {}
+    })
+
+    if (optionsError || !optionsData) {
+      throw new Error((optionsError as any)?.message || 'Erro ao obter opções de login')
+    }
+
+    setStatusText("Escolha sua conta...")
+
+    // 2. Iniciar autenticação WebAuthn - navegador mostra lista de contas
+    const credential = await startAuthentication({ optionsJSON: optionsData as any })
+
+    setStatusText("Verificando...")
+
+    // 3. Verificar credencial no servidor (sem email, usa userHandle)
+    const { data: verifyData, error: verifyError } = await (api.auth as any).passkeyLoginVerifyDiscoverable.mutate({
+      body: {
+        credential: credential,
+        rememberMe: false
+      }
+    })
+
+    const verifyDataError = (verifyData as any)?.error
+    if (verifyError || verifyDataError || !verifyData) {
+      throw new Error(verifyDataError || (verifyError as any)?.message || 'Verificação falhou')
+    }
+
+    // 4. Salvar tokens
+    const { accessToken, refreshToken, needsOnboarding } = verifyData as any
+
+    Cookies.set('accessToken', accessToken, {
+      expires: 1,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    })
+
+    Cookies.set('refreshToken', refreshToken, {
+      expires: 7,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    })
+
+    toast({
+      title: "Login realizado!",
+      description: "Autenticado com sucesso usando Passkey",
+    })
+
+    // 5. Redirecionar
+    if (onSuccess) {
+      onSuccess()
+    } else if (needsOnboarding) {
+      router.push('/onboarding')
+    } else {
+      router.push('/integracoes')
+    }
+
+    return true
+  }
+
+  /**
+   * Tenta fazer login com passkey existente (COM email - fluxo legado)
    * Retorna true se login foi bem sucedido, false se não tem passkey
    */
   const attemptPasskeyLogin = async (): Promise<boolean> => {
@@ -301,6 +369,13 @@ export function PasskeyButton({
 
   /**
    * Modo Smart: Fluxo inteligente de Passkey
+   *
+   * SEM EMAIL (Discoverable/Usernameless):
+   * 1. Navegador mostra lista de passkeys disponíveis
+   * 2. Usuário escolhe qual conta usar
+   * 3. Login automático
+   *
+   * COM EMAIL (Fluxo legado):
    * 1. Se usuário tem passkey → Login direto
    * 2. Se usuário existe mas não tem passkey → Registra e faz login
    * 3. Se usuário não existe → Orienta a criar conta
@@ -308,16 +383,43 @@ export function PasskeyButton({
   const handlePasskeySmart = async () => {
     if (!checkBrowserSupport()) return
 
+    setIsLoading(true)
+
+    // ✅ USERNAMELESS: Se não tem email, usar login discoverable
     if (!email) {
-      toast({
-        title: "Email necessário",
-        description: "Por favor, preencha seu email primeiro",
-        variant: "destructive",
-      })
+      console.log('[Passkey Smart] No email provided, using discoverable login...')
+
+      try {
+        await attemptDiscoverableLogin()
+      } catch (error: any) {
+        console.error('[Passkey Discoverable] Error:', error)
+
+        if (error.name === 'NotAllowedError') {
+          toast({
+            title: "Login cancelado",
+            description: "Você cancelou a autenticação com Passkey",
+            variant: "destructive",
+          })
+        } else if (error.message?.includes('inválida') || error.message?.includes('não suporta')) {
+          toast({
+            title: "Passkey incompatível",
+            description: "Esta passkey foi criada antes da atualização. Por favor, faça login com email e registre uma nova passkey.",
+            variant: "destructive",
+          })
+        } else {
+          toast({
+            title: "Nenhuma passkey encontrada",
+            description: "Preencha seu email para criar uma nova passkey ou fazer login",
+            variant: "destructive",
+          })
+        }
+      } finally {
+        setIsLoading(false)
+        setStatusText("")
+      }
       return
     }
 
-    setIsLoading(true)
     console.log('[Passkey Smart] Starting smart passkey flow for:', email)
 
     try {

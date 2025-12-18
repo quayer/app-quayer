@@ -375,7 +375,7 @@ export const webAuthnRegisterVerifySchema = z.object({
 export type WebAuthnRegisterVerifyInput = z.infer<typeof webAuthnRegisterVerifySchema>;
 
 /**
- * Schema de WebAuthn Login Options
+ * Schema de WebAuthn Login Options (com email - fluxo legado)
  */
 export const webAuthnLoginOptionsSchema = z.object({
   email: z
@@ -388,7 +388,17 @@ export const webAuthnLoginOptionsSchema = z.object({
 export type WebAuthnLoginOptionsInput = z.infer<typeof webAuthnLoginOptionsSchema>;
 
 /**
- * Schema de WebAuthn Login Verify
+ * Schema de WebAuthn Login Options Discoverable (sem email - usernameless)
+ * Usado para login com passkeys que armazenam o userHandle internamente
+ */
+export const webAuthnLoginOptionsDiscoverableSchema = z.object({
+  // Nenhum campo obrigatório - login sem email
+});
+
+export type WebAuthnLoginOptionsDiscoverableInput = z.infer<typeof webAuthnLoginOptionsDiscoverableSchema>;
+
+/**
+ * Schema de WebAuthn Login Verify (com email - fluxo legado)
  */
 export const webAuthnLoginVerifySchema = z.object({
   email: z
@@ -401,3 +411,14 @@ export const webAuthnLoginVerifySchema = z.object({
 });
 
 export type WebAuthnLoginVerifyInput = z.infer<typeof webAuthnLoginVerifySchema>;
+
+/**
+ * Schema de WebAuthn Login Verify Discoverable (sem email - usernameless)
+ * O userHandle na credential contém o userId
+ */
+export const webAuthnLoginVerifyDiscoverableSchema = z.object({
+  credential: z.any(), // PublicKeyCredential JSON com userHandle
+  rememberMe: z.boolean().optional().default(false),
+});
+
+export type WebAuthnLoginVerifyDiscoverableInput = z.infer<typeof webAuthnLoginVerifyDiscoverableSchema>;
