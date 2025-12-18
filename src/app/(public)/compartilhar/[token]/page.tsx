@@ -434,7 +434,7 @@ function SharePageContent({ token }: SharePageProps) {
 
       // Verificar se a instância já está conectada
       if (data.alreadyConnected || data.status === 'connected') {
-        toast.success('Esta instância já está conectada! 🎉');
+        toast.success('Esta instância já está conectada!');
         setConnectionStatus('connected');
         announce('Instância já conectada');
         return;
@@ -454,7 +454,7 @@ function SharePageContent({ token }: SharePageProps) {
       // Detectar se a instância já está conectada pela mensagem de erro
       const lowerMsg = message.toLowerCase();
       if (lowerMsg.includes('conectada') || lowerMsg.includes('connected')) {
-        toast.success('Esta instância já está conectada! 🎉');
+        toast.success('Esta instância já está conectada!');
         setConnectionStatus('connected');
         announce('Instância já conectada');
         return;
@@ -555,7 +555,7 @@ function SharePageContent({ token }: SharePageProps) {
               id="connected-title"
               className="text-2xl font-bold text-white"
             >
-              Conectado com Sucesso! 🎉
+              Conectado com Sucesso!
             </h1>
           </div>
           <CardContent className="p-8 text-center">

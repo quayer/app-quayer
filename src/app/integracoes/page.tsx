@@ -43,14 +43,9 @@ import {
   RefreshCw,
   Filter,
   Smartphone,
-  MessageSquare,
-  Wifi,
-  WifiOff,
-  Clock,
   LayoutGrid,
   List,
   Zap,
-  Radio,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -353,23 +348,6 @@ export default function IntegrationsPage() {
           <Skeleton className="h-10 w-40" />
         </div>
 
-        {/* Stats skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-8 w-16" />
-                  </div>
-                  <Skeleton className="h-10 w-10 rounded-full" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
         {/* Cards skeleton */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -413,49 +391,6 @@ export default function IntegrationsPage() {
             </Button>
           }
         />
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <Card className="border-l-4 border-l-green-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-muted-foreground">Conectadas</p>
-                <Wifi className="h-4 w-4 text-green-600" />
-              </div>
-              <p className="text-2xl font-bold">{stats.connected}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-yellow-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-muted-foreground">Conectando</p>
-                <Clock className="h-4 w-4 text-yellow-600" />
-              </div>
-              <p className="text-2xl font-bold">{stats.connecting}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-red-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-muted-foreground">Desconectadas</p>
-                <WifiOff className="h-4 w-4 text-red-600" />
-              </div>
-              <p className="text-2xl font-bold">{stats.disconnected}</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-primary">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-muted-foreground">Mensagens</p>
-                <MessageSquare className="h-4 w-4 text-primary" />
-              </div>
-              <p className="text-2xl font-bold">{stats.totalMessages.toLocaleString()}</p>
-            </CardContent>
-          </Card>
-        </div>
 
         {/* Filters */}
         <div className="flex flex-col md:flex-row items-center gap-4" role="search" aria-label="Filtros de integrações">

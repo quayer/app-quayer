@@ -21,6 +21,11 @@ interface PasskeyButtonProps {
   variant?: "default" | "outline" | "ghost"
   className?: string
   onSuccess?: () => void
+  /**
+   * Callback chamado quando nenhuma passkey é encontrada no login discoverable
+   * Permite ao componente pai mostrar o campo de email ou tomar outra ação
+   */
+  onNoPasskeyFound?: () => void
 }
 
 export function PasskeyButton({
@@ -28,7 +33,8 @@ export function PasskeyButton({
   email,
   variant = "outline",
   className,
-  onSuccess
+  onSuccess,
+  onNoPasskeyFound
 }: PasskeyButtonProps) {
   const router = useRouter()
   const { toast } = useToast()
@@ -412,6 +418,10 @@ export function PasskeyButton({
             description: "Preencha seu email para criar uma nova passkey ou fazer login",
             variant: "destructive",
           })
+          // ✅ Chamar callback para permitir ação do componente pai
+          if (onNoPasskeyFound) {
+            onNoPasskeyFound()
+          }
         }
       } finally {
         setIsLoading(false)

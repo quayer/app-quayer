@@ -1909,13 +1909,17 @@ export const authController = igniter.controller({
             return response.status(403).json({ error: 'Account disabled' });
           }
 
+          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
           let currentOrgId = user.currentOrgId;
-          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+
+          // Se usuário não tem org setada mas tem organizações, setar a primeira
+          if (!currentOrgId && user.organizations.length > 0) {
             currentOrgId = user.organizations[0].organizationId;
             await db.user.update({
               where: { id: user.id },
               data: { currentOrgId },
             });
+            console.log('[Magic Link Login] Set currentOrgId for user:', user.email, currentOrgId);
           }
 
           const currentOrgRelation = user.organizations.find(
@@ -1928,7 +1932,7 @@ export const authController = igniter.controller({
             role: user.role as UserRole,
             currentOrgId,
             organizationRole: currentOrgRelation?.role as any,
-            needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
+            needsOnboarding: !user.onboardingCompleted,
           }, '24h');
 
           const refreshTokenData = await db.refreshToken.create({
@@ -2347,20 +2351,32 @@ export const authController = igniter.controller({
             return response.status(403).json({ error: 'Conta desabilitada' });
           }
 
-          // Se admin não tem org setada, setar primeira org disponível
+          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
           let currentOrgId = user.currentOrgId;
-          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+
+          // Se usuário não tem org setada mas tem organizações, setar a primeira
+          if (!currentOrgId && user.organizations.length > 0) {
             currentOrgId = user.organizations[0].organizationId;
             await db.user.update({
               where: { id: user.id },
               data: { currentOrgId },
             });
+            console.log('[Passkey Login] Set currentOrgId for user:', user.email, currentOrgId);
           }
 
           // Obter role na organização atual
           const currentOrgRelation = user.organizations.find(
             (org) => org.organizationId === currentOrgId
           );
+
+          console.log('[Passkey Login] Token context:', {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role,
+            hasOrgs: user.organizations.length,
+          });
 
           // Criar access token
           const accessToken = signAccessToken({
@@ -2589,20 +2605,32 @@ export const authController = igniter.controller({
             return response.status(403).json({ error: 'Conta desabilitada' });
           }
 
-          // Se admin não tem org setada, setar primeira org disponível
+          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
           let currentOrgId = user.currentOrgId;
-          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+
+          // Se usuário não tem org setada mas tem organizações, setar a primeira
+          if (!currentOrgId && user.organizations.length > 0) {
             currentOrgId = user.organizations[0].organizationId;
             await db.user.update({
               where: { id: user.id },
               data: { currentOrgId },
             });
+            console.log('[Passkey Discoverable] Set currentOrgId for user:', user.email, currentOrgId);
           }
 
           // Obter role na organização atual
           const currentOrgRelation = user.organizations.find(
             (org) => org.organizationId === currentOrgId
           );
+
+          console.log('[Passkey Discoverable] Token context:', {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role,
+            hasOrgs: user.organizations.length,
+          });
 
           // Criar access token
           const accessToken = signAccessToken({

@@ -232,13 +232,25 @@
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* Interactive Elements - Minimum Target Size 44x44px (WCAG 2.5.5) */
+  /* Interactive Elements - Responsive Touch Targets
+   * Desktop: 36px para melhor estética
+   * Mobile: 44px para WCAG 2.5.5 compliance
+   */
   button,
   a,
   [role="button"],
   [role="link"] {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  /* Mobile: WCAG 2.5.5 Touch Target Size (44x44px) */
+  @media (max-width: 768px) {
+    button:not(.btn-compact):not([data-slot="switch-thumb"]),
+    [role="button"]:not(.btn-compact) {
+      min-height: 44px;
+      min-width: 44px;
+    }
   }
 
   /* UX FIX: Cursor pointer for all interactive elements */
@@ -254,11 +266,20 @@
     cursor: pointer;
   }
 
-  /* Exception for icon-only buttons */
+  /* Exception for icon-only buttons - always 36px minimum */
   button[aria-label],
   [role="button"][aria-label] {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  /* Mobile: Icon buttons also get 44px */
+  @media (max-width: 768px) {
+    button[aria-label]:not(.btn-compact),
+    [role="button"][aria-label]:not(.btn-compact) {
+      min-height: 44px;
+      min-width: 44px;
+    }
   }
 
   /* ✅ CORREÇÃO BRUTAL: Error Feedback Animations */

@@ -283,7 +283,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                         <Smartphone className={`h-8 w-8 ${formData.provider === 'WHATSAPP_WEB' ? 'text-primary' : 'text-muted-foreground'}`} />
                       </div>
                       <div>
-                        <h4 className="font-semibold text-lg text-foreground">Conectar Novo WhatsApp</h4>
+                        <h4 className="font-semibold text-lg text-foreground">WhatsApp Web</h4>
                         <p className="text-sm text-muted-foreground mt-1">
                           Conecte escaneando o QR Code. Ideal para números já existentes.
                         </p>

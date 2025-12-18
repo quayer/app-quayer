@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useReducer } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -12,32 +12,152 @@ import { Loader2, CheckCircle2, AlertCircle, Database, Server } from 'lucide-rea
 import { toast } from 'sonner'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
+import { extractErrorMessage } from '@/lib/utils/error-handler'
+
+// Types
+type DbProvider = 'quayer' | 'supabase' | 'custom'
+type RedisProvider = 'quayer' | 'custom'
+type ValidationStatus = 'idle' | 'success' | 'error'
+
+interface InfrastructureState {
+    // Database Settings
+    dbProvider: DbProvider
+    supabaseUrl: string
+    supabaseKey: string
+    supabaseServiceKey: string
+    // Custom PostgreSQL
+    pgHost: string
+    pgPort: string
+    pgDatabase: string
+    pgUser: string
+    pgPassword: string
+    // Redis Settings
+    redisProvider: RedisProvider
+    redisUrl: string
+    redisPassword: string
+    // Validation state
+    isValidatingDb: boolean
+    isValidatingRedis: boolean
+    dbValidationStatus: ValidationStatus
+    redisValidationStatus: ValidationStatus
+}
+
+type InfrastructureAction =
+    | { type: 'SET_DB_PROVIDER'; payload: DbProvider }
+    | { type: 'SET_SUPABASE'; payload: { url?: string; key?: string; serviceKey?: string } }
+    | { type: 'SET_PG'; payload: { host?: string; port?: string; database?: string; user?: string; password?: string } }
+    | { type: 'SET_REDIS_PROVIDER'; payload: RedisProvider }
+    | { type: 'SET_REDIS'; payload: { url?: string; password?: string } }
+    | { type: 'SET_DB_VALIDATION'; payload: { isValidating?: boolean; status?: ValidationStatus } }
+    | { type: 'SET_REDIS_VALIDATION'; payload: { isValidating?: boolean; status?: ValidationStatus } }
+    | { type: 'LOAD_FROM_ORG'; payload: { dbConfig?: Record<string, unknown>; redisConfig?: Record<string, unknown> } }
+
+const initialState: InfrastructureState = {
+    dbProvider: 'quayer',
+    supabaseUrl: '',
+    supabaseKey: '',
+    supabaseServiceKey: '',
+    pgHost: '',
+    pgPort: '5432',
+    pgDatabase: '',
+    pgUser: '',
+    pgPassword: '',
+    redisProvider: 'quayer',
+    redisUrl: '',
+    redisPassword: '',
+    isValidatingDb: false,
+    isValidatingRedis: false,
+    dbValidationStatus: 'idle',
+    redisValidationStatus: 'idle',
+}
+
+function infrastructureReducer(state: InfrastructureState, action: InfrastructureAction): InfrastructureState {
+    switch (action.type) {
+        case 'SET_DB_PROVIDER':
+            return { ...state, dbProvider: action.payload, dbValidationStatus: 'idle' }
+        case 'SET_SUPABASE':
+            return {
+                ...state,
+                supabaseUrl: action.payload.url ?? state.supabaseUrl,
+                supabaseKey: action.payload.key ?? state.supabaseKey,
+                supabaseServiceKey: action.payload.serviceKey ?? state.supabaseServiceKey,
+                dbValidationStatus: 'idle',
+            }
+        case 'SET_PG':
+            return {
+                ...state,
+                pgHost: action.payload.host ?? state.pgHost,
+                pgPort: action.payload.port ?? state.pgPort,
+                pgDatabase: action.payload.database ?? state.pgDatabase,
+                pgUser: action.payload.user ?? state.pgUser,
+                pgPassword: action.payload.password ?? state.pgPassword,
+                dbValidationStatus: 'idle',
+            }
+        case 'SET_REDIS_PROVIDER':
+            return { ...state, redisProvider: action.payload, redisValidationStatus: 'idle' }
+        case 'SET_REDIS':
+            return {
+                ...state,
+                redisUrl: action.payload.url ?? state.redisUrl,
+                redisPassword: action.payload.password ?? state.redisPassword,
+                redisValidationStatus: 'idle',
+            }
+        case 'SET_DB_VALIDATION':
+            return {
+                ...state,
+                isValidatingDb: action.payload.isValidating ?? state.isValidatingDb,
+                dbValidationStatus: action.payload.status ?? state.dbValidationStatus,
+            }
+        case 'SET_REDIS_VALIDATION':
+            return {
+                ...state,
+                isValidatingRedis: action.payload.isValidating ?? state.isValidatingRedis,
+                redisValidationStatus: action.payload.status ?? state.redisValidationStatus,
+            }
+        case 'LOAD_FROM_ORG': {
+            const { dbConfig, redisConfig } = action.payload
+            let newState = { ...state }
+
+            if (dbConfig) {
+                const type = dbConfig.type as string
+                if (type === 'supabase') {
+                    newState = {
+                        ...newState,
+                        dbProvider: 'supabase',
+                        supabaseUrl: (dbConfig.url as string) || '',
+                        supabaseKey: (dbConfig.anonKey as string) || '',
+                        supabaseServiceKey: (dbConfig.serviceKey as string) || '',
+                    }
+                } else if (type === 'custom') {
+                    newState = {
+                        ...newState,
+                        dbProvider: 'custom',
+                        pgHost: (dbConfig.host as string) || '',
+                        pgPort: (dbConfig.port as string) || '5432',
+                        pgDatabase: (dbConfig.database as string) || '',
+                        pgUser: (dbConfig.user as string) || '',
+                    }
+                }
+            }
+
+            if (redisConfig) {
+                newState = {
+                    ...newState,
+                    redisProvider: 'custom',
+                    redisUrl: (redisConfig.url as string) || '',
+                }
+            }
+
+            return newState
+        }
+        default:
+            return state
+    }
+}
 
 export function InfrastructureSettings() {
     const queryClient = useQueryClient()
-
-    // Database Settings
-    const [dbProvider, setDbProvider] = useState<'quayer' | 'supabase' | 'custom'>('quayer')
-    const [supabaseUrl, setSupabaseUrl] = useState('')
-    const [supabaseKey, setSupabaseKey] = useState('')
-    const [supabaseServiceKey, setSupabaseServiceKey] = useState('')
-
-    // Custom PostgreSQL
-    const [pgHost, setPgHost] = useState('')
-    const [pgPort, setPgPort] = useState('5432')
-    const [pgDatabase, setPgDatabase] = useState('')
-    const [pgUser, setPgUser] = useState('')
-    const [pgPassword, setPgPassword] = useState('')
-
-    // Redis Settings
-    const [redisProvider, setRedisProvider] = useState<'quayer' | 'custom'>('quayer')
-    const [redisUrl, setRedisUrl] = useState('')
-    const [redisPassword, setRedisPassword] = useState('')
-
-    const [isValidatingDb, setIsValidatingDb] = useState(false)
-    const [isValidatingRedis, setIsValidatingRedis] = useState(false)
-    const [dbValidationStatus, setDbValidationStatus] = useState<'idle' | 'success' | 'error'>('idle')
-    const [redisValidationStatus, setRedisValidationStatus] = useState<'idle' | 'success' | 'error'>('idle')
+    const [state, dispatch] = useReducer(infrastructureReducer, initialState)
 
     // Fetch current organization settings
     const { data: orgData, isLoading } = useQuery({
@@ -45,47 +165,36 @@ export function InfrastructureSettings() {
         queryFn: async () => await api.organizations.getCurrent.query(),
     })
 
-    const organization = (orgData as any)?.data
+    const organization = (orgData as Record<string, unknown>)?.data as Record<string, unknown> | undefined
 
     useEffect(() => {
-        if (organization?.dbConfig) {
-            const dbConfig = organization.dbConfig
-            if (dbConfig.type === 'supabase') {
-                setDbProvider('supabase')
-                setSupabaseUrl(dbConfig.url || '')
-                setSupabaseKey(dbConfig.anonKey || '')
-                setSupabaseServiceKey(dbConfig.serviceKey || '')
-            } else if (dbConfig.type === 'custom') {
-                setDbProvider('custom')
-                setPgHost(dbConfig.host || '')
-                setPgPort(dbConfig.port || '5432')
-                setPgDatabase(dbConfig.database || '')
-                setPgUser(dbConfig.user || '')
-            }
-        }
-
-        if (organization?.redisConfig) {
-            setRedisProvider('custom')
-            setRedisUrl(organization.redisConfig.url || '')
+        if (organization) {
+            dispatch({
+                type: 'LOAD_FROM_ORG',
+                payload: {
+                    dbConfig: organization.dbConfig as Record<string, unknown> | undefined,
+                    redisConfig: organization.redisConfig as Record<string, unknown> | undefined,
+                },
+            })
         }
     }, [organization])
 
     const validateDatabaseConnection = async () => {
         // TODO: Implementar validacao de conexao via API quando infrastructure controller for recriado
         toast.info('Funcionalidade de validacao de conexao em desenvolvimento')
-        setDbValidationStatus('success') // Simular sucesso por enquanto
+        dispatch({ type: 'SET_DB_VALIDATION', payload: { status: 'success' } })
     }
 
     const validateRedisConnection = async () => {
         // TODO: Implementar validacao de conexao via API quando infrastructure controller for recriado
         toast.info('Funcionalidade de validacao de conexao em desenvolvimento')
-        setRedisValidationStatus('success') // Simular sucesso por enquanto
+        dispatch({ type: 'SET_REDIS_VALIDATION', payload: { status: 'success' } })
     }
 
     const updateInfrastructureMutation = useMutation({
-        mutationFn: async (data: any) => {
-            const response = await (api.organizations.update.mutate as any)({
-                params: { id: organization.id },
+        mutationFn: async (data: Record<string, unknown>) => {
+            const response = await (api.organizations.update.mutate as (args: Record<string, unknown>) => Promise<unknown>)({
+                params: { id: (organization as Record<string, unknown>)?.id },
                 body: data,
             })
             return response
@@ -94,47 +203,47 @@ export function InfrastructureSettings() {
             toast.success('Configurações de infraestrutura atualizadas!')
             queryClient.invalidateQueries({ queryKey: ['organization', 'current'] })
         },
-        onError: (error: any) => {
-            toast.error(error.message || 'Erro ao atualizar infraestrutura')
+        onError: (error: unknown) => {
+            toast.error(extractErrorMessage(error, 'Erro ao atualizar infraestrutura'))
         },
     })
 
     const handleSaveDatabaseConfig = async () => {
-        if (dbProvider !== 'quayer' && dbValidationStatus !== 'success') {
+        if (state.dbProvider !== 'quayer' && state.dbValidationStatus !== 'success') {
             toast.error('Valide a conexão antes de salvar')
             return
         }
 
-        let dbConfig: any = null
-        if (dbProvider === 'supabase') {
+        let dbConfig: Record<string, unknown> | null = null
+        if (state.dbProvider === 'supabase') {
             dbConfig = {
                 type: 'supabase',
-                url: supabaseUrl,
-                anonKey: supabaseKey,
-                serviceKey: supabaseServiceKey
+                url: state.supabaseUrl,
+                anonKey: state.supabaseKey,
+                serviceKey: state.supabaseServiceKey
             }
-        } else if (dbProvider === 'custom') {
+        } else if (state.dbProvider === 'custom') {
             dbConfig = {
                 type: 'custom',
-                host: pgHost,
-                port: parseInt(pgPort),
-                database: pgDatabase,
-                user: pgUser,
-                password: pgPassword
+                host: state.pgHost,
+                port: parseInt(state.pgPort),
+                database: state.pgDatabase,
+                user: state.pgUser,
+                password: state.pgPassword
             }
         }
 
-        updateInfrastructureMutation.mutate({ dbProvider, dbConfig })
+        updateInfrastructureMutation.mutate({ dbProvider: state.dbProvider, dbConfig })
     }
 
     const handleSaveRedisConfig = async () => {
-        if (redisProvider === 'custom' && redisValidationStatus !== 'success') {
+        if (state.redisProvider === 'custom' && state.redisValidationStatus !== 'success') {
             toast.error('Valide a conexão antes de salvar')
             return
         }
 
-        const redisConfig = redisProvider === 'custom' ? { url: redisUrl, password: redisPassword } : null
-        updateInfrastructureMutation.mutate({ redisProvider, redisConfig })
+        const redisConfig = state.redisProvider === 'custom' ? { url: state.redisUrl, password: state.redisPassword } : null
+        updateInfrastructureMutation.mutate({ redisProvider: state.redisProvider, redisConfig })
     }
 
     if (isLoading) {
@@ -163,7 +272,7 @@ export function InfrastructureSettings() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <RadioGroup value={dbProvider} onValueChange={(value: any) => setDbProvider(value)}>
+                    <RadioGroup value={state.dbProvider} onValueChange={(value: DbProvider) => dispatch({ type: 'SET_DB_PROVIDER', payload: value })}>
                         <div className="grid gap-4">
                             <div className="flex items-start space-x-3">
                                 <RadioGroupItem value="quayer" id="db-quayer" />
@@ -207,7 +316,7 @@ export function InfrastructureSettings() {
                         </div>
                     </RadioGroup>
 
-                    {dbProvider === 'supabase' && (
+                    {state.dbProvider === 'supabase' && (
                         <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
                             <h4 className="font-semibold text-sm flex items-center gap-2">
                                 <Database className="h-4 w-4 text-green-600" />
@@ -221,11 +330,8 @@ export function InfrastructureSettings() {
                                         id="supabase-url"
                                         type="url"
                                         placeholder="https://xxxxx.supabase.co"
-                                        value={supabaseUrl}
-                                        onChange={(e) => {
-                                            setSupabaseUrl(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.supabaseUrl}
+                                        onChange={(e) => dispatch({ type: 'SET_SUPABASE', payload: { url: e.target.value } })}
                                     />
                                 </div>
 
@@ -235,11 +341,8 @@ export function InfrastructureSettings() {
                                         id="supabase-anon-key"
                                         type="password"
                                         placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                                        value={supabaseKey}
-                                        onChange={(e) => {
-                                            setSupabaseKey(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.supabaseKey}
+                                        onChange={(e) => dispatch({ type: 'SET_SUPABASE', payload: { key: e.target.value } })}
                                     />
                                 </div>
 
@@ -249,11 +352,8 @@ export function InfrastructureSettings() {
                                         id="supabase-service-key"
                                         type="password"
                                         placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                                        value={supabaseServiceKey}
-                                        onChange={(e) => {
-                                            setSupabaseServiceKey(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.supabaseServiceKey}
+                                        onChange={(e) => dispatch({ type: 'SET_SUPABASE', payload: { serviceKey: e.target.value } })}
                                     />
                                     <p className="text-xs text-muted-foreground">
                                         Necessário para operações administrativas
@@ -264,16 +364,16 @@ export function InfrastructureSettings() {
                                     <Button
                                         variant="outline"
                                         onClick={validateDatabaseConnection}
-                                        disabled={isValidatingDb}
+                                        disabled={state.isValidatingDb}
                                     >
-                                        {isValidatingDb ? (
+                                        {state.isValidatingDb ? (
                                             <>
                                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                                 Testando Conexão...
                                             </>
                                         ) : (
                                             <>
-                                                {dbValidationStatus === 'success' ? (
+                                                {state.dbValidationStatus === 'success' ? (
                                                     <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
                                                 ) : (
                                                     <Server className="mr-2 h-4 w-4" />
@@ -283,13 +383,13 @@ export function InfrastructureSettings() {
                                         )}
                                     </Button>
 
-                                    {dbValidationStatus === 'success' && (
+                                    {state.dbValidationStatus === 'success' && (
                                         <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
                                             <CheckCircle2 className="h-3 w-3 mr-1" />
                                             Conexão Validada
                                         </Badge>
                                     )}
-                                    {dbValidationStatus === 'error' && (
+                                    {state.dbValidationStatus === 'error' && (
                                         <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50">
                                             <AlertCircle className="h-3 w-3 mr-1" />
                                             Erro na Conexão
@@ -300,7 +400,7 @@ export function InfrastructureSettings() {
                         </div>
                     )}
 
-                    {dbProvider === 'custom' && (
+                    {state.dbProvider === 'custom' && (
                         <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
                             <h4 className="font-semibold text-sm flex items-center gap-2">
                                 <Database className="h-4 w-4 text-blue-600" />
@@ -313,11 +413,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="pg-host"
                                         placeholder="localhost"
-                                        value={pgHost}
-                                        onChange={(e) => {
-                                            setPgHost(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.pgHost}
+                                        onChange={(e) => dispatch({ type: 'SET_PG', payload: { host: e.target.value } })}
                                     />
                                 </div>
 
@@ -326,11 +423,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="pg-port"
                                         placeholder="5432"
-                                        value={pgPort}
-                                        onChange={(e) => {
-                                            setPgPort(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.pgPort}
+                                        onChange={(e) => dispatch({ type: 'SET_PG', payload: { port: e.target.value } })}
                                     />
                                 </div>
 
@@ -339,11 +433,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="pg-database"
                                         placeholder="quayer"
-                                        value={pgDatabase}
-                                        onChange={(e) => {
-                                            setPgDatabase(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.pgDatabase}
+                                        onChange={(e) => dispatch({ type: 'SET_PG', payload: { database: e.target.value } })}
                                     />
                                 </div>
 
@@ -352,11 +443,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="pg-user"
                                         placeholder="postgres"
-                                        value={pgUser}
-                                        onChange={(e) => {
-                                            setPgUser(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.pgUser}
+                                        onChange={(e) => dispatch({ type: 'SET_PG', payload: { user: e.target.value } })}
                                     />
                                 </div>
 
@@ -365,11 +453,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="pg-password"
                                         type="password"
-                                        value={pgPassword}
-                                        onChange={(e) => {
-                                            setPgPassword(e.target.value)
-                                            setDbValidationStatus('idle')
-                                        }}
+                                        value={state.pgPassword}
+                                        onChange={(e) => dispatch({ type: 'SET_PG', payload: { password: e.target.value } })}
                                     />
                                 </div>
                             </div>
@@ -378,16 +463,16 @@ export function InfrastructureSettings() {
                                 <Button
                                     variant="outline"
                                     onClick={validateDatabaseConnection}
-                                    disabled={isValidatingDb}
+                                    disabled={state.isValidatingDb}
                                 >
-                                    {isValidatingDb ? (
+                                    {state.isValidatingDb ? (
                                         <>
                                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                             Testando Conexão...
                                         </>
                                     ) : (
                                         <>
-                                            {dbValidationStatus === 'success' ? (
+                                            {state.dbValidationStatus === 'success' ? (
                                                 <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
                                             ) : (
                                                 <Server className="mr-2 h-4 w-4" />
@@ -397,13 +482,13 @@ export function InfrastructureSettings() {
                                     )}
                                 </Button>
 
-                                {dbValidationStatus === 'success' && (
+                                {state.dbValidationStatus === 'success' && (
                                     <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
                                         <CheckCircle2 className="h-3 w-3 mr-1" />
                                         Conexão Validada
                                     </Badge>
                                 )}
-                                {dbValidationStatus === 'error' && (
+                                {state.dbValidationStatus === 'error' && (
                                     <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50">
                                         <AlertCircle className="h-3 w-3 mr-1" />
                                         Erro na Conexão
@@ -424,7 +509,7 @@ export function InfrastructureSettings() {
 
                     <Button
                         onClick={handleSaveDatabaseConfig}
-                        disabled={updateInfrastructureMutation.isPending || (dbProvider !== 'quayer' && dbValidationStatus !== 'success')}
+                        disabled={updateInfrastructureMutation.isPending || (state.dbProvider !== 'quayer' && state.dbValidationStatus !== 'success')}
                     >
                         {updateInfrastructureMutation.isPending ? (
                             <>
@@ -455,7 +540,7 @@ export function InfrastructureSettings() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <RadioGroup value={redisProvider} onValueChange={(value: any) => setRedisProvider(value)}>
+                    <RadioGroup value={state.redisProvider} onValueChange={(value: RedisProvider) => dispatch({ type: 'SET_REDIS_PROVIDER', payload: value })}>
                         <div className="grid gap-4">
                             <div className="flex items-start space-x-3">
                                 <RadioGroupItem value="quayer" id="redis-quayer" />
@@ -486,7 +571,7 @@ export function InfrastructureSettings() {
                         </div>
                     </RadioGroup>
 
-                    {redisProvider === 'custom' && (
+                    {state.redisProvider === 'custom' && (
                         <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
                             <h4 className="font-semibold text-sm flex items-center gap-2">
                                 <Server className="h-4 w-4 text-red-600" />
@@ -499,11 +584,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="redis-url"
                                         placeholder="redis://localhost:6379"
-                                        value={redisUrl}
-                                        onChange={(e) => {
-                                            setRedisUrl(e.target.value)
-                                            setRedisValidationStatus('idle')
-                                        }}
+                                        value={state.redisUrl}
+                                        onChange={(e) => dispatch({ type: 'SET_REDIS', payload: { url: e.target.value } })}
                                     />
                                 </div>
 
@@ -512,11 +594,8 @@ export function InfrastructureSettings() {
                                     <Input
                                         id="redis-password"
                                         type="password"
-                                        value={redisPassword}
-                                        onChange={(e) => {
-                                            setRedisPassword(e.target.value)
-                                            setRedisValidationStatus('idle')
-                                        }}
+                                        value={state.redisPassword}
+                                        onChange={(e) => dispatch({ type: 'SET_REDIS', payload: { password: e.target.value } })}
                                     />
                                 </div>
 
@@ -524,16 +603,16 @@ export function InfrastructureSettings() {
                                     <Button
                                         variant="outline"
                                         onClick={validateRedisConnection}
-                                        disabled={isValidatingRedis}
+                                        disabled={state.isValidatingRedis}
                                     >
-                                        {isValidatingRedis ? (
+                                        {state.isValidatingRedis ? (
                                             <>
                                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                                 Testando Conexão...
                                             </>
                                         ) : (
                                             <>
-                                                {redisValidationStatus === 'success' ? (
+                                                {state.redisValidationStatus === 'success' ? (
                                                     <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
                                                 ) : (
                                                     <Server className="mr-2 h-4 w-4" />
@@ -543,13 +622,13 @@ export function InfrastructureSettings() {
                                         )}
                                     </Button>
 
-                                    {redisValidationStatus === 'success' && (
+                                    {state.redisValidationStatus === 'success' && (
                                         <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
                                             <CheckCircle2 className="h-3 w-3 mr-1" />
                                             Conexão Validada
                                         </Badge>
                                     )}
-                                    {redisValidationStatus === 'error' && (
+                                    {state.redisValidationStatus === 'error' && (
                                         <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50">
                                             <AlertCircle className="h-3 w-3 mr-1" />
                                             Erro na Conexão
@@ -562,7 +641,7 @@ export function InfrastructureSettings() {
 
                     <Button
                         onClick={handleSaveRedisConfig}
-                        disabled={updateInfrastructureMutation.isPending || (redisProvider === 'custom' && redisValidationStatus !== 'success')}
+                        disabled={updateInfrastructureMutation.isPending || (state.redisProvider === 'custom' && state.redisValidationStatus !== 'success')}
                     >
                         {updateInfrastructureMutation.isPending ? (
                             <>

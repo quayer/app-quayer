@@ -79,7 +79,7 @@ export function QRCodeModal({
       setQrCode(null)
       setError(null)
 
-      toast.success('🎉 WhatsApp conectado com sucesso!', {
+      toast.success('WhatsApp conectado com sucesso!', {
         description: `${connectionName} está pronto para uso.`,
         duration: 4000,
       })
@@ -135,7 +135,7 @@ export function QRCodeModal({
         // Ativar animação pulse por 1.5 segundos
         setQrJustUpdated(true)
         setTimeout(() => setQrJustUpdated(false), 1500)
-        toast.success('📱 QR Code gerado com sucesso!')
+        toast.success('QR Code gerado com sucesso!')
       } else if (data.status?.toLowerCase() === 'connected') {
         setStatus('connected')
       } else {
@@ -270,7 +270,7 @@ export function QRCodeModal({
               </div>
               <div className="text-center space-y-2">
                 <p className="font-bold text-xl text-green-600 dark:text-green-400">
-                  Conectado com sucesso! 🎉
+                  Conectado com sucesso!
                 </p>
                 <p className="text-sm text-muted-foreground max-w-xs">
                   <strong>{connectionName}</strong> está ativo e pronto para enviar e receber mensagens.

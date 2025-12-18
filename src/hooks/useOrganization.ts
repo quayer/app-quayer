@@ -8,9 +8,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/igniter.client';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { extractErrorMessage } from '@/lib/utils/error-handler';
+import type { Organization, ApiResponse } from '@/types/api.types';
 
 // Helper para fazer requests autenticados com cookies
-async function fetchWithAuth(url: string, options: RequestInit = {}) {
+async function fetchWithAuth<T = unknown>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
     ...options,
     credentials: 'include',
@@ -22,7 +24,7 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
-    throw new Error(error.message || error.error || `HTTP ${response.status}`);
+    throw new Error(extractErrorMessage(error, `HTTP ${response.status}`));
   }
 
   return response.json();
@@ -43,6 +45,13 @@ export function useOrganizations() {
   });
 }
 
+interface SwitchOrganizationResponse {
+  data?: {
+    accessToken?: string;
+  };
+  accessToken?: string;
+}
+
 /**
  * Hook to switch current organization context
  */
@@ -53,17 +62,18 @@ export function useSwitchOrganization() {
   return useMutation({
     mutationFn: async (organizationId: string) => {
       const result = await api.auth.switchOrganization.mutate({ body: { organizationId } });
-      return result;
+      return result as SwitchOrganizationResponse;
     },
-    onSuccess: (data: any) => {
-      // ✅ CORREÇÃO BRUTAL: Extrair data corretamente
+    onSuccess: (data: SwitchOrganizationResponse) => {
       const responseData = data?.data || data;
 
       // Update access token in localStorage AND cookie
       if (responseData.accessToken) {
-        // ✅ Usar 'accessToken' (não 'auth_token')
         localStorage.setItem('accessToken', responseData.accessToken);
-        document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax`;
+        // Cookie with Secure flag for HTTPS (production)
+        const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
+        const secureFlag = isSecure ? '; Secure' : '';
+        document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax${secureFlag}`;
       }
 
       // Invalidate all queries to refetch with new organization context
@@ -71,12 +81,12 @@ export function useSwitchOrganization() {
 
       toast.success('Organização alterada com sucesso!');
 
-      // Refresh page to update all contexts
-      window.location.reload();
+      // Use Next.js router.refresh() instead of window.location.reload()
+      // This preserves client state while refreshing server components
+      router.refresh();
     },
-    onError: (error: any) => {
-      const message = error?.response?.data?.error || error.message || 'Erro ao trocar organização';
-      toast.error(message);
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error, 'Erro ao trocar organização'));
     },
   });
 }
@@ -96,6 +106,11 @@ export function useCurrentOrganization() {
   });
 }
 
+interface UpdateOrganizationParams {
+  organizationId: string;
+  data: Partial<Organization>;
+}
+
 /**
  * Hook to update organization settings
  */
@@ -103,17 +118,28 @@ export function useUpdateOrganization() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ organizationId, data }: { organizationId: string; data: any }) => {
-      const result = await api.organizations.update.mutate({ organizationId, ...data });
-      return result;
+    mutationFn: async ({ organizationId, data }: UpdateOrganizationParams) => {
+      // Use fetch with proper params structure (API expects PUT /:id with body)
+      const response = await fetch(`/api/v1/organizations/${organizationId}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+        throw new Error(extractErrorMessage(error, 'Erro ao atualizar organização'));
+      }
+
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organization'] });
       toast.success('Organização atualizada com sucesso!');
     },
-    onError: (error: any) => {
-      const message = error?.response?.data?.error || error.message || 'Erro ao atualizar organização';
-      toast.error(message);
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error, 'Erro ao atualizar organização'));
     },
   });
 }

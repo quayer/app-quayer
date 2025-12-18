@@ -432,4 +432,54 @@ export class UAZClient {
   async ping() {
     return this.request('GET', '/ping');
   }
+
+  // ===== SYNC GLOBAL WEBHOOK =====
+  /**
+   * Sincroniza webhook global com todas as instâncias UAZapi
+   * Usado pelo painel admin para configurar webhook centralizado
+   */
+  async syncGlobalWebhook(config: {
+    url: string;
+    events: string[];
+    excludeMessages?: string[];
+    addUrlEvents?: boolean;
+    addUrlTypesMessages?: boolean;
+  }): Promise<{ synced: number; total: number; errors: string[] }> {
+    const errors: string[] = [];
+    let synced = 0;
+    let total = 0;
+
+    try {
+      // 1. Configurar webhook global na UAZapi
+      await this.setGlobalWebhook(config);
+      console.log('[UAZClient] Global webhook configured:', config.url);
+
+      // 2. Listar todas as instâncias para sincronizar
+      const instancesResponse = await this.listAllInstances();
+      const instances = instancesResponse.data || [];
+      total = instances.length;
+
+      console.log(`[UAZClient] Found ${total} instances to sync webhook`);
+
+      // 3. O webhook global já aplica a todas as instâncias automaticamente
+      // Não é necessário configurar individualmente
+      synced = total;
+
+      return { synced, total, errors };
+    } catch (error: any) {
+      console.error('[UAZClient] Failed to sync global webhook:', error);
+      errors.push(error.message);
+      return { synced, total, errors };
+    }
+  }
 }
+
+// ===== SINGLETON INSTANCE =====
+/**
+ * Instância singleton do UAZClient
+ * Configurada automaticamente com variáveis de ambiente
+ */
+export const uazapiClient = new UAZClient({
+  baseUrl: process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com',
+  adminToken: process.env.UAZAPI_ADMIN_TOKEN || '',
+});

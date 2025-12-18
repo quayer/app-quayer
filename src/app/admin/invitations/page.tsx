@@ -195,7 +195,7 @@ export default function AdminInvitationsPage() {
       const result = await createInvitationAction(formData)
 
       if (result.success) {
-        toast.success('✅ Convite criado com sucesso!', {
+        toast.success('Convite criado com sucesso!', {
           description: `Um email foi enviado para ${formData.email}`,
         })
         setCreateModalOpen(false)
@@ -220,7 +220,7 @@ export default function AdminInvitationsPage() {
       const result = await resendInvitationAction(invitationId)
 
       if (result.success) {
-        toast.success('✅ Convite reenviado com sucesso!')
+        toast.success('Convite reenviado com sucesso!')
         await loadInvitations()
       } else {
         toast.error(result.error || 'Erro ao reenviar convite')
@@ -238,7 +238,7 @@ export default function AdminInvitationsPage() {
       const result = await deleteInvitationAction(selectedInvitation.id)
 
       if (result.success) {
-        toast.success('✅ Convite cancelado com sucesso!')
+        toast.success('Convite cancelado com sucesso!')
         setDeleteModalOpen(false)
         setSelectedInvitation(null)
         await loadInvitations()
@@ -255,7 +255,7 @@ export default function AdminInvitationsPage() {
     const baseUrl = window.location.origin
     const inviteUrl = `${baseUrl}/connect?token=${token}`
     navigator.clipboard.writeText(inviteUrl)
-    toast.success('✅ Link copiado para a área de transferência!')
+    toast.success('Link copiado para a área de transferência!')
   }
 
   if (error) {

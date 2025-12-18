@@ -17,9 +17,9 @@ import {
   CheckCircle2,
   AlertCircle
 } from "lucide-react"
-import { api } from "@/igniter.client"
+// Removido: import { api } - usando fetch com credentials: include
 import { useToast } from "@/hooks/use-toast"
-import { startRegistration, startAuthentication } from "@simplewebauthn/browser"
+import { startRegistration } from "@simplewebauthn/browser"
 import { useAuth } from "@/lib/auth/auth-provider"
 import {
   AlertDialog,
@@ -63,12 +63,25 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
 
     setIsLoading(true)
     try {
-      const { data, error } = await api.auth.passkeyList.query()
+      // ✅ CORREÇÃO: Usar fetch com credentials: include para enviar cookies
+      const response = await fetch('/api/v1/auth/passkey/list', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
 
-      if (error) {
-        console.error('[Passkey] Error loading:', error)
+      if (!response.ok) {
+        console.error('[Passkey] HTTP Error:', response.status)
         setPasskeys([])
-      } else if (Array.isArray(data)) {
+        return
+      }
+
+      const result = await response.json()
+      const data = result.data || result
+
+      if (Array.isArray(data)) {
         // Converter Date para string se necessário
         const formattedData = data.map((p: any) => ({
           ...p,
@@ -119,36 +132,46 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
 
     try {
       // 1. Obter opções de registro do servidor
-      const { data: optionsData, error: optionsError } = await api.auth.passkeyRegisterOptions.mutate({
-        body: { email: user.email }
+      // ✅ CORREÇÃO: Usar fetch com credentials: include
+      const optionsResponse = await fetch('/api/v1/auth/passkey/register/options', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email })
       })
 
-      if (optionsError || !optionsData) {
-        const errorMsg = (optionsError as any)?.error?.message ||
-                        (optionsError as any)?.message ||
-                        'Erro ao obter opções de registro'
+      if (!optionsResponse.ok) {
+        const errorData = await optionsResponse.json().catch(() => ({}))
         toast({
           title: "Erro",
-          description: errorMsg,
+          description: errorData.error || errorData.message || 'Erro ao obter opções de registro',
           variant: "destructive",
         })
         return
       }
+
+      const optionsResult = await optionsResponse.json()
+      const optionsData = optionsResult.data || optionsResult
 
       // 2. Iniciar registro WebAuthn no navegador
       // Isso abre o prompt do Windows Hello, QR Code para celular, ou USB key
       const credential = await startRegistration({ optionsJSON: optionsData as any })
 
       // 3. Verificar e salvar credencial no servidor
-      const { data: verifyData, error: verifyError } = await api.auth.passkeyRegisterVerify.mutate({
-        body: {
+      // ✅ CORREÇÃO: Usar fetch com credentials: include
+      const verifyResponse = await fetch('/api/v1/auth/passkey/register/verify', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email: user.email,
           credential: credential
-        }
+        })
       })
 
-      if (verifyError || !verifyData) {
-        throw new Error((verifyError as any)?.error?.message || 'Registro falhou')
+      if (!verifyResponse.ok) {
+        const errorData = await verifyResponse.json().catch(() => ({}))
+        throw new Error(errorData.error || errorData.message || 'Registro falhou')
       }
 
       toast({
@@ -192,12 +215,18 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
 
     setIsDeleting(true)
     try {
-      const { error } = await (api.auth.passkeyDelete as any).mutate({
-        params: { id: passkeyToDelete.id }
+      // ✅ CORREÇÃO: Usar fetch com credentials: include para enviar cookies
+      const response = await fetch(`/api/v1/auth/passkey/${passkeyToDelete.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       })
 
-      if (error) {
-        throw new Error((error as any)?.error?.message || 'Erro ao remover passkey')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || errorData.message || 'Erro ao remover passkey')
       }
 
       toast({

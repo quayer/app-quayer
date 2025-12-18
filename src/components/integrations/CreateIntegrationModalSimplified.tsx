@@ -103,7 +103,7 @@ export function CreateIntegrationModalSimplified({
 
       if (result?.success) {
         // ✅ Feedback imediato
-        toast.success('✅ Integração criada com sucesso!', {
+        toast.success('Integração criada com sucesso!', {
           description: 'O card aparecerá na lista de integrações'
         });
 

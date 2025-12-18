@@ -173,12 +173,12 @@ export function ConnectionModal({ instance, isOpen, onClose, onSuccess }: Connec
       await navigator.clipboard.write([
         new ClipboardItem({ 'image/png': blob })
       ])
-      toast.success('✅ QR Code copiado!', {
+      toast.success('QR Code copiado!', {
         description: 'Cole em qualquer lugar (WhatsApp, Email, etc)'
       })
     } catch (error) {
       console.error('Erro ao copiar:', error)
-      toast.error('❌ Erro ao copiar', {
+      toast.error('Erro ao copiar', {
         description: 'Seu navegador não suporta copiar imagens'
       })
     }
@@ -199,7 +199,7 @@ export function ConnectionModal({ instance, isOpen, onClose, onSuccess }: Connec
           text: 'Escaneie este QR Code para conectar seu WhatsApp',
           files: [file]
         })
-        toast.success('✅ Compartilhado com sucesso!')
+        toast.success('Compartilhado com sucesso!')
       } else {
         // Fallback: Download
         const url = URL.createObjectURL(blob)
@@ -208,13 +208,13 @@ export function ConnectionModal({ instance, isOpen, onClose, onSuccess }: Connec
         a.download = 'qrcode-whatsapp.png'
         a.click()
         URL.revokeObjectURL(url)
-        toast.success('✅ QR Code baixado!', {
+        toast.success('QR Code baixado!', {
           description: 'Envie o arquivo para conectar'
         })
       }
     } catch (error) {
       console.error('Erro ao compartilhar:', error)
-      toast.error('❌ Erro ao compartilhar')
+      toast.error('Erro ao compartilhar')
     }
   }
 

@@ -268,36 +268,60 @@ export const instancesController = igniter.controller({
             search,
           });
 
-          // 🔄 ASYNC: Verificar status real de instâncias CONNECTING em background
+          // 🔄 ASYNC: Verificar status real de instâncias em background
+          // ✅ CORREÇÃO BRUTAL: Incluir DISCONNECTED para sincronizar instâncias importadas
           // Isso não bloqueia a resposta, melhora a UX com status mais atualizado no próximo polling
-          const connectingInstances = result.instances.filter(
-            (inst: any) => ((inst.status === 'CONNECTING') || (inst.status === 'CONNECTED' && !inst.phoneNumber)) && inst.uazapiToken
+          const instancesToSync = result.instances.filter(
+            (inst: any) => (
+              inst.uazapiToken && (
+                inst.status === 'CONNECTING' ||
+                inst.status === 'DISCONNECTED' ||
+                (inst.status === 'CONNECTED' && !inst.phoneNumber)
+              )
+            )
           );
 
-          if (connectingInstances.length > 0) {
+          if (instancesToSync.length > 0) {
             // Executar em background sem await
             setImmediate(async () => {
-              for (const instance of connectingInstances) {
+              for (const instance of instancesToSync) {
                 if (!instance.uazapiToken) continue; // Type guard
                 try {
                   const statusResult = await uazapiService.getInstanceStatus(instance.uazapiToken);
                   if (statusResult.success && statusResult.data) {
                     const realStatus = statusResult.data.status?.toLowerCase();
-                    logger.info('Async status check debug', {
+                    logger.info('Async status check', {
                       instanceId: instance.id,
+                      dbStatus: instance.status,
                       realStatus,
                       phoneNumber: statusResult.data.phoneNumber
                     });
 
                     if (realStatus === 'connected' || realStatus === 'open') {
-                      // Atualizar status no banco
-                      await repository.updateStatus(
-                        instance.id,
-                        'CONNECTED',
-                        statusResult.data.phoneNumber || undefined,
-                        statusResult.data.profilePicture || null
-                      );
-                      logger.info('Async status sync: instance connected', { instanceId: instance.id, name: instance.name });
+                      // ✅ Atualizar status no banco se diferente
+                      if (instance.status !== 'CONNECTED') {
+                        await repository.updateStatus(
+                          instance.id,
+                          'CONNECTED',
+                          statusResult.data.phoneNumber || undefined,
+                          statusResult.data.profilePicture || null
+                        );
+                        logger.info('Async status sync: instance updated to CONNECTED', {
+                          instanceId: instance.id,
+                          name: instance.name,
+                          previousStatus: instance.status
+                        });
+                      }
+                    } else if (realStatus === 'disconnected' || realStatus === 'close') {
+                      // ✅ Também sincronizar quando desconectar
+                      if (instance.status !== 'DISCONNECTED') {
+                        await repository.updateStatus(instance.id, 'DISCONNECTED');
+                        logger.info('Async status sync: instance updated to DISCONNECTED', {
+                          instanceId: instance.id,
+                          name: instance.name,
+                          previousStatus: instance.status
+                        });
+                      }
                     }
                   }
                 } catch (err) {
