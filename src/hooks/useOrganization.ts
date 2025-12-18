@@ -9,6 +9,25 @@ import { api } from '@/igniter.client';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
+// Helper para fazer requests autenticados com cookies
+async function fetchWithAuth(url: string, options: RequestInit = {}) {
+  const response = await fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+    throw new Error(error.message || error.error || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Hook to fetch all organizations (for GOD/admin users)
  */
@@ -16,7 +35,8 @@ export function useOrganizations() {
   return useQuery({
     queryKey: ['organizations'],
     queryFn: async () => {
-      const result = await api.organizations.list.query({ query: {} });
+      // ✅ CORREÇÃO: Usar fetch com credentials: include para enviar cookies
+      const result = await fetchWithAuth('/api/v1/organizations/');
       return result;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -68,7 +88,8 @@ export function useCurrentOrganization() {
   return useQuery({
     queryKey: ['organization', 'current'],
     queryFn: async () => {
-      const result = await api.organizations.getCurrent.query();
+      // ✅ CORREÇÃO: Usar fetch com credentials: include para enviar cookies
+      const result = await fetchWithAuth('/api/v1/organizations/current');
       return result;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
