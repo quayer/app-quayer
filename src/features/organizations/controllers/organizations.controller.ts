@@ -41,41 +41,34 @@ export const organizationsController = igniter.controller({
         const userId = user.id;
         const userRole = user.role as UserRole;
 
-        // Permitir criação se:
-        // 1. É admin (sistema) - pode criar sempre
-        // 2. Usuário no onboarding (não tem organização ainda)
-        // 3. Usuário é master em pelo menos uma organização (multi-empresa)
+        // Verificar permissões do usuário
         const isAdmin = isSystemAdmin(userRole);
 
-        if (!isAdmin) {
-          // Verificar permissões do usuário
-          const userData = await db.user.findUnique({
-            where: { id: userId },
-            include: {
-              organizations: {
-                include: {
-                  organization: true,
-                },
+        const userData = await db.user.findUnique({
+          where: { id: userId },
+          include: {
+            organizations: {
+              where: { isActive: true },
+              include: {
+                organization: true,
               },
             },
-          });
+          },
+        });
 
-          if (!userData) {
-            return response.notFound('User not found');
-          }
+        if (!userData) {
+          return response.notFound('User not found');
+        }
 
-          // Cenário 1: Usuário no onboarding (sem organização) - permitir criar primeira org
-          const hasNoOrganizations = userData.organizations.length === 0;
+        // ✅ VALIDAÇÃO 1:1: Usuários comuns só podem ter UMA organização
+        // Apenas admins do sistema podem criar múltiplas organizações
+        if (!isAdmin) {
+          const hasActiveOrganization = userData.organizations.length > 0;
 
-          // Cenário 2: Usuário é master em alguma organização - permitir criar novas orgs
-          const isMasterInAnyOrg = userData.organizations.some(
-            (orgUser) => orgUser.role === 'master'
-          );
-
-          // Bloquear se não está em nenhum dos cenários permitidos
-          if (!hasNoOrganizations && !isMasterInAnyOrg) {
+          // Se usuário já tem organização ativa, bloquear criação de nova
+          if (hasActiveOrganization) {
             return response.forbidden(
-              'Apenas masters de organizações podem criar novas organizações.'
+              'Você já possui uma organização vinculada ao seu e-mail. Cada usuário pode ter apenas uma organização.'
             );
           }
         }

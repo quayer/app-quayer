@@ -81,28 +81,11 @@
    4. Touch Targets - WCAG 2.5.5
    ======================================== */
 
-/* Garantir touch targets mínimo de 48x48px */
-button,
-[role="button"],
-a,
-[role="link"],
-input[type="checkbox"],
-input[type="radio"] {
-  min-height: 48px;
-  min-width: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Exceção para texto inline */
-p button,
-span button,
-p a,
-span a {
-  min-height: unset;
-  min-width: unset;
-}
+/*
+ * NOTA: Regras de min-height para touch targets já definidas em globals.css (44px)
+ * Removido daqui para evitar conflito e duplicação.
+ * 44px é suficiente para conformidade WCAG 2.1 AA (Success Criterion 2.5.5)
+ */
 
 /* ========================================
    5. Reduced Motion - WCAG 2.3.3
