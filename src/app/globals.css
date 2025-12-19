@@ -237,23 +237,47 @@
      - 2.5.8 (AA): 24×24px minimum
      - 2.5.5 (AAA): 44×44px for touch
 
-     Strategy: Use component-defined sizing.
-     Only apply 44px via explicit .touch-target class.
-     Let Button component variants control sizing.
+     Strategy: Responsive sizing
+     - Desktop (>768px): 36px - better aesthetics
+     - Mobile (≤768px): 44px - WCAG AAA touch targets
      ======================================== */
 
-  /* Utility class for explicit 44px touch targets */
-  .touch-target {
-    min-height: 44px;
-    min-width: 44px;
+  /* Desktop: 36px minimum for all interactive elements */
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"],
+  [type="reset"] {
+    min-height: 36px;
+    min-width: 36px;
   }
 
-  /* Touch devices: only apply to explicit .touch-target elements */
-  @media (hover: none) and (pointer: coarse) {
-    .touch-target {
+  /* Mobile (≤768px): 44px for touch targets */
+  @media (max-width: 768px) {
+    button:not(.btn-compact),
+    [role="button"]:not(.btn-compact),
+    [type="button"]:not(.btn-compact),
+    [type="submit"]:not(.btn-compact),
+    [type="reset"]:not(.btn-compact) {
       min-height: 44px;
       min-width: 44px;
     }
+  }
+
+  /* Compact button class for small UI elements */
+  .btn-compact {
+    min-height: unset;
+    min-width: unset;
+  }
+
+  /* Sidebar and navigation elements - keep native sizing */
+  [data-sidebar] button,
+  [data-slot^="sidebar"] button,
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"] {
+    min-height: unset;
+    min-width: unset;
   }
 
   /* UX FIX: Cursor pointer for all interactive elements */
