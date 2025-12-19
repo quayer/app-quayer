@@ -237,40 +237,23 @@
      - 2.5.8 (AA): 24×24px minimum
      - 2.5.5 (AAA): 44×44px for touch
 
-     Strategy: Apply 44px only on touch devices
-     for primary action buttons. Desktop and
-     navigation elements use native sizing.
+     Strategy: Use component-defined sizing.
+     Only apply 44px via explicit .touch-target class.
+     Let Button component variants control sizing.
      ======================================== */
 
-  /* Touch devices (mobile/tablet): 44px for form buttons */
-  @media (hover: none) and (pointer: coarse) {
-    /* Primary action buttons - forms, modals, dialogs */
-    form button[type="submit"],
-    form button[type="button"],
-    [role="dialog"] button,
-    [role="alertdialog"] button,
-    .touch-target {
-      min-height: 44px;
-      min-width: 44px;
-    }
-  }
-
-  /* Utility class for explicit 44px targets */
+  /* Utility class for explicit 44px touch targets */
   .touch-target {
     min-height: 44px;
     min-width: 44px;
   }
 
-  /* Ensure sidebar and compact elements keep native sizing */
-  [data-sidebar] button,
-  [data-slot^="sidebar"] button,
-  [data-slot="switch"],
-  [data-slot="switch-thumb"],
-  [role="menuitem"],
-  [role="tab"],
-  [role="option"] {
-    min-height: unset;
-    min-width: unset;
+  /* Touch devices: only apply to explicit .touch-target elements */
+  @media (hover: none) and (pointer: coarse) {
+    .touch-target {
+      min-height: 44px;
+      min-width: 44px;
+    }
   }
 
   /* UX FIX: Cursor pointer for all interactive elements */
