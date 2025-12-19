@@ -232,17 +232,43 @@
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* Interactive Elements - Minimum Target Size 44x44px (WCAG 2.5.5) */
-  /* Excludes Switch components which have their own sizing */
-  button:not([data-slot="switch"]),
-  [role="button"]:not([data-slot="switch"]) {
+  /* ========================================
+     WCAG 2.2 Target Size Guidelines
+     - 2.5.8 (AA): 24×24px minimum
+     - 2.5.5 (AAA): 44×44px for touch
+
+     Strategy: Apply 44px only on touch devices
+     for primary action buttons. Desktop and
+     navigation elements use native sizing.
+     ======================================== */
+
+  /* Touch devices (mobile/tablet): 44px for form buttons */
+  @media (hover: none) and (pointer: coarse) {
+    /* Primary action buttons - forms, modals, dialogs */
+    form button[type="submit"],
+    form button[type="button"],
+    [role="dialog"] button,
+    [role="alertdialog"] button,
+    .touch-target {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+
+  /* Utility class for explicit 44px targets */
+  .touch-target {
     min-height: 44px;
     min-width: 44px;
   }
 
-  /* Switch component - uses its own sizing (h-6 w-11) */
-  button[data-slot="switch"],
-  [data-slot="switch-thumb"] {
+  /* Ensure sidebar and compact elements keep native sizing */
+  [data-sidebar] button,
+  [data-slot^="sidebar"] button,
+  [data-slot="switch"],
+  [data-slot="switch-thumb"],
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"] {
     min-height: unset;
     min-width: unset;
   }
