@@ -2324,7 +2324,7 @@ export const authController = igniter.controller({
             expectedRPID: rpID,
             credential: {
               id: storedCredential.credentialId,
-              publicKey: storedCredential.publicKey as unknown as Uint8Array,
+              publicKey: storedCredential.publicKey as unknown as Uint8Array<ArrayBuffer>,
               counter: Number(storedCredential.counter),
               transports: storedCredential.transports as any[],
             },
@@ -2578,7 +2578,7 @@ export const authController = igniter.controller({
             expectedRPID: rpID,
             credential: {
               id: storedCredential.credentialId,
-              publicKey: storedCredential.publicKey as unknown as Uint8Array,
+              publicKey: storedCredential.publicKey as unknown as Uint8Array<ArrayBuffer>,
               counter: Number(storedCredential.counter),
               transports: storedCredential.transports as any[],
             },
