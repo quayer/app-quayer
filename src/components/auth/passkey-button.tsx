@@ -19,6 +19,7 @@ interface PasskeyButtonProps {
   mode?: "login" | "register" | "smart"
   email?: string
   variant?: "default" | "outline" | "ghost"
+  size?: "default" | "sm" | "lg" | "icon"
   className?: string
   onSuccess?: () => void
   /**
@@ -32,6 +33,7 @@ export function PasskeyButton({
   mode = "smart",
   email,
   variant = "outline",
+  size,
   className,
   onSuccess,
   onNoPasskeyFound
@@ -576,6 +578,7 @@ export function PasskeyButton({
     <Button
       type="button"
       variant={variant}
+      size={size}
       className={className}
       onClick={handleClick}
       disabled={isLoading}

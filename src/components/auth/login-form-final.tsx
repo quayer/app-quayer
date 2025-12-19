@@ -212,6 +212,7 @@ export function LoginFormFinal({
               <Field>
                 <Button
                   type="submit"
+                  size="lg"
                   className="w-full group relative overflow-hidden"
                   disabled={isLoading || isGoogleLoading || !isValidEmail}
                   aria-busy={isLoading}
@@ -241,6 +242,7 @@ export function LoginFormFinal({
                 <Field>
                   <Button
                     variant="outline"
+                    size="lg"
                     type="button"
                     onClick={handleGoogleLogin}
                     disabled={isGoogleLoading || isLoading}
@@ -264,6 +266,7 @@ export function LoginFormFinal({
                 <Field>
                   <PasskeyButton
                     mode="smart"
+                    size="lg"
                     email={email}
                     variant="outline"
                     className="w-full hover:bg-accent/50 transition-colors"

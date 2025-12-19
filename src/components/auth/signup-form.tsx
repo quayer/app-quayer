@@ -156,6 +156,7 @@ export function SignupForm({
               <Button
                 type="button"
                 variant="outline"
+                size="lg"
                 onClick={handleGoogleSignup}
                 disabled={isLoading || isGoogleLoading}
                 className="w-full"
@@ -213,6 +214,7 @@ export function SignupForm({
                 <Field>
                   <Button
                     type="submit"
+                    size="lg"
                     disabled={isLoading || isGoogleLoading}
                     className="w-full"
                     aria-busy={isLoading}
