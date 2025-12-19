@@ -46,7 +46,7 @@ async function setupGlobalWebhook(): Promise<void> {
   // Validar variáveis de ambiente
   const adminToken = process.env.UAZAPI_ADMIN_TOKEN
   const webhookUrl = process.env.UAZAPI_WEBHOOK_URL
-  const uazapiBaseUrl = process.env.UAZAPI_BASE_URL || 'https://api.uazapi.com'
+  const uazapiBaseUrl = process.env.UAZAPI_BASE_URL || 'https://quayer.uazapi.com'
 
   if (!adminToken) {
     throw new Error('❌ UAZAPI_ADMIN_TOKEN não configurado no .env')
@@ -77,7 +77,7 @@ async function setupGlobalWebhook(): Promise<void> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`,
+        'admintoken': adminToken,
       },
       body: JSON.stringify(config),
     })
@@ -104,7 +104,7 @@ async function setupGlobalWebhook(): Promise<void> {
     const verifyResponse = await fetch(`${uazapiBaseUrl}/globalwebhook`, {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        'admintoken': adminToken,
       },
     })
 
@@ -131,7 +131,7 @@ async function removeGlobalWebhook(): Promise<void> {
   console.log('🗑️  Removendo webhook global...\n')
 
   const adminToken = process.env.UAZAPI_ADMIN_TOKEN
-  const uazapiBaseUrl = process.env.UAZAPI_BASE_URL || 'https://api.uazapi.com'
+  const uazapiBaseUrl = process.env.UAZAPI_BASE_URL || 'https://quayer.uazapi.com'
 
   if (!adminToken) {
     throw new Error('❌ UAZAPI_ADMIN_TOKEN não configurado no .env')
@@ -141,7 +141,7 @@ async function removeGlobalWebhook(): Promise<void> {
     const response = await fetch(`${uazapiBaseUrl}/globalwebhook`, {
       method: 'DELETE',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        'admintoken': adminToken,
       },
     })
 
