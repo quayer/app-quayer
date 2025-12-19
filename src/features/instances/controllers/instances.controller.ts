@@ -32,17 +32,25 @@ function createErrorResponse(code: ErrorCode, message: string, details?: any) {
  * @param instanceOrganizationId - ID da organização da instância (pode ser null)
  * @param userOrganizationId - ID da organização do usuário (opcional)
  * @param userRole - Role do usuário (para verificar se é admin)
+ *
+ * REGRA CRÍTICA: Instâncias SEM organizationId (orphaned) só podem ser acessadas por admin
  */
 function checkOrganizationPermission(
   instanceOrganizationId: string | null,
   userOrganizationId?: string,
   userRole?: string
 ): boolean {
-  // Admin tem acesso a todas as instâncias
+  // Admin tem acesso a todas as instâncias (incluindo orphaned)
   if (userRole === 'admin') return true;
 
-  // Usuário normal precisa ter organizationId e deve corresponder
+  // Usuário normal precisa ter organizationId
   if (!userOrganizationId) return false;
+
+  // CRÍTICO: Instâncias sem organizationId NÃO podem ser acessadas por usuários normais
+  // Isso previne data leakage de instâncias órfãs
+  if (!instanceOrganizationId) return false;
+
+  // Verificar se a instância pertence à organização do usuário
   return instanceOrganizationId === userOrganizationId;
 }
 
@@ -85,8 +93,21 @@ export const instancesController = igniter.controller({
             logger.info('Phone number validated', { original: phoneNumber, formatted: validatedPhoneNumber });
           }
 
-          // Business Rule: Verificar limite de instâncias da organização
+          // CRÍTICO: Verificar organizationId obrigatório para usuários não-admin
           const organizationId = context.auth?.session?.user?.currentOrgId;
+          const userRole = context.auth?.session?.user?.role;
+
+          // Usuários normais DEVEM ter uma organização para criar instâncias
+          if (userRole !== 'admin' && !organizationId) {
+            logger.warn('User tried to create instance without organization', {
+              userId: context.auth?.session?.user?.id,
+            });
+            return response.badRequest(
+              'Você precisa estar associado a uma organização para criar instâncias'
+            );
+          }
+
+          // Business Rule: Verificar limite de instâncias da organização
           if (organizationId) {
             const organization = await context.db.organization.findUnique({
               where: { id: organizationId },
