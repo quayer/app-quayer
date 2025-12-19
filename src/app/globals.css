@@ -270,16 +270,11 @@
     min-width: unset;
   }
 
-  /* Sidebar and navigation elements - keep native sizing (force override mobile rules) */
-  [data-sidebar] button,
-  [data-slot^="sidebar"] button,
-  [data-sidebar="menu-button"],
-  nav button,
+  /* Small UI elements - keep native sizing (dropdowns, switches, tabs) */
   [role="menuitem"],
   [role="tab"],
   [role="option"],
-  [role="switch"],
-  .btn-compact {
+  [role="switch"] {
     min-height: unset !important;
     min-width: unset !important;
   }
