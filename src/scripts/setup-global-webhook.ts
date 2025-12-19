@@ -23,18 +23,19 @@ import 'dotenv/config'
 interface GlobalWebhookConfig {
   url: string
   events: string[]
-  excludeMessages?: {
-    wasSentByApi?: boolean
-  }
+  excludeMessages?: string[]
+  addUrlEvents?: boolean
+  addUrlTypesMessages?: boolean
 }
 
 interface GlobalWebhookResponse {
-  success: boolean
+  id?: string
+  enabled?: boolean
   url: string
   events: string[]
-  excludeMessages?: {
-    wasSentByApi?: boolean
-  }
+  excludeMessages?: string[]
+  addUrlEvents?: boolean
+  addUrlTypesMessages?: boolean
 }
 
 /**
@@ -60,13 +61,13 @@ async function setupGlobalWebhook(): Promise<void> {
   console.log(`📍 Base URL: ${uazapiBaseUrl}`)
   console.log(`📍 Webhook URL: ${webhookUrl}\n`)
 
-  // Configuração do webhook
+  // Configuração do webhook (formato conforme docs UAZapi)
   const config: GlobalWebhookConfig = {
     url: webhookUrl,
-    events: ['messages', 'messages_update', 'connection'],
-    excludeMessages: {
-      wasSentByApi: true, // Evitar loops de mensagens enviadas pela API
-    },
+    events: ['connection', 'messages', 'messages_update', 'chats'],
+    excludeMessages: ['wasSentByApi'], // Array de strings - evita loops
+    addUrlEvents: false,
+    addUrlTypesMessages: false,
   }
 
   try {
@@ -93,10 +94,12 @@ async function setupGlobalWebhook(): Promise<void> {
 
     console.log('\n✅ Webhook global configurado com sucesso!')
     console.log('📋 Configuração aplicada:')
+    console.log(`   ID: ${result.id || 'N/A'}`)
+    console.log(`   Enabled: ${result.enabled ?? true}`)
     console.log(`   URL: ${result.url}`)
-    console.log(`   Eventos: ${result.events.join(', ')}`)
-    if (result.excludeMessages) {
-      console.log(`   Excluir wasSentByApi: ${result.excludeMessages.wasSentByApi}`)
+    console.log(`   Eventos: ${result.events?.join(', ') || 'N/A'}`)
+    if (result.excludeMessages && result.excludeMessages.length > 0) {
+      console.log(`   Excluir mensagens: ${result.excludeMessages.join(', ')}`)
     }
 
     // Verificar configuração atual

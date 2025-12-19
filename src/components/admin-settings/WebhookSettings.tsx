@@ -15,18 +15,22 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
 
-// Eventos disponíveis para webhook global UAZapi
+// Eventos disponíveis para webhook global UAZapi (completo conforme docs)
 const WEBHOOK_EVENTS = [
   { id: 'connection', label: 'Connection', description: 'Alterações no estado da conexão' },
-  { id: 'messages', label: 'Messages', description: 'Novas mensagens recebidas' },
-  { id: 'messages_update', label: 'Messages Update', description: 'Atualizações em mensagens' },
+  { id: 'messages', label: 'Messages', description: 'Novas mensagens recebidas', recommended: true },
+  { id: 'messages_update', label: 'Messages Update', description: 'Atualizações em mensagens (entrega/leitura)', recommended: true },
   { id: 'call', label: 'Call', description: 'Eventos de chamadas VoIP' },
   { id: 'contacts', label: 'Contacts', description: 'Atualizações na agenda' },
-  { id: 'presence', label: 'Presence', description: 'Alterações no status' },
+  { id: 'presence', label: 'Presence', description: 'Alterações no status online' },
   { id: 'groups', label: 'Groups', description: 'Modificações em grupos' },
   { id: 'labels', label: 'Labels', description: 'Gerenciamento de etiquetas' },
-  { id: 'chats', label: 'Chats', description: 'Eventos de conversas' },
+  { id: 'chats', label: 'Chats', description: 'Eventos de conversas', recommended: true },
+  { id: 'chat_labels', label: 'Chat Labels', description: 'Alterações em etiquetas de conversas' },
   { id: 'history', label: 'History', description: 'Histórico de mensagens' },
+  { id: 'blocks', label: 'Blocks', description: 'Bloqueios/desbloqueios de contatos' },
+  { id: 'leads', label: 'Leads', description: 'Atualizações de leads' },
+  { id: 'sender', label: 'Sender', description: 'Atualizações de campanhas (início/fim)' },
 ]
 
 // Filtros de exclusão de mensagens
@@ -53,7 +57,7 @@ export function WebhookSettings() {
 
   const [webhookConfig, setWebhookConfig] = useState<WebhookConfig>({
     url: '',
-    events: ['connection', 'messages'],
+    events: ['connection', 'messages', 'messages_update', 'chats'],
     excludeMessages: ['wasSentByApi'],
     addUrlEvents: false,
     addUrlTypesMessages: false,
