@@ -17,6 +17,7 @@ export const dashboardController = igniter.controller({
     /**
      * GET /api/v1/dashboard/metrics
      * Obter métricas agregadas de todas as instâncias da organização
+     * Cache: 60 segundos por organização
      */
     getMetrics: igniter.query({
       name: 'GetDashboardMetrics',
@@ -30,6 +31,17 @@ export const dashboardController = igniter.controller({
 
         if (!organizationId) {
           return response.badRequest('Nenhuma organização selecionada');
+        }
+
+        // 🚀 Cache: Check cache before expensive queries
+        const cacheKey = `dashboard:metrics:${organizationId}`;
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss - continue
         }
 
         try {
@@ -48,14 +60,23 @@ export const dashboardController = igniter.controller({
           // Obter métricas agregadas
           const metrics = await dashboardService.getAggregatedMetrics(connections);
 
-          return response.success({
+          const responseData = {
             data: metrics,
             instances: {
               total: connections.length,
               connected: connections.filter((i) => i.status === 'CONNECTED').length,
               disconnected: connections.filter((i) => i.status === 'DISCONNECTED').length,
             },
-          });
+          };
+
+          // 🚀 Cache: Store result with 60s TTL
+          try {
+            await igniter.store.set(cacheKey, responseData, { ttl: 60 });
+          } catch (e) {
+            // Cache error - not critical
+          }
+
+          return response.success(responseData);
         } catch (error: any) {
           console.error('Error fetching dashboard metrics:', error);
           return response.error(error.message || 'Erro ao buscar métricas');
@@ -66,6 +87,7 @@ export const dashboardController = igniter.controller({
     /**
      * GET /api/v1/dashboard/overview
      * Visão geral do sistema (sessões, mensagens, conversões)
+     * Cache: 60 segundos por organização e período
      */
     getOverview: igniter.query({
       path: '/overview',
@@ -83,13 +105,24 @@ export const dashboardController = igniter.controller({
           return response.badRequest('Nenhuma organização selecionada');
         }
 
+        // 🚀 Cache: Check cache before expensive queries
+        const cacheKey = `dashboard:overview:${currentOrgId}:${startDate || 'all'}:${endDate || 'now'}`;
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss - continue
+        }
+
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
         if (endDate) dateFilter.lte = new Date(endDate);
 
         const whereDate = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
 
-        // Buscar estatísticas gerais
+        // Buscar estatísticas gerais (já usa Promise.all)
         const [
           totalSessions,
           activeSessions,
@@ -136,7 +169,7 @@ export const dashboardController = igniter.controller({
 
         const conversionRate = totalSessions > 0 ? (closedSessions / totalSessions) * 100 : 0;
 
-        return response.success({
+        const responseData = {
           data: {
             sessions: {
               total: totalSessions,
@@ -156,13 +189,23 @@ export const dashboardController = igniter.controller({
               endDate: endDate || 'now',
             },
           },
-        });
+        };
+
+        // 🚀 Cache: Store result with 60s TTL
+        try {
+          await igniter.store.set(cacheKey, responseData, { ttl: 60 });
+        } catch (e) {
+          // Cache error - not critical
+        }
+
+        return response.success(responseData);
       },
     }),
 
     /**
      * GET /api/v1/dashboard/attendance
      * Métricas de atendimento (tempo de resposta, tempo médio, etc)
+     * Cache: 60 segundos por organização, período e departamento
      */
     getAttendance: igniter.query({
       path: '/attendance',
@@ -179,6 +222,17 @@ export const dashboardController = igniter.controller({
 
         if (!currentOrgId) {
           return response.badRequest('Nenhuma organização selecionada');
+        }
+
+        // 🚀 Cache: Check cache before expensive queries
+        const cacheKey = `dashboard:attendance:${currentOrgId}:${startDate || 'all'}:${endDate || 'now'}:${departmentId || 'all'}`;
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss - continue
         }
 
         const dateFilter: any = {};
@@ -247,7 +301,7 @@ export const dashboardController = igniter.controller({
           ? Math.round(totalSessionTime / closedSessions.length / 1000 / 60) // minutos
           : 0;
 
-        return response.success({
+        const responseData = {
           data: {
             metrics: {
               totalSessions: sessions.length,
@@ -262,13 +316,23 @@ export const dashboardController = igniter.controller({
               endDate: endDate || 'now',
             },
           },
-        });
+        };
+
+        // 🚀 Cache: Store result with 60s TTL
+        try {
+          await igniter.store.set(cacheKey, responseData, { ttl: 60 });
+        } catch (e) {
+          // Cache error - not critical
+        }
+
+        return response.success(responseData);
       },
     }),
 
     /**
      * GET /api/v1/dashboard/performance
      * Performance dos agentes/departamentos
+     * Cache: 60 segundos por organização, período e agrupamento
      */
     getPerformance: igniter.query({
       path: '/performance',
@@ -285,6 +349,17 @@ export const dashboardController = igniter.controller({
 
         if (!currentOrgId) {
           return response.badRequest('Nenhuma organização selecionada');
+        }
+
+        // 🚀 Cache: Check cache before expensive queries
+        const cacheKey = `dashboard:performance:${currentOrgId}:${startDate || 'all'}:${endDate || 'now'}:${groupBy}`;
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss - continue
         }
 
         const dateFilter: any = {};
@@ -370,7 +445,7 @@ export const dashboardController = igniter.controller({
           }));
         }
 
-        return response.success({
+        const responseData = {
           data: {
             groupBy,
             items: performanceData,
@@ -379,13 +454,23 @@ export const dashboardController = igniter.controller({
               endDate: endDate || 'now',
             },
           },
-        });
+        };
+
+        // 🚀 Cache: Store result with 60s TTL
+        try {
+          await igniter.store.set(cacheKey, responseData, { ttl: 60 });
+        } catch (e) {
+          // Cache error - not critical
+        }
+
+        return response.success(responseData);
       },
     }),
 
     /**
      * GET /api/v1/dashboard/conversations
      * Estatísticas de conversas (distribuição, tipos, etc)
+     * Cache: 60 segundos por organização e período
      */
     getConversations: igniter.query({
       path: '/conversations',
@@ -403,53 +488,69 @@ export const dashboardController = igniter.controller({
           return response.badRequest('Nenhuma organização selecionada');
         }
 
+        // 🚀 Cache: Check cache before expensive queries
+        const cacheKey = `dashboard:conversations:${currentOrgId}:${startDate || 'all'}:${endDate || 'now'}`;
+        try {
+          const cached = await igniter.store.get<any>(cacheKey);
+          if (cached) {
+            return response.success({ ...cached, source: 'cache' });
+          }
+        } catch (e) {
+          // Cache miss - continue
+        }
+
         const dateFilter: any = {};
         if (startDate) dateFilter.gte = new Date(startDate);
         if (endDate) dateFilter.lte = new Date(endDate);
 
         const whereDate = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
 
-        // Distribuição por status
-        const sessionsByStatus = await database.chatSession.groupBy({
-          by: ['status'],
-          where: {
-            organizationId: currentOrgId,
-            ...whereDate,
-          },
-          _count: true,
-        });
+        // Execute all queries in parallel with Promise.all
+        const [
+          sessionsByStatus,
+          sessionsByStarter,
+          messagesByType,
+          messagesByDirection,
+        ] = await Promise.all([
+          // Distribuição por status
+          database.chatSession.groupBy({
+            by: ['status'],
+            where: {
+              organizationId: currentOrgId,
+              ...whereDate,
+            },
+            _count: true,
+          }),
+          // Distribuição por startedBy
+          database.chatSession.groupBy({
+            by: ['startedBy'],
+            where: {
+              organizationId: currentOrgId,
+              ...whereDate,
+            },
+            _count: true,
+          }),
+          // Mensagens por tipo
+          database.message.groupBy({
+            by: ['type'],
+            where: {
+              connection: { organizationId: currentOrgId },
+              ...whereDate,
+            },
+            _count: true,
+          }),
+          // Mensagens por direction
+          database.message.groupBy({
+            by: ['direction'],
+            where: {
+              connection: { organizationId: currentOrgId },
+              ...whereDate,
+            },
+            _count: true,
+          }),
+        ]);
 
-        // Distribuição por startedBy
-        const sessionsByStarter = await database.chatSession.groupBy({
-          by: ['startedBy'],
-          where: {
-            organizationId: currentOrgId,
-            ...whereDate,
-          },
-          _count: true,
-        });
-
-        // Mensagens por tipo
-        const messagesByType = await database.message.groupBy({
-          by: ['type'],
-          where: {
-            connection: { organizationId: currentOrgId },
-            ...whereDate,
-          },
-          _count: true,
-        });
-
-        // Mensagens por direction
-        const messagesByDirection = await database.message.groupBy({
-          by: ['direction'],
-          where: {
-            connection: { organizationId: currentOrgId },
-            ...whereDate,
-          },
-          _count: true,
-        });
-
-        return response.success({
+        const responseData = {
           data: {
             sessionsByStatus: sessionsByStatus.map(s => ({
               status: s.status,
@@ -472,7 +573,16 @@ export const dashboardController = igniter.controller({
               endDate: endDate || 'now',
             },
           },
-        });
+        };
+
+        // 🚀 Cache: Store result with 60s TTL
+        try {
+          await igniter.store.set(cacheKey, responseData, { ttl: 60 });
+        } catch (e) {
+          // Cache error - not critical
+        }
+
+        return response.success(responseData);
       },
     }),
   },

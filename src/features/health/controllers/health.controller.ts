@@ -2,6 +2,7 @@ import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { metrics } from '@/services/metrics'
 import { storeCircuitBreaker } from '@/services/circuit-breaker'
+import { adminProcedure } from '@/features/auth/procedures/auth.procedure'
 
 /**
  * Health Check Controller
@@ -204,12 +205,14 @@ export const healthController = igniter.controller({
 
     /**
      * Reset circuit breaker (admin only)
+     * ✅ SECURITY FIX: Now requires admin authentication
      */
     resetCircuit: igniter.mutation({
       name: 'Reset Circuit Breaker',
       description: 'Manually reset a circuit breaker',
       path: '/circuits/:name/reset',
       method: 'POST',
+      use: [adminProcedure()],
       input: z.object({
         name: z.enum(['store']),
       }),

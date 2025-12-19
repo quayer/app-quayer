@@ -303,10 +303,10 @@ export const instancesController = igniter.controller({
           );
 
           if (instancesToSync.length > 0) {
-            // Executar em background sem await
+            // Executar em background com Promise.all para paralelismo
             setImmediate(async () => {
-              for (const instance of instancesToSync) {
-                if (!instance.uazapiToken) continue; // Type guard
+              await Promise.all(instancesToSync.map(async (instance) => {
+                if (!instance.uazapiToken) return; // Type guard
                 try {
                   const statusResult = await uazapiService.getInstanceStatus(instance.uazapiToken);
                   if (statusResult.success && statusResult.data) {
@@ -348,7 +348,7 @@ export const instancesController = igniter.controller({
                 } catch (err) {
                   // Erros de background são silenciosos
                 }
-              }
+              }));
             });
           }
 

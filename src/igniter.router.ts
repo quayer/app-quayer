@@ -8,9 +8,7 @@ import { invitationsController } from '@/features/invitations'
 import { dashboardController } from '@/features/dashboard'
 import { chatsController, messagesController, mediaController } from '@/features/messages'
 import { sessionsController } from '@/features/sessions'
-import { departmentsController } from '@/features/departments'
 import { attributesController, contactAttributeController } from '@/features/attributes'
-import { labelsController } from '@/features/labels'
 import { observationsController } from '@/features/observations'
 import { sseController } from '@/features/sse'
 import { callsController } from '@/features/calls'
@@ -36,11 +34,9 @@ export const AppRouter = igniter.router({
     organizations: organizationsController,
     invitations: invitationsController,
     dashboard: dashboardController,
-    departments: departmentsController,
     attribute: attributesController,
     'contact-attribute': contactAttributeController,
     contacts: contactsController,
-    labels: labelsController,
     'contact-observation': observationsController,
     chats: chatsController,
     messages: messagesController,

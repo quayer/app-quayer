@@ -428,11 +428,16 @@ export default function AdminLogsPage() {
     }
   }, [loadLogs, selectedLog, logs])
 
-  // Initial load
+  // Initial load - parallel loading with Promise.all for better performance
   useEffect(() => {
-    loadLogs()
-    loadStats()
-    loadSources()
+    const loadAll = async () => {
+      await Promise.all([
+        loadLogs(),
+        loadStats(),
+        loadSources()
+      ])
+    }
+    loadAll()
   }, [loadLogs, loadStats, loadSources])
 
   // Cleanup streaming on unmount

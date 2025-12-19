@@ -9,6 +9,7 @@ import { PrismaClient } from '@prisma/client';
 import { completeOnboardingSchema } from '../onboarding.schemas';
 import { signAccessToken } from '@/lib/auth/jwt';
 import { UserRole, OrganizationRole } from '@/lib/auth/roles';
+import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 
 const db = new PrismaClient();
 
@@ -26,9 +27,11 @@ export const onboardingController = igniter.controller({
       description: 'Complete user onboarding by creating organization',
       path: '/complete',
       method: 'POST',
+      use: [authProcedure({ required: true })],
       body: completeOnboardingSchema,
-      handler: async ({ request, response }) => {
-        const userId = request.headers.get('x-user-id');
+      handler: async ({ request, response, context }) => {
+        // ✅ SECURITY FIX: Use authenticated user from context instead of forged header
+        const userId = context.user?.id;
         if (!userId) {
           return response.unauthorized('Not authenticated');
         }

@@ -11,6 +11,7 @@ import {
   updateNotificationSchema,
   listNotificationsQuerySchema,
 } from '../notifications.schemas'
+import { authProcedure, adminProcedure } from '@/features/auth/procedures/auth.procedure'
 
 export const notificationsController = igniter.controller({
   name: 'notifications',
@@ -25,17 +26,10 @@ export const notificationsController = igniter.controller({
       description: 'List all notifications (admin only)',
       path: '/',
       method: 'GET',
+      use: [adminProcedure()],
       query: listNotificationsQuerySchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
-        // Only admins can see all notifications
-        if (context.user.role !== 'admin') {
-          return response.status(403).json({ error: 'Acesso negado' })
-        }
-
+        // Admin authentication enforced by adminProcedure
         const query = request.query as {
           page?: number
           limit?: number
@@ -54,8 +48,7 @@ export const notificationsController = igniter.controller({
           isGlobal: query.isGlobal,
         })
 
-        return response.json({
-          success: true,
+        return response.success({
           data: result.data,
           pagination: result.pagination,
         })
@@ -70,12 +63,10 @@ export const notificationsController = igniter.controller({
       description: 'Get notifications for the current user',
       path: '/my',
       method: 'GET',
+      use: [authProcedure({ required: true })],
       query: listNotificationsQuerySchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         const query = request.query as {
           page?: number
           limit?: number
@@ -95,8 +86,7 @@ export const notificationsController = igniter.controller({
           }
         )
 
-        return response.json({
-          success: true,
+        return response.success({
           data: result.data,
           pagination: result.pagination,
         })
@@ -111,19 +101,16 @@ export const notificationsController = igniter.controller({
       description: 'Get unread notification count for the current user',
       path: '/unread-count',
       method: 'GET',
+      use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         const count = await notificationsRepository.getUnreadCount(
           context.user.id,
           context.user.organizationId || null,
           context.user.role
         )
 
-        return response.json({
-          success: true,
+        return response.success({
           data: { count },
         })
       },
@@ -137,16 +124,14 @@ export const notificationsController = igniter.controller({
       description: 'Get a single notification by ID',
       path: '/:id',
       method: 'GET',
+      use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         const { id } = request.params as { id: string }
         const notification = await notificationsRepository.findById(id)
 
         if (!notification) {
-          return response.status(404).json({ error: 'Notificação não encontrada' })
+          return response.notFound('Notificação não encontrada')
         }
 
         // Check access
@@ -158,11 +143,10 @@ export const notificationsController = igniter.controller({
           notification.role === context.user.role
 
         if (!canAccess) {
-          return response.status(403).json({ error: 'Acesso negado' })
+          return response.forbidden('Acesso negado')
         }
 
-        return response.json({
-          success: true,
+        return response.success({
           data: notification,
         })
       },
@@ -176,34 +160,26 @@ export const notificationsController = igniter.controller({
       description: 'Create a new notification (admin only)',
       path: '/',
       method: 'POST',
+      use: [adminProcedure()],
       body: createNotificationSchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
-        // Only admins can create notifications
-        if (context.user.role !== 'admin') {
-          return response.status(403).json({ error: 'Apenas administradores podem criar notificações' })
-        }
-
+        // Admin authentication enforced by adminProcedure
         const data = request.body
 
         // Validate that at least one target is specified
         if (!data.userId && !data.organizationId && !data.role && !data.isGlobal) {
-          return response.status(400).json({ error: 'Especifique pelo menos um destinatário' })
+          return response.badRequest('Especifique pelo menos um destinatário')
         }
 
         try {
           const notification = await notificationsRepository.create(data)
-          return response.json({
-            success: true,
+          return response.success({
             data: notification,
             message: 'Notificação criada com sucesso',
           })
         } catch (error: any) {
           console.error('Error creating notification:', error)
-          return response.status(500).json({ error: 'Erro ao criar notificação' })
+          return response.error('Erro ao criar notificação')
         }
       },
     }),
@@ -216,28 +192,21 @@ export const notificationsController = igniter.controller({
       description: 'Update a notification (admin only)',
       path: '/:id',
       method: 'PUT',
+      use: [adminProcedure()],
       body: updateNotificationSchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
-        if (context.user.role !== 'admin') {
-          return response.status(403).json({ error: 'Apenas administradores podem editar notificações' })
-        }
-
+        // Admin authentication enforced by adminProcedure
         const { id } = request.params as { id: string }
 
         try {
           const notification = await notificationsRepository.update(id, request.body)
-          return response.json({
-            success: true,
+          return response.success({
             data: notification,
             message: 'Notificação atualizada com sucesso',
           })
         } catch (error: any) {
           console.error('Error updating notification:', error)
-          return response.status(500).json({ error: 'Erro ao atualizar notificação' })
+          return response.error('Erro ao atualizar notificação')
         }
       },
     }),
@@ -250,15 +219,9 @@ export const notificationsController = igniter.controller({
       description: 'Delete a notification (admin only)',
       path: '/:id',
       method: 'DELETE',
+      use: [adminProcedure()],
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
-        if (context.user.role !== 'admin') {
-          return response.status(403).json({ error: 'Apenas administradores podem excluir notificações' })
-        }
-
+        // Admin authentication enforced by adminProcedure
         const { id } = request.params as { id: string }
 
         try {
@@ -266,7 +229,7 @@ export const notificationsController = igniter.controller({
           return response.noContent()
         } catch (error: any) {
           console.error('Error deleting notification:', error)
-          return response.status(500).json({ error: 'Erro ao excluir notificação' })
+          return response.error('Erro ao excluir notificação')
         }
       },
     }),
@@ -279,22 +242,19 @@ export const notificationsController = igniter.controller({
       description: 'Mark a notification as read',
       path: '/:id/read',
       method: 'POST',
+      use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         const { id } = request.params as { id: string }
 
         try {
           await notificationsRepository.markAsRead(id, context.user.id)
-          return response.json({
-            success: true,
+          return response.success({
             message: 'Notificação marcada como lida',
           })
         } catch (error: any) {
           console.error('Error marking notification as read:', error)
-          return response.status(500).json({ error: 'Erro ao marcar notificação como lida' })
+          return response.error('Erro ao marcar notificação como lida')
         }
       },
     }),
@@ -307,25 +267,22 @@ export const notificationsController = igniter.controller({
       description: 'Mark all notifications as read for the current user',
       path: '/mark-all-read',
       method: 'POST',
+      use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         try {
           const result = await notificationsRepository.markAllAsRead(
             context.user.id,
             context.user.organizationId || null,
             context.user.role
           )
-          return response.json({
-            success: true,
+          return response.success({
             data: result,
             message: 'Todas as notificações foram marcadas como lidas',
           })
         } catch (error: any) {
           console.error('Error marking all notifications as read:', error)
-          return response.status(500).json({ error: 'Erro ao marcar notificações como lidas' })
+          return response.error('Erro ao marcar notificações como lidas')
         }
       },
     }),
@@ -338,14 +295,11 @@ export const notificationsController = igniter.controller({
       description: 'Get available notification types',
       path: '/types',
       method: 'GET',
+      use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
+        // Authentication enforced by authProcedure
         const types = notificationsRepository.getTypes()
-        return response.json({
-          success: true,
+        return response.success({
           data: types,
         })
       },
@@ -359,25 +313,18 @@ export const notificationsController = igniter.controller({
       description: 'Clean up expired notifications (admin only)',
       path: '/cleanup',
       method: 'POST',
+      use: [adminProcedure()],
       handler: async ({ context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
-        }
-
-        if (context.user.role !== 'admin') {
-          return response.status(403).json({ error: 'Acesso negado' })
-        }
-
+        // Admin authentication enforced by adminProcedure
         try {
           const result = await notificationsRepository.deleteExpired()
-          return response.json({
-            success: true,
+          return response.success({
             data: { deleted: result.count },
             message: `${result.count} notificações expiradas foram removidas`,
           })
         } catch (error: any) {
           console.error('Error cleaning up notifications:', error)
-          return response.status(500).json({ error: 'Erro ao limpar notificações' })
+          return response.error('Erro ao limpar notificações')
         }
       },
     }),

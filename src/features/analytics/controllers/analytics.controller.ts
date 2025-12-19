@@ -8,6 +8,7 @@
 import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { logger } from '@/lib/logging/logger'
+import { authProcedure, adminProcedure } from '@/features/auth/procedures/auth.procedure'
 
 // UI Event Schema
 const UIEventSchema = z.object({
@@ -45,13 +46,17 @@ export const analyticsController = igniter.controller({
   actions: {
     /**
      * Receive UI events from frontend
+     * Auth is optional - captures events from both authenticated and unauthenticated users
      */
     receiveUIEvents: igniter.mutation({
       path: '/ui-events',
       method: 'POST',
+      use: [authProcedure({ required: false })],
       body: UIEventsBodySchema,
-      handler: async ({ request, response }) => {
+      handler: async ({ request, response, context }) => {
         const { events } = request.body
+        // Use authenticated userId if available, otherwise keep from event
+        const authenticatedUserId = context.user?.id
 
         try {
           // Log each event
@@ -63,7 +68,8 @@ export const analyticsController = igniter.controller({
               element: event.element,
               page: event.page,
               sessionId: event.sessionId,
-              userId: event.userId,
+              // Use authenticated userId if available, otherwise use from event
+              userId: authenticatedUserId || event.userId,
               timestamp: new Date(event.timestamp).toISOString(),
               metadata: event.metadata,
             }
@@ -98,10 +104,12 @@ export const analyticsController = igniter.controller({
 
     /**
      * Get UI events summary (for admin debugging)
+     * Requires admin authentication
      */
     getEventsSummary: igniter.query({
       path: '/ui-events/summary',
       method: 'GET',
+      use: [adminProcedure()],
       query: z.object({
         sessionId: z.string().optional(),
         userId: z.string().optional(),

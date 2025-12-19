@@ -103,15 +103,6 @@ export function CommandPalette() {
       group: 'navigation',
     },
     {
-      id: 'departments',
-      title: 'Departamentos',
-      description: 'Configurar departamentos',
-      icon: Building2,
-      action: () => router.push('/configuracoes/departamentos'),
-      keywords: ['departamentos', 'setores', 'equipes'],
-      group: 'navigation',
-    },
-    {
       id: 'webhooks',
       title: 'Webhooks',
       description: 'Configurar webhooks',

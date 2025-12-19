@@ -15,7 +15,7 @@ import {
 const quickLinks = [
   { href: '/integracoes', icon: MessageCircle, label: 'Canais de Comunicacao', description: 'Gerencie suas conexoes WhatsApp' },
   { href: '/contatos', icon: Users, label: 'Contatos', description: 'Veja e gerencie seus contatos' },
-  { href: '/configuracoes/departamentos', icon: Settings, label: 'Configuracoes', description: 'Ajuste as configuracoes do sistema' },
+  { href: '/integracoes/settings', icon: Settings, label: 'Configuracoes', description: 'Ajuste as configuracoes do sistema' },
 ]
 
 export default function NotFound() {
