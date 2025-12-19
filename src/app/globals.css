@@ -270,14 +270,18 @@
     min-width: unset;
   }
 
-  /* Sidebar and navigation elements - keep native sizing */
+  /* Sidebar and navigation elements - keep native sizing (force override mobile rules) */
   [data-sidebar] button,
   [data-slot^="sidebar"] button,
+  [data-sidebar="menu-button"],
+  nav button,
   [role="menuitem"],
   [role="tab"],
-  [role="option"] {
-    min-height: unset;
-    min-width: unset;
+  [role="option"],
+  [role="switch"],
+  .btn-compact {
+    min-height: unset !important;
+    min-width: unset !important;
   }
 
   /* UX FIX: Cursor pointer for all interactive elements */

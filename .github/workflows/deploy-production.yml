@@ -49,12 +49,12 @@ jobs:
               echo "⚠️ Repositório não encontrado. Clonando..."
               rm -rf "$APP_DIR"
               mkdir -p "$APP_DIR"
-              git clone https://github.com/quayer/app-quayer.git "$APP_DIR"
+              git clone --depth 1 --single-branch --branch main https://github.com/quayer/app-quayer.git "$APP_DIR"
               cd "$APP_DIR"
             else
               cd "$APP_DIR"
               echo "📥 Atualizando código..."
-              git fetch --all
+              git fetch --depth 1 origin main
               git reset --hard origin/main
             fi
 
@@ -83,23 +83,26 @@ jobs:
 
             echo "🐳 Usando: $COMPOSE_CMD"
 
-            # Build (com ou sem cache)
+            # Build (com ou sem cache) - usando BuildKit para cache otimizado
             echo "🏗️ Construindo imagem..."
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_DOCKER_CLI_BUILD=1
+
             if [ "$NO_CACHE" = "true" ]; then
               echo "   (sem cache - mais lento)"
               $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
             else
-              echo "   (com cache - mais rápido)"
-              $COMPOSE_CMD -f $COMPOSE_FILE build app
+              echo "   (com cache BuildKit - mais rápido)"
+              $COMPOSE_CMD -f $COMPOSE_FILE build --parallel app
             fi
 
             # Deploy
             echo "🚀 Subindo aplicação..."
             $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
 
-            # Aguardar health check
+            # Aguardar health check (reduzido para deploy mais rápido)
             echo "⏳ Aguardando health check..."
-            sleep 30
+            sleep 15
 
             STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
 
