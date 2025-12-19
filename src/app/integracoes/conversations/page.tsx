@@ -9,13 +9,11 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet'
 import {
   Select,
@@ -45,7 +43,6 @@ import {
 import {
   MessageSquare,
   Send,
-  Image as ImageIcon,
   Paperclip,
   Search,
   Phone,
@@ -55,15 +52,10 @@ import {
   CheckCheck,
   X,
   Loader2,
-  Menu,
   ArrowLeft,
   RefreshCw,
   Radio,
-  Filter,
   Smile,
-  Mic,
-  MapPin,
-  User,
   FileText,
   Archive,
   Trash2,
@@ -73,17 +65,21 @@ import {
   Users,
   Pin,
   AlertCircle,
+  Smartphone,
+  Layers,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
-import { useAuth } from '@/lib/auth/auth-provider'
 import { toast } from 'sonner'
-import { formatDistanceToNow, format } from 'date-fns'
+import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 
 // Common emojis for quick access
-const QUICK_EMOJIS = ['😊', '👍', '❤️', '😂', '🙏', '👋', '🎉', '✅', '⭐', '🔥']
+const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check', 'star', 'fire']
+  .map(() => ['👍', '❤️', '😂', '🙏', '👋', '🎉', '✅', '⭐', '🔥'])
+  .flat()
+  .slice(0, 10)
 
 // ==================== CONSTANTS ====================
 const CHAT_REFRESH_INTERVAL = 10 * 1000 // 10 segundos
@@ -93,7 +89,7 @@ type ChatFilter = 'all' | 'unread' | 'groups' | 'pinned'
 
 const CHAT_FILTERS: { value: ChatFilter; label: string; icon: any }[] = [
   { value: 'all', label: 'Todas', icon: MessageCircle },
-  { value: 'unread', label: 'Não lidas', icon: MessageSquare },
+  { value: 'unread', label: 'Nao lidas', icon: MessageSquare },
   { value: 'groups', label: 'Grupos', icon: Users },
   { value: 'pinned', label: 'Fixadas', icon: Pin },
 ]
@@ -108,6 +104,8 @@ interface UAZChat {
   wa_unreadCount: number
   wa_isGroup: boolean
   wa_isPinned: boolean
+  instanceId?: string
+  instanceName?: string
 }
 
 interface DBMessage {
@@ -142,15 +140,13 @@ interface Instance {
 
 // ==================== COMPONENT ====================
 export default function ConversationsPage() {
-  const { user } = useAuth()
-  const queryClient = useQueryClient()
-
   // Hydration
   const [isHydrated, setIsHydrated] = useState(false)
 
-  // Selection state
-  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
+  // Selection state - 'all' means all instances
+  const [selectedInstanceFilter, setSelectedInstanceFilter] = useState<string>('all')
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
+  const [selectedChatInstanceId, setSelectedChatInstanceId] = useState<string | null>(null)
 
   // Input state
   const [messageText, setMessageText] = useState('')
@@ -165,7 +161,6 @@ export default function ConversationsPage() {
   // UI state
   const [isMobile, setIsMobile] = useState(false)
   const [isChatsDrawerOpen, setIsChatsDrawerOpen] = useState(false)
-  const [isInstancesDrawerOpen, setIsInstancesDrawerOpen] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   // Refs
@@ -210,14 +205,15 @@ export default function ConversationsPage() {
     return data.filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
   }, [instancesData])
 
-  // Auto-select first instance
-  useEffect(() => {
-    if (instances.length > 0 && !selectedInstanceId) {
-      setSelectedInstanceId(instances[0].id)
+  // Determine which instance IDs to fetch chats for
+  const instanceIdsToFetch = useMemo(() => {
+    if (selectedInstanceFilter === 'all') {
+      return instances.map((i: Instance) => i.id)
     }
-  }, [instances, selectedInstanceId])
+    return [selectedInstanceFilter]
+  }, [selectedInstanceFilter, instances])
 
-  // Fetch chats for selected instance
+  // Fetch chats for selected instance(s)
   const {
     data: chatsData,
     isLoading: chatsLoading,
@@ -225,20 +221,45 @@ export default function ConversationsPage() {
     isFetching: chatsFetching,
     refetch: refetchChats,
   } = useQuery({
-    queryKey: ['conversations', 'chats', selectedInstanceId, chatFilter],
+    queryKey: ['conversations', 'chats', instanceIdsToFetch, chatFilter],
     queryFn: async () => {
-      if (!selectedInstanceId) return null
-      const response = await api.chats.list.query({
-        query: {
-          instanceId: selectedInstanceId,
-          status: chatFilter,
-          limit: 50,
-          offset: 0,
-        }
-      })
-      return response
+      if (instanceIdsToFetch.length === 0) return { chats: [] }
+
+      // Fetch chats from all selected instances in parallel
+      const results = await Promise.all(
+        instanceIdsToFetch.map(async (instanceId: string) => {
+          try {
+            const response = await api.chats.list.query({
+              query: {
+                instanceId,
+                status: chatFilter,
+                limit: 50,
+                offset: 0,
+              }
+            })
+            const chats = (response as any)?.data?.chats ?? (response as any)?.chats ?? []
+            const instance = instances.find((i: Instance) => i.id === instanceId)
+            // Add instance info to each chat
+            return chats.map((chat: UAZChat) => ({
+              ...chat,
+              instanceId,
+              instanceName: instance?.name || 'Instancia',
+            }))
+          } catch (error) {
+            console.error(`Error fetching chats for instance ${instanceId}:`, error)
+            return []
+          }
+        })
+      )
+
+      // Flatten and sort by timestamp
+      const allChats = results.flat().sort((a, b) =>
+        (b.wa_lastMsgTimestamp || 0) - (a.wa_lastMsgTimestamp || 0)
+      )
+
+      return { chats: allChats }
     },
-    enabled: !!selectedInstanceId,
+    enabled: instanceIdsToFetch.length > 0,
     refetchInterval: CHAT_REFRESH_INTERVAL,
     refetchOnWindowFocus: true,
     staleTime: 0,
@@ -246,8 +267,7 @@ export default function ConversationsPage() {
 
   // Extract chats with search filter
   const chats = useMemo(() => {
-    const response = chatsData as any
-    const data: UAZChat[] = response?.data?.chats ?? response?.chats ?? []
+    const data: UAZChat[] = (chatsData as any)?.chats ?? []
 
     if (!searchText.trim()) return data
 
@@ -292,7 +312,9 @@ export default function ConversationsPage() {
   }, [messagesData])
 
   // Selected items
-  const selectedInstance = instances.find((i: Instance) => i.id === selectedInstanceId)
+  const selectedInstance = selectedChatInstanceId
+    ? instances.find((i: Instance) => i.id === selectedChatInstanceId)
+    : null
   const selectedChat = chats.find((c: UAZChat) => c.wa_chatid === selectedChatId)
 
   // ==================== MUTATIONS ====================
@@ -343,10 +365,10 @@ export default function ConversationsPage() {
   // Archive chat
   const archiveChatMutation = useMutation({
     mutationFn: async (chatId: string) => {
-      if (!selectedInstanceId) throw new Error('Nenhuma instância selecionada')
+      if (!selectedChatInstanceId) throw new Error('Nenhuma instancia selecionada')
       const response = await (api.chats as any).archive.mutate({
         params: { chatId },
-        body: { instanceId: selectedInstanceId }
+        body: { instanceId: selectedChatInstanceId }
       })
       return response
     },
@@ -363,10 +385,10 @@ export default function ConversationsPage() {
   // Block contact
   const blockContactMutation = useMutation({
     mutationFn: async (data: { chatId: string; block: boolean }) => {
-      if (!selectedInstanceId) throw new Error('Nenhuma instância selecionada')
+      if (!selectedChatInstanceId) throw new Error('Nenhuma instancia selecionada')
       const response = await (api.chats as any).block.mutate({
         params: { chatId: data.chatId },
-        body: { instanceId: selectedInstanceId, block: data.block }
+        body: { instanceId: selectedChatInstanceId, block: data.block }
       })
       return response
     },
@@ -381,34 +403,23 @@ export default function ConversationsPage() {
 
   // ==================== HANDLERS ====================
 
-  const handleSelectChat = useCallback((chatId: string) => {
-    setSelectedChatId(chatId)
+  const handleSelectChat = useCallback((chat: UAZChat) => {
+    setSelectedChatId(chat.wa_chatid)
+    setSelectedChatInstanceId(chat.instanceId || null)
 
     // Mark as read automatically
-    if (selectedInstanceId) {
-      const chat = chats.find(c => c.wa_chatid === chatId)
-      if (chat && chat.wa_unreadCount > 0) {
-        markAsReadMutation.mutate({
-          instanceId: selectedInstanceId,
-          chatId: chatId,
-        })
-      }
+    if (chat.instanceId && chat.wa_unreadCount > 0) {
+      markAsReadMutation.mutate({
+        instanceId: chat.instanceId,
+        chatId: chat.wa_chatid,
+      })
     }
 
     // Close drawer on mobile
     if (isMobile) {
       setIsChatsDrawerOpen(false)
     }
-  }, [selectedInstanceId, chats, isMobile, markAsReadMutation])
-
-  const handleSelectInstance = useCallback((instanceId: string) => {
-    setSelectedInstanceId(instanceId)
-    setSelectedChatId(null)
-
-    if (isMobile) {
-      setIsInstancesDrawerOpen(false)
-    }
-  }, [isMobile])
+  }, [isMobile, markAsReadMutation])
 
   const handleSendMessage = useCallback(() => {
     if (!messageText.trim() || !selectedChatId) return
@@ -425,7 +436,7 @@ export default function ConversationsPage() {
 
     // Validate size (16MB max)
     if (file.size > 16 * 1024 * 1024) {
-      toast.error('Arquivo muito grande', { description: 'Tamanho máximo: 16MB' })
+      toast.error('Arquivo muito grande', { description: 'Tamanho maximo: 16MB' })
       return
     }
 
@@ -442,7 +453,7 @@ export default function ConversationsPage() {
   }, [])
 
   const handleSendFile = useCallback(async () => {
-    if (!selectedFile || !selectedInstanceId || !selectedChatId) return
+    if (!selectedFile || !selectedChatInstanceId || !selectedChatId) return
 
     setIsUploading(true)
 
@@ -457,7 +468,7 @@ export default function ConversationsPage() {
 
         await endpoint.mutate({
           body: {
-            instanceId: selectedInstanceId,
+            instanceId: selectedChatInstanceId,
             chatId: selectedChatId,
             mediaBase64: base64,
             mimeType: selectedFile.type,
@@ -481,7 +492,7 @@ export default function ConversationsPage() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, selectedInstanceId, selectedChatId, messageText, refetchMessages])
+  }, [selectedFile, selectedChatInstanceId, selectedChatId, messageText, refetchMessages])
 
   const handleCancelFile = useCallback(() => {
     setSelectedFile(null)
@@ -509,7 +520,7 @@ export default function ConversationsPage() {
 
   const formatTimestamp = (timestamp: number | string) => {
     const date = typeof timestamp === 'number'
-      ? new Date(timestamp * 1000)
+      ? new Date(timestamp > 9999999999 ? timestamp : timestamp * 1000)
       : new Date(timestamp)
 
     const now = new Date()
@@ -563,7 +574,7 @@ export default function ConversationsPage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="flex items-center justify-between">
-            <span>Erro ao carregar instâncias</span>
+            <span>Erro ao carregar instancias</span>
             <Button variant="outline" size="sm" onClick={() => refetchInstances()}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Tentar novamente
@@ -580,7 +591,7 @@ export default function ConversationsPage() {
         <Alert>
           <MessageSquare className="h-4 w-4" />
           <AlertDescription>
-            Nenhuma instância WhatsApp conectada. Conecte pelo menos uma instância para acessar as conversas.
+            Nenhuma instancia WhatsApp conectada. Conecte pelo menos uma instancia para acessar as conversas.
           </AlertDescription>
         </Alert>
       </div>
@@ -589,52 +600,62 @@ export default function ConversationsPage() {
 
   // ==================== RENDER COMPONENTS ====================
 
-  // Instances List Component
-  const InstancesList = ({ className }: { className?: string }) => (
-    <div className={cn("space-y-2", className)}>
-      <div className="px-2 py-1">
-        <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
-          Instâncias ({instances.length})
-        </h3>
-      </div>
-      <div className="space-y-1">
+  // Instance Filter Dropdown
+  const InstanceFilter = () => (
+    <Select value={selectedInstanceFilter} onValueChange={setSelectedInstanceFilter}>
+      <SelectTrigger className="w-full">
+        <div className="flex items-center gap-2">
+          {selectedInstanceFilter === 'all' ? (
+            <>
+              <Layers className="h-4 w-4" />
+              <span>Todas as integracoes ({instances.length})</span>
+            </>
+          ) : (
+            <>
+              <Smartphone className="h-4 w-4" />
+              <span className="truncate">
+                {instances.find((i: Instance) => i.id === selectedInstanceFilter)?.name || 'Selecionar'}
+              </span>
+            </>
+          )}
+        </div>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4" />
+            <span>Todas as integracoes ({instances.length})</span>
+          </div>
+        </SelectItem>
         {instances.map((instance: Instance) => (
-          <button
-            key={instance.id}
-            onClick={() => handleSelectInstance(instance.id)}
-            className={cn(
-              "w-full p-3 rounded-lg text-left transition-all",
-              selectedInstanceId === instance.id
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "hover:bg-muted"
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <Avatar className="h-10 w-10 border-2 border-background">
+          <SelectItem key={instance.id} value={instance.id}>
+            <div className="flex items-center gap-2">
+              <Avatar className="h-5 w-5">
                 <AvatarImage src={instance.profilePictureUrl || ''} />
-                <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                <AvatarFallback className="text-[10px]">
                   {instance.name[0]?.toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium truncate">{instance.name}</p>
-                <p className="text-xs opacity-70 truncate">
-                  {instance.phoneNumber || 'Sem número'}
-                </p>
-              </div>
-              <div className="h-2 w-2 rounded-full bg-green-500" title="Conectado" />
+              <span className="truncate">{instance.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {instance.phoneNumber || ''}
+              </span>
             </div>
-          </button>
+          </SelectItem>
         ))}
-      </div>
-    </div>
+      </SelectContent>
+    </Select>
   )
 
   // Chats List Component
   const ChatsList = ({ className }: { className?: string }) => (
     <div className={cn("flex flex-col h-full", className)}>
-      {/* Header with search and filters */}
+      {/* Header with instance filter and search */}
       <div className="p-4 space-y-3 border-b">
+        {/* Instance filter */}
+        <InstanceFilter />
+
+        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -645,10 +666,10 @@ export default function ConversationsPage() {
           />
         </div>
 
+        {/* Chat type filter + refresh */}
         <div className="flex items-center gap-2">
           <Select value={chatFilter} onValueChange={(v) => setChatFilter(v as ChatFilter)}>
             <SelectTrigger className="flex-1">
-              <Filter className="h-4 w-4 mr-2" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -699,13 +720,16 @@ export default function ConversationsPage() {
           <div className="p-8 text-center">
             <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
             <p className="text-muted-foreground">Nenhuma conversa encontrada</p>
+            <p className="text-sm text-muted-foreground/70 mt-1">
+              As conversas aparecerao aqui quando voce receber mensagens
+            </p>
           </div>
         ) : (
           <div className="divide-y">
             {chats.map((chat: UAZChat) => (
               <button
-                key={chat.wa_chatid}
-                onClick={() => handleSelectChat(chat.wa_chatid)}
+                key={`${chat.instanceId}-${chat.wa_chatid}`}
+                onClick={() => handleSelectChat(chat)}
                 className={cn(
                   "w-full p-4 text-left transition-colors hover:bg-muted/50",
                   selectedChatId === chat.wa_chatid && "bg-muted"
@@ -750,6 +774,14 @@ export default function ConversationsPage() {
                         </Badge>
                       )}
                     </div>
+
+                    {/* Show instance name when viewing all */}
+                    {selectedInstanceFilter === 'all' && chat.instanceName && (
+                      <p className="text-xs text-muted-foreground/70 mt-1 flex items-center gap-1">
+                        <Smartphone className="h-3 w-3" />
+                        {chat.instanceName}
+                      </p>
+                    )}
                   </div>
                 </div>
               </button>
@@ -794,9 +826,15 @@ export default function ConversationsPage() {
                 <p className="font-medium">
                   {selectedChat.wa_name || selectedChat.wa_chatid.split('@')[0]}
                 </p>
-                {selectedChat.wa_isGroup && (
-                  <p className="text-xs text-muted-foreground">Grupo</p>
-                )}
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  {selectedChat.wa_isGroup && <span>Grupo</span>}
+                  {selectedInstance && (
+                    <>
+                      <Smartphone className="h-3 w-3 ml-1" />
+                      {selectedInstance.name}
+                    </>
+                  )}
+                </p>
               </div>
             </div>
 
@@ -823,7 +861,7 @@ export default function ConversationsPage() {
                     <Video className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Chamada de vídeo</TooltipContent>
+                <TooltipContent>Chamada de video</TooltipContent>
               </Tooltip>
 
               <DropdownMenu>
@@ -978,9 +1016,9 @@ export default function ConversationsPage() {
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-2" align="start">
                   <div className="flex flex-wrap gap-1 max-w-[200px]">
-                    {QUICK_EMOJIS.map((emoji) => (
+                    {QUICK_EMOJIS.map((emoji, idx) => (
                       <button
-                        key={emoji}
+                        key={idx}
                         onClick={() => {
                           setMessageText(prev => prev + emoji)
                           setShowEmojiPicker(false)
@@ -1007,7 +1045,7 @@ export default function ConversationsPage() {
                     <Paperclip className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Anexar arquivo (máx 16MB)</TooltipContent>
+                <TooltipContent>Anexar arquivo (max 16MB)</TooltipContent>
               </Tooltip>
 
               {/* Message input */}
@@ -1051,7 +1089,7 @@ export default function ConversationsPage() {
             <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
             <h3 className="text-lg font-medium mb-1">Selecione uma conversa</h3>
             <p className="text-sm text-muted-foreground">
-              Escolha uma conversa para começar a enviar mensagens
+              Escolha uma conversa para comecar a enviar mensagens
             </p>
           </div>
         </div>
@@ -1066,40 +1104,11 @@ export default function ConversationsPage() {
         {/* Mobile Layout */}
         {isMobile ? (
           <>
-            {/* Instance selector drawer */}
-            <Sheet open={isInstancesDrawerOpen} onOpenChange={setIsInstancesDrawerOpen}>
-              <SheetContent side="left" className="w-72 p-0">
-                <SheetHeader className="p-4 border-b">
-                  <SheetTitle>Instâncias</SheetTitle>
-                </SheetHeader>
-                <div className="p-4">
-                  <InstancesList />
-                </div>
-              </SheetContent>
-            </Sheet>
-
             {/* Chats drawer */}
             <Sheet open={isChatsDrawerOpen} onOpenChange={setIsChatsDrawerOpen}>
               <SheetContent side="left" className="w-full sm:w-96 p-0">
-                <SheetHeader className="p-4 border-b flex-row items-center justify-between">
-                  <SheetTitle className="flex items-center gap-2">
-                    {selectedInstance && (
-                      <>
-                        <Avatar className="h-6 w-6">
-                          <AvatarImage src={selectedInstance.profilePictureUrl || ''} />
-                          <AvatarFallback>{selectedInstance.name[0]}</AvatarFallback>
-                        </Avatar>
-                        {selectedInstance.name}
-                      </>
-                    )}
-                  </SheetTitle>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsInstancesDrawerOpen(true)}
-                  >
-                    Trocar
-                  </Button>
+                <SheetHeader className="p-4 border-b">
+                  <SheetTitle>Conversas</SheetTitle>
                 </SheetHeader>
                 <ChatsList />
               </SheetContent>
@@ -1116,7 +1125,7 @@ export default function ConversationsPage() {
                       onClick={() => setIsChatsDrawerOpen(true)}
                       className="gap-2"
                     >
-                      <Menu className="h-5 w-5" />
+                      <MessageCircle className="h-5 w-5" />
                       Ver conversas
                     </Button>
                   </div>
@@ -1125,23 +1134,16 @@ export default function ConversationsPage() {
             </Card>
           </>
         ) : (
-          /* Desktop Layout - 3 columns */
+          /* Desktop Layout - 2 columns (chats + messages) */
           <>
-            {/* Column 1: Instances */}
-            <Card className="w-64 flex-shrink-0 mr-4">
-              <CardContent className="p-4 h-full">
-                <InstancesList />
-              </CardContent>
-            </Card>
-
-            {/* Column 2: Chats */}
-            <Card className="w-80 flex-shrink-0 mr-4">
+            {/* Column 1: Chats with integrated instance filter */}
+            <Card className="w-96 flex-shrink-0 mr-4">
               <CardContent className="p-0 h-full">
                 <ChatsList />
               </CardContent>
             </Card>
 
-            {/* Column 3: Messages */}
+            {/* Column 2: Messages */}
             <Card className="flex-1">
               <CardContent className="p-0 h-full">
                 <MessagesArea />
