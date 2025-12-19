@@ -52,7 +52,7 @@ export const healthController = igniter.controller({
         // Check Database
         const dbStart = Date.now()
         try {
-          await context.database.$queryRaw`SELECT 1`
+          await context.db.$queryRaw`SELECT 1`
           checks.database = {
             healthy: true,
             latency: Date.now() - dbStart,
@@ -134,10 +134,10 @@ export const healthController = igniter.controller({
         const summary = metrics.getSummary()
 
         return response.success({
+          ...summary,
           timestamp: new Date().toISOString(),
           uptime: process.uptime(),
           memory: process.memoryUsage(),
-          ...summary,
         })
       },
     }),
@@ -152,7 +152,7 @@ export const healthController = igniter.controller({
       handler: async ({ context, response }) => {
         // Check if essential services are ready
         try {
-          await context.database.$queryRaw`SELECT 1`
+          await context.db.$queryRaw`SELECT 1`
           await igniter.store.has('ready:check')
 
           return response.success({
@@ -160,11 +160,7 @@ export const healthController = igniter.controller({
             timestamp: new Date().toISOString(),
           })
         } catch (error) {
-          return response.error({
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'Service not ready',
-            details: { error: (error as Error).message },
-          })
+          return response.badRequest('Service not ready: ' + (error as Error).message)
         }
       },
     }),
@@ -213,21 +209,15 @@ export const healthController = igniter.controller({
       path: '/circuits/:name/reset',
       method: 'POST',
       use: [adminProcedure()],
-      input: z.object({
-        name: z.enum(['store']),
-      }),
-      handler: async ({ input, response }) => {
-        const { name } = input
+      handler: async ({ request, response }) => {
+        const { name } = request.params as { name: string }
 
         switch (name) {
           case 'store':
             storeCircuitBreaker.reset()
             break
           default:
-            return response.error({
-              code: 'NOT_FOUND',
-              message: `Circuit breaker '${name}' not found`,
-            })
+            return response.notFound(`Circuit breaker '${name}' not found`)
         }
 
         return response.success({

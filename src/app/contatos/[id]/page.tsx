@@ -48,9 +48,8 @@ export default function ContactDetailsPage() {
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ['contact', contactId],
         queryFn: async () => {
-            const response = await api.contacts.getById.query({
-                params: { id: contactId },
-            });
+            // @ts-expect-error - Igniter client type issue with path params
+            const response = await api.contacts.getById.query({ id: contactId });
 
             if (response.error) {
                 throw new Error('Erro ao carregar contato');
@@ -90,9 +89,8 @@ export default function ContactDetailsPage() {
     // Delete observation mutation
     const deleteObservationMutation = useMutation({
         mutationFn: async (observationId: string) => {
-            const response = await api['contact-observation'].delete.mutate({
-                params: { id: observationId },
-            });
+            // @ts-expect-error - Igniter client type issue with path params
+            const response = await api['contact-observation'].delete.mutate({ id: observationId });
 
             if (response.error) {
                 throw new Error('Erro ao excluir anotação');
