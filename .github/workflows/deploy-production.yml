@@ -83,6 +83,16 @@ jobs:
 
             echo "🐳 Usando: $COMPOSE_CMD"
 
+            # Limpar espaço em disco antes do build
+            echo "🧹 Limpando espaço em disco..."
+            docker system prune -af --volumes 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            rm -rf /tmp/* 2>/dev/null || true
+
+            # Mostrar espaço disponível
+            echo "📊 Espaço disponível:"
+            df -h / | tail -1
+
             # Build (com ou sem cache) - usando BuildKit para cache otimizado
             echo "🏗️ Construindo imagem..."
             export DOCKER_BUILDKIT=1
