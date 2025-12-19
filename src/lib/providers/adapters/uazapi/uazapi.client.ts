@@ -478,8 +478,34 @@ export class UAZClient {
 /**
  * Instância singleton do UAZClient
  * Configurada automaticamente com variáveis de ambiente
+ * Use getConfiguredUazapiClient() para obter cliente com credenciais do banco
  */
 export const uazapiClient = new UAZClient({
   baseUrl: process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com',
   adminToken: process.env.UAZAPI_ADMIN_TOKEN || '',
 });
+
+/**
+ * Factory para criar UAZClient com credenciais do banco de dados
+ * Prioridade: banco de dados > variáveis de ambiente
+ */
+export async function getConfiguredUazapiClient(): Promise<UAZClient> {
+  try {
+    // Import dynamically to avoid circular dependencies
+    const { systemSettingsRepository } = await import('@/features/system-settings/system-settings.repository');
+    const uazapiSettings = await systemSettingsRepository.getByCategory('uazapi');
+
+    const baseUrl = uazapiSettings?.baseUrl || process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+    const adminToken = uazapiSettings?.adminToken || process.env.UAZAPI_ADMIN_TOKEN || '';
+
+    if (!adminToken) {
+      console.warn('[UAZClient] No admin token configured');
+    }
+
+    return new UAZClient({ baseUrl, adminToken });
+  } catch (error) {
+    console.error('[UAZClient] Failed to get configured client:', error);
+    // Fallback to env-based singleton
+    return uazapiClient;
+  }
+}

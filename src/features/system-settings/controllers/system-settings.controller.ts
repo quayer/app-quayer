@@ -465,14 +465,15 @@ export const systemSettingsController = igniter.controller({
           updatedBy: user?.id,
         })
 
-        // Optionally sync to all UAZapi instances
+        // Sync to UAZapi global webhook
         let syncResult = null
         try {
-          // Import uazapi client to sync webhook
-          const { uazapiClient } = await import('@/lib/providers/adapters/uazapi/uazapi.client')
-          syncResult = await uazapiClient.syncGlobalWebhook(request.body)
+          // Use factory to get client with database credentials
+          const { getConfiguredUazapiClient } = await import('@/lib/providers/adapters/uazapi/uazapi.client')
+          const client = await getConfiguredUazapiClient()
+          syncResult = await client.syncGlobalWebhook(request.body)
         } catch (error: any) {
-          console.warn('Failed to sync webhook to instances:', error.message)
+          console.warn('Failed to sync webhook to UAZapi:', error.message)
         }
 
         return response.json({
