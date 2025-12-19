@@ -232,11 +232,19 @@
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* Interactive Elements - Minimum size for buttons */
-  button,
-  [role="button"] {
-    min-height: 30px;
-    min-width: 30px;
+  /* Interactive Elements - Minimum Target Size 44x44px (WCAG 2.5.5) */
+  /* Excludes Switch components which have their own sizing */
+  button:not([data-slot="switch"]),
+  [role="button"]:not([data-slot="switch"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Switch component - uses its own sizing (h-6 w-11) */
+  button[data-slot="switch"],
+  [data-slot="switch-thumb"] {
+    min-height: unset;
+    min-width: unset;
   }
 
   /* UX FIX: Cursor pointer for all interactive elements */
