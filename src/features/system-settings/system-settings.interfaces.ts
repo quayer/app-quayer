@@ -246,6 +246,39 @@ export const DEFAULT_EMAIL_TEMPLATES = [
     variables: ['inviterName', 'organizationName', 'invitationUrl', 'role'],
   },
   {
+    name: 'organization_welcome',
+    subject: 'Sua conta foi criada - {{organizationName}}',
+    htmlContent: `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h1 style="color: #4CAF50;">🎉 Bem-vindo ao Quayer!</h1>
+  <p>Olá <strong>{{name}}</strong>,</p>
+  <p>Sua conta foi criada como administrador da organização <strong>{{organizationName}}</strong>.</p>
+
+  <div style="background: #e8f5e9; border-left: 4px solid #4CAF50; padding: 16px; margin: 20px 0; border-radius: 4px;">
+    <strong>✨ Login seguro e sem senha!</strong><br>
+    O Quayer usa autenticação por código de verificação enviado ao seu email.
+  </div>
+
+  <div style="background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px;">
+    <p style="margin: 0 0 16px 0; font-weight: bold;">Como fazer login:</p>
+    <p style="margin: 8px 0;"><strong>1.</strong> Acesse a página de login</p>
+    <p style="margin: 8px 0;"><strong>2.</strong> Digite seu email: <strong>{{email}}</strong></p>
+    <p style="margin: 8px 0;"><strong>3.</strong> Você receberá um código de 6 dígitos por email</p>
+    <p style="margin: 8px 0;"><strong>4.</strong> Digite o código para acessar sua conta</p>
+  </div>
+
+  <a href="{{loginUrl}}" style="display: inline-block; background: #4CAF50; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold;">Fazer Login Agora</a>
+
+  <p style="color: #666; margin-top: 30px; font-size: 14px;">Se você não esperava receber este email, por favor entre em contato com o suporte.</p>
+</body>
+</html>`,
+    textContent: 'Bem-vindo ao Quayer, {{name}}! Sua conta foi criada para a organização {{organizationName}}. Acesse: {{loginUrl}}',
+    variables: ['name', 'organizationName', 'email', 'loginUrl'],
+  },
+  {
     name: 'password_reset',
     subject: 'Redefinição de Senha - Quayer',
     htmlContent: `

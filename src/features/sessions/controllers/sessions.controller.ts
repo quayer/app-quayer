@@ -29,8 +29,19 @@ export const sessionsController = igniter.controller({
         connectionId: z.string().optional(),
         contactId: z.string().optional(),
         status: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
+        // ⭐ NOVOS FILTROS AVANÇADOS
+        aiStatus: z.enum(['enabled', 'disabled', 'blocked']).optional(), // Status da IA
+        whatsappWindow: z.enum(['active', 'expiring', 'expired', 'none']).optional(), // Janela 24h
+        assignedAgentId: z.string().optional(), // Atendente atribuído
+        hasUnread: z.coerce.boolean().optional(), // Mensagens não lidas
+        search: z.string().optional(), // Busca por nome/telefone
+        sortBy: z.enum(['lastMessage', 'created', 'updated']).default('lastMessage'),
+        sortOrder: z.enum(['asc', 'desc']).default('desc'),
         page: z.coerce.number().min(1).default(1),
         limit: z.coerce.number().min(1).max(100).default(50),
+        // 🚀 Paginação cursor-based (mais eficiente para grandes volumes)
+        cursor: z.string().optional(), // ID da última sessão recebida
+        useCursor: z.coerce.boolean().optional(), // Se true, usa cursor em vez de offset
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -52,7 +63,7 @@ export const sessionsController = igniter.controller({
         }
 
         // 🚀 Cache: Verificar cache antes de buscar no banco
-        const cacheKey = `sessions:list:${organizationId || 'all'}:${request.query.connectionId || ''}:${request.query.status || ''}:${request.query.page}:${request.query.limit}`;
+        const cacheKey = `sessions:list:${organizationId || 'all'}:${request.query.connectionId || ''}:${request.query.status || ''}:${request.query.aiStatus || ''}:${request.query.whatsappWindow || ''}:${request.query.search || ''}:${request.query.sortBy}:${request.query.sortOrder}:${request.query.page}:${request.query.limit}:${request.query.cursor || ''}:${request.query.useCursor || ''}`;
 
         try {
           const cached = await igniter.store.get<any>(cacheKey);
@@ -68,8 +79,19 @@ export const sessionsController = igniter.controller({
           connectionId: request.query.connectionId,
           contactId: request.query.contactId,
           status: request.query.status,
+          // ⭐ Filtros avançados
+          aiStatus: request.query.aiStatus,
+          whatsappWindow: request.query.whatsappWindow,
+          assignedAgentId: request.query.assignedAgentId,
+          hasUnread: request.query.hasUnread,
+          search: request.query.search,
+          sortBy: request.query.sortBy,
+          sortOrder: request.query.sortOrder,
           page: request.query.page,
           limit: request.query.limit,
+          // 🚀 Paginação cursor-based
+          cursor: request.query.cursor,
+          useCursor: request.query.useCursor,
         });
 
         // 🚀 Cache: Salvar resultado com TTL de 30 segundos

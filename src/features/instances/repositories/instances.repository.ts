@@ -1,5 +1,24 @@
-import { PrismaClient, Connection as Instance, ConnectionStatus } from "@prisma/client";
+import { PrismaClient, Connection as Instance, ConnectionStatus, ConnectionEventType } from "@prisma/client";
 import { CreateInstanceInput, UpdateInstanceInput } from "../instances.interfaces";
+import { connectionNotificationsService } from "@/lib/notifications/connection-notifications.service";
+
+// Map status transitions to event types
+const STATUS_TO_EVENT_TYPE: Record<string, ConnectionEventType> = {
+  CONNECTED: 'CONNECTED',
+  DISCONNECTED: 'DISCONNECTED',
+  CONNECTING: 'RECONNECTING',
+  ERROR: 'ERROR',
+};
+
+export interface LogEventInput {
+  connectionId: string;
+  eventType: ConnectionEventType;
+  fromStatus?: ConnectionStatus;
+  toStatus: ConnectionStatus;
+  reason?: string;
+  metadata?: Record<string, any>;
+  triggeredBy?: string;
+}
 
 /**
  * @class InstancesRepository
@@ -159,28 +178,144 @@ export class InstancesRepository {
 
   /**
    * @method updateStatus
-   * @description Atualiza apenas o status de uma instância
+   * @description Atualiza apenas o status de uma instância e loga o evento
    * @param {string} id - ID da instância
    * @param {string} status - Novo status
    * @param {string} phoneNumber - Número do telefone (opcional)
    * @param {string} profilePictureUrl - URL da foto de perfil (opcional)
+   * @param {object} eventContext - Contexto adicional para o evento (opcional)
    * @returns {Promise<Instance>} Instância atualizada
    */
   async updateStatus(
     id: string,
     status: string,
     phoneNumber?: string,
-    profilePictureUrl?: string | null
+    profilePictureUrl?: string | null,
+    eventContext?: { reason?: string; triggeredBy?: string; metadata?: Record<string, any>; skipNotification?: boolean }
   ): Promise<Instance> {
+    // Get current status and connection info before update
+    const current = await this.prisma.connection.findUnique({
+      where: { id },
+      select: { status: true, name: true, organizationId: true }
+    });
+
+    const fromStatus = current?.status;
+    const toStatus = status as ConnectionStatus;
+
     // Business Logic: Atualizar status e dados relacionados da instância
-    return this.prisma.connection.update({
+    const updated = await this.prisma.connection.update({
       where: { id },
       data: {
-        status: status as ConnectionStatus,
+        status: toStatus,
         ...(phoneNumber && { phoneNumber }),
         ...(profilePictureUrl !== undefined && { profilePictureUrl }),
         ...(status === 'CONNECTED' && { lastConnected: new Date() })
       }
+    });
+
+    // Log the connection event (only if status actually changed)
+    if (fromStatus !== toStatus) {
+      const eventType = STATUS_TO_EVENT_TYPE[status] || 'DISCONNECTED';
+      await this.logEvent({
+        connectionId: id,
+        eventType: eventType as ConnectionEventType,
+        fromStatus: fromStatus || undefined,
+        toStatus,
+        reason: eventContext?.reason,
+        metadata: eventContext?.metadata,
+        triggeredBy: eventContext?.triggeredBy,
+      });
+
+      // Send push notification for disconnections (if org exists and not skipped)
+      if (!eventContext?.skipNotification && current?.organizationId) {
+        const notificationContext = {
+          connectionId: id,
+          connectionName: current.name || 'WhatsApp',
+          organizationId: current.organizationId,
+          reason: eventContext?.reason,
+          previousStatus: fromStatus,
+        };
+
+        // Async - don't await to not block the main operation
+        if (toStatus === 'DISCONNECTED' && fromStatus === 'CONNECTED') {
+          connectionNotificationsService.notifyDisconnection(notificationContext);
+        } else if (toStatus === 'ERROR') {
+          connectionNotificationsService.notifyConnectionError({
+            ...notificationContext,
+            error: eventContext?.reason,
+          });
+        } else if (toStatus === 'CONNECTED' && fromStatus !== 'CONNECTED') {
+          connectionNotificationsService.notifyConnected(notificationContext);
+        }
+      }
+    }
+
+    return updated;
+  }
+
+  /**
+   * @method logEvent
+   * @description Registra um evento de conexão no histórico
+   */
+  async logEvent(input: LogEventInput): Promise<void> {
+    try {
+      await this.prisma.connectionEvent.create({
+        data: {
+          connectionId: input.connectionId,
+          eventType: input.eventType,
+          fromStatus: input.fromStatus,
+          toStatus: input.toStatus,
+          reason: input.reason,
+          metadata: input.metadata as any,
+          triggeredBy: input.triggeredBy,
+        }
+      });
+    } catch (error) {
+      // Don't fail the main operation if event logging fails
+      console.error('[InstancesRepository] Failed to log connection event:', error);
+    }
+  }
+
+  /**
+   * @method getEvents
+   * @description Busca histórico de eventos de uma conexão
+   */
+  async getEvents(
+    connectionId: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<{ events: any[]; total: number }> {
+    const [events, total] = await Promise.all([
+      this.prisma.connectionEvent.findMany({
+        where: { connectionId },
+        orderBy: { createdAt: 'desc' },
+        take: options?.limit || 50,
+        skip: options?.offset || 0,
+      }),
+      this.prisma.connectionEvent.count({ where: { connectionId } })
+    ]);
+
+    return { events, total };
+  }
+
+  /**
+   * @method logQREvent
+   * @description Registra eventos específicos de QR Code
+   */
+  async logQREvent(
+    connectionId: string,
+    eventType: 'QR_GENERATED' | 'QR_SCANNED' | 'QR_TIMEOUT' | 'QR_RETRY',
+    metadata?: Record<string, any>
+  ): Promise<void> {
+    const current = await this.prisma.connection.findUnique({
+      where: { id: connectionId },
+      select: { status: true }
+    });
+
+    await this.logEvent({
+      connectionId,
+      eventType: eventType as ConnectionEventType,
+      toStatus: current?.status || 'CONNECTING',
+      metadata,
     });
   }
 
@@ -283,16 +418,21 @@ export class InstancesRepository {
    * @description Atualiza token de compartilhamento de uma instância
    * @param {string} id - ID da instância
    * @param {object} shareData - Dados do token de compartilhamento
+   * @param {boolean} isNewToken - Se é um novo token (reseta contador) ou extensão (incrementa)
    * @returns {Promise<Instance>} Instância atualizada
    */
   async updateShareToken(id: string, shareData: {
     shareToken: string;
     shareTokenExpiresAt: Date;
-  }): Promise<Instance> {
+  }, isNewToken: boolean = false): Promise<Instance> {
     // Business Logic: Atualizar token de compartilhamento
     return this.prisma.connection.update({
       where: { id },
-      data: shareData
+      data: {
+        ...shareData,
+        // Reset counter for new tokens, increment for extensions
+        shareTokenExtensionCount: isNewToken ? 0 : { increment: 1 }
+      }
     });
   }
 
@@ -308,7 +448,8 @@ export class InstancesRepository {
       where: { id },
       data: {
         shareToken: null,
-        shareTokenExpiresAt: new Date(0) // Data no passado
+        shareTokenExpiresAt: new Date(0), // Data no passado
+        shareTokenExtensionCount: 0 // Reset counter
       }
     });
   }

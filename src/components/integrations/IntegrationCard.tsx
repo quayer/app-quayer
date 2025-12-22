@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ import {
 import {
   MoreVertical,
   Settings,
+  Settings2,
   Trash2,
   RefreshCw,
   MessageSquare,
@@ -88,8 +90,13 @@ export function IntegrationCard({
   onShare,
   onDisconnect,
 }: IntegrationCardProps) {
+  const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
   const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+
+  const handleAdvancedSettings = () => {
+    router.push(`/integracoes/${instance.id}/settings`);
+  };
 
   const getStatusConfig = (status: string) => {
     switch (status) {
@@ -240,6 +247,11 @@ export function IntegrationCard({
                     Configurar
                   </DropdownMenuItem>
                 )}
+
+                <DropdownMenuItem onClick={handleAdvancedSettings}>
+                  <Settings2 className="h-4 w-4 mr-2" aria-hidden="true" />
+                  Configuracoes Avancadas
+                </DropdownMenuItem>
 
                 {instance.status !== 'connected' && onGenerateQrCode && (
                   <DropdownMenuItem onClick={() => onGenerateQrCode(instance.id)}>

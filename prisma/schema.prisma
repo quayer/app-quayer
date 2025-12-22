@@ -55,6 +55,12 @@ model Organization {
   // SMTP Configuration
   smtpConfig Json? // { host, port, user, pass, from }
 
+  // BYOC (Bring Your Own Credentials) Flags
+  useOwnOpenAI   Boolean @default(false) // Usar própria API key OpenAI
+  useOwnRedis    Boolean @default(false) // Usar próprio Redis
+  useOwnDatabase Boolean @default(false) // Usar próprio PostgreSQL
+  useOwnStorage  Boolean @default(false) // Usar próprio S3/Storage
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -65,6 +71,7 @@ model Organization {
   auditLogs    AuditLog[]
   chatSessions ChatSession[]
   calls        Call[]
+  providers    OrganizationProvider[]
 
   @@index([document])
   @@index([slug])
@@ -349,8 +356,9 @@ model Connection {
   msgDelayMax Int @default(4)
 
   // Share Token System
-  shareToken          String?   @unique
-  shareTokenExpiresAt DateTime?
+  shareToken               String?   @unique
+  shareTokenExpiresAt      DateTime?
+  shareTokenExtensionCount Int       @default(0) // Max 3 extensions allowed
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -375,6 +383,74 @@ model Connection {
   @@index([shareToken])
   @@index([n8nWorkflowId])
   @@map("connections")
+
+  // Advanced Settings
+  settings ConnectionSettings?
+
+  // Connection Events History
+  events ConnectionEvent[]
+}
+
+// ============================================
+// CONNECTION SETTINGS (Advanced Configuration per Instance)
+// ============================================
+
+model ConnectionSettings {
+  id           String @id @default(uuid())
+  connectionId String @unique
+
+  // ===== CONCATENAÇÃO DE MENSAGENS =====
+  concatEnabled       Boolean @default(true)
+  concatTimeoutMs     Int     @default(8000)    // 8 segundos
+  concatMaxMessages   Int     @default(10)
+  concatSameType      Boolean @default(false)   // false = concat tudo junto (melhor para IA)
+  concatSameSender    Boolean @default(true)    // apenas mesmo remetente
+
+  // ===== TRANSCRIÇÃO & IA =====
+  transcriptionEnabled      Boolean @default(true)
+  imageDescriptionEnabled   Boolean @default(true)
+  documentAnalysisEnabled   Boolean @default(true)
+  videoTranscriptionEnabled Boolean @default(true)
+
+  // ===== GEOCODING =====
+  geocodingEnabled  Boolean @default(true)
+  geocodingApiKey   String? // Se vazio, usa da organização ou sistema
+
+  // ===== AI MODELS (override do padrão) =====
+  transcriptionModel String? // whisper-1
+  visionModel        String? // gpt-4o
+  analysisModel      String? // gpt-4o
+
+  // ===== AI PROMPTS (override do padrão) =====
+  imagePrompt    String? @db.Text
+  audioPrompt    String? @db.Text
+  documentPrompt String? @db.Text
+  videoPrompt    String? @db.Text
+
+  // ===== WHATSAPP 24H WINDOW =====
+  enforceWhatsAppWindow   Boolean @default(true)
+  templateFallbackEnabled Boolean @default(false)
+
+  // ===== BOT ECHO DETECTION =====
+  botEchoEnabled Boolean @default(true)
+  botSignature   String? // Custom signature (default: \u200B\u200C\u200D)
+
+  // ===== AUTO-PAUSE =====
+  autoPauseOnHumanReply  Boolean @default(true)
+  autoPauseDurationHours Int     @default(24)
+
+  // ===== COMANDOS VIA CHAT =====
+  commandsEnabled Boolean @default(true)
+  commandPrefix   String  @default("@") // @fechar, @pausar
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId])
+  @@map("connection_settings")
 }
 
 enum Channel {
@@ -398,6 +474,51 @@ enum ConnectionStatus {
   CONNECTING
   DISCONNECTED
   ERROR
+}
+
+// ============================================
+// CONNECTION EVENTS (Connection/Disconnection History)
+// ============================================
+
+model ConnectionEvent {
+  id           String   @id @default(uuid())
+  connectionId String
+
+  // Event Info
+  eventType    ConnectionEventType
+  fromStatus   ConnectionStatus?
+  toStatus     ConnectionStatus
+
+  // Context
+  reason       String?   // Reason for disconnection/error
+  metadata     Json?     // Additional context (qr_timeout, manual, etc)
+  ipAddress    String?   // IP where event originated
+  userAgent    String?   // Browser/Device info
+
+  // User who triggered (if manual action)
+  triggeredBy  String?   // User ID if manual
+
+  // Timestamps
+  createdAt    DateTime  @default(now())
+
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("connection_events")
+}
+
+enum ConnectionEventType {
+  CONNECTED        // Successfully connected
+  DISCONNECTED     // Disconnected (manual or automatic)
+  CONNECTION_LOST  // Unexpected disconnection
+  QR_GENERATED     // QR Code generated for pairing
+  QR_SCANNED       // QR Code was scanned
+  QR_TIMEOUT       // QR Code expired without scan
+  QR_RETRY         // Automatic QR retry triggered
+  ERROR            // Connection error occurred
+  RECONNECTING     // Attempting to reconnect
 }
 
 // ============================================
@@ -678,6 +799,11 @@ model ChatSession {
   pausedUntil   DateTime? // For @pausar command with time limit
   pausedBy      String? // Who paused: "command", "agent", "system"
 
+  // WhatsApp 24h Window (compliance with WhatsApp Business API)
+  lastCustomerMessageAt   DateTime? // Last message FROM customer (inbound)
+  whatsappWindowExpiresAt DateTime? // 24h from last customer message
+  whatsappWindowType      String?   @default("CUSTOMER_INITIATED") // CUSTOMER_INITIATED, BUSINESS_INITIATED
+
   // Concatenação
   isConcat      Boolean @default(false)
   concatTimeout Int     @default(8)
@@ -707,6 +833,7 @@ model ChatSession {
   @@index([lastMessageAt])
   @@index([expiresAt])
   @@index([pausedUntil])
+  @@index([whatsappWindowExpiresAt])
   @@index([assignedDepartmentId])
   @@index([assignedAgentId])
   @@index([externalId])
@@ -751,6 +878,20 @@ model Message {
   fileName      String?
   mediaSize     Int?
   mediaDuration Int?
+
+  // Location Data (quando type = 'location')
+  latitude      Float?
+  longitude     Float?
+  locationName  String?      // Nome do local enviado pelo usuário
+
+  // Geocoded Address (preenchido automaticamente via Google Maps API)
+  geoAddress       String?    // Endereço completo formatado
+  geoNeighborhood  String?    // Bairro
+  geoCity          String?    // Cidade
+  geoState         String?    // Estado (ex: São Paulo)
+  geoStateCode     String?    // Código do estado (ex: SP)
+  geoPostalCode    String?    // CEP
+  geoCountry       String?    // País
 
   // Transcrição
   transcription            String?             @db.Text
@@ -1224,6 +1365,60 @@ enum IntegrationType {
 
   // Other
   CUSTOM
+}
+
+// ============================================
+// PROVIDER CATEGORY (BYOC Architecture)
+// ============================================
+
+enum ProviderCategory {
+  AI              // LLMs: openai, anthropic, google, openrouter
+  TRANSCRIPTION   // STT: whisper, deepgram, assemblyai
+  TTS             // Text-to-Speech: elevenlabs, openai-tts
+  INFRASTRUCTURE  // redis, postgresql, supabase, s3
+  AUXILIARY       // google-maps, email, sms
+}
+
+// ============================================
+// ORGANIZATION PROVIDER (BYOC Credentials)
+// ============================================
+
+model OrganizationProvider {
+  id             String   @id @default(uuid())
+  organizationId String
+
+  // Tipo do provedor
+  category       ProviderCategory
+  provider       String            // openai, anthropic, redis, supabase, etc
+
+  // Configuração
+  isActive       Boolean  @default(true)
+  isPrimary      Boolean  @default(false)  // Provedor principal da categoria
+  priority       Int      @default(0)       // Para fallback ordering (menor = maior prioridade)
+
+  // Credenciais (encriptadas no nível da aplicação)
+  credentials    Json     // { apiKey, apiSecret, apiUrl, region, bucket, etc }
+
+  // Configurações específicas do provedor
+  settings       Json?    // { model: "gpt-4o", maxTokens: 4096, temperature: 0.7, etc }
+
+  // Metadados de uso
+  lastTestedAt   DateTime?
+  lastTestStatus String?   // success, failed, pending
+  lastTestError  String?
+  usageThisMonth Int       @default(0)  // Para tracking de uso
+  costThisMonth  Float     @default(0)  // Custo estimado do mês
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, category, provider, priority])
+  @@index([organizationId, category])
+  @@index([organizationId, isActive])
+  @@index([category, provider])
+  @@map("organization_providers")
 }
 
 // Configurations at system/admin level (global defaults)

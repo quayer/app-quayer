@@ -67,6 +67,10 @@ import {
   AlertCircle,
   Smartphone,
   Layers,
+  Bot,
+  User,
+  ArchiveIcon,
+  Inbox,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -86,12 +90,21 @@ const CHAT_REFRESH_INTERVAL = 10 * 1000 // 10 segundos
 const MESSAGE_REFRESH_INTERVAL = 5 * 1000 // 5 segundos
 
 type ChatFilter = 'all' | 'unread' | 'groups' | 'pinned'
+type AttendanceFilter = 'all' | 'ai' | 'human' | 'archived'
 
 const CHAT_FILTERS: { value: ChatFilter; label: string; icon: any }[] = [
   { value: 'all', label: 'Todas', icon: MessageCircle },
   { value: 'unread', label: 'Nao lidas', icon: MessageSquare },
   { value: 'groups', label: 'Grupos', icon: Users },
   { value: 'pinned', label: 'Fixadas', icon: Pin },
+]
+
+// Filtros de tipo de atendimento
+const ATTENDANCE_FILTERS: { value: AttendanceFilter; label: string; icon: any; color: string }[] = [
+  { value: 'all', label: 'Todas', icon: Inbox, color: 'text-muted-foreground' },
+  { value: 'ai', label: 'IA', icon: Bot, color: 'text-purple-500' },
+  { value: 'human', label: 'Humano', icon: User, color: 'text-blue-500' },
+  { value: 'archived', label: 'Arquivado', icon: ArchiveIcon, color: 'text-orange-500' },
 ]
 
 // ==================== TYPES ====================
@@ -106,6 +119,11 @@ interface UAZChat {
   wa_isPinned: boolean
   instanceId?: string
   instanceName?: string
+  // Campos de sessão (do DB)
+  id?: string // session ID
+  status?: 'QUEUED' | 'ACTIVE' | 'PAUSED' | 'CLOSED'
+  aiEnabled?: boolean
+  aiBlockedUntil?: string | null
 }
 
 interface DBMessage {
@@ -152,6 +170,7 @@ export default function ConversationsPage() {
   const [messageText, setMessageText] = useState('')
   const [searchText, setSearchText] = useState('')
   const [chatFilter, setChatFilter] = useState<ChatFilter>('all')
+  const [attendanceFilter, setAttendanceFilter] = useState<AttendanceFilter>('all')
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -221,7 +240,7 @@ export default function ConversationsPage() {
     isFetching: chatsFetching,
     refetch: refetchChats,
   } = useQuery({
-    queryKey: ['conversations', 'chats', instanceIdsToFetch, chatFilter],
+    queryKey: ['conversations', 'chats', instanceIdsToFetch, chatFilter, attendanceFilter],
     queryFn: async () => {
       if (instanceIdsToFetch.length === 0) return { chats: [] }
 
@@ -233,6 +252,7 @@ export default function ConversationsPage() {
               query: {
                 instanceId,
                 status: chatFilter,
+                attendanceType: attendanceFilter,
                 limit: 50,
                 offset: 0,
               }
@@ -666,6 +686,34 @@ export default function ConversationsPage() {
           />
         </div>
 
+        {/* Attendance type filter - Buttons */}
+        <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg">
+          {ATTENDANCE_FILTERS.map(filter => (
+            <Tooltip key={filter.value}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={attendanceFilter === filter.value ? "secondary" : "ghost"}
+                  size="sm"
+                  className={cn(
+                    "flex-1 gap-1.5",
+                    attendanceFilter === filter.value && filter.color
+                  )}
+                  onClick={() => setAttendanceFilter(filter.value)}
+                >
+                  <filter.icon className={cn("h-4 w-4", filter.color)} />
+                  <span className="text-xs hidden sm:inline">{filter.label}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {filter.value === 'ai' && 'Conversas com IA ativa'}
+                {filter.value === 'human' && 'Conversas com atendente humano'}
+                {filter.value === 'archived' && 'Conversas arquivadas/encerradas'}
+                {filter.value === 'all' && 'Todas as conversas'}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+
         {/* Chat type filter + refresh */}
         <div className="flex items-center gap-2">
           <Select value={chatFilter} onValueChange={(v) => setChatFilter(v as ChatFilter)}>
@@ -756,6 +804,29 @@ export default function ConversationsPage() {
                         {chat.wa_isPinned && (
                           <Pin className="h-3 w-3 text-muted-foreground" />
                         )}
+                        {/* Indicador de status IA/Humano/Arquivado */}
+                        {chat.status === 'CLOSED' || chat.status === 'PAUSED' ? (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <ArchiveIcon className="h-3 w-3 text-orange-500" />
+                            </TooltipTrigger>
+                            <TooltipContent>Arquivado</TooltipContent>
+                          </Tooltip>
+                        ) : chat.aiEnabled && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date()) ? (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Bot className="h-3 w-3 text-purple-500" />
+                            </TooltipTrigger>
+                            <TooltipContent>IA ativa</TooltipContent>
+                          </Tooltip>
+                        ) : chat.aiEnabled === false || (chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= new Date()) ? (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <User className="h-3 w-3 text-blue-500" />
+                            </TooltipTrigger>
+                            <TooltipContent>Atendimento humano</TooltipContent>
+                          </Tooltip>
+                        ) : null}
                       </div>
                       {chat.wa_lastMsgTimestamp && (
                         <span className="text-xs text-muted-foreground whitespace-nowrap">

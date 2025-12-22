@@ -46,6 +46,9 @@ interface QRCodeModalProps {
   onConnected?: () => void
 }
 
+// Tempo de expiração do QR Code em segundos
+const QR_EXPIRATION_SECONDS = 120
+
 export function QRCodeModal({
   open,
   onOpenChange,
@@ -59,7 +62,9 @@ export function QRCodeModal({
   const [error, setError] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [qrJustUpdated, setQrJustUpdated] = useState(false) // Para animação pulse
+  const [countdown, setCountdown] = useState<number>(QR_EXPIRATION_SECONDS) // Countdown em segundos
   const connectedHandledRef = useRef(false) // Evitar callbacks duplicados
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // ✅ USAR HOOK DO REACT QUERY COM POLLING 3s (IGUAL AO ADMIN)
   const { data: statusData } = useInstanceStatus(
@@ -132,6 +137,8 @@ export function QRCodeModal({
       if (qrCodeValue) {
         setStatus('qr')
         setQrCode(qrCodeValue)
+        // Resetar countdown
+        setCountdown(QR_EXPIRATION_SECONDS)
         // Ativar animação pulse por 1.5 segundos
         setQrJustUpdated(true)
         setTimeout(() => setQrJustUpdated(false), 1500)
@@ -165,9 +172,54 @@ export function QRCodeModal({
       setQrCode(null)
       setError(null)
       setIsRefreshing(false)
+      setCountdown(QR_EXPIRATION_SECONDS)
+      // Limpar intervalo do countdown
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // Countdown para expiração do QR Code
+  useEffect(() => {
+    // Só ativar countdown quando QR code estiver visível
+    if (status !== 'qr' || !qrCode) {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+      return
+    }
+
+    // Iniciar countdown
+    countdownIntervalRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          // Tempo esgotado, auto-refresh
+          handleConnect()
+          return QR_EXPIRATION_SECONDS
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, qrCode])
+
+  // Formatar countdown em MM:SS
+  const formatCountdown = useCallback((seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }, [])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -196,6 +248,30 @@ export function QRCodeModal({
           {/* QR Code */}
           {status === 'qr' && qrCode && (
             <div className="space-y-4">
+              {/* Countdown Timer */}
+              <div className="flex items-center justify-center gap-2">
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors",
+                  countdown <= 30
+                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                    : countdown <= 60
+                      ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      : "bg-muted text-muted-foreground"
+                )}>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" strokeWidth="2" className="opacity-30" />
+                    <path
+                      strokeLinecap="round"
+                      strokeWidth="2"
+                      d={`M12 2 A10 10 0 ${countdown / QR_EXPIRATION_SECONDS > 0.5 ? 1 : 0} 1 ${12 + 10 * Math.sin(2 * Math.PI * (1 - countdown / QR_EXPIRATION_SECONDS))} ${12 - 10 * Math.cos(2 * Math.PI * (1 - countdown / QR_EXPIRATION_SECONDS))}`}
+                    />
+                  </svg>
+                  <span aria-live="polite" aria-label={`QR Code expira em ${formatCountdown(countdown)}`}>
+                    Expira em {formatCountdown(countdown)}
+                  </span>
+                </div>
+              </div>
+
               <div className={cn(
                 "flex justify-center p-4 bg-white rounded-lg border transition-all duration-300",
                 qrJustUpdated && "ring-4 ring-primary/40 animate-pulse"

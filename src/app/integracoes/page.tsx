@@ -57,6 +57,7 @@ import {
   useDeleteInstance,
   useInstanceStats,
 } from '@/hooks/useInstance';
+import { useCurrentOrganization } from '@/hooks/useOrganization';
 import { BrokerType } from '@/features/instances/instances.interfaces';
 import { PageContainer, PageHeader } from '@/components/layout/page-layout';
 
@@ -74,12 +75,31 @@ interface Instance {
   unreadCount?: number;
 }
 
+// Chave para localStorage das preferências
+const PREFERENCES_KEY = 'integracoes_preferences';
+
+interface IntegrationsPreferences {
+  viewMode: 'grid' | 'list';
+  statusFilter: string;
+}
+
 export default function IntegrationsPage() {
   const [isMounted, setIsMounted] = useState(false);
 
-  // Hydration fix: esperar montagem no cliente
+  // Hydration fix: esperar montagem no cliente e carregar preferências
   useEffect(() => {
     setIsMounted(true);
+    // Carregar preferências do localStorage
+    try {
+      const saved = localStorage.getItem(PREFERENCES_KEY);
+      if (saved) {
+        const prefs: IntegrationsPreferences = JSON.parse(saved);
+        if (prefs.viewMode) setViewMode(prefs.viewMode);
+        if (prefs.statusFilter) setStatusFilter(prefs.statusFilter);
+      }
+    } catch {
+      // Ignorar erros de parsing
+    }
   }, []);
 
   // Detectar se há instâncias conectando para polling mais rápido
@@ -91,6 +111,10 @@ export default function IntegrationsPage() {
     fastPolling: hasPendingConnections, // Polling rápido (3s) quando há conexões pendentes
   });
   const { data: statsData } = useInstanceStats();
+  const { data: organizationData } = useCurrentOrganization();
+
+  // Extrair limite de instâncias da organização (fallback para 5)
+  const maxInstances = (organizationData as any)?.maxInstances || (organizationData as any)?.data?.maxInstances || 5;
   const createInstanceMutation = useCreateInstance();
   const connectInstanceMutation = useConnectInstance();
   const disconnectInstanceMutation = useDisconnectInstance();
@@ -99,6 +123,17 @@ export default function IntegrationsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  // Salvar preferências no localStorage quando mudarem
+  useEffect(() => {
+    if (!isMounted) return;
+    try {
+      const prefs: IntegrationsPreferences = { viewMode, statusFilter };
+      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(prefs));
+    } catch {
+      // Ignorar erros de storage
+    }
+  }, [viewMode, statusFilter, isMounted]);
 
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -486,8 +521,8 @@ export default function IntegrationsPage() {
           {instances.length > 0 && (
             <Badge variant="outline" className="gap-1">
               <Zap className="h-3 w-3" aria-hidden="true" />
-              <span aria-label={`${instances.length} de 10 instâncias utilizadas`}>
-                {instances.length}/10 instâncias
+              <span aria-label={`${instances.length} de ${maxInstances} instâncias utilizadas`}>
+                {instances.length}/{maxInstances} instâncias
               </span>
             </Badge>
           )}

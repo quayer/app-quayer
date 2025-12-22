@@ -49,9 +49,7 @@ export function SystemInfo() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['system-info'],
     queryFn: async () => {
-      const result = await api['system-settings'].getSystemInfo.query({
-        headers: getAuthHeaders(),
-      })
+      const result = await (api['system-settings'].getSystemInfo.query as any)()
       return (result as any)?.data as SystemInfo
     },
     refetchInterval: 30000, // Refresh every 30s
@@ -60,9 +58,7 @@ export function SystemInfo() {
   // Initialize defaults
   const initMutation = useMutation({
     mutationFn: async () => {
-      return api['system-settings'].initializeDefaults.mutate({
-        headers: getAuthHeaders(),
-      })
+      return (api['system-settings'].initializeDefaults.mutate as any)()
     },
     onSuccess: () => {
       toast.success('Configurações padrão inicializadas!')

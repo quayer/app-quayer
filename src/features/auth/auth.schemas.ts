@@ -198,9 +198,10 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 /**
  * Schema de Switch Organization
+ * organizationId can be null to clear context (admin returning to global mode)
  */
 export const switchOrganizationSchema = z.object({
-  organizationId: z.string({ required_error: 'Organization ID is required' }).uuid(),
+  organizationId: z.string().uuid().nullable(),
 });
 
 export type SwitchOrganizationInput = z.infer<typeof switchOrganizationSchema>;

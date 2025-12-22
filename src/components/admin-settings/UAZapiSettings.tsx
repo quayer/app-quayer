@@ -86,9 +86,8 @@ export function UAZapiSettings() {
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: async (settings: UAZapiSettingsData) => {
-      return api['system-settings'].updateUazapi.mutate({
+      return (api['system-settings'].updateUazapi.mutate as any)({
         body: settings,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {
@@ -103,12 +102,11 @@ export function UAZapiSettings() {
   // Test connection mutation
   const testMutation = useMutation({
     mutationFn: async () => {
-      return api['system-settings'].testUazapiConnection.mutate({
+      return (api['system-settings'].testUazapiConnection.mutate as any)({
         body: {
           baseUrl: formData.baseUrl,
           adminToken: formData.adminToken,
         },
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: (result: any) => {

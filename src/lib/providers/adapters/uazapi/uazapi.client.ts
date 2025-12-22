@@ -2,12 +2,126 @@
  * UAZapi HTTP Client
  *
  * Cliente HTTP para comunicação com a API UAZapi
+ * Com suporte a Circuit Breaker para resiliência
  */
+
+// ============================================================================
+// CIRCUIT BREAKER IMPLEMENTATION
+// ============================================================================
+
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+interface CircuitBreakerConfig {
+  failureThreshold: number;    // Failures before opening circuit
+  successThreshold: number;    // Successes in half-open to close circuit
+  timeout: number;             // Time in ms before attempting half-open
+}
+
+interface CircuitBreakerState {
+  state: CircuitState;
+  failures: number;
+  successes: number;
+  lastFailureTime: number | null;
+  nextAttempt: number | null;
+}
+
+class CircuitBreaker {
+  private state: CircuitBreakerState;
+  private config: CircuitBreakerConfig;
+
+  constructor(config?: Partial<CircuitBreakerConfig>) {
+    this.config = {
+      failureThreshold: config?.failureThreshold || 5,
+      successThreshold: config?.successThreshold || 2,
+      timeout: config?.timeout || 30000, // 30s default
+    };
+    this.state = {
+      state: 'CLOSED',
+      failures: 0,
+      successes: 0,
+      lastFailureTime: null,
+      nextAttempt: null,
+    };
+  }
+
+  canRequest(): boolean {
+    if (this.state.state === 'CLOSED') return true;
+    if (this.state.state === 'OPEN') {
+      // Check if timeout has passed
+      if (this.state.nextAttempt && Date.now() >= this.state.nextAttempt) {
+        this.state.state = 'HALF_OPEN';
+        this.state.successes = 0;
+        console.log('[CircuitBreaker] Transitioning to HALF_OPEN state');
+        return true;
+      }
+      return false;
+    }
+    // HALF_OPEN - allow limited requests
+    return true;
+  }
+
+  recordSuccess(): void {
+    if (this.state.state === 'HALF_OPEN') {
+      this.state.successes++;
+      if (this.state.successes >= this.config.successThreshold) {
+        this.state.state = 'CLOSED';
+        this.state.failures = 0;
+        this.state.successes = 0;
+        console.log('[CircuitBreaker] Circuit CLOSED - service recovered');
+      }
+    } else if (this.state.state === 'CLOSED') {
+      // Reset failure count on success
+      this.state.failures = 0;
+    }
+  }
+
+  recordFailure(error: Error): void {
+    this.state.failures++;
+    this.state.lastFailureTime = Date.now();
+
+    if (this.state.state === 'HALF_OPEN') {
+      // Any failure in half-open immediately opens circuit
+      this.openCircuit();
+    } else if (this.state.failures >= this.config.failureThreshold) {
+      this.openCircuit();
+    }
+  }
+
+  private openCircuit(): void {
+    this.state.state = 'OPEN';
+    this.state.nextAttempt = Date.now() + this.config.timeout;
+    console.warn(`[CircuitBreaker] Circuit OPEN - will retry at ${new Date(this.state.nextAttempt).toISOString()}`);
+  }
+
+  getState(): CircuitState {
+    return this.state.state;
+  }
+
+  getStats(): { state: CircuitState; failures: number; nextAttempt: string | null } {
+    return {
+      state: this.state.state,
+      failures: this.state.failures,
+      nextAttempt: this.state.nextAttempt ? new Date(this.state.nextAttempt).toISOString() : null,
+    };
+  }
+}
+
+// Singleton circuit breaker for UAZapi
+const uazapiCircuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,    // Open after 5 consecutive failures
+  successThreshold: 2,    // Close after 2 successes in half-open
+  timeout: 30000,         // Wait 30s before retrying
+});
+
+// ============================================================================
+// CLIENT TYPES
+// ============================================================================
 
 export interface UAZClientConfig {
   baseUrl: string;
   adminToken: string;
   timeout?: number;
+  useCircuitBreaker?: boolean;
 }
 
 export interface UAZResponse<T = any> {
@@ -17,19 +131,39 @@ export interface UAZResponse<T = any> {
   error?: string;
 }
 
+export class CircuitOpenError extends Error {
+  constructor(nextAttempt: string | null) {
+    super(`Circuit breaker is OPEN. Next attempt: ${nextAttempt || 'unknown'}`);
+    this.name = 'CircuitOpenError';
+  }
+}
+
+// ============================================================================
+// UAZ CLIENT
+// ============================================================================
+
 export class UAZClient {
   private baseUrl: string;
   private adminToken: string;
   private timeout: number;
+  private useCircuitBreaker: boolean;
 
   constructor(config: UAZClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
     this.adminToken = config.adminToken;
     this.timeout = config.timeout || 30000; // 30s default
+    this.useCircuitBreaker = config.useCircuitBreaker !== false; // Default true
   }
 
   /**
-   * Request genérico
+   * Get circuit breaker status
+   */
+  getCircuitBreakerStatus() {
+    return uazapiCircuitBreaker.getStats();
+  }
+
+  /**
+   * Request genérico com Circuit Breaker
    */
   private async request<T = any>(
     method: string,
@@ -40,6 +174,12 @@ export class UAZClient {
       headers?: Record<string, string>;
     } = {}
   ): Promise<UAZResponse<T>> {
+    // Check circuit breaker
+    if (this.useCircuitBreaker && !uazapiCircuitBreaker.canRequest()) {
+      const stats = uazapiCircuitBreaker.getStats();
+      throw new CircuitOpenError(stats.nextAttempt);
+    }
+
     const url = `${this.baseUrl}${path}`;
 
     const headers: Record<string, string> = {
@@ -70,13 +210,29 @@ export class UAZClient {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || data.message || `HTTP ${response.status}`);
+        const error = new Error(data.error || data.message || `HTTP ${response.status}`);
+        if (this.useCircuitBreaker) {
+          uazapiCircuitBreaker.recordFailure(error);
+        }
+        throw error;
+      }
+
+      // Record success
+      if (this.useCircuitBreaker) {
+        uazapiCircuitBreaker.recordSuccess();
       }
 
       return data;
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${this.timeout}ms`);
+        const timeoutError = new Error(`Request timeout after ${this.timeout}ms`);
+        if (this.useCircuitBreaker) {
+          uazapiCircuitBreaker.recordFailure(timeoutError);
+        }
+        throw timeoutError;
+      }
+      if (this.useCircuitBreaker && error.name !== 'CircuitOpenError') {
+        uazapiCircuitBreaker.recordFailure(error);
       }
       throw error;
     }

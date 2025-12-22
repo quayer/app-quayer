@@ -47,7 +47,7 @@ export const permissionsController = igniter.controller({
           const matrix = await permissionsService.getPermissionMatrix()
           return response.success({ data: matrix })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao carregar matriz de permissoes')
+          return (response as any).error(error.message || 'Erro ao carregar matriz de permissoes')
         }
       },
     }),
@@ -71,7 +71,7 @@ export const permissionsController = igniter.controller({
           const permissions = await permissionsService.getAllPermissions()
           return response.success({ data: permissions })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao listar permissoes')
+          return (response as any).error(error.message || 'Erro ao listar permissoes')
         }
       },
     }),
@@ -99,7 +99,7 @@ export const permissionsController = igniter.controller({
           )
           return response.success({ data: permissions })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao carregar permissoes do role')
+          return (response as any).error(error.message || 'Erro ao carregar permissoes do role')
         }
       },
     }),
@@ -136,7 +136,7 @@ export const permissionsController = igniter.controller({
             data: { message: 'Permissao atualizada com sucesso' },
           })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao atualizar permissao')
+          return (response as any).error(error.message || 'Erro ao atualizar permissao')
         }
       },
     }),
@@ -165,7 +165,7 @@ export const permissionsController = igniter.controller({
             },
           })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao inicializar permissoes')
+          return (response as any).error(error.message || 'Erro ao inicializar permissoes')
         }
       },
     }),
@@ -200,7 +200,7 @@ export const permissionsController = igniter.controller({
           )
           return response.success({ data: { hasPermission } })
         } catch (error: any) {
-          return response.error(error.message || 'Erro ao verificar permissao')
+          return (response as any).error(error.message || 'Erro ao verificar permissao')
         }
       },
     }),

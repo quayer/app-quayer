@@ -41,6 +41,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useOrganizations, useSwitchOrganization, useCurrentOrganization } from "@/hooks/useOrganization"
+import { toast } from "sonner"
 
 export function NavUser({
   user,
@@ -65,8 +66,8 @@ export function NavUser({
   const switchOrganization = useSwitchOrganization()
 
   // ✅ CORREÇÃO BRUTAL: Tratar caso onde organizations é undefined ou não é array
-  const organizations = Array.isArray(organizationsData?.data?.data) 
-    ? organizationsData.data.data 
+  const organizations = Array.isArray((organizationsData as any)?.data?.data)
+    ? (organizationsData as any).data.data
     : []
   
   const currentOrg = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name || "Sem Organização"
@@ -81,10 +82,14 @@ export function NavUser({
     router.refresh()
   }
 
-  const handleSwitchOrg = (orgId: string) => {
+  const handleSwitchOrg = (orgId: string, orgName: string) => {
     switchOrganization.mutate(orgId)
     setIsOrgSwitcherOpen(false)
     setSearchTerm("")
+    toast.info(`Contexto alterado para: ${orgName}`, {
+      description: "Todas as ações agora afetam esta organização",
+      duration: 4000,
+    })
   }
 
   return (
@@ -190,7 +195,7 @@ export function NavUser({
                   key={org.id}
                   variant={user.organizationId === org.id ? "secondary" : "ghost"}
                   className="w-full justify-start"
-                  onClick={() => handleSwitchOrg(org.id)}
+                  onClick={() => handleSwitchOrg(org.id, org.name)}
                   disabled={switchOrganization.isPending}
                 >
                   <Building2 className="mr-2 h-4 w-4" />

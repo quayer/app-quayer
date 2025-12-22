@@ -131,9 +131,7 @@ export function EmailSettings() {
     queryKey: ['email-templates'],
     queryFn: async () => {
       try {
-        const result = await api['system-settings'].getEmailTemplates.query({
-          headers: getAuthHeaders(),
-        })
+        const result = await (api['system-settings'].getEmailTemplates.query as any)()
         console.log('[EmailSettings] Templates result:', result)
 
         // API returns { data: { success: true, data: [...] } }
@@ -204,9 +202,8 @@ export function EmailSettings() {
   // Save settings
   const saveMutation = useMutation({
     mutationFn: async (data: EmailSettingsData) => {
-      return api['system-settings'].updateEmail.mutate({
+      return (api['system-settings'].updateEmail.mutate as any)({
         body: data,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {
@@ -225,9 +222,8 @@ export function EmailSettings() {
       if (!formData.smtp.host) throw new Error('Host SMTP é obrigatório')
       if (!formData.smtp.user) throw new Error('Usuário SMTP é obrigatório')
       if (!formData.smtp.pass) throw new Error('Senha SMTP é obrigatória')
-      return api['system-settings'].testSmtpConnection.mutate({
+      return (api['system-settings'].testSmtpConnection.mutate as any)({
         body: formData.smtp,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: (result: any) => {
@@ -245,9 +241,8 @@ export function EmailSettings() {
   // Save template
   const saveTemplateMutation = useMutation({
     mutationFn: async (template: Partial<EmailTemplate>) => {
-      return api['system-settings'].upsertEmailTemplate.mutate({
+      return (api['system-settings'].upsertEmailTemplate.mutate as any)({
         body: template as any,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {
@@ -300,6 +295,8 @@ export function EmailSettings() {
       invitationUrl: 'https://quayer.com/convite/abc123',
       role: 'Operador',
       resetUrl: 'https://quayer.com/redefinir-senha?token=xyz789',
+      email: 'joao.silva@empresa.com',
+      loginUrl: 'https://quayer.com/login',
     }
 
     let html = template.htmlContent

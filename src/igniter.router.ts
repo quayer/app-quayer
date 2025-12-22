@@ -21,6 +21,9 @@ import { apiKeysController } from '@/features/api-keys'
 import { notificationsController } from '@/features/notifications'
 import { chatwootController } from '@/features/chatwoot'
 import { healthController } from '@/features/health'
+import { auditController } from '@/features/audit'
+import { connectionSettingsController } from '@/features/connection-settings'
+import { organizationProvidersController } from '@/features/organization-providers'
 
 /**
  * @description Main application router configuration
@@ -54,6 +57,9 @@ export const AppRouter = igniter.router({
     notifications: notificationsController,
     chatwoot: chatwootController,
     health: healthController,
+    audit: auditController,
+    'connection-settings': connectionSettingsController,
+    'organization-providers': organizationProvidersController,
   }
 })
 

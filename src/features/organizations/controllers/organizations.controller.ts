@@ -17,7 +17,10 @@ import { UserRole, OrganizationRole, isSystemAdmin } from '@/lib/auth/roles';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { signAccessToken } from '@/lib/auth/jwt';
+import { emailService } from '@/lib/email/email.service';
+import { auditLog } from '@/lib/audit';
 
 const db = new PrismaClient();
 
@@ -95,22 +98,32 @@ export const organizationsController = igniter.controller({
 
           // Se não existe, criar usuário
           if (!adminUser) {
-            // Gerar senha temporária segura (8 caracteres alfanuméricos)
-            const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-4).toUpperCase();
-            const tempPasswordHash = await bcrypt.hash(tempPassword, 10);
+            // Gerar hash aleatório para password (nunca será usado - login é via OTP)
+            const randomPassword = crypto.randomBytes(32).toString('hex');
+            const passwordHash = await bcrypt.hash(randomPassword, 10);
 
             adminUser = await db.user.create({
               data: {
                 email: adminEmail,
                 name: adminName || 'Admin',
-                password: tempPasswordHash,
+                password: passwordHash, // Satisfaz schema, nunca usado (login via OTP)
                 role: 'user', // Role no sistema (não na org)
                 onboardingCompleted: true, // Já entra aprovado
               },
             });
 
-            // TODO: Enviar email com senha temporária para o novo admin
-            console.log(`[Organizations] Novo usuário criado: ${adminEmail} com senha temporária: ${tempPassword}`);
+            // Enviar email de boas-vindas com instruções para login via OTP
+            try {
+              await emailService.sendOrganizationWelcomeEmail(
+                adminEmail,
+                adminName || 'Admin',
+                orgData.name
+              );
+              console.log(`[Organizations] Email de boas-vindas enviado para: ${adminEmail}`);
+            } catch (emailError) {
+              console.error(`[Organizations] Erro ao enviar email para ${adminEmail}:`, emailError);
+              // Não bloqueia a criação, apenas loga o erro
+            }
           }
 
           targetUserId = adminUser.id;
@@ -144,6 +157,13 @@ export const organizationsController = igniter.controller({
           currentOrgId: organization.id,
           organizationRole: OrganizationRole.MASTER,
           needsOnboarding: false, // ✅ CRÍTICO: Token com onboarding completo
+        });
+
+        // ✅ AUDIT LOG: Registrar criação de organização
+        await auditLog.logCrud('create', 'organization', organization.id, userId, organization.id, {
+          organizationName: organization.name,
+          createdByAdmin: isAdmin,
+          adminEmail: adminEmail || null,
         });
 
         return response.created({
@@ -254,6 +274,12 @@ export const organizationsController = igniter.controller({
         }
 
         const updated = await organizationsRepository.update(id, request.body);
+
+        // ✅ AUDIT LOG: Registrar atualização de organização
+        await auditLog.logCrud('update', 'organization', id, userId, id, {
+          changes: Object.keys(request.body),
+        });
+
         return response.success({ message: 'Organização atualizada', organization: updated });
       },
     }),
@@ -278,6 +304,12 @@ export const organizationsController = igniter.controller({
         }
 
         await organizationsRepository.softDelete(id);
+
+        // ✅ AUDIT LOG: Registrar exclusão de organização
+        await auditLog.logCrud('delete', 'organization', id, user.id, id, {
+          organizationName: existing.name,
+        });
+
         return response.noContent();
       },
     }),
@@ -350,6 +382,14 @@ export const organizationsController = igniter.controller({
         }
 
         const member = await organizationsRepository.addMember(id, { userId, role });
+
+        // ✅ AUDIT LOG: Registrar adição de membro
+        await auditLog.logCrud('create', 'user', userId, requestUserId, id, {
+          action: 'add_member',
+          memberRole: role,
+          organizationId: id,
+        });
+
         return response.created({ message: 'Membro adicionado', member });
       },
     }),
@@ -426,6 +466,14 @@ export const organizationsController = igniter.controller({
               },
             },
           },
+        });
+
+        // ✅ AUDIT LOG: Registrar atualização de role de membro
+        await auditLog.logCrud('update', 'user', userId, requestUserId, id, {
+          action: 'update_member_role',
+          previousRole: existingMember.role,
+          newRole: role,
+          organizationId: id,
         });
 
         return response.success({
@@ -510,6 +558,14 @@ export const organizationsController = igniter.controller({
             data: { currentOrgId: null },
           });
         }
+
+        // ✅ AUDIT LOG: Registrar remoção de membro
+        await auditLog.logCrud('delete', 'user', userId, requestUserId, id, {
+          action: 'remove_member',
+          removedMemberEmail: user?.email,
+          removedMemberRole: existingMember.role,
+          organizationId: id,
+        });
 
         return response.noContent();
       },

@@ -14,6 +14,7 @@ import { providerOrchestrator } from "@/lib/providers/orchestrator/provider.orch
 import { InstancesRepository } from "../repositories/instances.repository";
 import { logger } from "@/services/logger";
 import { validatePhoneNumber, formatWhatsAppNumber } from "@/lib/validators/phone.validator";
+import { auditLog } from "@/lib/audit";
 
 /**
  * Helper function to create structured error responses
@@ -59,6 +60,62 @@ export const instancesController = igniter.controller({
   path: "/instances",
   description: "Gerenciamento de instâncias WhatsApp com integração UAZapi",
   actions: {
+    // ==================== VALIDATE CLOUD API CREDENTIALS ====================
+    validateCloudApi: igniter.mutation({
+      name: "ValidateCloudApiCredentials",
+      description: "Validar credenciais do WhatsApp Cloud API sem criar instância",
+      path: "/validate-cloud-api",
+      method: "POST",
+      use: [authProcedure({ required: true }), instancesProcedure()],
+      body: z.object({
+        cloudApiAccessToken: z.string().min(1, "Token é obrigatório"),
+        cloudApiPhoneNumberId: z.string().min(1, "Phone Number ID é obrigatório"),
+        cloudApiWabaId: z.string().min(1, "WABA ID é obrigatório"),
+      }),
+      handler: async ({ request, response }) => {
+        const { cloudApiAccessToken, cloudApiPhoneNumberId, cloudApiWabaId } = request.body;
+
+        logger.info('Validating Cloud API credentials', { phoneNumberId: cloudApiPhoneNumberId });
+
+        try {
+          const { CloudAPIClient } = await import('@/lib/providers/adapters/cloudapi/cloudapi.client');
+
+          const cloudClient = new CloudAPIClient({
+            accessToken: cloudApiAccessToken,
+            phoneNumberId: cloudApiPhoneNumberId,
+            wabaId: cloudApiWabaId,
+          });
+
+          const phoneInfo = await cloudClient.getPhoneInfo();
+
+          logger.info('Cloud API credentials validated successfully', {
+            phoneNumberId: cloudApiPhoneNumberId,
+            verifiedName: phoneInfo.verified_name,
+            displayPhone: phoneInfo.display_phone_number,
+          });
+
+          return response.success({
+            valid: true,
+            phoneNumber: phoneInfo.display_phone_number,
+            verifiedName: phoneInfo.verified_name,
+            qualityRating: phoneInfo.quality_rating,
+            message: 'Credenciais válidas! Conexão com a Meta verificada.',
+          });
+        } catch (error: any) {
+          logger.warn('Cloud API credentials validation failed', {
+            error: error.message,
+            phoneNumberId: cloudApiPhoneNumberId,
+          });
+
+          return response.success({
+            valid: false,
+            error: error.message || 'Falha ao validar credenciais',
+            message: 'Credenciais inválidas ou sem permissão. Verifique o token e IDs.',
+          });
+        }
+      },
+    }),
+
     // ==================== CREATE ====================
     create: igniter.mutation({
       name: "CreateInstance",
@@ -185,6 +242,12 @@ export const instancesController = igniter.controller({
                 verifiedName: phoneInfo.verified_name,
               });
 
+              // ✅ AUDIT LOG: Registrar criação de instância Cloud API
+              await auditLog.logCrud('create', 'instance', instance.id, context.auth?.session?.user?.id || 'system', context.auth?.session?.user?.currentOrgId, {
+                provider: 'WHATSAPP_CLOUD_API',
+                instanceName: name,
+              });
+
               return response.created({
                 ...instance,
                 cloudApiAccessToken: undefined, // Não expor o token na resposta
@@ -229,6 +292,12 @@ export const instancesController = igniter.controller({
             userId: context.auth?.session?.user?.id
           });
 
+          // ✅ AUDIT LOG: Registrar criação de instância UAZAPI
+          await auditLog.logCrud('create', 'instance', instance.id, context.auth?.session?.user?.id || 'system', context.auth?.session?.user?.currentOrgId, {
+            provider: 'WHATSAPP_WEB',
+            instanceName: name,
+          });
+
           return response.created(instance);
         } catch (error) {
           logger.error('Failed to create instance', { error, userId: context.auth?.session?.user?.id });
@@ -253,9 +322,14 @@ export const instancesController = igniter.controller({
         const user = context.auth?.session?.user;
         const isAdmin = user?.role === 'admin';
 
+        // 🔒 SECURITY FIX: Bloquear usuários sem organização (previne vazamento de dados)
+        if (!isAdmin && !user?.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada. Complete o onboarding primeiro.');
+        }
+
         // Business Rule: Admin vê todas instâncias (sem filtro de organização)
         // Business Rule: Usuário normal vê apenas instâncias da sua organização
-        const organizationId = isAdmin ? undefined : (user?.currentOrgId || undefined);
+        const organizationId = isAdmin ? undefined : user?.currentOrgId;
 
         // 🚀 Cache: Verificar cache antes de buscar no banco
         const cacheKey = `instances:list:${organizationId || 'all'}:${status}:${search || ''}:${page}:${limit}`;
@@ -282,7 +356,7 @@ export const instancesController = igniter.controller({
 
         try {
           const result = await repository.findAllPaginated({
-            organizationId,
+            organizationId: organizationId ?? undefined,
             page,
             limit,
             status: status === 'all' ? undefined : status,
@@ -324,8 +398,8 @@ export const instancesController = igniter.controller({
                         await repository.updateStatus(
                           instance.id,
                           'CONNECTED',
-                          statusResult.data.phoneNumber || undefined,
-                          statusResult.data.profilePicture || null
+                          statusResult.data?.phoneNumber || undefined,
+                          (statusResult.data as any)?.profilePicture || null
                         );
                         logger.info('Async status sync: instance updated to CONNECTED', {
                           instanceId: instance.id,
@@ -743,7 +817,7 @@ export const instancesController = igniter.controller({
                 `instances:list:all:all::1:10`,
               ];
               for (const pattern of cachePatterns) {
-                await igniter.store.del(pattern);
+                await (igniter.store as any).del(pattern);
               }
               logger.info('Invalidated instances list cache after status change', {
                 instanceId: id,
@@ -804,6 +878,12 @@ export const instancesController = igniter.controller({
               userId: context.auth?.session?.user?.id,
             });
 
+            // ✅ AUDIT LOG: Registrar desconexão Cloud API
+            await auditLog.logConnection('disconnect', id, context.auth?.session?.user?.id || 'system', instance.organizationId, {
+              provider: 'WHATSAPP_CLOUD_API',
+              instanceName: instance.name,
+            });
+
             return response.success({
               message: "Instância Cloud API marcada como desconectada. Para reconectar, valide as credenciais novamente.",
               provider: 'cloudapi',
@@ -834,6 +914,12 @@ export const instancesController = igniter.controller({
             instanceId: id,
             userId: context.auth?.session?.user?.id,
             provider: disconnectResult.provider
+          });
+
+          // ✅ AUDIT LOG: Registrar desconexão UAZAPI
+          await auditLog.logConnection('disconnect', id, context.auth?.session?.user?.id || 'system', instance.organizationId, {
+            provider: 'WHATSAPP_WEB',
+            instanceName: instance.name,
           });
 
           return response.success({
@@ -899,6 +985,12 @@ export const instancesController = igniter.controller({
           await repository.delete(id);
 
           logger.info('Instance deleted successfully', { instanceId: id, userId: context.auth?.session?.user?.id });
+
+          // ✅ AUDIT LOG: Registrar exclusão de instância
+          await auditLog.logCrud('delete', 'instance', id, context.auth?.session?.user?.id || 'system', instance.organizationId, {
+            instanceName: instance.name,
+            provider: instance.provider,
+          });
 
           return response.success({
             message: "Instância deletada com sucesso",
@@ -1105,11 +1197,11 @@ export const instancesController = igniter.controller({
           const shareToken = `share_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
-          // Salvar token no banco de dados usando o método específico
+          // Salvar token no banco de dados usando o método específico (isNewToken = true para resetar contador)
           await repository.updateShareToken(id, {
             shareToken,
             shareTokenExpiresAt: expiresAt
-          });
+          }, true);
 
           logger.info('Share token generated successfully', { instanceId: id, shareToken });
 
@@ -1174,7 +1266,7 @@ export const instancesController = igniter.controller({
                     instance.id,
                     currentStatus,
                     phoneNumber || undefined, // Converter null para undefined
-                    statusResult.data.profilePicture || null
+                    (statusResult.data as any)?.profilePicture || null
                   );
 
                   logger.info('Shared instance detected as connected', {
@@ -1289,14 +1381,45 @@ export const instancesController = igniter.controller({
             }
           }
 
-          // Estender expiração do token (mais 1 hora)
-          const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+          // Verificar limite de extensões (máximo 3)
+          const MAX_EXTENSIONS = 3;
+          const currentExtensions = (instance as any).shareTokenExtensionCount || 0;
+
+          if (currentExtensions >= MAX_EXTENSIONS) {
+            logger.warn('Share token reached maximum extension limit', {
+              instanceId: instance.id,
+              extensions: currentExtensions
+            });
+            return response.badRequest('Link de compartilhamento atingiu o limite máximo de 3 extensões. Gere um novo link.');
+          }
+
+          // Estender expiração do token (mais 1 hora), com limite máximo de 24h desde criação
+          // Extrair timestamp de criação do token: share_{timestamp}_{random}
+          const tokenParts = instance.shareToken?.split('_');
+          const createdAtTimestamp = tokenParts?.[1] ? parseInt(tokenParts[1]) : Date.now();
+          const maxAbsoluteExpiry = createdAtTimestamp + (24 * 60 * 60 * 1000); // 24h máximo
+          const proposedExpiry = Date.now() + (60 * 60 * 1000); // +1h
+
+          // Usar o menor entre proposto e limite absoluto
+          const newExpiresAt = new Date(Math.min(proposedExpiry, maxAbsoluteExpiry));
+
+          // Se já passou do limite absoluto, não estender mais
+          if (Date.now() >= maxAbsoluteExpiry) {
+            logger.warn('Share token reached maximum expiry limit', { instanceId: instance.id });
+            return response.badRequest('Link de compartilhamento atingiu o limite máximo de 24 horas. Gere um novo link.');
+          }
+
+          // Atualizar token e incrementar contador de extensões
           await repository.updateShareToken(instance.id, {
             shareToken: instance.shareToken!,
             shareTokenExpiresAt: newExpiresAt
-          });
+          }); // isNewToken = false (default) incrementa o contador
 
-          logger.info('Shared QR code refreshed successfully', { instanceId: instance.id });
+          logger.info('Shared QR code refreshed successfully', {
+            instanceId: instance.id,
+            newExpiresAt,
+            extensionCount: currentExtensions + 1
+          });
 
           return response.success({
             qrCode,
@@ -1368,7 +1491,7 @@ export const instancesController = igniter.controller({
                 instance.id,
                 'CONNECTED',
                 phoneNumber || undefined,
-                statusResult.data.profilePicture || null
+                (statusResult.data as any)?.profilePicture || null
               );
 
               logger.info('Instance already connected (Real Status), returning success', { instanceId: instance.id });
@@ -1410,14 +1533,45 @@ export const instancesController = igniter.controller({
           // Atualizar status para CONNECTING
           await repository.updateStatus(instance.id, 'CONNECTING');
 
-          // Estender expiração do token (mais 1 hora)
-          const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+          // Verificar limite de extensões (máximo 3)
+          const MAX_EXTENSIONS = 3;
+          const currentExtensions = (instance as any).shareTokenExtensionCount || 0;
+
+          if (currentExtensions >= MAX_EXTENSIONS) {
+            logger.warn('Share token reached maximum extension limit for pairing', {
+              instanceId: instance.id,
+              extensions: currentExtensions
+            });
+            return response.badRequest('Link de compartilhamento atingiu o limite máximo de 3 extensões. Gere um novo link.');
+          }
+
+          // Estender expiração do token (mais 1 hora), com limite máximo de 24h desde criação
+          // Extrair timestamp de criação do token: share_{timestamp}_{random}
+          const tokenParts = instance.shareToken?.split('_');
+          const createdAtTimestamp = tokenParts?.[1] ? parseInt(tokenParts[1]) : Date.now();
+          const maxAbsoluteExpiry = createdAtTimestamp + (24 * 60 * 60 * 1000); // 24h máximo
+          const proposedExpiry = Date.now() + (60 * 60 * 1000); // +1h
+
+          // Usar o menor entre proposto e limite absoluto
+          const newExpiresAt = new Date(Math.min(proposedExpiry, maxAbsoluteExpiry));
+
+          // Se já passou do limite absoluto, não estender mais
+          if (Date.now() >= maxAbsoluteExpiry) {
+            logger.warn('Share token reached maximum expiry limit for pairing', { instanceId: instance.id });
+            return response.badRequest('Link de compartilhamento atingiu o limite máximo de 24 horas. Gere um novo link.');
+          }
+
+          // Atualizar token e incrementar contador de extensões
           await repository.updateShareToken(instance.id, {
             shareToken: instance.shareToken!,
             shareTokenExpiresAt: newExpiresAt
-          });
+          }); // isNewToken = false (default) incrementa o contador
 
-          logger.info('Pairing code generated successfully', { instanceId: instance.id, pairingCode });
+          logger.info('Pairing code generated successfully', {
+            instanceId: instance.id,
+            pairingCode,
+            extensionCount: currentExtensions + 1
+          });
 
           return response.success({
             pairingCode,
@@ -1666,6 +1820,67 @@ export const instancesController = igniter.controller({
           logger.error('Failed to restart instance', { error, instanceId: id });
           throw error;
         }
+      },
+    }),
+
+    /**
+     * GET /instances/:id/events
+     * Retorna histórico de eventos de conexão/desconexão
+     */
+    getEvents: igniter.query({
+      name: "GetInstanceEvents",
+      description: "Histórico de eventos de conexão/desconexão",
+      path: "/:id/events",
+      query: z.object({
+        limit: z.coerce.number().min(1).max(100).default(50),
+        offset: z.coerce.number().min(0).default(0),
+      }),
+      use: [authProcedure({ required: true }), instancesProcedure()],
+      handler: async ({ request, response, context }) => {
+        const { id } = request.params as { id: string };
+        const { limit, offset } = request.query;
+
+        const user = context.auth?.session?.user;
+        const repository = new InstancesRepository(context.db);
+
+        // Verificar se instância existe
+        const instance = await repository.findById(id);
+        if (!instance) {
+          return response.notFound("Instância não encontrada");
+        }
+
+        // Verificar permissão de acesso
+        if (!checkOrganizationPermission(
+          instance.organizationId,
+          user?.currentOrgId || undefined,
+          user?.role
+        )) {
+          return response.forbidden("Sem permissão para acessar esta instância");
+        }
+
+        // Buscar eventos
+        const limitVal = limit || 50;
+        const offsetVal = offset || 0;
+        const result = await repository.getEvents(id, { limit: limitVal, offset: offsetVal });
+
+        return response.success({
+          events: result.events.map((event: any) => ({
+            id: event.id,
+            eventType: event.eventType,
+            fromStatus: event.fromStatus,
+            toStatus: event.toStatus,
+            reason: event.reason,
+            metadata: event.metadata,
+            triggeredBy: event.triggeredBy,
+            createdAt: event.createdAt,
+          })),
+          pagination: {
+            total: result.total,
+            limit: limitVal,
+            offset: offsetVal,
+            hasMore: offsetVal + result.events.length < result.total,
+          },
+        });
       },
     }),
   },

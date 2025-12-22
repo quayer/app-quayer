@@ -8,4 +8,11 @@
 export * from './rate-limiter';
 
 // Explicit re-exports for commonly used utilities
-export { authRateLimiter, getClientIdentifier } from './rate-limiter';
+export {
+  authRateLimiter,
+  apiRateLimiter,
+  messageRateLimiter,
+  webhookRateLimiter,
+  getClientIdentifier,
+  RateLimiter,
+} from './rate-limiter';

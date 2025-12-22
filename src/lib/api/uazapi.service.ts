@@ -68,6 +68,49 @@ export class UAZapiService {
   }
 
   /**
+   * 🚀 Retry com backoff exponencial
+   * Tenta a operação até 3 vezes com delays crescentes (1s, 2s, 4s)
+   */
+  private async withRetry<T>(
+    operation: () => Promise<UAZapiResponse<T>>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<UAZapiResponse<T>> {
+    let lastError: UAZapiResponse<T> | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const result = await operation();
+
+      // Se sucesso ou erro de validação (4xx), não retry
+      if (result.success) {
+        return result;
+      }
+
+      // Não fazer retry para erros de cliente (400-499)
+      const errorMsg = result.error || '';
+      if (errorMsg.includes('HTTP 4')) {
+        return result;
+      }
+
+      lastError = result;
+
+      // Se não é a última tentativa, aguardar antes de retry
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+        console.warn(`[UAZapi] Tentativa ${attempt + 1} falhou, retry em ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    console.error(`[UAZapi] Todas as ${maxRetries} tentativas falharam`);
+    return lastError || {
+      success: false,
+      error: 'Todas as tentativas falharam',
+      message: 'Erro após múltiplas tentativas'
+    };
+  }
+
+  /**
    * @method createInstance
    * @description Cria uma nova instância no UAZapi (requer admintoken)
    * @param {string} name - Nome da instância
@@ -411,6 +454,111 @@ export class UAZapiService {
         success: false,
         error: error instanceof Error ? error.message : 'Erro desconhecido',
         message: 'Falha ao buscar mensagens'
+      }
+    }
+  }
+
+  // ==================== CHAT OPERATIONS ====================
+
+  /**
+   * @method markAsRead
+   * @description Marca um chat como lido
+   * @param {string} instanceToken - Token da instância
+   * @param {string} chatId - ID do chat (ex: 5511999999999@s.whatsapp.net)
+   * @returns {Promise<UAZapiResponse>} Resposta da operação
+   */
+  async markAsRead(instanceToken: string, chatId: string): Promise<UAZapiResponse> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/mark-read`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({ chatId })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: 'Falha ao marcar chat como lido'
+      }
+    }
+  }
+
+  /**
+   * @method archiveChat
+   * @description Arquiva ou desarquiva um chat
+   * @param {string} instanceToken - Token da instância
+   * @param {string} chatId - ID do chat
+   * @param {boolean} archive - true para arquivar, false para desarquivar
+   * @returns {Promise<UAZapiResponse>} Resposta da operação
+   */
+  async archiveChat(instanceToken: string, chatId: string, archive: boolean = true): Promise<UAZapiResponse> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/archive`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({ chatId, archive })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: `Falha ao ${archive ? 'arquivar' : 'desarquivar'} chat`
+      }
+    }
+  }
+
+  /**
+   * @method deleteChat
+   * @description Deleta um chat
+   * @param {string} instanceToken - Token da instância
+   * @param {string} chatId - ID do chat
+   * @returns {Promise<UAZapiResponse>} Resposta da operação
+   */
+  async deleteChat(instanceToken: string, chatId: string): Promise<UAZapiResponse> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/delete`, {
+        method: 'DELETE',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({ chatId })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: 'Falha ao deletar chat'
+      }
+    }
+  }
+
+  /**
+   * @method blockContact
+   * @description Bloqueia ou desbloqueia um contato
+   * @param {string} instanceToken - Token da instância
+   * @param {string} number - Número do contato (ex: 5511999999999@s.whatsapp.net)
+   * @param {boolean} block - true para bloquear, false para desbloquear
+   * @returns {Promise<UAZapiResponse>} Resposta da operação
+   */
+  async blockContact(instanceToken: string, number: string, block: boolean = true): Promise<UAZapiResponse> {
+    try {
+      const endpoint = block ? 'block' : 'unblock'
+      const response = await fetch(`${this.baseURL}/contact/${endpoint}`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({ number })
+      })
+
+      return await this.handleResponse(response)
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: `Falha ao ${block ? 'bloquear' : 'desbloquear'} contato`
       }
     }
   }

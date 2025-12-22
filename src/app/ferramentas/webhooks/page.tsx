@@ -79,6 +79,9 @@ import {
   Loader2,
   AlertTriangle,
   ShieldAlert,
+  Zap,
+  Power,
+  PowerOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -272,6 +275,44 @@ export default function WebhooksPage() {
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Erro ao retentar entrega')
+    },
+  })
+
+  // Mutation: Test webhook
+  const testMutation = useMutation({
+    mutationFn: async (webhookId: string) => {
+      return (api.webhooks.test as any).mutate({ id: webhookId })
+    },
+    onSuccess: (data: any) => {
+      if (data?.success) {
+        toast.success(data.message || 'Webhook testado com sucesso!', {
+          description: `Status: ${data.statusCode}`,
+        })
+      } else {
+        toast.error(data?.message || 'Falha ao testar webhook', {
+          description: data?.error || `Status: ${data?.statusCode || 'Erro'}`,
+        })
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Erro ao testar webhook')
+    },
+  })
+
+  // Mutation: Toggle active/inactive
+  const toggleMutation = useMutation({
+    mutationFn: async ({ webhookId, isActive }: { webhookId: string; isActive: boolean }) => {
+      return (api.webhooks.update as any).mutate({
+        id: webhookId,
+        body: { isActive },
+      })
+    },
+    onSuccess: (_, variables) => {
+      toast.success(variables.isActive ? 'Webhook ativado!' : 'Webhook desativado!')
+      queryClient.invalidateQueries({ queryKey: ['webhooks'] })
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Erro ao alterar status')
     },
   })
 
@@ -587,6 +628,13 @@ export default function WebhooksPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Acoes</DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onClick={() => testMutation.mutate(webhook.id)}
+                                disabled={testMutation.isPending}
+                              >
+                                <Zap className="h-4 w-4 mr-2" />
+                                {testMutation.isPending ? 'Testando...' : 'Testar Webhook'}
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditModal(webhook)}>
                                 <Edit className="h-4 w-4 mr-2" />
                                 Editar
@@ -596,6 +644,25 @@ export default function WebhooksPage() {
                                 Ver Entregas
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => toggleMutation.mutate({
+                                  webhookId: webhook.id,
+                                  isActive: !webhook.isActive,
+                                })}
+                                disabled={toggleMutation.isPending}
+                              >
+                                {webhook.isActive ? (
+                                  <>
+                                    <PowerOff className="h-4 w-4 mr-2" />
+                                    Desativar
+                                  </>
+                                ) : (
+                                  <>
+                                    <Power className="h-4 w-4 mr-2" />
+                                    Ativar
+                                  </>
+                                )}
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-destructive"
                                 onClick={() => openDeleteDialog(webhook)}

@@ -11,7 +11,11 @@ import { z } from 'zod';
 import { ConnectionStatus } from '@prisma/client';
 import { uazapiService } from '@/lib/api/uazapi.service';
 
-const UAZAPI_BASE_URL = process.env.UAZAPI_BASE_URL || process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+/**
+ * Cache TTL para listagem de chats (em segundos)
+ * TTL curto para manter dados frescos, mas reduzir carga no banco
+ */
+const CHATS_CACHE_TTL = 15; // 15 segundos
 
 export const chatsController = igniter.controller({
   name: 'chats',
@@ -48,6 +52,18 @@ export const chatsController = igniter.controller({
         }
 
         try {
+          // 🚀 Cache: Verificar cache antes de buscar no banco
+          const cacheKey = `chats:list:${instanceId}:${query.search || ''}:${query.status || ''}:${query.sessionStatus || ''}:${query.attendanceType || ''}:${query.offset || 0}:${query.limit || 20}`;
+
+          try {
+            const cached = await igniter.store.get<any>(cacheKey);
+            if (cached) {
+              return response.success({ ...cached, source: 'cache' });
+            }
+          } catch {
+            // Cache miss ou erro - continuar sem cache
+          }
+
           // Filtros
           const where: any = {
             connectionId: instanceId,
@@ -67,6 +83,43 @@ export const chatsController = igniter.controller({
               ...where.contact,
               phoneNumber: { contains: '@g.us' }
             };
+          }
+
+          // Filtro por status da sessão
+          if (query.sessionStatus) {
+            where.status = query.sessionStatus;
+          }
+
+          // Filtro por tipo de atendimento (IA, Humano, Arquivado)
+          const now = new Date();
+          if (query.attendanceType === 'ai') {
+            // Sessões com IA ativa: aiEnabled = true E (aiBlockedUntil é null OU já expirou)
+            where.AND = [
+              ...(where.AND || []),
+              { aiEnabled: true },
+              {
+                OR: [
+                  { aiBlockedUntil: null },
+                  { aiBlockedUntil: { lt: now } }
+                ]
+              }
+            ];
+          } else if (query.attendanceType === 'human') {
+            // Sessões com humano: aiEnabled = false OU aiBlockedUntil ainda não expirou
+            where.AND = [
+              ...(where.AND || []),
+              {
+                OR: [
+                  { aiEnabled: false },
+                  { aiBlockedUntil: { gte: now } }
+                ]
+              },
+              // Exclui arquivados deste filtro
+              { status: { notIn: ['CLOSED', 'PAUSED'] } }
+            ];
+          } else if (query.attendanceType === 'archived') {
+            // Sessões arquivadas: status é CLOSED ou PAUSED
+            where.status = { in: ['CLOSED', 'PAUSED'] };
           }
 
           // Paginação
@@ -142,8 +195,8 @@ export const chatsController = igniter.controller({
                   });
 
                   // Upsert ChatSession
-                  const sessionOrgId = instance.organizationId;
-                  await database.chatSession.upsert({
+                  const sessionOrgId = instance.organizationId ?? undefined;
+                  await (database.chatSession.upsert as any)({
                     where: {
                       connectionId_contactId: { // Check composite unique constraint if exists, otherwise assume manual check logic if unique constraint is missing
                         connectionId: instance.id,
@@ -161,7 +214,7 @@ export const chatsController = igniter.controller({
                     update: {
                       lastMessageAt
                     }
-                  }).catch(async (e) => {
+                  }).catch(async (_e: unknown) => {
                     // Fallback se unique key não existir como esperado (Prisma às vezes trick)
                     // Tentativa manual se upsert falhar por constraint name mismatch
                     const existing = await database.chatSession.findFirst({
@@ -172,7 +225,7 @@ export const chatsController = igniter.controller({
                         where: { id: existing.id },
                         data: { lastMessageAt }
                       });
-                    } else {
+                    } else if (sessionOrgId) {
                       await database.chatSession.create({
                         data: {
                           connectionId: instance.id,
@@ -213,6 +266,8 @@ export const chatsController = igniter.controller({
             const isGroup = session.contact.phoneNumber.endsWith('@g.us') || session.contact.isBusiness;
 
             return {
+              // Session ID for proper identification
+              id: session.id,
               wa_chatid: session.contact.phoneNumber.includes('@') ? session.contact.phoneNumber : `${session.contact.phoneNumber}@s.whatsapp.net`,
               wa_name: session.contact.name || session.contact.phoneNumber,
               wa_profilePicUrl: session.contact.profilePicUrl,
@@ -227,10 +282,14 @@ export const chatsController = igniter.controller({
               lead_source: session.leadSource || 'whatsapp',
               created_at: session.createdAt.toISOString(),
               updated_at: session.updatedAt.toISOString(),
+              // Campos de status e IA
+              status: session.status,
+              aiEnabled: session.aiEnabled ?? true,
+              aiBlockedUntil: session.aiBlockedUntil?.toISOString() ?? null,
             };
           };
 
-          return response.success({
+          const result = {
             chats: sessions.map(mapSessionToChat),
             pagination: {
               total,
@@ -238,7 +297,16 @@ export const chatsController = igniter.controller({
               offset,
               hasMore: offset + limit < total,
             },
-          });
+          };
+
+          // 🚀 Cache: Salvar resultado com TTL
+          try {
+            await igniter.store.set(cacheKey, result, { ttl: CHATS_CACHE_TTL });
+          } catch {
+            // Erro ao salvar cache - não crítico
+          }
+
+          return response.success(result);
 
         } catch (error: any) {
           console.error('[ChatsController] Erro geral:', error);
@@ -321,22 +389,11 @@ export const chatsController = igniter.controller({
           return response.badRequest('Instância não está conectada');
         }
 
-        try {
-          await uazapiService.markAsRead(instance.uazapiToken, body.chatId);
-          return response.success({ message: 'Chat marcado como lido' });
-        } catch (error) {
-          // Fallback se helper nao existir
-          try {
-            await fetch(`${UAZAPI_BASE_URL}/chat/mark-read`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
-              body: JSON.stringify({ chatId: body.chatId }),
-            });
-            return response.success({ message: 'Chat marcado como lido' });
-          } catch (e) {
-            return response.badRequest('Erro ao marcar chat como lido');
-          }
+        const result = await uazapiService.markAsRead(instance.uazapiToken, body.chatId);
+        if (!result.success) {
+          return response.badRequest(result.error || 'Erro ao marcar chat como lido');
         }
+        return response.success({ message: 'Chat marcado como lido' });
       },
     }),
 
@@ -365,18 +422,11 @@ export const chatsController = igniter.controller({
           return response.badRequest('Instância não está conectada');
         }
 
-        try {
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/archive`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
-            body: JSON.stringify({ chatId, archive: true }),
-          });
-
-          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
-          return response.success({ message: 'Chat arquivado com sucesso' });
-        } catch (error) {
-          return response.badRequest('Erro ao arquivar chat');
+        const result = await uazapiService.archiveChat(instance.uazapiToken, chatId, true);
+        if (!result.success) {
+          return response.badRequest(result.error || 'Erro ao arquivar chat');
         }
+        return response.success({ message: 'Chat arquivado com sucesso' });
       },
     }),
 
@@ -405,26 +455,20 @@ export const chatsController = igniter.controller({
           return response.badRequest('Instância não está conectada');
         }
 
-        try {
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/chat/delete`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken },
-            body: JSON.stringify({ chatId }),
-          });
-
-          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
-
-          await database.chatSession.deleteMany({
-            where: {
-              connectionId: instanceId,
-              contact: { phoneNumber: chatId.replace('@s.whatsapp.net', '').replace('@g.us', '') },
-            },
-          });
-
-          return response.noContent();
-        } catch (error) {
-          return response.badRequest('Erro ao deletar chat');
+        const result = await uazapiService.deleteChat(instance.uazapiToken, chatId);
+        if (!result.success) {
+          return response.badRequest(result.error || 'Erro ao deletar chat');
         }
+
+        // Limpar sessão local
+        await database.chatSession.deleteMany({
+          where: {
+            connectionId: instanceId,
+            contact: { phoneNumber: chatId.replace('@s.whatsapp.net', '').replace('@g.us', '') },
+          },
+        });
+
+        return response.noContent();
       },
     }),
 
@@ -452,18 +496,15 @@ export const chatsController = igniter.controller({
         });
 
         if (!instance) return response.notFound('Instância não encontrada');
-        try {
-          const uazResponse = await fetch(`${UAZAPI_BASE_URL}/contact/${block ? 'block' : 'unblock'}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', token: instance.uazapiToken! },
-            body: JSON.stringify({ number: chatId }),
-          });
-
-          if (!uazResponse.ok) throw new Error('Falha na API UAZapi');
-          return response.success({ message: block ? 'Bloqueado' : 'Desbloqueado' });
-        } catch (error) {
-          return response.badRequest(`Erro ao ${block ? 'bloquear' : 'desbloquear'}`);
+        if (!instance.uazapiToken) {
+          return response.badRequest('Instância sem token configurado');
         }
+
+        const result = await uazapiService.blockContact(instance.uazapiToken, chatId, block);
+        if (!result.success) {
+          return response.badRequest(result.error || `Erro ao ${block ? 'bloquear' : 'desbloquear'}`);
+        }
+        return response.success({ message: block ? 'Bloqueado' : 'Desbloqueado' });
       },
     }),
   },

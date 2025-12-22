@@ -106,9 +106,8 @@ export function OAuthSettings() {
   // Save settings
   const saveMutation = useMutation({
     mutationFn: async (data: OAuthSettingsData) => {
-      return api['system-settings'].updateOAuth.mutate({
+      return (api['system-settings'].updateOAuth.mutate as any)({
         body: data,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

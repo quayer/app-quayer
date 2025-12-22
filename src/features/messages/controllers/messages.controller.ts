@@ -11,6 +11,7 @@ import { database } from '@/services/database';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { orchestrator } from '@/lib/providers/core/orchestrator';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
+import { sessionRateLimiter } from '@/lib/rate-limit/rate-limiter';
 import type { BrokerType } from '@/lib/providers/core/provider.types';
 
 /**
@@ -90,8 +91,17 @@ export const messagesController = igniter.controller({
           return response.unauthorized('Usuário não autenticado');
         }
 
+        const { sessionId } = request.body;
+
+        // 🚀 Rate Limiting: Verificar limite por sessão (20 msgs/min)
+        const rateLimitResult = await sessionRateLimiter.check(sessionId);
+        if (!rateLimitResult.success) {
+          return response.tooManyRequests(
+            `Limite de mensagens excedido. Aguarde ${rateLimitResult.retryAfter || 60} segundos.`
+          );
+        }
+
         const {
-          sessionId,
           type,
           direction,
           author,

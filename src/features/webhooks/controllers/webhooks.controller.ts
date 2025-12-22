@@ -266,5 +266,93 @@ export const webhooksController = igniter.controller({
         }
       },
     }),
+
+    // TEST WEBHOOK
+    test: igniter.mutation({
+      path: '/:id/test',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        const { id } = request.params as { id: string };
+
+        const webhook = await webhooksRepository.findById(id);
+        if (!webhook) {
+          return response.notFound('Webhook não encontrado');
+        }
+
+        // Check permission
+        const isAdmin = user.role === 'admin';
+        const orgRole = await organizationsRepository.getUserRole(webhook.organizationId!, user.id);
+
+        if (!isAdmin && orgRole !== 'master' && orgRole !== 'manager') {
+          return response.forbidden('Sem permissão para testar este webhook');
+        }
+
+        // Send test payload
+        const testPayload = {
+          event: 'webhook.test',
+          timestamp: new Date().toISOString(),
+          data: {
+            webhookId: webhook.id,
+            organizationId: webhook.organizationId,
+            message: 'Este é um evento de teste do Quayer',
+            testId: `test_${Date.now()}`,
+          },
+        };
+
+        try {
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'X-Webhook-Event': 'webhook.test',
+            'X-Webhook-Timestamp': testPayload.timestamp,
+          };
+
+          if (webhook.secret) {
+            headers['X-Webhook-Secret'] = webhook.secret;
+          }
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+          const result = await fetch(webhook.url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(testPayload),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          const responseText = await result.text().catch(() => 'No response body');
+
+          return response.success({
+            success: result.ok,
+            statusCode: result.status,
+            statusText: result.statusText,
+            response: responseText.slice(0, 500), // Limit response size
+            message: result.ok
+              ? 'Webhook testado com sucesso!'
+              : `Webhook respondeu com status ${result.status}`,
+          });
+        } catch (error: any) {
+          const errorMessage = error.name === 'AbortError'
+            ? 'Timeout: webhook não respondeu em 10 segundos'
+            : error.message || 'Erro ao conectar com o webhook';
+
+          return response.success({
+            success: false,
+            statusCode: 0,
+            error: errorMessage,
+            message: `Falha ao testar webhook: ${errorMessage}`,
+          });
+        }
+      },
+    }),
   },
 });

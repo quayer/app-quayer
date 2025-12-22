@@ -5,6 +5,35 @@
 
 import { z } from 'zod';
 
+/**
+ * Validador E.164 para números de telefone
+ * Aceita formatos:
+ * - +5511999999999 (E.164 puro)
+ * - 5511999999999 (sem +)
+ * - 5511999999999@s.whatsapp.net (formato WhatsApp individual)
+ * - 5511999999999-1234567890@g.us (formato WhatsApp grupo)
+ */
+const phoneOrChatIdSchema = z.string().min(1, 'ID do chat é obrigatório').refine(
+  (value) => {
+    // Remove sufixos do WhatsApp para validar
+    const cleaned = value
+      .replace('@s.whatsapp.net', '')
+      .replace('@g.us', '')
+      .replace('@broadcast', '')
+      .replace(/^whatsapp:/, '')
+      .replace(/^\+/, '');
+
+    // Grupos podem ter formato diferente (com hífen)
+    if (value.includes('@g.us')) {
+      return /^[\d-]+$/.test(cleaned);
+    }
+
+    // Validar E.164: 7-15 dígitos
+    return /^\d{7,15}$/.test(cleaned);
+  },
+  { message: 'Formato de telefone/chat inválido. Use formato E.164 (ex: 5511999999999)' }
+);
+
 // Schema para listar chats
 export const listChatsSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
@@ -12,6 +41,9 @@ export const listChatsSchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
   search: z.string().optional(),
   status: z.enum(['all', 'unread', 'groups', 'pinned']).optional(),
+  // Novos filtros de atendimento
+  attendanceType: z.enum(['all', 'ai', 'human', 'archived']).optional().default('all'),
+  sessionStatus: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
 });
 
 // Schema para buscar mensagens de um chat
@@ -27,7 +59,7 @@ export const listMessagesSchema = z.object({
 // Schema para enviar mensagem de texto
 export const sendTextMessageSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  chatId: z.string().min(1, 'Chat ID é obrigatório'),
+  chatId: phoneOrChatIdSchema,
   text: z.string().min(1, 'Mensagem não pode ser vazia').max(4096),
   quotedMessageId: z.string().optional(),
 });
@@ -35,7 +67,7 @@ export const sendTextMessageSchema = z.object({
 // Schema para enviar imagem
 export const sendImageSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  chatId: z.string().min(1, 'Chat ID é obrigatório'),
+  chatId: phoneOrChatIdSchema,
   imageUrl: z.string().url('URL da imagem inválida'),
   caption: z.string().max(1024).optional(),
   quotedMessageId: z.string().optional(),
@@ -44,7 +76,7 @@ export const sendImageSchema = z.object({
 // Schema para enviar arquivo
 export const sendFileSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  chatId: z.string().min(1, 'Chat ID é obrigatório'),
+  chatId: phoneOrChatIdSchema,
   fileUrl: z.string().url('URL do arquivo inválida'),
   fileName: z.string().min(1, 'Nome do arquivo é obrigatório'),
   caption: z.string().max(1024).optional(),
@@ -54,7 +86,7 @@ export const sendFileSchema = z.object({
 // Schema para marcar mensagem como lida
 export const markAsReadSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
-  chatId: z.string().min(1, 'Chat ID é obrigatório'),
+  chatId: phoneOrChatIdSchema,
 });
 
 export type ListChatsInput = z.infer<typeof listChatsSchema>;

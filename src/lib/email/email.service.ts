@@ -274,6 +274,169 @@ class EmailService {
     return this.send({ to, subject, html });
   }
 
+  async sendTempPasswordEmail(
+    to: string,
+    name: string,
+    organizationName: string,
+    tempPassword: string,
+    loginUrl?: string
+  ): Promise<void> {
+    const appUrl = loginUrl || `${process.env.NEXT_PUBLIC_APP_URL || 'https://app.quayer.com'}/login`;
+    const fallbackHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f5f5f5; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; }
+          .header { text-align: center; padding: 20px 0; border-bottom: 1px solid #eee; }
+          .header h1 { color: #4CAF50; margin: 0; }
+          .content { padding: 30px 20px; }
+          .password-box { background: #f8f9fa; border: 2px dashed #4CAF50; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }
+          .password { font-size: 24px; font-weight: bold; color: #333; letter-spacing: 2px; font-family: monospace; }
+          .button { display: inline-block; padding: 14px 28px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+          .warning { background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 12px; margin: 20px 0; }
+          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 Bem-vindo ao Quayer!</h1>
+          </div>
+          <div class="content">
+            <p>Ola <strong>${name}</strong>,</p>
+            <p>Sua conta foi criada com sucesso para a organizacao <strong>${organizationName}</strong>.</p>
+            <p>Use a senha temporaria abaixo para fazer seu primeiro login:</p>
+
+            <div class="password-box">
+              <p style="margin: 0 0 10px 0; color: #666; font-size: 14px;">Sua senha temporaria:</p>
+              <div class="password">${tempPassword}</div>
+            </div>
+
+            <div class="warning">
+              ⚠️ <strong>Importante:</strong> Por seguranca, recomendamos que voce altere sua senha apos o primeiro login.
+            </div>
+
+            <p style="text-align: center; margin-top: 30px;">
+              <a href="${appUrl}" class="button">Fazer Login</a>
+            </p>
+
+            <p style="margin-top: 30px; color: #666; font-size: 14px;">
+              Se voce nao solicitou esta conta, por favor ignore este email ou entre em contato com o suporte.
+            </p>
+          </div>
+          <div class="footer">
+            <p>Quayer - Sistema de Gestao de WhatsApp</p>
+            <p>Este e um email automatico, nao responda.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'temp_password',
+      { name, organizationName, tempPassword, loginUrl: appUrl },
+      fallbackHtml,
+      `Sua conta foi criada - ${organizationName}`
+    );
+
+    return this.send({ to, subject, html });
+  }
+
+  /**
+   * Email de boas-vindas para admin de organização (login via OTP)
+   * Usado quando Super Admin cria organização com novo admin
+   */
+  async sendOrganizationWelcomeEmail(
+    to: string,
+    name: string,
+    organizationName: string,
+    loginUrl?: string
+  ): Promise<void> {
+    const appUrl = loginUrl || `${process.env.NEXT_PUBLIC_APP_URL || 'https://app.quayer.com'}/login`;
+    const fallbackHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f5f5f5; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; }
+          .header { text-align: center; padding: 20px 0; border-bottom: 1px solid #eee; }
+          .header h1 { color: #4CAF50; margin: 0; }
+          .content { padding: 30px 20px; }
+          .info-box { background: #e8f5e9; border-left: 4px solid #4CAF50; border-radius: 4px; padding: 16px; margin: 20px 0; }
+          .steps { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
+          .step { display: flex; align-items: flex-start; margin-bottom: 12px; }
+          .step-number { background: #4CAF50; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 12px; flex-shrink: 0; }
+          .button { display: inline-block; padding: 14px 28px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+          .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🎉 Bem-vindo ao Quayer!</h1>
+          </div>
+          <div class="content">
+            <p>Ola <strong>${name}</strong>,</p>
+            <p>Sua conta foi criada como administrador da organizacao <strong>${organizationName}</strong>.</p>
+
+            <div class="info-box">
+              <strong>✨ Login seguro e sem senha!</strong><br>
+              O Quayer usa autenticacao por codigo de verificacao enviado ao seu email.
+            </div>
+
+            <div class="steps">
+              <p style="margin: 0 0 16px 0; font-weight: bold;">Como fazer login:</p>
+              <div class="step">
+                <span class="step-number">1</span>
+                <span>Acesse a pagina de login</span>
+              </div>
+              <div class="step">
+                <span class="step-number">2</span>
+                <span>Digite seu email: <strong>${to}</strong></span>
+              </div>
+              <div class="step">
+                <span class="step-number">3</span>
+                <span>Voce recebera um codigo de 6 digitos por email</span>
+              </div>
+              <div class="step">
+                <span class="step-number">4</span>
+                <span>Digite o codigo para acessar sua conta</span>
+              </div>
+            </div>
+
+            <p style="text-align: center; margin-top: 30px;">
+              <a href="${appUrl}" class="button">Fazer Login Agora</a>
+            </p>
+
+            <p style="margin-top: 30px; color: #666; font-size: 14px;">
+              Se voce nao esperava receber este email, por favor entre em contato com o suporte.
+            </p>
+          </div>
+          <div class="footer">
+            <p>Quayer - Sistema de Gestao de WhatsApp</p>
+            <p>Este e um email automatico, nao responda.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const { html, subject } = await getTemplateFromDatabase(
+      'organization_welcome',
+      { name, organizationName, loginUrl: appUrl, email: to },
+      fallbackHtml,
+      `Sua conta foi criada - ${organizationName}`
+    );
+
+    return this.send({ to, subject, html });
+  }
+
   async sendPasswordResetEmail(
     to: string,
     name: string,

@@ -356,9 +356,14 @@ export class DashboardService {
 
   /**
    * Obter métricas agregadas do dashboard para múltiplas conexões
+   * @param connections - Lista de conexões
+   * @param startDate - Data inicial para filtro (opcional)
+   * @param endDate - Data final para filtro (opcional)
    */
   async getAggregatedMetrics(
-    connections: Array<{ id: string; uazapiToken: string | null; status: string }>
+    connections: Array<{ id: string; uazapiToken: string | null; status: string }>,
+    startDate?: Date,
+    endDate?: Date
   ): Promise<DashboardMetrics> {
     // Filtrar apenas conexões conectadas
     const connectedInstances = connections.filter(
@@ -369,9 +374,14 @@ export class DashboardService {
       return this.getEmptyMetrics();
     }
 
+    // Convert dates to timestamps for filtering
+    const startTimestamp = startDate ? Math.floor(startDate.getTime() / 1000) : 0;
+    const endTimestamp = endDate ? Math.floor(endDate.getTime() / 1000) : Math.floor(Date.now() / 1000);
+
     logger.info('[DashboardService] Buscando métricas agregadas', {
       totalConnections: connections.length,
       connectedInstances: connectedInstances.length,
+      period: startDate ? `${startDate.toISOString()} - ${endDate?.toISOString()}` : 'all-time',
     });
 
     // Buscar dados de todas as conexões em paralelo (com limites otimizados)
@@ -420,7 +430,15 @@ export class DashboardService {
     );
 
     // Agregar todos os chats
-    const allChats = chatsResults.flatMap((result) => result.chats || []);
+    const allChatsRaw = chatsResults.flatMap((result) => result.chats || []);
+
+    // Filtrar chats por período (se especificado)
+    const allChats = startDate
+      ? allChatsRaw.filter((chat) => {
+          const timestamp = chat.wa_lastMsgTimestamp;
+          return timestamp >= startTimestamp && timestamp <= endTimestamp;
+        })
+      : allChatsRaw;
 
     // Calcular conversas em andamento (tickets abertos)
     const openChats = allChats.filter((chat) => chat.lead_isTicketOpen === true);
@@ -428,7 +446,15 @@ export class DashboardService {
     const humanControlled = allChats.filter((chat) => chat.lead_assignedAttendant_id);
 
     // Agregar todas as mensagens
-    const allMessages = messagesResults.flatMap((result) => result.messages || []);
+    const allMessagesRaw = messagesResults.flatMap((result) => result.messages || []);
+
+    // Filtrar mensagens por período (se especificado)
+    const allMessages = startDate
+      ? allMessagesRaw.filter((msg) => {
+          const timestamp = msg.messageTimestamp;
+          return timestamp >= startTimestamp && timestamp <= endTimestamp;
+        })
+      : allMessagesRaw;
 
     // Calcular métricas de mensagens
     const sentMessages = allMessages.filter((msg) => msg.messageStatus === 'sent');

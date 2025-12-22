@@ -75,9 +75,9 @@ export const notificationsController = igniter.controller({
         }
 
         const result = await notificationsRepository.getForUser(
-          context.user.id,
-          context.user.organizationId || null,
-          context.user.role,
+          context.user!.id,
+          (context.user as any)?.organizationId || null,
+          context.user!.role,
           {
             page: query.page || 1,
             limit: query.limit || 20,
@@ -105,9 +105,9 @@ export const notificationsController = igniter.controller({
       handler: async ({ context, response }) => {
         // Authentication enforced by authProcedure
         const count = await notificationsRepository.getUnreadCount(
-          context.user.id,
-          context.user.organizationId || null,
-          context.user.role
+          context.user!.id,
+          (context.user as any)?.organizationId || null,
+          context.user!.role
         )
 
         return response.success({
@@ -136,11 +136,11 @@ export const notificationsController = igniter.controller({
 
         // Check access
         const canAccess =
-          context.user.role === 'admin' ||
+          context.user!.role === 'admin' ||
           notification.isGlobal ||
-          notification.userId === context.user.id ||
-          notification.organizationId === context.user.organizationId ||
-          notification.role === context.user.role
+          notification.userId === context.user!.id ||
+          notification.organizationId === (context.user as any)?.organizationId ||
+          notification.role === context.user!.role
 
         if (!canAccess) {
           return response.forbidden('Acesso negado')
@@ -172,14 +172,17 @@ export const notificationsController = igniter.controller({
         }
 
         try {
-          const notification = await notificationsRepository.create(data)
+          const notification = await notificationsRepository.create({
+            ...data,
+            isGlobal: data.isGlobal ?? false,
+          })
           return response.success({
             data: notification,
             message: 'Notificação criada com sucesso',
           })
         } catch (error: any) {
           console.error('Error creating notification:', error)
-          return response.error('Erro ao criar notificação')
+          return (response as any).error('Erro ao criar notificação')
         }
       },
     }),
@@ -206,7 +209,7 @@ export const notificationsController = igniter.controller({
           })
         } catch (error: any) {
           console.error('Error updating notification:', error)
-          return response.error('Erro ao atualizar notificação')
+          return (response as any).error('Erro ao atualizar notificação')
         }
       },
     }),
@@ -229,7 +232,7 @@ export const notificationsController = igniter.controller({
           return response.noContent()
         } catch (error: any) {
           console.error('Error deleting notification:', error)
-          return response.error('Erro ao excluir notificação')
+          return (response as any).error('Erro ao excluir notificação')
         }
       },
     }),
@@ -248,13 +251,13 @@ export const notificationsController = igniter.controller({
         const { id } = request.params as { id: string }
 
         try {
-          await notificationsRepository.markAsRead(id, context.user.id)
+          await notificationsRepository.markAsRead(id, context.user!.id)
           return response.success({
             message: 'Notificação marcada como lida',
           })
         } catch (error: any) {
           console.error('Error marking notification as read:', error)
-          return response.error('Erro ao marcar notificação como lida')
+          return (response as any).error('Erro ao marcar notificação como lida')
         }
       },
     }),
@@ -272,9 +275,9 @@ export const notificationsController = igniter.controller({
         // Authentication enforced by authProcedure
         try {
           const result = await notificationsRepository.markAllAsRead(
-            context.user.id,
-            context.user.organizationId || null,
-            context.user.role
+            context.user!.id,
+            (context.user as any)?.organizationId || null,
+            context.user!.role
           )
           return response.success({
             data: result,
@@ -282,7 +285,7 @@ export const notificationsController = igniter.controller({
           })
         } catch (error: any) {
           console.error('Error marking all notifications as read:', error)
-          return response.error('Erro ao marcar notificações como lidas')
+          return (response as any).error('Erro ao marcar notificações como lidas')
         }
       },
     }),
@@ -324,7 +327,7 @@ export const notificationsController = igniter.controller({
           })
         } catch (error: any) {
           console.error('Error cleaning up notifications:', error)
-          return response.error('Erro ao limpar notificações')
+          return (response as any).error('Erro ao limpar notificações')
         }
       },
     }),

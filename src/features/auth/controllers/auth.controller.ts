@@ -564,10 +564,11 @@ export const authController = igniter.controller({
 
     /**
      * Switch Organization
+     * organizationId can be null to clear context (admin returning to global mode)
      */
     switchOrganization: igniter.mutation({
       name: 'Switch Organization',
-      description: 'Switch current organization',
+      description: 'Switch current organization or clear context (null for admin global mode)',
       path: '/switch-organization',
       method: 'POST',
       body: switchOrganizationSchema,
@@ -597,6 +598,45 @@ export const authController = igniter.controller({
           return response.status(404).json({ error: 'User not found' });
         }
 
+        // ✅ CONTEXT CLEAR: If organizationId is null, clear context (admin only)
+        if (organizationId === null) {
+          if (user.role !== 'admin') {
+            return response.status(403).json({ error: 'Only admins can clear organization context' });
+          }
+
+          const previousOrgId = user.currentOrgId;
+
+          // Clear organization context
+          await db.user.update({
+            where: { id: userId },
+            data: { currentOrgId: null },
+          });
+
+          // Generate new access token without organization
+          const accessToken = signAccessToken({
+            userId: user.id,
+            email: user.email,
+            role: user.role as UserRole,
+            currentOrgId: null,
+            organizationRole: null,
+            needsOnboarding: !user.onboardingCompleted,
+          });
+
+          // Log audit: context cleared
+          await auditLog.logContextSwitch(
+            user.id,
+            previousOrgId,
+            'GLOBAL_ADMIN_MODE',
+            'Modo Admin Global'
+          );
+
+          return response.success({
+            currentOrgId: null,
+            accessToken,
+            organizationRole: null,
+          });
+        }
+
         // Verificar se usuário pertence à organização (ou é admin)
         const userOrg = user.organizations.find(
           (org) => org.organizationId === organizationId
@@ -607,6 +647,7 @@ export const authController = igniter.controller({
         }
 
         // Admin pode trocar para qualquer org, mas precisa verificar se existe
+        let targetOrg = userOrg?.organization;
         if (user.role === 'admin' && !userOrg) {
           const orgExists = await db.organization.findUnique({
             where: { id: organizationId },
@@ -614,7 +655,10 @@ export const authController = igniter.controller({
           if (!orgExists) {
             return response.status(404).json({ error: 'Organization not found' });
           }
+          targetOrg = orgExists;
         }
+
+        const previousOrgId = user.currentOrgId;
 
         // Atualizar organização atual
         await db.user.update({
@@ -631,6 +675,16 @@ export const authController = igniter.controller({
           organizationRole: userOrg?.role as any,
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
         });
+
+        // Log de auditoria: context switch (especialmente para admins)
+        if (user.role === 'admin') {
+          await auditLog.logContextSwitch(
+            user.id,
+            previousOrgId,
+            organizationId,
+            targetOrg?.name || 'Unknown Organization'
+          );
+        }
 
         return response.success({
           currentOrgId: organizationId,

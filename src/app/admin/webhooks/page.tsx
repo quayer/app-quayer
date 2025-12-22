@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, MoreVertical, Webhook, CheckCircle2, XCircle, Activity, RefreshCw } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Search, MoreVertical, Webhook, CheckCircle2, XCircle, RefreshCw, Eye, Trash2, Play, Power, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -18,15 +18,38 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { listWebhooksAction } from '@/app/admin/actions'
 import { CreateWebhookDialog } from '@/app/integracoes/webhooks/create-webhook-dialog'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { toast } from 'sonner'
+import { api } from '@/igniter.client'
 
 // Helper para formatar datas com segurança
 function safeFormatDate(date: any): string {
@@ -50,6 +73,7 @@ interface WebhookType {
   instance?: { name: string } | null
   lastExecutedAt?: Date | string | null
   createdAt?: Date | string
+  secret?: string
 }
 
 export default function AdminWebhooksPage() {
@@ -57,6 +81,11 @@ export default function AdminWebhooksPage() {
   const [isMounted, setIsMounted] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const queryClient = useQueryClient()
+
+  // Dialog states
+  const [selectedWebhook, setSelectedWebhook] = useState<WebhookType | null>(null)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
   // Hydration fix: esperar montagem no cliente
   useEffect(() => {
@@ -81,6 +110,91 @@ export default function AdminWebhooksPage() {
     enabled: isMounted,
   })
   const webhooks = (webhooksData?.data || []) as WebhookType[]
+
+  // Toggle webhook mutation
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const response = await (api.webhooks.update as any).mutate({
+        id,
+        body: { isActive: !isActive },
+      })
+      if (response.error) throw new Error('Erro ao atualizar webhook')
+      return response.data
+    },
+    onSuccess: () => {
+      toast.success('Webhook atualizado')
+      queryClient.invalidateQueries({ queryKey: ['admin-webhooks'] })
+    },
+    onError: () => {
+      toast.error('Erro ao atualizar webhook')
+    },
+  })
+
+  // Delete webhook mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await (api.webhooks.delete as any).mutate({ id })
+      if (response.error) throw new Error('Erro ao excluir webhook')
+      return response.data
+    },
+    onSuccess: () => {
+      toast.success('Webhook excluído')
+      setIsDeleteOpen(false)
+      setSelectedWebhook(null)
+      queryClient.invalidateQueries({ queryKey: ['admin-webhooks'] })
+    },
+    onError: () => {
+      toast.error('Erro ao excluir webhook')
+    },
+  })
+
+  // Test webhook mutation using API endpoint
+  const testMutation = useMutation({
+    mutationFn: async (webhookId: string) => {
+      const response = await (api.webhooks.test as any).mutate({ id: webhookId })
+      return response
+    },
+    onSuccess: (data: any) => {
+      if (data?.success) {
+        toast.success(data.message || 'Webhook testado com sucesso!', {
+          description: `Status: ${data.statusCode}`,
+        })
+      } else {
+        toast.error(data?.message || 'Falha ao testar webhook', {
+          description: data?.error || `Status: ${data?.statusCode || 'Erro'}`,
+        })
+      }
+    },
+    onError: () => {
+      toast.error('Erro ao testar webhook')
+    },
+  })
+
+  // Handle test using API
+  const handleTest = (webhook: WebhookType) => {
+    testMutation.mutate(webhook.id)
+  }
+
+  // Handlers
+  const handleViewDetails = (webhook: WebhookType) => {
+    setSelectedWebhook(webhook)
+    setIsDetailsOpen(true)
+  }
+
+  const handleToggle = (webhook: WebhookType) => {
+    toggleMutation.mutate({ id: webhook.id, isActive: webhook.isActive })
+  }
+
+  const handleDeleteClick = (webhook: WebhookType) => {
+    setSelectedWebhook(webhook)
+    setIsDeleteOpen(true)
+  }
+
+  const handleDeleteConfirm = () => {
+    if (selectedWebhook) {
+      deleteMutation.mutate(selectedWebhook.id)
+    }
+  }
 
   // Calculate statistics
   const stats = {
@@ -169,7 +283,7 @@ export default function AdminWebhooksPage() {
 
       {/* Search and Table */}
       <Card>
-        <CardHeader>
+        <div className="p-4 border-b">
           <div className="flex items-center gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -181,8 +295,8 @@ export default function AdminWebhooksPage() {
               />
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div className="p-4">
           {!isMounted || isLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -254,13 +368,29 @@ export default function AdminWebhooksPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>Ver Detalhes</DropdownMenuItem>
-                          <DropdownMenuItem>Editar</DropdownMenuItem>
-                          <DropdownMenuItem>Testar Webhook</DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleViewDetails(webhook)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            Ver Detalhes
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleTest(webhook)} disabled={testMutation.isPending && testMutation.variables === webhook.id}>
+                            {testMutation.isPending && testMutation.variables === webhook.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Testar Webhook
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleToggle(webhook)} disabled={toggleMutation.isPending}>
+                            <Power className="h-4 w-4 mr-2" />
                             {webhook.isActive ? 'Desativar' : 'Ativar'}
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => handleDeleteClick(webhook)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
                             Excluir
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -271,8 +401,106 @@ export default function AdminWebhooksPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
+        </div>
       </Card>
+
+      {/* Details Dialog */}
+      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Webhook className="h-5 w-5" />
+              Detalhes do Webhook
+            </DialogTitle>
+            <DialogDescription>
+              Informações completas do webhook
+            </DialogDescription>
+          </DialogHeader>
+          {selectedWebhook && (
+            <ScrollArea className="max-h-[60vh]">
+              <div className="space-y-4 pr-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">URL</Label>
+                  <p className="text-sm font-mono break-all">{selectedWebhook.url}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Status</Label>
+                  <div className="mt-1">
+                    <Badge variant={selectedWebhook.isActive ? 'default' : 'secondary'}>
+                      {selectedWebhook.isActive ? 'Ativo' : 'Inativo'}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Eventos</Label>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {selectedWebhook.events?.map((event, idx) => (
+                      <Badge key={idx} variant="outline" className="text-xs">
+                        {event}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Organização</Label>
+                  <p className="text-sm">{selectedWebhook.organization?.name || 'Global'}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Instância</Label>
+                  <p className="text-sm">{selectedWebhook.instance?.name || 'Todas'}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Última Execução</Label>
+                  <p className="text-sm">{safeFormatDate(selectedWebhook.lastExecutedAt)}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Criado em</Label>
+                  <p className="text-sm">
+                    {selectedWebhook.createdAt
+                      ? format(new Date(selectedWebhook.createdAt), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+                      : '-'}
+                  </p>
+                </div>
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Webhook</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir este webhook? Esta ação não pode ser desfeita.
+              <div className="mt-2 p-2 bg-muted rounded text-xs font-mono break-all">
+                {selectedWebhook?.url}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

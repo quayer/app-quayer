@@ -3,11 +3,27 @@
  *
  * Gerenciador de sessões de atendimento WhatsApp
  * Controla criação, bloqueio de IA, e estado das sessões
+ *
+ * Features:
+ * - Criação/recuperação de sessões
+ * - Bloqueio de IA (manual e automático)
+ * - WhatsApp 24h Window Tracking
+ * - Auto-pause on human reply
+ * - Bypass bots (blacklist/whitelist)
+ * - Session expiration management
  */
 
 import { database } from '@/services/database';
 import { redis } from '@/services/redis';
 import type { SessionStatus } from '@prisma/client';
+
+// ===== CONSTANTS =====
+
+/** WhatsApp 24h window duration in milliseconds */
+const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Default AI block duration when human replies (in minutes) */
+const DEFAULT_HUMAN_BLOCK_MINUTES = 24 * 60; // 24 hours
 
 export interface GetOrCreateSessionInput {
   contactId: string;
@@ -20,8 +36,20 @@ export interface ListSessionsFilters {
   connectionId?: string;
   contactId?: string;
   status?: SessionStatus;
+  // ⭐ NOVOS FILTROS AVANÇADOS
+  aiStatus?: 'enabled' | 'disabled' | 'blocked';
+  whatsappWindow?: 'active' | 'expiring' | 'expired' | 'none';
+  assignedAgentId?: string;
+  hasUnread?: boolean;
+  search?: string;
+  sortBy?: 'lastMessage' | 'created' | 'updated';
+  sortOrder?: 'asc' | 'desc';
+  // Paginação offset-based (padrão)
   page?: number;
   limit?: number;
+  // 🚀 Paginação cursor-based (opcional, mais eficiente para grandes volumes)
+  cursor?: string; // ID da última sessão recebida
+  useCursor?: boolean; // Se true, usa cursor em vez de offset
 }
 
 export class SessionsManager {
@@ -163,24 +191,84 @@ export class SessionsManager {
 
   /**
    * Listar sessões com filtros e paginação
+   * Suporta tanto offset-based (padrão) quanto cursor-based (mais eficiente)
    */
   async listSessions(filters: ListSessionsFilters = {}) {
-    const page = filters.page ?? 1;
     const limit = filters.limit ?? 50;
-    const skip = (page - 1) * limit;
+    const now = new Date();
+    const useCursor = filters.useCursor && filters.cursor;
+
+    // 🚀 Paginação: offset-based vs cursor-based
+    const page = filters.page ?? 1;
+    const skip = useCursor ? undefined : (page - 1) * limit;
 
     const where: any = {};
     if (filters.organizationId) where.organizationId = filters.organizationId;
     if (filters.connectionId) where.connectionId = filters.connectionId;
     if (filters.contactId) where.contactId = filters.contactId;
     if (filters.status) where.status = filters.status;
+    if (filters.assignedAgentId) where.assignedAgentId = filters.assignedAgentId;
+
+    // ⭐ FILTRO: AI Status
+    if (filters.aiStatus === 'enabled') {
+      where.aiEnabled = true;
+      where.OR = [
+        { aiBlockedUntil: null },
+        { aiBlockedUntil: { lt: now } },
+      ];
+    } else if (filters.aiStatus === 'disabled') {
+      where.aiEnabled = false;
+    } else if (filters.aiStatus === 'blocked') {
+      where.aiBlockedUntil = { gte: now };
+    }
+
+    // ⭐ FILTRO: WhatsApp 24h Window
+    if (filters.whatsappWindow === 'active') {
+      const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      where.whatsappWindowExpiresAt = { gte: twoHoursFromNow };
+    } else if (filters.whatsappWindow === 'expiring') {
+      const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      where.whatsappWindowExpiresAt = { gte: now, lt: twoHoursFromNow };
+    } else if (filters.whatsappWindow === 'expired') {
+      where.whatsappWindowExpiresAt = { lt: now };
+    } else if (filters.whatsappWindow === 'none') {
+      where.whatsappWindowExpiresAt = null;
+    }
+
+    // ⭐ FILTRO: Search (nome ou telefone do contato)
+    if (filters.search) {
+      where.contact = {
+        OR: [
+          { name: { contains: filters.search, mode: 'insensitive' } },
+          { phoneNumber: { contains: filters.search } },
+        ],
+      };
+    }
+
+    // ⭐ ORDENAÇÃO
+    const sortBy = filters.sortBy || 'lastMessage';
+    const sortOrder = filters.sortOrder || 'desc';
+    const orderByMap: Record<string, any> = {
+      lastMessage: { lastMessageAt: sortOrder },
+      created: { createdAt: sortOrder },
+      updated: { updatedAt: sortOrder },
+    };
+    const orderBy = orderByMap[sortBy] || { lastMessageAt: 'desc' };
+
+    // 🚀 Cursor-based: buscar sessões após o cursor
+    const cursorConfig = useCursor ? {
+      cursor: { id: filters.cursor! },
+      skip: 1, // Pular o item do cursor
+    } : {
+      skip,
+    };
 
     const [sessions, total] = await Promise.all([
       database.chatSession.findMany({
         where,
-        skip,
+        ...cursorConfig,
         take: limit,
-        orderBy: { lastMessageAt: 'desc' },
+        orderBy,
         include: {
           contact: true,
           connection: {
@@ -188,6 +276,13 @@ export class SessionsManager {
               id: true,
               name: true,
               status: true,
+              provider: true,
+            },
+          },
+          organization: {
+            select: {
+              id: true,
+              name: true,
             },
           },
           department: {
@@ -195,6 +290,17 @@ export class SessionsManager {
               id: true,
               name: true,
               description: true,
+            },
+          },
+          messages: {
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              content: true,
+              type: true,
+              direction: true,
+              createdAt: true,
             },
           },
           _count: {
@@ -205,13 +311,72 @@ export class SessionsManager {
       database.chatSession.count({ where }),
     ]);
 
+    // ⭐ Enriquecer sessões com dados computados
+    const enrichedSessions = sessions.map((session) => {
+      const lastMessage = session.messages?.[0];
+
+      // Calcular status do WhatsApp Window
+      let whatsappWindowStatus: 'active' | 'expiring' | 'expired' | 'none' = 'none';
+      let whatsappWindowRemaining = 0;
+
+      if (session.whatsappWindowExpiresAt) {
+        const expiresAt = new Date(session.whatsappWindowExpiresAt);
+        const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+
+        if (expiresAt > twoHoursFromNow) {
+          whatsappWindowStatus = 'active';
+        } else if (expiresAt > now) {
+          whatsappWindowStatus = 'expiring';
+        } else {
+          whatsappWindowStatus = 'expired';
+        }
+
+        whatsappWindowRemaining = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 60000));
+      }
+
+      // Calcular status da IA
+      let aiStatus: 'enabled' | 'disabled' | 'blocked' = 'disabled';
+      if (session.aiEnabled) {
+        if (session.aiBlockedUntil && new Date(session.aiBlockedUntil) > now) {
+          aiStatus = 'blocked';
+        } else {
+          aiStatus = 'enabled';
+        }
+      }
+
+      // Calcular duração da sessão
+      const durationMs = now.getTime() - new Date(session.createdAt).getTime();
+      const durationMinutes = Math.floor(durationMs / 60000);
+
+      return {
+        ...session,
+        lastMessage,
+        computed: {
+          whatsappWindowStatus,
+          whatsappWindowRemaining, // minutos
+          aiStatus,
+          durationMinutes,
+          messageCount: session._count.messages,
+        },
+      };
+    });
+
+    // 🚀 Cursor para próxima página (último ID da lista)
+    const nextCursor = enrichedSessions.length > 0
+      ? enrichedSessions[enrichedSessions.length - 1].id
+      : null;
+    const hasMore = enrichedSessions.length === limit;
+
     return {
-      data: sessions,
+      data: enrichedSessions,
       pagination: {
         page,
         limit,
         total,
         totalPages: Math.ceil(total / limit),
+        // 🚀 Campos para paginação cursor-based
+        nextCursor,
+        hasMore,
       },
     };
   }
@@ -471,6 +636,188 @@ export class SessionsManager {
     } catch {
       // Ignore Redis errors
     }
+  }
+
+  // ============================================
+  // WHATSAPP 24H WINDOW TRACKING
+  // ============================================
+
+  /**
+   * Atualizar janela 24h do WhatsApp quando cliente envia mensagem
+   * A janela permite enviar mensagens template-free por 24h após última msg do cliente
+   */
+  async updateWhatsAppWindow(
+    sessionId: string,
+    isCustomerMessage: boolean
+  ): Promise<{ expiresAt: Date | null; canReply: boolean }> {
+    // Só atualiza janela quando CLIENTE envia mensagem
+    if (!isCustomerMessage) {
+      const session = await database.chatSession.findUnique({
+        where: { id: sessionId },
+        select: { whatsappWindowExpiresAt: true },
+      });
+      return {
+        expiresAt: session?.whatsappWindowExpiresAt || null,
+        canReply: session?.whatsappWindowExpiresAt ? new Date() < session.whatsappWindowExpiresAt : false,
+      };
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + WHATSAPP_WINDOW_MS);
+
+    console.log(`[Sessions] Updating WhatsApp 24h window for session ${sessionId} - expires at ${expiresAt.toISOString()}`);
+
+    await database.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        lastCustomerMessageAt: now,
+        whatsappWindowExpiresAt: expiresAt,
+        whatsappWindowType: 'CUSTOMER_INITIATED',
+      },
+    });
+
+    // Publicar evento
+    try {
+      await redis.publish('session:window_updated', JSON.stringify({
+        sessionId,
+        expiresAt,
+        type: 'CUSTOMER_INITIATED',
+      }));
+    } catch {
+      // Ignore Redis errors
+    }
+
+    return { expiresAt, canReply: true };
+  }
+
+  /**
+   * Verificar se a janela 24h do WhatsApp ainda está ativa
+   * Retorna true se podemos enviar mensagens livres (sem template)
+   */
+  async canReplyWithinWindow(sessionId: string): Promise<boolean> {
+    const session = await database.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { whatsappWindowExpiresAt: true },
+    });
+
+    if (!session?.whatsappWindowExpiresAt) {
+      return false;
+    }
+
+    return new Date() < session.whatsappWindowExpiresAt;
+  }
+
+  /**
+   * Obter informações da janela 24h do WhatsApp
+   */
+  async getWhatsAppWindowInfo(sessionId: string): Promise<{
+    isActive: boolean;
+    expiresAt: Date | null;
+    lastCustomerMessageAt: Date | null;
+    windowType: string | null;
+    remainingMinutes: number;
+  }> {
+    const session = await database.chatSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        whatsappWindowExpiresAt: true,
+        lastCustomerMessageAt: true,
+        whatsappWindowType: true,
+      },
+    });
+
+    if (!session) {
+      return {
+        isActive: false,
+        expiresAt: null,
+        lastCustomerMessageAt: null,
+        windowType: null,
+        remainingMinutes: 0,
+      };
+    }
+
+    const now = new Date();
+    const isActive = session.whatsappWindowExpiresAt
+      ? now < session.whatsappWindowExpiresAt
+      : false;
+
+    const remainingMinutes = isActive && session.whatsappWindowExpiresAt
+      ? Math.max(0, Math.floor((session.whatsappWindowExpiresAt.getTime() - now.getTime()) / 60000))
+      : 0;
+
+    return {
+      isActive,
+      expiresAt: session.whatsappWindowExpiresAt,
+      lastCustomerMessageAt: session.lastCustomerMessageAt,
+      windowType: session.whatsappWindowType,
+      remainingMinutes,
+    };
+  }
+
+  // ============================================
+  // AUTO-PAUSE ON HUMAN REPLY
+  // ============================================
+
+  /**
+   * Auto-pausar sessão quando humano responde
+   * Bloqueia IA automaticamente para evitar interferência
+   */
+  async autoPauseOnHumanReply(
+    sessionId: string,
+    agentId?: string,
+    agentName?: string
+  ): Promise<void> {
+    console.log(`[Sessions] Auto-pausing session ${sessionId} due to human reply`);
+
+    const session = await database.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { organizationId: true },
+    });
+
+    if (!session) {
+      console.warn(`[Sessions] Session ${sessionId} not found for auto-pause`);
+      return;
+    }
+
+    // Buscar timeout da organização
+    const org = await database.organization.findUnique({
+      where: { id: session.organizationId },
+      select: { sessionTimeoutHours: true },
+    });
+
+    const pauseDurationHours = org?.sessionTimeoutHours ?? 24;
+    const pausedUntil = new Date(Date.now() + pauseDurationHours * 60 * 60 * 1000);
+
+    await database.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'ACTIVE', // Mantém ativa mas com IA bloqueada
+        aiEnabled: false,
+        aiBlockedUntil: pausedUntil,
+        aiBlockReason: 'AUTO_PAUSED_HUMAN',
+        pausedBy: agentName || agentId || 'human_agent',
+      },
+    });
+
+    // Publicar evento
+    try {
+      await redis.publish('session:auto_paused', JSON.stringify({
+        sessionId,
+        pausedUntil,
+        reason: 'human_reply',
+        agentId,
+        agentName,
+      }));
+    } catch {
+      // Ignore Redis errors
+    }
+  }
+
+  /**
+   * Verificar se deve auto-pausar (mensagem de saída de humano)
+   */
+  shouldAutoPause(direction: 'INBOUND' | 'OUTBOUND', author: string): boolean {
+    return direction === 'OUTBOUND' && (author === 'HUMAN' || author === 'AGENT');
   }
 
   // ============================================

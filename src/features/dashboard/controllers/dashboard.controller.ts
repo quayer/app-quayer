@@ -17,24 +17,73 @@ export const dashboardController = igniter.controller({
     /**
      * GET /api/v1/dashboard/metrics
      * Obter métricas agregadas de todas as instâncias da organização
-     * Cache: 60 segundos por organização
+     * Cache: 60 segundos por organização e período
+     *
+     * Query params:
+     * - period: 'today' | 'week' | 'month' | 'all' (default: 'today')
+     *
+     * Response includes comparison with previous period:
+     * - today vs yesterday
+     * - week vs previous week
+     * - month vs previous month
      */
     getMetrics: igniter.query({
       name: 'GetDashboardMetrics',
-      description: 'Obter métricas do dashboard',
+      description: 'Obter métricas do dashboard com filtro de período e comparativo',
       path: '/metrics',
       method: 'GET',
+      query: z.object({
+        period: z.enum(['today', 'week', 'month', 'all']).default('today'),
+      }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id;
         const organizationId = context.auth?.session?.user?.currentOrgId;
+        const { period } = request.query;
 
         if (!organizationId) {
           return response.badRequest('Nenhuma organização selecionada');
         }
 
+        // Calculate date range based on period
+        const now = new Date();
+        let startDate: Date | undefined;
+        let endDate: Date = now;
+        let prevStartDate: Date | undefined;
+        let prevEndDate: Date | undefined;
+
+        switch (period) {
+          case 'today':
+            // Current: today (00:00 to now)
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+            // Previous: yesterday (00:00 to 23:59:59)
+            prevEndDate = new Date(startDate.getTime() - 1); // End of yesterday
+            prevStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
+            break;
+          case 'week':
+            // Current: last 7 days
+            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            // Previous: 7 days before that
+            prevEndDate = new Date(startDate.getTime() - 1);
+            prevStartDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+            break;
+          case 'month':
+            // Current: last 30 days
+            startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            // Previous: 30 days before that
+            prevEndDate = new Date(startDate.getTime() - 1);
+            prevStartDate = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+            break;
+          case 'all':
+            startDate = undefined;
+            // No comparison for "all time"
+            prevStartDate = undefined;
+            prevEndDate = undefined;
+            break;
+        }
+
         // 🚀 Cache: Check cache before expensive queries
-        const cacheKey = `dashboard:metrics:${organizationId}`;
+        const cacheKey = `dashboard:metrics:${organizationId}:${period}:v2`;
         try {
           const cached = await igniter.store.get<any>(cacheKey);
           if (cached) {
@@ -57,15 +106,61 @@ export const dashboardController = igniter.controller({
             },
           });
 
-          // Obter métricas agregadas
-          const metrics = await dashboardService.getAggregatedMetrics(connections);
+          // Fetch current and previous period metrics in parallel
+          const [currentMetrics, previousMetrics] = await Promise.all([
+            dashboardService.getAggregatedMetrics(connections, startDate, endDate),
+            // Only fetch previous period if not "all"
+            prevStartDate && prevEndDate
+              ? dashboardService.getAggregatedMetrics(connections, prevStartDate, prevEndDate)
+              : null,
+          ]);
+
+          // Calculate percentage changes
+          const calculateChange = (current: number, previous: number | null): number | null => {
+            if (previous === null || previous === 0) return current > 0 ? 100 : null;
+            return Math.round(((current - previous) / previous) * 100);
+          };
+
+          const comparison = previousMetrics ? {
+            // Conversations
+            totalContacts: calculateChange(currentMetrics.conversations.total, previousMetrics.conversations.total),
+            openChats: calculateChange(currentMetrics.conversations.inProgress, previousMetrics.conversations.inProgress),
+            aiControlled: calculateChange(currentMetrics.conversations.aiControlled, previousMetrics.conversations.aiControlled),
+            humanControlled: calculateChange(currentMetrics.conversations.humanControlled, previousMetrics.conversations.humanControlled),
+            // Messages
+            totalMessages: calculateChange(currentMetrics.messages.sent + currentMetrics.messages.delivered, previousMetrics.messages.sent + previousMetrics.messages.delivered),
+            sentMessages: calculateChange(currentMetrics.messages.sent, previousMetrics.messages.sent),
+            receivedMessages: calculateChange(currentMetrics.messages.delivered, previousMetrics.messages.delivered),
+            deliveryRate: calculateChange(
+              currentMetrics.messages.deliveryRate || 0,
+              previousMetrics.messages.deliveryRate || 0
+            ),
+            previousPeriod: {
+              startDate: prevStartDate?.toISOString(),
+              endDate: prevEndDate?.toISOString(),
+              data: {
+                totalContacts: previousMetrics.conversations.total,
+                openChats: previousMetrics.conversations.inProgress,
+                totalMessages: previousMetrics.messages.sent + previousMetrics.messages.delivered,
+                sentMessages: previousMetrics.messages.sent,
+                aiControlled: previousMetrics.conversations.aiControlled,
+                humanControlled: previousMetrics.conversations.humanControlled,
+              },
+            },
+          } : null;
 
           const responseData = {
-            data: metrics,
+            data: currentMetrics,
+            comparison,
             instances: {
               total: connections.length,
               connected: connections.filter((i) => i.status === 'CONNECTED').length,
               disconnected: connections.filter((i) => i.status === 'DISCONNECTED').length,
+            },
+            period: {
+              type: period,
+              startDate: startDate?.toISOString() || 'all-time',
+              endDate: endDate.toISOString(),
             },
           };
 
@@ -79,7 +174,7 @@ export const dashboardController = igniter.controller({
           return response.success(responseData);
         } catch (error: any) {
           console.error('Error fetching dashboard metrics:', error);
-          return response.error(error.message || 'Erro ao buscar métricas');
+          return (response as any).error(error.message || 'Erro ao buscar métricas');
         }
       },
     }),

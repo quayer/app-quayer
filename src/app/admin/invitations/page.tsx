@@ -485,7 +485,7 @@ export default function AdminInvitationsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {status === 'pending' && (
+                            {status !== 'accepted' && (
                               <>
                                 <DropdownMenuItem onClick={() => handleCopyInviteLink(invitation.id)}>
                                   <Copy className="h-4 w-4 mr-2" />
@@ -493,21 +493,19 @@ export default function AdminInvitationsPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleResendInvitation(invitation.id)}>
                                   <Send className="h-4 w-4 mr-2" />
-                                  Reenviar Email
+                                  {status === 'expired' ? 'Reenviar (Renovar)' : 'Reenviar Email'}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSelectedInvitation(invitation)
+                                    setDeleteModalOpen(true)
+                                  }}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Cancelar Convite
                                 </DropdownMenuItem>
                               </>
-                            )}
-                            {status !== 'accepted' && (
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setSelectedInvitation(invitation)
-                                  setDeleteModalOpen(true)
-                                }}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Cancelar Convite
-                              </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>

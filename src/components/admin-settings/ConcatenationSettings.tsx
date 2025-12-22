@@ -58,9 +58,8 @@ export function ConcatenationSettings() {
   // Save settings
   const saveMutation = useMutation({
     mutationFn: async (data: ConcatenationSettingsData) => {
-      return api['system-settings'].updateConcatenation.mutate({
+      return (api['system-settings'].updateConcatenation.mutate as any)({
         body: data,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

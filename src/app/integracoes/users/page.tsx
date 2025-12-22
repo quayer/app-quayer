@@ -71,6 +71,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Progress } from '@/components/ui/progress'
 import {
   UserPlus,
   Copy,
@@ -85,6 +86,8 @@ import {
   UserCog,
   UserMinus,
   Crown,
+  AlertTriangle,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -128,6 +131,17 @@ export default function UsersPage() {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState({})
+
+  // Fetch current organization (for maxUsers limit)
+  const { data: orgResponse } = useQuery({
+    queryKey: ['current-organization', currentOrgId],
+    queryFn: async () => {
+      if (!currentOrgId) return null
+      const response = await api.organizations.getCurrent.query()
+      return response as unknown as { maxUsers: number; name: string; type: string }
+    },
+    enabled: !!currentOrgId,
+  })
 
   // Fetch organization members
   const { data: membersResponse, isLoading, refetch } = useQuery({
@@ -201,6 +215,13 @@ export default function UsersPage() {
 
   // Extract members array from response
   const members = membersResponse?.members || []
+
+  // Get organization limits
+  const maxUsers = orgResponse?.maxUsers || 10
+  const currentMemberCount = members.length
+  const isAtLimit = currentMemberCount >= maxUsers
+  const limitPercentage = Math.min((currentMemberCount / maxUsers) * 100, 100)
+  const isNearLimit = limitPercentage >= 80 && !isAtLimit
 
   // Get current user's role in organization
   const currentUserOrgRole = members.find(m => m.userId === currentUser?.id)?.role
@@ -338,7 +359,6 @@ export default function UsersPage() {
         cell: ({ row }) => {
           const member = row.original
           const isCurrentUser = member.userId === currentUser?.id
-          const isMaster = member.role === 'master'
 
           return (
             <DropdownMenu>
@@ -514,19 +534,54 @@ export default function UsersPage() {
           </p>
         </div>
         {canManageMembers && (
-          <Button onClick={() => setInviteDialogOpen(true)}>
+          <Button
+            onClick={() => setInviteDialogOpen(true)}
+            disabled={isAtLimit}
+            title={isAtLimit ? 'Limite de membros atingido' : undefined}
+          >
             <UserPlus className="mr-2 h-4 w-4" />
             Convidar Usuário
           </Button>
         )}
       </div>
 
+      {/* Limit Warning */}
+      {isAtLimit && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Sua organização atingiu o limite de <strong>{maxUsers} membros</strong>.
+            Para adicionar mais membros, entre em contato com o suporte para fazer upgrade do seu plano.
+          </AlertDescription>
+        </Alert>
+      )}
+      {isNearLimit && (
+        <Alert className="border-yellow-500/50 bg-yellow-500/10">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          <AlertDescription className="text-yellow-700 dark:text-yellow-400">
+            Sua organização está próxima do limite de membros ({currentMemberCount}/{maxUsers}).
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Card className={isAtLimit ? 'border-destructive/50' : isNearLimit ? 'border-yellow-500/50' : ''}>
           <CardHeader className="pb-3">
-            <CardDescription>Total de Membros</CardDescription>
-            <CardTitle className="text-4xl">{stats.total}</CardTitle>
+            <CardDescription className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Limite de Membros
+            </CardDescription>
+            <CardTitle className="text-2xl">
+              {currentMemberCount} / {maxUsers}
+            </CardTitle>
+            <Progress
+              value={limitPercentage}
+              className={`h-2 ${isAtLimit ? '[&>div]:bg-destructive' : isNearLimit ? '[&>div]:bg-yellow-500' : ''}`}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {isAtLimit ? 'Limite atingido' : `${Math.round(100 - limitPercentage)}% disponível`}
+            </p>
           </CardHeader>
         </Card>
         <Card>
@@ -553,6 +608,15 @@ export default function UsersPage() {
             <CardTitle className="text-4xl flex items-center gap-2">
               <User className="h-6 w-6 text-gray-500" />
               {stats.users}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Ativos</CardDescription>
+            <CardTitle className="text-4xl flex items-center gap-2">
+              <CheckCircle2 className="h-6 w-6 text-green-500" />
+              {stats.active}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -705,6 +769,14 @@ export default function UsersPage() {
 
           {!inviteUrl ? (
             <form onSubmit={handleInvite} className="space-y-4">
+              {isNearLimit && (
+                <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                  <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                  <AlertDescription className="text-yellow-700 dark:text-yellow-400">
+                    Restam {maxUsers - currentMemberCount} vagas disponíveis.
+                  </AlertDescription>
+                </Alert>
+              )}
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>

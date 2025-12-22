@@ -37,6 +37,7 @@ export enum MessageType {
   BUTTONS = 'BUTTONS',
   LIST = 'LIST',
   TEMPLATE = 'TEMPLATE',
+  UNKNOWN = 'UNKNOWN',
 }
 
 export enum MessageStatus {
@@ -56,6 +57,9 @@ export enum WebhookEvent {
   PRESENCE_UPDATE = 'PRESENCE_UPDATE',
   CALL_RECEIVED = 'CALL_RECEIVED',
   GROUP_UPDATE = 'GROUP_UPDATE',
+  CONTACT_UPDATE = 'CONTACT_UPDATE',
+  CHAT_UPDATE = 'CHAT_UPDATE',
+  UNKNOWN = 'UNKNOWN',
 }
 
 // ============================================

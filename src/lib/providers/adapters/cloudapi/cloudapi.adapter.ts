@@ -399,14 +399,15 @@ export class CloudAPIAdapter implements IWhatsAppProvider {
     
     // Get the temporary URL for the media
     const mediaInfo = await client.getMediaUrl(mediaId);
-    
+    const mediaInfoAny = mediaInfo as any;
+
     // Download the media using the URL
     const buffer = await client.downloadMedia(mediaInfo.url);
-    
+
     return {
       data: buffer.toString('base64'),
       mimeType: mediaInfo.mime_type || 'application/octet-stream',
-      fileName: mediaInfo.file_name,
+      fileName: mediaInfoAny.file_name || undefined,
       size: buffer.length,
     };
   }

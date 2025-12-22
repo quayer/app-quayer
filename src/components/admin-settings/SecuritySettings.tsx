@@ -99,9 +99,8 @@ export function SecuritySettings() {
   // Save settings
   const saveMutation = useMutation({
     mutationFn: async (data: SecuritySettingsData) => {
-      return api['system-settings'].updateSecurity.mutate({
+      return (api['system-settings'].updateSecurity.mutate as any)({
         body: data,
-        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

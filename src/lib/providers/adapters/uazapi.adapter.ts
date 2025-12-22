@@ -22,6 +22,9 @@ import {
 } from '../types/normalized.types';
 import { uazService } from '@/lib/uaz/uaz.service';
 
+// Type assertion para métodos dinâmicos do uazService
+const uazServiceAny = uazService as any;
+
 class UAZapiLegacyAdapter implements IProviderAdapter {
   readonly providerType = ProviderType.UAZAPI;
   readonly providerName = 'UAZapi';
@@ -38,7 +41,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
   }): Promise<ProviderResponse<NormalizedInstance>> {
     try {
       if (params.token) {
-        await uazService.initInstance(params.token, params.name);
+        await uazServiceAny.initInstance(params.token, params.name);
       }
 
       return {
@@ -63,7 +66,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     instanceId: string;
   }): Promise<ProviderResponse<{ qrCode?: string }>> {
     try {
-      const result = await uazService.connectInstance(params.token);
+      const result = await uazServiceAny.connectInstance(params.token);
 
       const qrCode = typeof result === 'string'
         ? result
@@ -94,7 +97,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     instanceId: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.disconnectInstance(params.token);
+      await uazServiceAny.disconnectInstance(params.token);
 
       return {
         success: true,
@@ -110,7 +113,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     token: string;
   }): Promise<ProviderResponse<NormalizedInstance>> {
     try {
-      const result = await uazService.getStatus(params.token);
+      const result = await uazServiceAny.getStatus(params.token);
 
       const status = this.mapStatus(result?.status || result?.state || 'disconnected');
 
@@ -122,7 +125,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
           status,
           phoneNumber: result?.phoneNumber || result?.owner,
           profileName: result?.profileName,
-          profilePicUrl: result?.profilePicUrl,
+          profilePicture: result?.profilePicUrl,
           provider: ProviderType.UAZAPI,
           createdAt: new Date(),
         },
@@ -139,7 +142,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     instanceId: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.deleteInstance(params.token);
+      await uazServiceAny.deleteInstance(params.token);
 
       return {
         success: true,
@@ -162,7 +165,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     quotedMessageId?: string;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendText(params.token, params.to, params.text);
+      const result = await uazServiceAny.sendText(params.token, params.to, params.text);
 
       return {
         success: true,
@@ -183,7 +186,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     fileName?: string;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendMedia(
+      const result = await uazServiceAny.sendMedia(
         params.token,
         params.to,
         params.mediaUrl,
@@ -209,7 +212,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     buttons: Array<{ id: string; text: string }>;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendButtons(
+      const result = await uazServiceAny.sendButtons(
         params.token,
         params.to,
         params.text,
@@ -238,7 +241,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     }>;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendList(
+      const result = await uazServiceAny.sendList(
         params.token,
         params.to,
         params.text,
@@ -266,7 +269,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     address?: string;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendLocation(
+      const result = await uazServiceAny.sendLocation(
         params.token,
         params.to,
         params.latitude,
@@ -292,7 +295,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     contacts: Array<{ name: string; phone: string }>;
   }): Promise<ProviderResponse<NormalizedMessage>> {
     try {
-      const result = await uazService.sendContact(
+      const result = await uazServiceAny.sendContact(
         params.token,
         params.to,
         params.contacts
@@ -319,7 +322,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     limit?: number;
   }): Promise<ProviderResponse<NormalizedMessage[]>> {
     try {
-      const result = await uazService.findMessages(params.token, {
+      const result = await uazServiceAny.findMessages(params.token, {
         chatId: params.chatId,
         limit: params.limit || 50,
       });
@@ -342,7 +345,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     messageId: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.markAsRead(params.token, params.messageId);
+      await uazServiceAny.markAsRead(params.token, params.messageId);
 
       return {
         success: true,
@@ -359,7 +362,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     messageId: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.deleteMessage(params.token, params.messageId);
+      await uazServiceAny.deleteMessage(params.token, params.messageId);
 
       return {
         success: true,
@@ -377,7 +380,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     presence: 'composing' | 'recording' | 'paused';
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.sendPresence(params.token, params.to, params.presence);
+      await uazServiceAny.sendPresence(params.token, params.to, params.presence);
 
       return {
         success: true,
@@ -398,17 +401,16 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     phoneNumber: string;
   }): Promise<ProviderResponse<NormalizedContact>> {
     try {
-      const result = await uazService.getContact(params.token, params.phoneNumber);
+      const result = await uazServiceAny.getContact(params.token, params.phoneNumber);
 
       return {
         success: true,
         data: {
-          id: result?.id || params.phoneNumber,
           phoneNumber: params.phoneNumber,
           name: result?.pushname || result?.name,
-          profilePicUrl: result?.profilePicUrl,
+          profilePicture: result?.profilePicUrl,
           isBlocked: result?.isBlocked || false,
-          isGroup: params.phoneNumber.includes('@g.us'),
+          isBusiness: result?.isBusiness || false,
         },
         provider: ProviderType.UAZAPI,
         timestamp: new Date(),
@@ -423,7 +425,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     phoneNumber: string;
   }): Promise<ProviderResponse<{ exists: boolean; jid?: string }>> {
     try {
-      const result = await uazService.checkNumber(params.token, params.phoneNumber);
+      const result = await uazServiceAny.checkNumber(params.token, params.phoneNumber);
 
       return {
         success: true,
@@ -444,7 +446,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     phoneNumber: string;
   }): Promise<ProviderResponse<{ url: string }>> {
     try {
-      const result = await uazService.getProfilePicture(params.token, params.phoneNumber);
+      const result = await uazServiceAny.getProfilePicture(params.token, params.phoneNumber);
 
       return {
         success: true,
@@ -464,7 +466,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     phoneNumber: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.blockContact(params.token, params.phoneNumber);
+      await uazServiceAny.blockContact(params.token, params.phoneNumber);
 
       return {
         success: true,
@@ -481,7 +483,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     phoneNumber: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.unblockContact(params.token, params.phoneNumber);
+      await uazServiceAny.unblockContact(params.token, params.phoneNumber);
 
       return {
         success: true,
@@ -503,7 +505,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     participants: string[];
   }): Promise<ProviderResponse<{ groupId: string }>> {
     try {
-      const result = await uazService.createGroup(params.token, params.name, params.participants);
+      const result = await uazServiceAny.createGroup(params.token, params.name, params.participants);
 
       return {
         success: true,
@@ -524,7 +526,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     participants: string[];
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.addGroupParticipants(params.token, params.groupId, params.participants);
+      await uazServiceAny.addGroupParticipants(params.token, params.groupId, params.participants);
 
       return {
         success: true,
@@ -542,7 +544,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     participants: string[];
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.removeGroupParticipants(params.token, params.groupId, params.participants);
+      await uazServiceAny.removeGroupParticipants(params.token, params.groupId, params.participants);
 
       return {
         success: true,
@@ -559,7 +561,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     groupId: string;
   }): Promise<ProviderResponse<void>> {
     try {
-      await uazService.leaveGroup(params.token, params.groupId);
+      await uazServiceAny.leaveGroup(params.token, params.groupId);
 
       return {
         success: true,
@@ -576,7 +578,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     groupId: string;
   }): Promise<ProviderResponse<{ inviteLink: string }>> {
     try {
-      const result = await uazService.getGroupInviteLink(params.token, params.groupId);
+      const result = await uazServiceAny.getGroupInviteLink(params.token, params.groupId);
 
       return {
         success: true,
@@ -605,10 +607,11 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
       'messages_update': WebhookEvent.MESSAGE_STATUS_UPDATE,
       'connection': WebhookEvent.CONNECTION_UPDATE,
       'contacts': WebhookEvent.CONTACT_UPDATE,
-      'call': WebhookEvent.CALL,
+      'call': WebhookEvent.CALL_RECEIVED,
       'presence': WebhookEvent.PRESENCE_UPDATE,
       'groups': WebhookEvent.GROUP_UPDATE,
       'chats': WebhookEvent.CHAT_UPDATE,
+      'qrcode': WebhookEvent.QR_CODE,
     };
 
     const normalizedEvent = eventMap[event] || WebhookEvent.UNKNOWN;
@@ -655,7 +658,10 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
           healthy: false,
           latency: Date.now() - start,
         },
-        error: error instanceof Error ? error.message : 'Health check failed',
+        error: {
+          code: 'HEALTH_CHECK_FAILED',
+          message: error instanceof Error ? error.message : 'Health check failed',
+        },
         provider: ProviderType.UAZAPI,
         timestamp: new Date(),
       };
@@ -674,35 +680,45 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
       'closed': InstanceStatus.DISCONNECTED,
       'disconnected': InstanceStatus.DISCONNECTED,
       'connecting': InstanceStatus.CONNECTING,
-      'qrcode': InstanceStatus.CONNECTING,
+      'qrcode': InstanceStatus.QR_CODE,
+      'qr_code': InstanceStatus.QR_CODE,
+      'error': InstanceStatus.ERROR,
+      'failed': InstanceStatus.ERROR,
     };
 
     return statusMap[status?.toLowerCase()] || InstanceStatus.DISCONNECTED;
   }
 
   private normalizeMessage(rawMessage: any): NormalizedMessage {
+    const remoteJid = rawMessage?.key?.remoteJid || rawMessage?.chatid || rawMessage?.from || '';
+    const isGroup = remoteJid.includes('@g.us');
+
     return {
       id: rawMessage?.key?.id || rawMessage?.id || rawMessage?.messageid || '',
-      chatId: rawMessage?.key?.remoteJid || rawMessage?.chatid || rawMessage?.from || '',
-      fromMe: rawMessage?.key?.fromMe || rawMessage?.fromMe || false,
+      instanceId: rawMessage?.instanceId || '',
+      from: rawMessage?.key?.participant || rawMessage?.author || rawMessage?.from || '',
+      to: rawMessage?.to,
+      isGroup,
+      groupId: isGroup ? remoteJid : undefined,
       type: this.mapMessageType(rawMessage?.type || rawMessage?.messageType),
-      content: rawMessage?.message?.conversation ||
-               rawMessage?.message?.extendedTextMessage?.text ||
-               rawMessage?.text ||
-               rawMessage?.caption ||
-               '',
+      content: {
+        text: rawMessage?.message?.conversation ||
+              rawMessage?.message?.extendedTextMessage?.text ||
+              rawMessage?.text ||
+              rawMessage?.caption ||
+              '',
+      },
       timestamp: rawMessage?.messageTimestamp
         ? new Date(rawMessage.messageTimestamp * 1000)
         : new Date(),
+      isFromMe: rawMessage?.key?.fromMe || rawMessage?.fromMe || false,
       status: this.mapMessageStatus(rawMessage?.status || rawMessage?.ack),
-      sender: {
-        id: rawMessage?.key?.participant || rawMessage?.author || rawMessage?.from || '',
-        name: rawMessage?.pushName || rawMessage?.pushname || '',
-      },
       quotedMessage: rawMessage?.quotedMsg ? {
         id: rawMessage.quotedMsg.key?.id || '',
+        from: rawMessage.quotedMsg.key?.participant || rawMessage.quotedMsg.from || '',
         content: rawMessage.quotedMsg.message?.conversation || '',
       } : undefined,
+      raw: rawMessage,
     };
   }
 
@@ -756,7 +772,10 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
 
     return {
       success: false,
-      error: `[UAZapi ${operation}] ${message}`,
+      error: {
+        code: `UAZAPI_${operation.toUpperCase()}_ERROR`,
+        message: `[UAZapi ${operation}] ${message}`,
+      },
       provider: ProviderType.UAZAPI,
       timestamp: new Date(),
     } as ProviderResponse<T>;

@@ -215,6 +215,17 @@ export const webhookRateLimiter = new RateLimiter({
 });
 
 /**
+ * Rate limiter por sessão de chat
+ * 20 mensagens por minuto por sessão
+ * Previne spam e abuso de envio de mensagens
+ */
+export const sessionRateLimiter = new RateLimiter({
+  limit: 20,
+  window: 60, // 1 minuto
+  prefix: 'ratelimit:session',
+});
+
+/**
  * Helper para extrair identificador da requisição
  */
 export function getClientIdentifier(req: Request | { ip?: string; headers: Headers }): string {

@@ -8,6 +8,17 @@
  * GET  /api/v1/webhooks/cloudapi (Meta verification challenge)
  *
  * Recebe webhooks de qualquer provider, normaliza e processa
+ *
+ * ⭐ MELHORIAS IMPLEMENTADAS (do workflow N8N):
+ * 1. Bot Echo Detection - Previne loops infinitos
+ * 2. WhatsApp 24h Window - Compliance com WhatsApp Business API
+ * 3. Auto-Pause on Human Reply - Bloqueia IA quando humano responde
+ * 4. Sistema de Comandos - @fechar, @pausar, @reabrir, etc.
+ *
+ * 🔐 SEGURANÇA (2025-12-21):
+ * 5. Rate Limiting por IP - 1000 req/min
+ * 6. IP Whitelist para UAZapi - IPs conhecidos
+ * 7. Signature Verification - HMAC-SHA256 (quando disponível)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,7 +30,125 @@ import { transcriptionQueue } from '@/lib/transcription';
 import { database } from '@/services/database';
 import { redis } from '@/services/redis';
 import { chatwootSyncService } from '@/features/chatwoot';
-import type { BrokerType, NormalizedWebhook } from '@/lib/providers/core/provider.types';
+import {
+  type BrokerType,
+  type NormalizedWebhook,
+  isBotEcho,
+  stripBotSignature,
+} from '@/lib/providers/core/provider.types';
+import { parseCommand, hasCommand, type ParsedCommand } from '@/lib/commands';
+import { geocodingService } from '@/lib/geocoding';
+import { webhookRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-limiter';
+import crypto from 'crypto';
+
+// ============================================================================
+// 🔐 SECURITY CONFIGURATION
+// ============================================================================
+
+/**
+ * IP Whitelist for UAZapi
+ * Configure via UAZAPI_ALLOWED_IPS environment variable (comma-separated)
+ * If not configured, all IPs are allowed (development mode)
+ *
+ * Known UAZapi IPs (update as needed):
+ * - 54.94.23.96 (São Paulo)
+ * - 18.231.12.154 (São Paulo)
+ * - 52.67.184.127 (São Paulo)
+ */
+const UAZAPI_ALLOWED_IPS = (process.env.UAZAPI_ALLOWED_IPS || '')
+  .split(',')
+  .map((ip) => ip.trim())
+  .filter(Boolean);
+
+/**
+ * Webhook signature secret (for HMAC verification)
+ * Configure via WEBHOOK_SIGNATURE_SECRET environment variable
+ */
+const WEBHOOK_SIGNATURE_SECRET = process.env.WEBHOOK_SIGNATURE_SECRET || '';
+
+/**
+ * Security mode: 'strict' | 'permissive'
+ * - strict: Block requests that fail security checks
+ * - permissive: Log warnings but allow requests (development)
+ */
+const SECURITY_MODE = process.env.WEBHOOK_SECURITY_MODE || 'permissive';
+
+/**
+ * Get client IP from request
+ */
+function getClientIP(request: NextRequest): string {
+  return getClientIdentifier(request);
+}
+
+/**
+ * Check if IP is in whitelist
+ */
+function isIPWhitelisted(ip: string, provider: string): boolean {
+  // Only apply whitelist for uazapi
+  if (provider !== 'uazapi') return true;
+
+  // If no whitelist configured, allow all (development mode)
+  if (UAZAPI_ALLOWED_IPS.length === 0) return true;
+
+  // Check if IP matches any whitelisted IP (supports wildcards like 54.94.*)
+  return UAZAPI_ALLOWED_IPS.some((allowedIP) => {
+    if (allowedIP.includes('*')) {
+      const pattern = allowedIP.replace(/\*/g, '.*');
+      return new RegExp(`^${pattern}$`).test(ip);
+    }
+    return ip === allowedIP;
+  });
+}
+
+/**
+ * Verify webhook signature (HMAC-SHA256)
+ * UAZapi sends signature in X-Webhook-Signature header
+ */
+function verifySignature(
+  rawBody: string,
+  signature: string | null,
+  provider: string
+): boolean {
+  // Skip verification if no secret configured
+  if (!WEBHOOK_SIGNATURE_SECRET) return true;
+
+  // Skip for providers that don't support signatures
+  if (!['uazapi', 'cloudapi'].includes(provider)) return true;
+
+  // Require signature if secret is configured
+  if (!signature) {
+    console.warn(`[Webhook] ⚠️ Missing signature header for ${provider}`);
+    return SECURITY_MODE !== 'strict';
+  }
+
+  try {
+    // UAZapi uses format: sha256=<signature>
+    const [algo, sig] = signature.split('=');
+    if (algo !== 'sha256' || !sig) {
+      console.warn(`[Webhook] ⚠️ Invalid signature format: ${signature}`);
+      return SECURITY_MODE !== 'strict';
+    }
+
+    const expectedSig = crypto
+      .createHmac('sha256', WEBHOOK_SIGNATURE_SECRET)
+      .update(rawBody)
+      .digest('hex');
+
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(sig),
+      Buffer.from(expectedSig)
+    );
+
+    if (!isValid) {
+      console.warn(`[Webhook] ⚠️ Signature mismatch for ${provider}`);
+    }
+
+    return isValid || SECURITY_MODE !== 'strict';
+  } catch (error) {
+    console.error('[Webhook] Signature verification error:', error);
+    return SECURITY_MODE !== 'strict';
+  }
+}
 
 /**
  * GET /api/v1/webhooks/cloudapi
@@ -30,7 +159,7 @@ export async function GET(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider: providerParam } = await params;
-  
+
   // Only Cloud API uses GET for verification
   if (providerParam !== 'cloudapi') {
     return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
@@ -64,21 +193,79 @@ export async function POST(
 ) {
   const { provider: providerParam } = await params;
   const provider = providerParam as BrokerType; // 'uazapi' | 'evolution' | 'baileys' | 'cloudapi'
-  const rawBody = await request.json();
+  const clientIP = getClientIP(request);
 
-  console.log(`[Webhook] Received from ${provider}:`, JSON.stringify(rawBody, null, 2));
+  // =========================================================================
+  // 🔐 SECURITY CHECKS
+  // =========================================================================
+
+  // 1. RATE LIMITING
+  const rateLimitResult = await webhookRateLimiter.check(clientIP);
+  if (!rateLimitResult.success) {
+    console.warn(`[Webhook] 🚫 Rate limit exceeded for IP ${clientIP}`);
+    return NextResponse.json(
+      { error: 'Rate limit exceeded', retryAfter: rateLimitResult.retryAfter },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rateLimitResult.retryAfter || 60),
+          'X-RateLimit-Limit': String(rateLimitResult.limit),
+          'X-RateLimit-Remaining': String(rateLimitResult.remaining),
+          'X-RateLimit-Reset': String(rateLimitResult.reset),
+        },
+      }
+    );
+  }
+
+  // 2. IP WHITELIST CHECK
+  if (!isIPWhitelisted(clientIP, provider)) {
+    console.warn(`[Webhook] 🚫 IP ${clientIP} not whitelisted for ${provider}`);
+    return NextResponse.json(
+      { error: 'Forbidden', message: 'IP not allowed' },
+      { status: 403 }
+    );
+  }
+
+  // Clone request to read body as text for signature verification
+  const rawBodyText = await request.text();
+  let rawBody: any;
+
+  try {
+    rawBody = JSON.parse(rawBodyText);
+  } catch (parseError) {
+    console.error('[Webhook] Failed to parse JSON body:', parseError);
+    return NextResponse.json(
+      { error: 'Invalid JSON body' },
+      { status: 400 }
+    );
+  }
+
+  // 3. SIGNATURE VERIFICATION
+  const signature = request.headers.get('x-webhook-signature') ||
+                   request.headers.get('x-hub-signature-256'); // Meta uses this
+  if (!verifySignature(rawBodyText, signature, provider)) {
+    console.warn(`[Webhook] 🚫 Invalid signature from IP ${clientIP}`);
+    return NextResponse.json(
+      { error: 'Forbidden', message: 'Invalid signature' },
+      { status: 403 }
+    );
+  }
+
+  // =========================================================================
+
+  console.log(`[Webhook] ✅ Security passed - Received from ${provider} (IP: ${clientIP}):`, JSON.stringify(rawBody, null, 2));
 
   try {
     // 1. NORMALIZAR WEBHOOK
     const normalized = await orchestrator.normalizeWebhook(provider, rawBody);
-    
+
     // 2. CLOUD API: Map phoneNumberId to real instanceId
     if (provider === 'cloudapi' && normalized.instanceId) {
       const instance = await database.instance.findFirst({
         where: { cloudApiPhoneNumberId: normalized.instanceId },
         select: { id: true },
       });
-      
+
       if (instance) {
         console.log(`[Webhook] CloudAPI: Mapped phoneNumberId ${normalized.instanceId} to instanceId ${instance.id}`);
         normalized.instanceId = instance.id;
@@ -151,6 +338,13 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     return;
   }
 
+  // ⭐ BOT ECHO DETECTION - Prevenir loops infinitos
+  // Se a mensagem contém nossa assinatura, é um echo do bot
+  if (message.content && isBotEcho(message.content)) {
+    console.log('[Webhook] 🔄 Bot echo detected - ignoring to prevent loop');
+    return;
+  }
+
   console.log(`[Webhook] Processing incoming message from ${from} (provider: ${provider})`);
 
   // 1. Buscar ou criar contato
@@ -215,15 +409,40 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     return;
   }
 
+  // ⭐ WHATSAPP 24H WINDOW - Atualizar janela quando cliente envia mensagem
+  try {
+    const windowInfo = await sessionsManager.updateWhatsAppWindow(session.id, true);
+    console.log(`[Webhook] WhatsApp window updated - expires at: ${windowInfo.expiresAt}`);
+  } catch (windowError) {
+    console.error('[Webhook] Failed to update WhatsApp window (non-blocking):', windowError);
+  }
+
+  // ⭐ COMANDO DETECTION - Verificar se mensagem é um comando
+  if (message.type === 'text' && hasCommand(message.content)) {
+    const command = parseCommand(message.content);
+    console.log(`[Webhook] 🎯 Command detected: ${command.type} (raw: ${command.raw})`);
+
+    await executeCommand(command, session.id, contact.id, instanceId);
+
+    // Se foi um comando, não processar como mensagem normal
+    // (a menos que seja NONE, o que significa que não é um comando válido)
+    if (command.type !== 'NONE') {
+      return;
+    }
+  }
+
   // 4. CONCATENAÇÃO DE MENSAGENS DE TEXTO
   if (message.type === 'text') {
     console.log('[Webhook] Text message - adding to concatenation queue');
+
+    // Limpar assinatura do bot se presente (caso tenha passado pelo check inicial)
+    const cleanContent = message.content ? stripBotSignature(message.content) : '';
 
     await messageConcatenator.addMessage(session.id, contact.id, {
       connectionId: instanceId, // Map instanceId to connectionId
       waMessageId: message.id,
       type: message.type,
-      content: message.content,
+      content: cleanContent,
       direction: 'INBOUND',
     });
 
@@ -231,7 +450,79 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     return;
   }
 
-  // 5. MÍDIA - SALVAR E ENFILEIRAR TRANSCRIÇÃO
+  // 5. LOCALIZAÇÃO - GEOCODING AUTOMÁTICO
+  if (message.type === 'location' && message.latitude && message.longitude) {
+    console.log(`[Webhook] 📍 Location message received: ${message.latitude}, ${message.longitude}`);
+
+    // Resolver endereço via Google Maps API
+    let geoData: any = {};
+    try {
+      const address = await geocodingService.reverseGeocode(
+        message.latitude,
+        message.longitude
+      );
+
+      if (address) {
+        geoData = {
+          geoAddress: address.formattedAddress,
+          geoNeighborhood: address.neighborhood,
+          geoCity: address.city,
+          geoState: address.state,
+          geoStateCode: address.stateCode,
+          geoPostalCode: address.postalCode,
+          geoCountry: address.country,
+        };
+        console.log(`[Webhook] 🗺️ Address resolved: ${address.formattedAddress}`);
+      }
+    } catch (geoError) {
+      console.error('[Webhook] Geocoding failed (non-blocking):', geoError);
+    }
+
+    // Salvar mensagem de localização com dados geocodificados
+    const savedLocation = await database.message.create({
+      data: {
+        sessionId: session.id,
+        contactId: contact.id,
+        connectionId: instanceId,
+        waMessageId: message.id,
+        direction: 'INBOUND',
+        type: 'location',
+        content: geoData.geoAddress || `📍 ${message.latitude}, ${message.longitude}`,
+        latitude: message.latitude,
+        longitude: message.longitude,
+        locationName: message.locationName,
+        ...geoData,
+        status: 'delivered',
+      },
+    });
+
+    console.log(`[Webhook] Location message saved: ${savedLocation.id}`);
+
+    // Sync com Chatwoot
+    try {
+      await chatwootSyncService.syncIncomingMessage({
+        instanceId,
+        organizationId: instance.organizationId,
+        phoneNumber: from,
+        contactName: contact.name || from,
+        messageContent: geoData.geoAddress || `📍 Localização: ${message.latitude}, ${message.longitude}`,
+        messageType: 'location',
+        isFromGroup: from.includes('@g.us'),
+      });
+    } catch (chatwootError) {
+      console.error('[Webhook] Chatwoot sync failed (non-blocking):', chatwootError);
+    }
+
+    // Atualizar lastMessageAt
+    await database.chatSession.update({
+      where: { id: session.id },
+      data: { lastMessageAt: new Date() },
+    });
+
+    return;
+  }
+
+  // 6. MÍDIA - SALVAR E ENFILEIRAR TRANSCRIÇÃO
   if (message.media) {
     console.log(`[Webhook] Media message (${message.media.type}) - saving and queuing transcription`);
 
@@ -311,6 +602,7 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
   // Atualizar status no banco se existir
   const existingMessage = await database.message.findUnique({
     where: { waMessageId: message.id },
+    include: { session: true },
   });
 
   if (existingMessage) {
@@ -324,11 +616,127 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
 
     console.log(`[Webhook] Message ${existingMessage.id} marked as sent`);
 
-    // TODO: Se foi enviada por humano, bloquear IA
-    // Verificar se existingMessage.direction === 'OUTBOUND' e foi manual
+    // ⭐ AUTO-PAUSE ON HUMAN REPLY
+    // Se mensagem OUTBOUND não foi enviada pelo bot, é um humano respondendo
+    // Verifica se deve pausar a IA automaticamente
+    // author é enum: CUSTOMER, AGENT, BOT, SYSTEM
+    if (existingMessage.session) {
+      const authorType = existingMessage.author; // MessageAuthor enum
+      const agentName = existingMessage.aiAgentName || 'Unknown';
+
+      // Se author é AGENT (não BOT), significa que um humano respondeu
+      const shouldPause = authorType === 'AGENT';
+
+      if (shouldPause) {
+        console.log(`[Webhook] 🛑 Human reply detected (author: ${authorType}) - auto-pausing AI`);
+
+        try {
+          await sessionsManager.autoPauseOnHumanReply(
+            existingMessage.sessionId,
+            existingMessage.aiAgentId || undefined,
+            agentName
+          );
+          console.log(`[Webhook] Session ${existingMessage.sessionId} paused due to human intervention`);
+        } catch (pauseError) {
+          console.error('[Webhook] Failed to auto-pause session:', pauseError);
+        }
+      }
+    }
   } else {
     console.log(`[Webhook] Message ${message.id} not found in database (may be external)`);
+
+    // ⭐ Mensagem externa (não está no banco) - provavelmente enviada via app WhatsApp
+    // Isso pode indicar resposta manual de humano
+    // TODO: Implementar detecção de mensagens externas para auto-pause
   }
+}
+
+/**
+ * Executar comando detectado na mensagem
+ */
+async function executeCommand(
+  command: ParsedCommand,
+  sessionId: string,
+  contactId: string,
+  _instanceId: string // Prefixo _ para indicar parâmetro reservado para uso futuro
+): Promise<void> {
+  console.log(`[Webhook] Executing command: ${command.type}`);
+
+  switch (command.type) {
+    case 'CLOSE':
+      // Fechar sessão
+      await sessionsManager.closeSession(sessionId);
+      console.log(`[Webhook] ✅ Session ${sessionId} closed via @fechar command`);
+      break;
+
+    case 'PAUSE':
+      // Pausar sessão (bloquear IA)
+      const pauseHours = command.hours || 24;
+      await sessionsManager.pauseSession(sessionId, pauseHours);
+      console.log(`[Webhook] ⏸️ Session ${sessionId} paused for ${pauseHours}h via @pausar command`);
+      break;
+
+    case 'REOPEN':
+      // Reabrir sessão (desbloquear IA)
+      await sessionsManager.resumeSession(sessionId);
+      console.log(`[Webhook] ▶️ Session ${sessionId} resumed via @reabrir command`);
+      break;
+
+    case 'BLACKLIST':
+      // Adicionar contato à blacklist (bypass bot permanente)
+      await database.contact.update({
+        where: { id: contactId },
+        data: { bypassBots: true },
+      });
+      console.log(`[Webhook] 🚫 Contact ${contactId} added to blacklist via @blacklist command`);
+      break;
+
+    case 'WHITELIST':
+      // Remover contato da blacklist
+      await database.contact.update({
+        where: { id: contactId },
+        data: { bypassBots: false },
+      });
+      console.log(`[Webhook] ✅ Contact ${contactId} removed from blacklist via @whitelist command`);
+      break;
+
+    case 'TRANSFER':
+      // Transferir para outro agente/departamento
+      if (command.targetId) {
+        // TODO: Implementar transferência real
+        console.log(`[Webhook] 🔀 Transfer requested to ${command.targetId} (not yet implemented)`);
+      } else {
+        console.log('[Webhook] Transfer command missing target ID');
+      }
+      break;
+
+    case 'STATUS':
+      // Retornar status da sessão
+      const session = await database.chatSession.findUnique({
+        where: { id: sessionId },
+        select: {
+          status: true,
+          lastMessageAt: true,
+          // WhatsApp 24h window fields will be added after migration
+        },
+      });
+      console.log(`[Webhook] 📊 Session status:`, session);
+      // TODO: Enviar resposta de volta para o chat
+      break;
+
+    case 'NONE':
+      // Não é um comando válido, não fazer nada
+      break;
+  }
+
+  // Log do comando executado (apenas console, não requer userId)
+  console.log(`[Webhook] Command executed: ${command.type}`, {
+    sessionId,
+    contactId,
+    command: command.raw,
+    hours: command.hours,
+    targetId: command.targetId,
+  });
 }
 
 /**

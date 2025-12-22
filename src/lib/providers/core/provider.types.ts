@@ -4,6 +4,41 @@
  * Tipos normalizados que TODOS os providers devem retornar
  */
 
+// ===== BOT SIGNATURE (Anti-Loop) =====
+/**
+ * Marcador invisível Unicode para detectar mensagens enviadas pelo bot
+ * Evita loops infinitos quando o bot recebe suas próprias mensagens via webhook
+ *
+ * Caracteres: Zero-Width Space + Zero-Width Non-Joiner + Zero-Width Joiner
+ * Invisível para usuários, mas detectável pelo sistema
+ */
+export const BOT_SIGNATURE = '\u200B\u200C\u200D';
+
+/**
+ * Verifica se uma mensagem foi enviada pelo bot (contém BOT_SIGNATURE)
+ */
+export function isBotEcho(content: string | null | undefined): boolean {
+  if (!content) return false;
+  return content.startsWith(BOT_SIGNATURE);
+}
+
+/**
+ * Remove BOT_SIGNATURE do conteúdo (para exibição limpa)
+ */
+export function stripBotSignature(content: string): string {
+  if (content.startsWith(BOT_SIGNATURE)) {
+    return content.slice(BOT_SIGNATURE.length);
+  }
+  return content;
+}
+
+/**
+ * Adiciona BOT_SIGNATURE ao conteúdo (antes de enviar)
+ */
+export function addBotSignature(content: string): string {
+  return BOT_SIGNATURE + content;
+}
+
 // ===== BROKER TYPE =====
 export type BrokerType = 'uazapi' | 'evolution' | 'baileys' | 'cloudapi';
 
@@ -189,6 +224,11 @@ export interface WebhookData {
     content: string;
     media?: MediaMessage;
     timestamp: Date;
+    // Location data (quando type = 'location')
+    latitude?: number;
+    longitude?: number;
+    locationName?: string;
+    locationAddress?: string;
   };
   status?: InstanceStatus;
   qrCode?: string;

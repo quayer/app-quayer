@@ -28,7 +28,9 @@ import {
   Info,
   Settings,
   Cloud,
-  Zap
+  Zap,
+  XCircle,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -55,12 +57,20 @@ interface CreateIntegrationData {
 type Step = 'channel' | 'config' | 'method' | 'connect' | 'share' | 'success';
 type ConnectionMethod = 'qrcode' | 'share' | null;
 
+interface CloudApiValidation {
+  status: 'idle' | 'validating' | 'valid' | 'invalid';
+  phoneNumber?: string;
+  verifiedName?: string;
+  error?: string;
+}
+
 export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode, isAdmin = false }: CreateIntegrationModalProps) {
   const [currentStep, setCurrentStep] = useState<Step>('channel');
   const [loading, setLoading] = useState(false);
   const [shareLink, setShareLink] = useState<string>('');
   const [instanceId, setInstanceId] = useState<string>('');
   const [connectionMethod, setConnectionMethod] = useState<ConnectionMethod>(null);
+  const [cloudApiValidation, setCloudApiValidation] = useState<CloudApiValidation>({ status: 'idle' });
   const [formData, setFormData] = useState<CreateIntegrationData>({
     name: '',
     description: '',
@@ -92,6 +102,52 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(stepOrder[currentIndex - 1]);
+    }
+  };
+
+  const handleValidateCloudApi = async () => {
+    if (!formData.cloudApiAccessToken || !formData.cloudApiPhoneNumberId || !formData.cloudApiWabaId) {
+      toast.error('Preencha todos os campos de credenciais primeiro');
+      return;
+    }
+
+    setCloudApiValidation({ status: 'validating' });
+
+    try {
+      const response = await fetch('/api/v1/instances/validate-cloud-api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          cloudApiAccessToken: formData.cloudApiAccessToken,
+          cloudApiPhoneNumberId: formData.cloudApiPhoneNumberId,
+          cloudApiWabaId: formData.cloudApiWabaId,
+        }),
+      });
+
+      const result = await response.json();
+      const data = result.data || result;
+
+      if (data.valid) {
+        setCloudApiValidation({
+          status: 'valid',
+          phoneNumber: data.phoneNumber,
+          verifiedName: data.verifiedName,
+        });
+        toast.success('Credenciais válidas! Conexão verificada com sucesso.');
+      } else {
+        setCloudApiValidation({
+          status: 'invalid',
+          error: data.error || 'Credenciais inválidas',
+        });
+        toast.error(data.message || 'Credenciais inválidas. Verifique e tente novamente.');
+      }
+    } catch (error: any) {
+      setCloudApiValidation({
+        status: 'invalid',
+        error: error.message || 'Erro ao validar credenciais',
+      });
+      toast.error('Erro ao validar credenciais. Tente novamente.');
     }
   };
 
@@ -210,6 +266,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     setShareLink('');
     setInstanceId('');
     setConnectionMethod(null);
+    setCloudApiValidation({ status: 'idle' });
     onClose();
   };
 
@@ -404,7 +461,10 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                         id="cloudApiAccessToken"
                         type="password"
                         value={formData.cloudApiAccessToken}
-                        onChange={(e) => setFormData(prev => ({ ...prev, cloudApiAccessToken: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, cloudApiAccessToken: e.target.value }));
+                          setCloudApiValidation({ status: 'idle' });
+                        }}
                         placeholder="EAAB..."
                         className="mt-1 font-mono"
                       />
@@ -417,7 +477,10 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                         <Input
                           id="cloudApiPhoneNumberId"
                           value={formData.cloudApiPhoneNumberId}
-                          onChange={(e) => setFormData(prev => ({ ...prev, cloudApiPhoneNumberId: e.target.value }))}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, cloudApiPhoneNumberId: e.target.value }));
+                            setCloudApiValidation({ status: 'idle' });
+                          }}
                           placeholder="123456789..."
                           className="mt-1 font-mono"
                         />
@@ -427,12 +490,79 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                         <Input
                           id="cloudApiWabaId"
                           value={formData.cloudApiWabaId}
-                          onChange={(e) => setFormData(prev => ({ ...prev, cloudApiWabaId: e.target.value }))}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, cloudApiWabaId: e.target.value }));
+                            setCloudApiValidation({ status: 'idle' });
+                          }}
                           placeholder="987654321..."
                           className="mt-1 font-mono"
                         />
                       </div>
                     </div>
+
+                    {/* Botão de Testar Credenciais */}
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleValidateCloudApi}
+                        disabled={
+                          cloudApiValidation.status === 'validating' ||
+                          !formData.cloudApiAccessToken ||
+                          !formData.cloudApiPhoneNumberId ||
+                          !formData.cloudApiWabaId
+                        }
+                        className="flex items-center gap-2"
+                      >
+                        {cloudApiValidation.status === 'validating' ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Validando...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="h-4 w-4" />
+                            Testar Credenciais
+                          </>
+                        )}
+                      </Button>
+
+                      {cloudApiValidation.status === 'valid' && (
+                        <div className="flex items-center gap-2 text-green-600">
+                          <CheckCircle className="h-5 w-5" />
+                          <span className="text-sm font-medium">Válido</span>
+                        </div>
+                      )}
+
+                      {cloudApiValidation.status === 'invalid' && (
+                        <div className="flex items-center gap-2 text-red-600">
+                          <XCircle className="h-5 w-5" />
+                          <span className="text-sm font-medium">Inválido</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Feedback visual de validação */}
+                    {cloudApiValidation.status === 'valid' && cloudApiValidation.verifiedName && (
+                      <Alert className="bg-green-50 border-green-200">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <AlertDescription className="text-green-700 text-sm">
+                          <strong>Conexão verificada!</strong><br />
+                          Nome: {cloudApiValidation.verifiedName}<br />
+                          Telefone: {cloudApiValidation.phoneNumber}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {cloudApiValidation.status === 'invalid' && (
+                      <Alert className="bg-red-50 border-red-200">
+                        <XCircle className="h-4 w-4 text-red-600" />
+                        <AlertDescription className="text-red-700 text-sm">
+                          <strong>Falha na validação</strong><br />
+                          {cloudApiValidation.error || 'Verifique as credenciais e tente novamente.'}
+                        </AlertDescription>
+                      </Alert>
+                    )}
 
                     <Alert className="bg-blue-50 border-blue-200">
                       <Info className="h-4 w-4 text-blue-600" />

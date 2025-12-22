@@ -43,8 +43,15 @@ export const contactsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
+        const isAdmin = user.role === 'admin';
+
+        // 🔒 SECURITY FIX: Bloquear usuários sem organização (previne vazamento de dados)
+        if (!isAdmin && !user.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada. Complete o onboarding primeiro.');
+        }
+
         // Admin pode ver todos os contatos, outros usuários veem apenas da sua org
-        const organizationId = user.role === 'admin' ? undefined : user.currentOrgId;
+        const organizationId = isAdmin ? undefined : user.currentOrgId;
 
         const where: any = {};
 
@@ -127,6 +134,11 @@ export const contactsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
+        // 🔒 SECURITY: Validar organização antes de buscar
+        if (user.role !== 'admin' && !user.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada');
+        }
+
         const contact = await database.contact.findUnique({
           where: { id },
           include: {
@@ -199,6 +211,11 @@ export const contactsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
+        // 🔒 SECURITY: Validar organização antes de modificar
+        if (user.role !== 'admin' && !user.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada');
+        }
+
         // Verificar se contato existe
         const existing = await database.contact.findUnique({
           where: { id },
@@ -247,6 +264,11 @@ export const contactsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
+        // 🔒 SECURITY: Validar organização antes de deletar
+        if (user.role !== 'admin' && !user.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada');
+        }
+
         const contact = await database.contact.findUnique({
           where: { id },
         });
@@ -286,6 +308,11 @@ export const contactsController = igniter.controller({
 
         if (!user) {
           return response.unauthorized('Autenticação necessária');
+        }
+
+        // 🔒 SECURITY: Validar organização antes de acessar
+        if (user.role !== 'admin' && !user.currentOrgId) {
+          return response.forbidden('Usuário não possui organização associada');
         }
 
         // Verificar se contato existe

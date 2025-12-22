@@ -458,7 +458,8 @@ export class CloudAPIClient {
     const formData = new FormData();
     formData.append('messaging_product', 'whatsapp');
     formData.append('type', mimeType);
-    formData.append('file', new Blob([fileBuffer], { type: mimeType }), filename);
+    // Convert Buffer to BlobPart compatible format
+    formData.append('file', new Blob([fileBuffer as unknown as BlobPart], { type: mimeType }), filename);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout * 2); // Longer timeout for uploads

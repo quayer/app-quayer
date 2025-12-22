@@ -3,12 +3,75 @@
 import { cookies } from 'next/headers'
 import jwt from 'jsonwebtoken'
 import { database as db } from '@/services/database'
+import { getOrFetch, resilientCacheDel } from '@/services/store'
+
+// ==================== CACHE KEYS ====================
+const CACHE_KEYS = {
+  DASHBOARD_STATS: 'admin:dashboard:stats',
+  RECENT_ACTIVITY: (limit: number) => `admin:dashboard:activity:${limit}`,
+  RECENT_ORGS: (limit: number) => `admin:dashboard:orgs:${limit}`,
+  PERMISSIONS_STATS: 'admin:permissions:stats',
+  MESSAGES_STATS: 'admin:messages:stats',
+} as const
+
+// Cache TTL em milissegundos (60 segundos)
+const CACHE_TTL = 60 * 1000
+
+/**
+ * Invalida caches do dashboard admin
+ * Chamado quando dados são modificados (create/update/delete)
+ */
+async function invalidateDashboardCache() {
+  try {
+    await Promise.all([
+      resilientCacheDel(CACHE_KEYS.DASHBOARD_STATS),
+      resilientCacheDel(CACHE_KEYS.RECENT_ACTIVITY(5)),
+      resilientCacheDel(CACHE_KEYS.RECENT_ORGS(5)),
+    ])
+    console.log('[Admin Cache] Dashboard cache invalidated')
+  } catch (error) {
+    console.warn('[Admin Cache] Failed to invalidate cache:', error)
+  }
+}
 
 /**
  * Server Actions para páginas admin
  * ✅ CORREÇÃO BRUTAL: Acessar banco diretamente no servidor (sem API HTTP)
  * Usa database service com alias instance -> connection
  */
+
+// Helper para formatar mensagem de log de auditoria
+function formatLogMessage(action: string, resource: string, resourceId: string | null): string {
+  const actionLabels: Record<string, string> = {
+    CREATE: 'criou',
+    UPDATE: 'atualizou',
+    DELETE: 'excluiu',
+    LOGIN: 'fez login',
+    LOGOUT: 'fez logout',
+    VIEW: 'visualizou',
+    EXPORT: 'exportou',
+    IMPORT: 'importou',
+    SEND: 'enviou',
+    RECEIVE: 'recebeu',
+  }
+
+  const resourceLabels: Record<string, string> = {
+    USER: 'usuário',
+    ORGANIZATION: 'organização',
+    INSTANCE: 'instância',
+    MESSAGE: 'mensagem',
+    CONTACT: 'contato',
+    WEBHOOK: 'webhook',
+    SETTINGS: 'configurações',
+    TEMPLATE: 'template',
+  }
+
+  const actionLabel = actionLabels[action] || action.toLowerCase()
+  const resourceLabel = resourceLabels[resource] || resource.toLowerCase()
+  const idSuffix = resourceId ? ` #${resourceId.substring(0, 8)}` : ''
+
+  return `${actionLabel} ${resourceLabel}${idSuffix}`
+}
 
 // Helper para obter usuário autenticado dos cookies
 async function getAuthenticatedUser() {
@@ -115,6 +178,9 @@ export async function deleteOrganizationAction(id: string) {
       where: { id },
       data: { isActive: false },
     })
+
+    // ✅ CACHE: Invalidar cache do dashboard
+    await invalidateDashboardCache()
 
     return { data: { success: true }, error: null }
   } catch (error: any) {
@@ -240,24 +306,28 @@ export async function getDashboardStatsAction() {
   try {
     await getAuthenticatedUser()
 
-    // ✅ CORREÇÃO: Remover db.instance.count() - tabela não existe
-    // Contar connections em vez de instances
-    const [totalOrganizations, totalUsers, totalConnections, totalWebhooks] = await Promise.all([
-      db.organization.count(),
-      db.user.count(),
-      db.connection.count(), // Corrigido: connection existe no schema
-      db.webhook.count(),
-    ])
+    // ✅ CACHE: Usar cache com TTL de 60s para reduzir carga no banco
+    const stats = await getOrFetch(
+      CACHE_KEYS.DASHBOARD_STATS,
+      async () => {
+        console.log('[getDashboardStatsAction] Cache miss, fetching from DB...')
+        const [totalOrganizations, totalUsers, totalConnections, totalWebhooks] = await Promise.all([
+          db.organization.count(),
+          db.user.count(),
+          db.connection.count(),
+          db.webhook.count(),
+        ])
+        return {
+          totalOrganizations,
+          totalUsers,
+          totalInstances: totalConnections,
+          totalWebhooks,
+        }
+      },
+      { ttl: CACHE_TTL }
+    )
 
-    return {
-      success: true,
-      data: {
-        totalOrganizations,
-        totalUsers,
-        totalInstances: totalConnections, // Compatibilidade com interface
-        totalWebhooks,
-      }
-    }
+    return { success: true, data: stats }
   } catch (error: any) {
     console.error('[getDashboardStatsAction] Error:', error);
     return { success: false, error: error.message }
@@ -554,6 +624,7 @@ export async function importInstanceFromUazapiAction(params: {
 
 /**
  * Server Action para buscar atividade recente (ultimos logs) - Dashboard
+ * ✅ CACHE: TTL de 60s para reduzir carga
  */
 export async function getRecentActivityAction(limit: number = 5) {
   try {
@@ -563,31 +634,38 @@ export async function getRecentActivityAction(limit: number = 5) {
       return { success: false, error: 'Acesso negado', data: [] }
     }
 
-    const logs = await db.auditLog.findMany({
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
+    const data = await getOrFetch(
+      CACHE_KEYS.RECENT_ACTIVITY(limit),
+      async () => {
+        console.log('[getRecentActivityAction] Cache miss, fetching from DB...')
+        const logs = await db.auditLog.findMany({
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
-        },
+        })
+
+        return logs.map((log) => ({
+          id: log.id,
+          action: log.action,
+          resource: log.resource,
+          resourceId: log.resourceId,
+          userName: log.user?.name || log.user?.email || 'Sistema',
+          createdAt: log.createdAt,
+          message: formatLogMessage(log.action, log.resource, log.resourceId),
+        }))
       },
-    })
+      { ttl: CACHE_TTL }
+    )
 
-    const mapped = logs.map((log) => ({
-      id: log.id,
-      action: log.action,
-      resource: log.resource,
-      resourceId: log.resourceId,
-      userName: log.user?.name || log.user?.email || 'Sistema',
-      createdAt: log.createdAt,
-      message: formatLogMessage(log.action, log.resource, log.resourceId),
-    }))
-
-    return { success: true, data: mapped }
+    return { success: true, data }
   } catch (error: any) {
     console.error('[getRecentActivityAction] Error:', error)
     return { success: false, error: error.message, data: [] }
@@ -597,6 +675,7 @@ export async function getRecentActivityAction(limit: number = 5) {
 /**
  * Server Action para buscar organizacoes recentes - Dashboard
  * Inclui: status (isActive), última atividade (updatedAt), métricas
+ * ✅ CACHE: TTL de 60s para reduzir carga
  */
 export async function getRecentOrganizationsAction(limit: number = 5) {
   try {
@@ -606,35 +685,42 @@ export async function getRecentOrganizationsAction(limit: number = 5) {
       return { success: false, error: 'Acesso negado', data: [] }
     }
 
-    const organizations = await db.organization.findMany({
-      take: limit,
-      orderBy: { updatedAt: 'desc' }, // Ordenar por última atividade
-      select: {
-        id: true,
-        name: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: {
+    const data = await getOrFetch(
+      CACHE_KEYS.RECENT_ORGS(limit),
+      async () => {
+        console.log('[getRecentOrganizationsAction] Cache miss, fetching from DB...')
+        const organizations = await db.organization.findMany({
+          take: limit,
+          orderBy: { updatedAt: 'desc' },
           select: {
-            users: true,
-            connections: true,
+            id: true,
+            name: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+            _count: {
+              select: {
+                users: true,
+                connections: true,
+              },
+            },
           },
-        },
+        })
+
+        return organizations.map((org) => ({
+          id: org.id,
+          name: org.name,
+          isActive: org.isActive,
+          createdAt: org.createdAt,
+          lastActivity: org.updatedAt,
+          usersCount: org._count.users,
+          connectionsCount: org._count.connections,
+        }))
       },
-    })
+      { ttl: CACHE_TTL }
+    )
 
-    const mapped = organizations.map((org) => ({
-      id: org.id,
-      name: org.name,
-      isActive: org.isActive,
-      createdAt: org.createdAt,
-      lastActivity: org.updatedAt, // Usar updatedAt como indicador de última atividade
-      usersCount: org._count.users,
-      connectionsCount: org._count.connections,
-    }))
-
-    return { success: true, data: mapped }
+    return { success: true, data }
   } catch (error: any) {
     console.error('[getRecentOrganizationsAction] Error:', error)
     return { success: false, error: error.message, data: [] }
@@ -1419,14 +1505,15 @@ export async function listMessagesFromUazapiAction(params?: {
         // 2. { messages: [...] } - resposta direta
         // 3. { success: true, data: { messages: [...] } }
         let messages: any[] = []
-        if (messagesResult?.data?.messages) {
-          messages = messagesResult.data.messages
-        } else if (messagesResult?.messages) {
-          messages = messagesResult.messages
-        } else if (Array.isArray(messagesResult?.data)) {
-          messages = messagesResult.data
-        } else if (Array.isArray(messagesResult)) {
-          messages = messagesResult
+        const result = messagesResult as any
+        if (result?.data?.messages) {
+          messages = result.data.messages
+        } else if (result?.messages) {
+          messages = result.messages
+        } else if (Array.isArray(result?.data)) {
+          messages = result.data
+        } else if (Array.isArray(result)) {
+          messages = result
         }
 
         console.log(`[listMessagesFromUazapi] Parsed ${messages.length} messages from ${instance.name}`)
@@ -1558,14 +1645,15 @@ export async function getMessagesStatsFromUazapiAction() {
 
         // A resposta pode vir em vários formatos (mesmo padrão de listMessagesFromUazapi)
         let messages: any[] = []
-        if (messagesResult?.data?.messages) {
-          messages = messagesResult.data.messages
-        } else if (messagesResult?.messages) {
-          messages = messagesResult.messages
-        } else if (Array.isArray(messagesResult?.data)) {
-          messages = messagesResult.data
-        } else if (Array.isArray(messagesResult)) {
-          messages = messagesResult
+        const result = messagesResult as any
+        if (result?.data?.messages) {
+          messages = result.data.messages
+        } else if (result?.messages) {
+          messages = result.messages
+        } else if (Array.isArray(result?.data)) {
+          messages = result.data
+        } else if (Array.isArray(result)) {
+          messages = result
         }
 
         if (messages.length > 0) {

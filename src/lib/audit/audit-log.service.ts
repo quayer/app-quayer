@@ -34,6 +34,7 @@ export type AuditAction =
   | 'validation_error'
   | 'external_api_error'
   | 'system_error'
+  | 'context_switch'
 
 export type AuditResource =
   | 'user'
@@ -430,6 +431,31 @@ class AuditLogService {
       resource: 'system',
       error,
       metadata: { ...metadata, component },
+    })
+  }
+
+  /**
+   * Log admin context switch (when admin views a specific organization)
+   */
+  async logContextSwitch(
+    userId: string,
+    fromOrgId: string | null,
+    toOrgId: string,
+    toOrgName: string,
+    ipAddress?: string
+  ): Promise<void> {
+    await this.log({
+      action: 'context_switch',
+      resource: 'organization',
+      resourceId: toOrgId,
+      userId,
+      organizationId: toOrgId,
+      metadata: {
+        fromOrganizationId: fromOrgId,
+        toOrganizationId: toOrgId,
+        toOrganizationName: toOrgName,
+      },
+      ipAddress,
     })
   }
 }

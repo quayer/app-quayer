@@ -9,7 +9,7 @@ import { api } from '@/igniter.client';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { extractErrorMessage } from '@/lib/utils/error-handler';
-import type { Organization, ApiResponse } from '@/types/api.types';
+import type { Organization } from '@/types/api.types';
 
 // Helper para fazer requests autenticados com cookies
 async function fetchWithAuth<T = unknown>(url: string, options: RequestInit = {}): Promise<T> {
@@ -87,6 +87,44 @@ export function useSwitchOrganization() {
     },
     onError: (error: unknown) => {
       toast.error(extractErrorMessage(error, 'Erro ao trocar organização'));
+    },
+  });
+}
+
+/**
+ * Hook to clear organization context (admin returning to global mode)
+ */
+export function useClearOrganizationContext() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const result = await api.auth.switchOrganization.mutate({ body: { organizationId: null } });
+      return result as SwitchOrganizationResponse;
+    },
+    onSuccess: (data: SwitchOrganizationResponse) => {
+      const responseData = data?.data || data;
+
+      // Update access token in localStorage AND cookie
+      if (responseData.accessToken) {
+        localStorage.setItem('accessToken', responseData.accessToken);
+        const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
+        const secureFlag = isSecure ? '; Secure' : '';
+        document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax${secureFlag}`;
+      }
+
+      // Invalidate all queries to refetch without organization context
+      queryClient.invalidateQueries();
+
+      toast.success('Voltou ao modo Admin Global');
+
+      // Redirect to admin dashboard
+      router.push('/admin');
+      router.refresh();
+    },
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error, 'Erro ao sair do contexto'));
     },
   });
 }

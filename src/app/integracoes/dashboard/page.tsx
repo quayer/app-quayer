@@ -11,6 +11,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Plug,
   MessagesSquare,
   MessageSquare,
@@ -18,9 +25,13 @@ import {
   CheckCircle2,
   XCircle,
   TrendingUp,
+  TrendingDown,
+  Minus,
   BarChart3,
   PieChart,
+  Calendar,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { api } from '@/igniter.client'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { motion } from 'framer-motion'
@@ -45,9 +56,57 @@ import {
   Legend,
 } from 'recharts'
 
+// Period options for the dashboard
+type PeriodType = 'today' | 'week' | 'month' | 'all'
+const PERIOD_OPTIONS: { value: PeriodType; label: string; comparisonLabel: string }[] = [
+  { value: 'today', label: 'Hoje', comparisonLabel: 'vs ontem' },
+  { value: 'week', label: 'Últimos 7 dias', comparisonLabel: 'vs semana anterior' },
+  { value: 'month', label: 'Últimos 30 dias', comparisonLabel: 'vs mês anterior' },
+  { value: 'all', label: 'Todo período', comparisonLabel: '' },
+]
+
+// Comparison indicator component
+interface ComparisonBadgeProps {
+  change: number | null | undefined
+  label?: string
+  inverted?: boolean // true for metrics where decrease is good (e.g., failed messages)
+}
+
+function ComparisonBadge({ change, label, inverted = false }: ComparisonBadgeProps) {
+  if (change === null || change === undefined) return null
+
+  const isPositive = inverted ? change < 0 : change > 0
+  const isNegative = inverted ? change > 0 : change < 0
+  const isNeutral = change === 0
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            'inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded cursor-help',
+            isPositive && 'text-green-600 bg-green-500/10',
+            isNegative && 'text-red-600 bg-red-500/10',
+            isNeutral && 'text-muted-foreground bg-muted'
+          )}
+        >
+          {isPositive && <TrendingUp className="h-3 w-3" />}
+          {isNegative && <TrendingDown className="h-3 w-3" />}
+          {isNeutral && <Minus className="h-3 w-3" />}
+          {change > 0 ? '+' : ''}{change}%
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{label || 'Comparado com período anterior'}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 export default function DashboardPage() {
   const { user } = useAuth()
   const [isHydrated, setIsHydrated] = useState(false)
+  const [period, setPeriod] = useState<PeriodType>('today')
 
   useEffect(() => {
     setIsHydrated(true)
@@ -56,8 +115,10 @@ export default function DashboardPage() {
   // Fetch instances
   const { data: instancesData, isLoading: instancesLoading, error: instancesError } = api.instances.list.useQuery()
 
-  // ✅ Fetch dashboard metrics (DADOS REAIS)
-  const { data: metricsData, isLoading: metricsLoading, error: metricsError } = api.dashboard.getMetrics.useQuery()
+  // ✅ Fetch dashboard metrics with period filter
+  const { data: metricsData, isLoading: metricsLoading, error: metricsError } = api.dashboard.getMetrics.useQuery({
+    query: { period }
+  })
 
   const isInitialLoading = !isHydrated || instancesLoading || metricsLoading
 
@@ -104,10 +165,18 @@ export default function DashboardPage() {
     return metricsData.data
   }, [metricsData])
 
+  // ✅ Comparison data for period-over-period analysis
+  const comparison = useMemo(() => {
+    return (metricsData as any)?.comparison || null
+  }, [metricsData])
+
+  // Get current period option for label
+  const currentPeriodOption = PERIOD_OPTIONS.find(p => p.value === period)
+
   // Chart data with proper fills
   const messagesByStatusChart = useMemo(() => {
     const fills = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))']
-    return metrics.charts.messagesByStatus.map((item, index) => ({
+    return metrics.charts.messagesByStatus.map((item: { status: string; count: number }, index: number) => ({
       ...item,
       fill: fills[index] || 'hsl(var(--chart-1))'
     }))
@@ -148,6 +217,23 @@ export default function DashboardPage() {
                   Bem-vindo(a), {user?.name}! Acompanhe métricas em tempo real.
                 </p>
               </div>
+            </div>
+
+            {/* Period Selector */}
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Select value={period} onValueChange={(value) => setPeriod(value as PeriodType)}>
+                <SelectTrigger className="w-[180px]" aria-label="Selecionar período">
+                  <SelectValue placeholder="Selecione o período" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERIOD_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </header>
@@ -221,9 +307,15 @@ export default function DashboardPage() {
                 <Skeleton className="h-10 w-20" />
               ) : (
                 <>
-                  <CardTitle className="text-4xl" aria-label={`${metrics.conversations.inProgress} conversas abertas de ${metrics.conversations.total} total`}>
-                    <CountUp end={metrics.conversations.inProgress} duration={1} aria-hidden="true" />
-                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-4xl" aria-label={`${metrics.conversations.inProgress} conversas abertas de ${metrics.conversations.total} total`}>
+                      <CountUp end={metrics.conversations.inProgress} duration={1} aria-hidden="true" />
+                    </CardTitle>
+                    <ComparisonBadge
+                      change={comparison?.openChats}
+                      label={currentPeriodOption?.comparisonLabel}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-2" aria-hidden="true">
                     de {metrics.conversations.total} total
                   </p>
@@ -239,16 +331,16 @@ export default function DashboardPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.2 }}
         >
-          <Card className="transition-all duration-300 hover:shadow-lg hover:scale-[1.02]" role="article" aria-label="Mensagens hoje">
+          <Card className="transition-all duration-300 hover:shadow-lg hover:scale-[1.02]" role="article" aria-label="Mensagens no período">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardDescription>Mensagens Hoje</CardDescription>
+                <CardDescription>Mensagens Enviadas</CardDescription>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <MessageSquare className="h-4 w-4 text-muted-foreground cursor-help" aria-hidden="true" />
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Total de mensagens enviadas nas últimas 24 horas</p>
+                    <p>Total de mensagens enviadas no período selecionado</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -256,9 +348,15 @@ export default function DashboardPage() {
                 <Skeleton className="h-10 w-20" />
               ) : (
                 <>
-                  <CardTitle className="text-4xl" aria-label={`${metrics.messages.sent} mensagens enviadas hoje, ${metrics.messages.deliveryRate.toFixed(1)}% entregues`}>
-                    <CountUp end={metrics.messages.sent} duration={1} separator="." aria-hidden="true" />
-                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-4xl" aria-label={`${metrics.messages.sent} mensagens enviadas, ${metrics.messages.deliveryRate.toFixed(1)}% entregues`}>
+                      <CountUp end={metrics.messages.sent} duration={1} separator="." aria-hidden="true" />
+                    </CardTitle>
+                    <ComparisonBadge
+                      change={comparison?.sentMessages}
+                      label={currentPeriodOption?.comparisonLabel}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-2" aria-hidden="true">
                     {metrics.messages.deliveryRate.toFixed(1)}% entregues
                   </p>
@@ -291,9 +389,15 @@ export default function DashboardPage() {
                 <Skeleton className="h-10 w-20" />
               ) : (
                 <>
-                  <CardTitle className="text-4xl" aria-label={`${metrics.conversations.aiControlled} conversas controladas por IA, ${metrics.conversations.total > 0 ? Math.round((metrics.conversations.aiControlled / metrics.conversations.total) * 100) : 0}% do total`}>
-                    <CountUp end={metrics.conversations.aiControlled} duration={1} aria-hidden="true" />
-                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-4xl" aria-label={`${metrics.conversations.aiControlled} conversas controladas por IA, ${metrics.conversations.total > 0 ? Math.round((metrics.conversations.aiControlled / metrics.conversations.total) * 100) : 0}% do total`}>
+                      <CountUp end={metrics.conversations.aiControlled} duration={1} aria-hidden="true" />
+                    </CardTitle>
+                    <ComparisonBadge
+                      change={comparison?.aiControlled}
+                      label={currentPeriodOption?.comparisonLabel}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-2" aria-hidden="true">
                     {metrics.conversations.total > 0
                       ? Math.round((metrics.conversations.aiControlled / metrics.conversations.total) * 100)
@@ -326,19 +430,31 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-muted-foreground">Total</span>
-                <span className="text-2xl font-bold">{metrics.conversations.total}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold">{metrics.conversations.total}</span>
+                  <ComparisonBadge change={comparison?.totalContacts} label={currentPeriodOption?.comparisonLabel} />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-muted-foreground">Em Andamento</span>
-                <span className="text-2xl font-bold">{metrics.conversations.inProgress}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold">{metrics.conversations.inProgress}</span>
+                  <ComparisonBadge change={comparison?.openChats} label={currentPeriodOption?.comparisonLabel} />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-muted-foreground">IA</span>
-                <span className="text-2xl font-bold text-blue-500">{metrics.conversations.aiControlled}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold text-blue-500">{metrics.conversations.aiControlled}</span>
+                  <ComparisonBadge change={comparison?.aiControlled} label={currentPeriodOption?.comparisonLabel} />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-muted-foreground">Humano</span>
-                <span className="text-2xl font-bold text-green-500">{metrics.conversations.humanControlled}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold text-green-500">{metrics.conversations.humanControlled}</span>
+                  <ComparisonBadge change={comparison?.humanControlled} label={currentPeriodOption?.comparisonLabel} />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-sm text-muted-foreground">Tempo Médio</span>
@@ -520,7 +636,7 @@ export default function DashboardPage() {
                     outerRadius={100}
                     dataKey="value"
                   >
-                    {aiVsHumanChart.map((entry, index) => (
+                    {aiVsHumanChart.map((entry: { type: string; value: number; fill: string }, index: number) => (
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Pie>
@@ -566,7 +682,7 @@ export default function DashboardPage() {
                 />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                  {messagesByStatusChart.map((entry, index) => (
+                  {messagesByStatusChart.map((entry: { status: string; count: number; fill: string }, index: number) => (
                     <Cell key={`cell-${index}`} fill={entry.fill} />
                   ))}
                 </Bar>
