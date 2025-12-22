@@ -131,7 +131,9 @@ export function EmailSettings() {
     queryKey: ['email-templates'],
     queryFn: async () => {
       try {
-        const result = await (api['system-settings'].getEmailTemplates.query as any)()
+        const result = await (api['system-settings'].getEmailTemplates.query as any)({
+          headers: getAuthHeaders(),
+        })
         console.log('[EmailSettings] Templates result:', result)
 
         // API returns { data: { success: true, data: [...] } }
@@ -204,6 +206,7 @@ export function EmailSettings() {
     mutationFn: async (data: EmailSettingsData) => {
       return (api['system-settings'].updateEmail.mutate as any)({
         body: data,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {
@@ -224,6 +227,7 @@ export function EmailSettings() {
       if (!formData.smtp.pass) throw new Error('Senha SMTP é obrigatória')
       return (api['system-settings'].testSmtpConnection.mutate as any)({
         body: formData.smtp,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: (result: any) => {
@@ -243,6 +247,7 @@ export function EmailSettings() {
     mutationFn: async (template: Partial<EmailTemplate>) => {
       return (api['system-settings'].upsertEmailTemplate.mutate as any)({
         body: template as any,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

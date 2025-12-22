@@ -1,8 +1,10 @@
 import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { metrics } from '@/services/metrics'
-import { storeCircuitBreaker } from '@/services/circuit-breaker'
+import { storeCircuitBreaker, externalApiCircuitBreaker } from '@/services/circuit-breaker'
 import { adminProcedure } from '@/features/auth/procedures/auth.procedure'
+import { database } from '@/services/database'
+import { uazapiService } from '@/lib/api/uazapi.service'
 
 /**
  * Health Check Controller
@@ -196,6 +198,93 @@ export const healthController = igniter.controller({
             store: storeCircuitBreaker.getState(),
           },
         })
+      },
+    }),
+
+    /**
+     * UAZapi health check - verifica conectividade com UAZapi
+     */
+    uazapi: igniter.query({
+      name: 'UAZapi Health',
+      description: 'Verificar status de conexao com UAZapi',
+      path: '/uazapi',
+      use: [adminProcedure()],
+      handler: async ({ response }) => {
+        const results: {
+          instanceId: string;
+          name: string;
+          status: 'healthy' | 'unhealthy' | 'disconnected';
+          latency?: number;
+          error?: string;
+        }[] = [];
+
+        // Buscar todas as instancias com token UAZapi
+        const instances = await database.instance.findMany({
+          where: {
+            uazapiToken: { not: null },
+            status: 'CONNECTED',
+          },
+          select: {
+            id: true,
+            name: true,
+            uazapiToken: true,
+          },
+          take: 10, // Limitar para nao sobrecarregar
+        });
+
+        for (const instance of instances) {
+          if (!instance.uazapiToken) continue;
+
+          const start = Date.now();
+          try {
+            // Verificar status da instancia na UAZapi
+            const statusResponse = await uazapiService.getStatus(instance.uazapiToken);
+            const latency = Date.now() - start;
+
+            if (statusResponse.connected) {
+              results.push({
+                instanceId: instance.id,
+                name: instance.name,
+                status: 'healthy',
+                latency,
+              });
+            } else {
+              results.push({
+                instanceId: instance.id,
+                name: instance.name,
+                status: 'disconnected',
+                latency,
+              });
+            }
+          } catch (error: any) {
+            results.push({
+              instanceId: instance.id,
+              name: instance.name,
+              status: 'unhealthy',
+              latency: Date.now() - start,
+              error: error.message,
+            });
+          }
+        }
+
+        const healthyCount = results.filter(r => r.status === 'healthy').length;
+        const avgLatency = results.length > 0
+          ? Math.round(results.reduce((sum, r) => sum + (r.latency || 0), 0) / results.length)
+          : 0;
+
+        return response.success({
+          status: healthyCount === results.length ? 'healthy' : 'degraded',
+          timestamp: new Date().toISOString(),
+          summary: {
+            total: results.length,
+            healthy: healthyCount,
+            unhealthy: results.filter(r => r.status === 'unhealthy').length,
+            disconnected: results.filter(r => r.status === 'disconnected').length,
+            avgLatency,
+          },
+          circuitBreaker: externalApiCircuitBreaker.getState(),
+          instances: results,
+        });
       },
     }),
 

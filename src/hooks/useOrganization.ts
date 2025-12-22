@@ -150,6 +150,25 @@ interface UpdateOrganizationParams {
 }
 
 /**
+ * Hook to get current organization context (simple version)
+ * Returns { currentOrgId, organization, isLoading }
+ */
+export function useOrganization() {
+  const { data, isLoading } = useCurrentOrganization();
+
+  // Extract organization data from response
+  const responseData = data as { data?: { id?: string }; id?: string } | undefined;
+  const organization = responseData?.data || responseData;
+  const currentOrgId = organization?.id || null;
+
+  return {
+    currentOrgId,
+    organization,
+    isLoading,
+  };
+}
+
+/**
  * Hook to update organization settings
  */
 export function useUpdateOrganization() {

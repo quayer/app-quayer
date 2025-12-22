@@ -22,6 +22,7 @@
 │  ├── Integrações ────────────► /admin/integracoes                           │
 │  ├── Webhooks ───────────────► /admin/webhooks                              │
 │  ├── Logs Técnicos ──────────► /admin/logs                                  │
+│  ├── Sessões ───────────────► /admin/sessions                               │
 │  ├── Permissões ─────────────► /admin/permissions                           │
 │  ├── Notificações ───────────► /admin/notificacoes                          │
 │  └── Configurações ──────────► /admin/settings                              │
@@ -668,6 +669,64 @@ Usuário Normal COM organização
 - Listar convites pendentes/expirados
 - Reenviar convite
 - Cancelar convite
+
+### 3.5 Gestão de Sessões de Atendimento (Global)
+**Caminho**: `/admin/sessions`
+**Status**: ✅ Funcional (Implementado 2025-12-22)
+**Descrição**: Visão global de todas sessões de atendimento de TODAS organizações
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│              FLUXO DE GESTÃO DE SESSÕES (ADMIN)                  │
+└──────────────────────────────────────────────────────────────────┘
+
+[Admin] ──► /admin/sessions
+            │
+            ├──► 📊 Estatísticas Globais
+            │    ├── Total de sessões ativas
+            │    ├── Sessões aguardando atendimento
+            │    ├── Sessões com IA bloqueada
+            │    └── Total de sessões encerradas
+            │
+            ├──► 🔍 Filtros Disponíveis
+            │    ├── Organização (dropdown)
+            │    ├── Status: active, waiting, closed
+            │    ├── Status IA: enabled, blocked
+            │    ├── Busca por contato/número
+            │    └── Ordenação por data
+            │
+            ├──► 📋 Tabela de Sessões
+            │    ├── Organização
+            │    ├── Contato (nome/número)
+            │    ├── Status da sessão
+            │    ├── Status da IA
+            │    ├── Último update
+            │    └── Ações
+            │
+            └──► ⚡ Ações por Sessão
+                 ├── 👁️ Ver Detalhes
+                 │    ├── Dialog com histórico
+                 │    ├── Mensagens trocadas
+                 │    └── Metadata da sessão
+                 │
+                 ├── 🤖 Bloquear/Desbloquear IA
+                 │    └── Toggle aiEnabled
+                 │
+                 └── ✖️ Encerrar Sessão
+                      └── Muda status para closed
+```
+
+**APIs Utilizadas**:
+- `GET /sessions` - Lista todas sessões (com filtros)
+- `PUT /sessions/:id` - Atualizar sessão (status, aiEnabled)
+- `GET /sessions/:id` - Ver detalhes da sessão
+
+**Diferença Admin vs Master**:
+| Aspecto | Admin | Master |
+|---------|-------|--------|
+| Escopo | TODAS organizações | Apenas sua organização |
+| Filtro org | Dropdown para selecionar | Fixo na org atual |
+| Visão | Tabela com org column | Cards por sessão |
 
 ---
 

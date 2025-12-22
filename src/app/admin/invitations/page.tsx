@@ -192,7 +192,9 @@ export default function AdminInvitationsPage() {
     }
 
     try {
-      const result = await createInvitationAction(formData)
+      // ✅ Passar token do localStorage para Server Action
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
+      const result = await createInvitationAction({ ...formData, tokenFromClient: token })
 
       if (result.success) {
         toast.success('Convite criado com sucesso!', {
@@ -217,7 +219,9 @@ export default function AdminInvitationsPage() {
   // Handle resend invitation
   const handleResendInvitation = async (invitationId: string) => {
     try {
-      const result = await resendInvitationAction(invitationId)
+      // ✅ Passar token do localStorage para Server Action
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
+      const result = await resendInvitationAction(invitationId, token)
 
       if (result.success) {
         toast.success('Convite reenviado com sucesso!')
@@ -235,7 +239,9 @@ export default function AdminInvitationsPage() {
     if (!selectedInvitation) return
 
     try {
-      const result = await deleteInvitationAction(selectedInvitation.id)
+      // ✅ Passar token do localStorage para Server Action
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
+      const result = await deleteInvitationAction(selectedInvitation.id, token)
 
       if (result.success) {
         toast.success('Convite cancelado com sucesso!')

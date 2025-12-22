@@ -12,6 +12,7 @@ import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { orchestrator } from '@/lib/providers/core/orchestrator';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
 import { sessionRateLimiter } from '@/lib/rate-limit/rate-limiter';
+import { retryWithBackoff } from '@/services/circuit-breaker';
 import type { BrokerType } from '@/lib/providers/core/provider.types';
 
 /**
@@ -96,7 +97,7 @@ export const messagesController = igniter.controller({
         // 🚀 Rate Limiting: Verificar limite por sessão (20 msgs/min)
         const rateLimitResult = await sessionRateLimiter.check(sessionId);
         if (!rateLimitResult.success) {
-          return response.tooManyRequests(
+          return response.badRequest(
             `Limite de mensagens excedido. Aguarde ${rateLimitResult.retryAfter || 60} segundos.`
           );
         }
@@ -196,59 +197,79 @@ export const messagesController = igniter.controller({
               await new Promise(resolve => setTimeout(resolve, delayMs));
             }
 
-            // 6.3. ENVIAR MENSAGEM conforme tipo
+            // 6.3. ENVIAR MENSAGEM conforme tipo (com retry automatico)
+            const retryOptions = { maxRetries: 2, baseDelay: 1000, maxDelay: 5000 };
+
             if (type === 'text') {
               // Texto simples
-              await orchestrator.sendText(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                text: content,
-              });
+              await retryWithBackoff(
+                () => orchestrator.sendText(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  text: content,
+                }),
+                retryOptions
+              );
             } else if (type === 'list') {
               // Lista interativa (provider-agnostic)
-              await orchestrator.sendInteractiveList(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                title: interactiveData?.title || '',
-                description: interactiveData?.description || content,
-                buttonText: interactiveData?.buttonText || 'Selecionar',
-                sections: interactiveData?.sections || [],
-                footer: interactiveData?.footer,
-              });
+              await retryWithBackoff(
+                () => orchestrator.sendInteractiveList(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  title: interactiveData?.title || '',
+                  description: interactiveData?.description || content,
+                  buttonText: interactiveData?.buttonText || 'Selecionar',
+                  sections: interactiveData?.sections || [],
+                  footer: interactiveData?.footer,
+                }),
+                retryOptions
+              );
             } else if (type === 'buttons') {
-              // Botões interativos (provider-agnostic)
-              await orchestrator.sendInteractiveButtons(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                text: interactiveData?.text || content,
-                buttons: interactiveData?.buttons || [],
-                footer: interactiveData?.footer,
-                header: interactiveData?.header,
-              });
+              // Botoes interativos (provider-agnostic)
+              await retryWithBackoff(
+                () => orchestrator.sendInteractiveButtons(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  text: interactiveData?.text || content,
+                  buttons: interactiveData?.buttons || [],
+                  footer: interactiveData?.footer,
+                  header: interactiveData?.header,
+                }),
+                retryOptions
+              );
             } else if (type === 'location') {
-              // Localização (provider-agnostic)
-              await orchestrator.sendLocation(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                latitude: interactiveData?.latitude || interactiveData?.lat,
-                longitude: interactiveData?.longitude || interactiveData?.lng,
-                name: interactiveData?.name,
-                address: interactiveData?.address,
-              });
+              // Localizacao (provider-agnostic)
+              await retryWithBackoff(
+                () => orchestrator.sendLocation(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  latitude: interactiveData?.latitude || interactiveData?.lat,
+                  longitude: interactiveData?.longitude || interactiveData?.lng,
+                  name: interactiveData?.name,
+                  address: interactiveData?.address,
+                }),
+                retryOptions
+              );
             } else if (type === 'contact') {
               // Contato (provider-agnostic)
-              await orchestrator.sendContact(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                contact: {
-                  name: interactiveData?.contact?.name || interactiveData?.name,
-                  phone: interactiveData?.contact?.phone || interactiveData?.contact?.number || interactiveData?.number,
-                },
-              });
+              await retryWithBackoff(
+                () => orchestrator.sendContact(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  contact: {
+                    name: interactiveData?.contact?.name || interactiveData?.name,
+                    phone: interactiveData?.contact?.phone || interactiveData?.contact?.number || interactiveData?.number,
+                  },
+                }),
+                retryOptions
+              );
             } else if (mediaUrl) {
-              // Mídia (image, video, audio, document)
-              await orchestrator.sendMedia(session.connectionId, brokerType, {
-                to: session.contact.phoneNumber,
-                mediaUrl,
-                mediaType: type,
-                caption: caption || content,
-                fileName: filename,
-              });
+              // Midia (image, video, audio, document)
+              await retryWithBackoff(
+                () => orchestrator.sendMedia(session.connectionId, brokerType, {
+                  to: session.contact.phoneNumber,
+                  mediaUrl,
+                  mediaType: type,
+                  caption: caption || content,
+                  fileName: filename,
+                }),
+                retryOptions
+              );
             }
 
             // 6.4. PARAR EFEITO DIGITANDO

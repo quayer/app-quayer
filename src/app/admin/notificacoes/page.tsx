@@ -361,7 +361,12 @@ export default function NotificationsAdminPage() {
     return <span className="text-muted-foreground">-</span>
   }
 
-  const notifications = notificationsData?.data || []
+  // API retorna { data: { data: [...], pagination: {...} } }
+  const notifications = Array.isArray(notificationsData?.data?.data)
+    ? notificationsData.data.data
+    : Array.isArray(notificationsData?.data)
+      ? notificationsData.data
+      : []
 
   // Filter notifications by search
   const filteredNotifications = notifications.filter((n: Notification) =>

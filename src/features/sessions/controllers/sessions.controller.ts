@@ -1548,5 +1548,93 @@ export const sessionsController = igniter.controller({
         });
       },
     }),
+
+    /**
+     * POST /sessions/bulk
+     * Acoes em massa para multiplas sessoes
+     * Suporta: close, pause, resume, enableAI, disableAI
+     */
+    bulk: igniter.mutation({
+      path: '/bulk',
+      method: 'POST',
+      body: z.object({
+        sessionIds: z.array(z.string()).min(1).max(100),
+        action: z.enum(['close', 'pause', 'resume', 'enableAI', 'disableAI']),
+        pauseHours: z.number().min(1).max(168).optional(), // Para action=pause
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticacao necessaria');
+        }
+
+        const { sessionIds, action, pauseHours } = request.body;
+
+        // Verificar permissao para todas as sessoes
+        const sessions = await database.chatSession.findMany({
+          where: {
+            id: { in: sessionIds },
+            // Se nao for admin, filtrar pela org do usuario
+            ...(user.role !== 'admin' && user.currentOrgId
+              ? { organizationId: user.currentOrgId }
+              : {}),
+          },
+          select: { id: true, organizationId: true, status: true, aiEnabled: true },
+        });
+
+        if (sessions.length === 0) {
+          return response.notFound('Nenhuma sessao encontrada');
+        }
+
+        const results: { id: string; success: boolean; error?: string }[] = [];
+
+        for (const session of sessions) {
+          try {
+            switch (action) {
+              case 'close':
+                await sessionsManager.updateSessionStatus(session.id, 'CLOSED');
+                break;
+
+              case 'pause':
+                await sessionsManager.updateSessionStatus(session.id, 'PAUSED');
+                if (pauseHours) {
+                  await sessionsManager.blockAI(session.id, pauseHours * 60, 'bulk_pause');
+                }
+                break;
+
+              case 'resume':
+                await sessionsManager.updateSessionStatus(session.id, 'ACTIVE');
+                await sessionsManager.unblockAI(session.id);
+                break;
+
+              case 'enableAI':
+                await sessionsManager.unblockAI(session.id);
+                break;
+
+              case 'disableAI':
+                await sessionsManager.blockAI(session.id, 24 * 60, 'bulk_disable');
+                break;
+            }
+
+            results.push({ id: session.id, success: true });
+          } catch (error: any) {
+            results.push({ id: session.id, success: false, error: error.message });
+          }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.filter(r => !r.success).length;
+
+        return response.success({
+          message: `Acao '${action}' executada em ${successCount} sessoes${failCount > 0 ? ` (${failCount} falhas)` : ''}`,
+          processed: sessions.length,
+          success: successCount,
+          failed: failCount,
+          results,
+        });
+      },
+    }),
   },
 });

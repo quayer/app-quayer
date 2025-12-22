@@ -60,6 +60,7 @@ export function ConcatenationSettings() {
     mutationFn: async (data: ConcatenationSettingsData) => {
       return (api['system-settings'].updateConcatenation.mutate as any)({
         body: data,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

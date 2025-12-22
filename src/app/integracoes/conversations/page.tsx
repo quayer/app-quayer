@@ -335,7 +335,7 @@ export default function ConversationsPage() {
   const selectedInstance = selectedChatInstanceId
     ? instances.find((i: Instance) => i.id === selectedChatInstanceId)
     : null
-  const selectedChat = chats.find((c: UAZChat) => c.wa_chatid === selectedChatId)
+  const selectedChat = chats.find((c: UAZChat) => c.id === selectedChatId || c.wa_chatid === selectedChatId)
 
   // ==================== MUTATIONS ====================
 
@@ -424,7 +424,9 @@ export default function ConversationsPage() {
   // ==================== HANDLERS ====================
 
   const handleSelectChat = useCallback((chat: UAZChat) => {
-    setSelectedChatId(chat.wa_chatid)
+    // Use session ID for messages API, fallback to wa_chatid if no session ID
+    const sessionId = chat.id || chat.wa_chatid
+    setSelectedChatId(sessionId)
     setSelectedChatInstanceId(chat.instanceId || null)
 
     // Mark as read automatically
@@ -780,7 +782,7 @@ export default function ConversationsPage() {
                 onClick={() => handleSelectChat(chat)}
                 className={cn(
                   "w-full p-4 text-left transition-colors hover:bg-muted/50",
-                  selectedChatId === chat.wa_chatid && "bg-muted"
+                  (selectedChatId === chat.id || selectedChatId === chat.wa_chatid) && "bg-muted"
                 )}
               >
                 <div className="flex items-start gap-3">

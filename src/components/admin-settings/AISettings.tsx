@@ -166,7 +166,9 @@ export function AISettings() {
   const { data: prompts, isLoading: loadingPrompts } = useQuery({
     queryKey: ['ai-prompts'],
     queryFn: async () => {
-      const result = await (api['system-settings'].getAIPrompts.query as any)()
+      const result = await (api['system-settings'].getAIPrompts.query as any)({
+        headers: getAuthHeaders(),
+      })
       // API returns { data: { success: true, data: [...] } }
       const responseData = (result as any)?.data
       return (responseData?.data || []) as AIPrompt[]
@@ -214,6 +216,7 @@ export function AISettings() {
     mutationFn: async (data: AISettingsData) => {
       return (api['system-settings'].updateAI.mutate as any)({
         body: data,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {
@@ -230,6 +233,7 @@ export function AISettings() {
     mutationFn: async () => {
       return (api['system-settings'].testOpenAIConnection.mutate as any)({
         body: { apiKey: formData.openaiApiKey },
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: (result: any) => {
@@ -246,6 +250,7 @@ export function AISettings() {
     mutationFn: async (prompt: Partial<AIPrompt>) => {
       return (api['system-settings'].upsertAIPrompt.mutate as any)({
         body: prompt as any,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

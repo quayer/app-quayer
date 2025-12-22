@@ -21,6 +21,7 @@
 │  ├── Conversas ──────────────► /conversas → /integracoes/conversations      │
 │  ├── Contatos ───────────────► /contatos                                    │
 │  ├── Equipe ─────────────────► /integracoes/users                           │
+│  ├── Atendimentos ──────────► /integracoes/sessions                         │
 │  ├── Webhooks ───────────────► /configuracoes/webhooks → /ferramentas/webhooks│
 │  ├── Ferramentas ────────────► /ferramentas                                 │
 │  │   ├── Webhooks ───────────► /ferramentas/webhooks                        │
@@ -740,12 +741,12 @@ GET /api/v1/chats/list?instanceId=xxx
 | # | Melhoria | Arquivo | Prioridade | Esforço | Status |
 |---|----------|---------|------------|---------|--------|
 | 1 | ~~Unificar fetch direto com uazapiService~~ | `chats.controller.ts` | ~~🔴 Alto~~ | ~~2h~~ | ✅ FEITO 2025-12-21 |
-| 2 | Cache de chats/sessões (Redis) | `chats.controller.ts` | 🟡 Médio | 4h | ⏳ Pendente |
+| ~~2~~ | ~~Cache de chats/sessoes (Redis)~~ | `chats.controller.ts` | ~~🟡 Médio~~ | ~~4h~~ | ✅ FEITO 2025-12-22 |
 | 3 | Websocket para mensagens em tempo real | - | 🟡 Médio | 8h | ⏳ Pendente |
 | 4 | ~~Validação E.164 para phoneNumber~~ | `messages.schemas.ts` | ~~🟢 Baixo~~ | ~~1h~~ | ✅ FEITO 2025-12-21 |
-| 5 | Rate limiting por sessão | `messages.controller.ts` | 🟡 Médio | 3h | ⏳ Pendente |
-| 6 | Retry para falhas de envio UAZapi | `messages.controller.ts` | 🟢 Baixo | 2h | ⏳ Pendente |
-| 7 | Bulk actions para múltiplas sessões | `sessions.controller.ts` | 🟢 Baixo | 4h | ⏳ Pendente |
+| 5 | ~~Rate limiting por sessão~~ | `messages.controller.ts` | ~~🟡 Médio~~ | ~~3h~~ | ✅ FEITO 2025-12-22 |
+| ~~6~~ | ~~Retry para falhas de envio UAZapi~~ | `messages.controller.ts` | ~~🟢 Baixo~~ | ~~2h~~ | ✅ FEITO 2025-12-22 |
+| ~~7~~ | ~~Bulk actions para multiplas sessoes~~ | `sessions.controller.ts` | ~~🟢 Baixo~~ | ~~4h~~ | ✅ FEITO 2025-12-22 |
 | 8 | Paginação eficiente (cursor-based) | `sessions.controller.ts:1159` | 🟢 Baixo | 3h | ⏳ Pendente |
 
 ##### Frontend
@@ -1103,7 +1104,7 @@ preciso de ajuda"
 |---|----------|---------|------------|--------|
 | ~~1~~ | ~~Rate limiting inbound por IP~~ | `route.ts` | ~~🟡 Médio~~ | ✅ FEITO 2025-12-21 |
 | ~~2~~ | ~~IP whitelist para UAZapi~~ | `route.ts` | ~~🟡 Médio~~ | ✅ FEITO 2025-12-21 |
-| 3 | Dead letter queue para falhas | `transcription.worker.ts` | 🟢 Baixo | ⏳ Pendente |
+| ~~3~~ | ~~Dead letter queue para falhas~~ | `transcription.worker.ts` | ~~🟢 Baixo~~ | ✅ FEITO 2025-12-22 |
 | 4 | Implementar PDF/DOCX parser | `transcription.engine.ts` | 🟡 Médio | ⏳ Pendente |
 | 5 | Implementar message-sender callback | `webhooks.service.ts` | 🟡 Médio | ⏳ Pendente |
 | 6 | Batch processing para transcrições | `transcription.worker.ts` | 🟢 Baixo | ⏳ Pendente |
@@ -1624,21 +1625,21 @@ await sessionCleanupQueue.add('cleanup', {}, {
 | WhatsApp Cloud API | ✅ | ✅ (Cloud adapter) | ➖ |
 | UAZapi/Não-oficial | ✅ | ✅ (UAZapi adapter) | ➖ |
 | Chatwoot Webhooks | ✅ | ✅ (chatwootSyncService) | ➖ |
-| **Detecção de Loop** |
-| Bot Echo (Unicode Marker) | ✅ `\u200B\u200C\u200D` | ❌ | 🔴 Adicionar |
-| Outgoing System Filter | ✅ sender.type='user' | ❌ | 🟡 Avaliar |
+| **Deteccao de Loop** |
+| Bot Echo (Unicode Marker) | ✅ `\u200B\u200C\u200D` | ✅ (provider.types.ts) | ✅ FEITO 2025-12-22 |
+| Outgoing System Filter | ✅ sender.type='user' | ✅ (route.ts:343) | ✅ FEITO |
 | **Janela 24h WhatsApp** |
-| `last_customer_message_at` | ✅ | ❌ | 🔴 Adicionar |
-| `whatsapp_window_expires_at` | ✅ | ❌ | 🔴 Adicionar |
-| `whatsapp_can_reply` | ✅ | ❌ | 🔴 Adicionar |
+| `last_customer_message_at` | ✅ | ✅ (schema.prisma) | ✅ FEITO 2025-12-22 |
+| `whatsapp_window_expires_at` | ✅ | ✅ (sessions.manager.ts) | ✅ FEITO 2025-12-22 |
+| `whatsapp_can_reply` | ✅ | ✅ (sessions.manager.ts) | ✅ FEITO 2025-12-22 |
 | **Sistema de Comandos** |
-| `@fechar` (fechar sessão) | ✅ | ❌ | 🟡 Avaliar |
-| `@pausar [horas]` | ✅ | ✅ (aiBlocked) | Melhorar |
-| `@reabrir` | ✅ | ❌ | 🟡 Avaliar |
-| `@blacklist` / `@whitelist` | ✅ | ❌ | 🟡 Avaliar |
+| `@fechar` (fechar sessão) | ✅ | ✅ (command-parser.ts) | ✅ FEITO 2025-12-22 |
+| `@pausar [horas]` | ✅ | ✅ (command-parser.ts) | ✅ FEITO |
+| `@reabrir` | ✅ | ✅ (command-parser.ts) | ✅ FEITO 2025-12-22 |
+| `@blacklist` / `@whitelist` | ✅ | ✅ (command-parser.ts) | ✅ FEITO 2025-12-22 |
 | **Auto-Pause** |
-| Human Reply Detection | ✅ dir=OUT + author=HUMAN | ❌ | 🔴 Adicionar |
-| Pause Duration Config | ✅ (session_timeout_hours) | ❌ | 🟡 Melhorar |
+| Human Reply Detection | ✅ dir=OUT + author=HUMAN | ✅ (sessions.manager.ts) | ✅ FEITO 2025-12-22 |
+| Pause Duration Config | ✅ (session_timeout_hours) | ✅ (connection-settings) | ✅ FEITO 2025-12-22 |
 | **Bypass Bots** |
 | Per-contact bypass | ✅ contact.bypass_bots | ❌ | 🟡 Avaliar |
 | **Concatenação** |
@@ -1646,11 +1647,11 @@ await sessionCleanupQueue.add('cleanup', {}, {
 | **Transcrição** |
 | Audio/Video Transcription | ❌ | ✅ (Whisper/GPT-4o) | ➖ N8N não tem |
 
-##### Funcionalidades N8N que Quayer DEVE Implementar
+##### Funcionalidades N8N que Quayer ~~DEVE~~ Implementou
 
-###### 1. 🔴 Bot Echo Detection (Prioridade Alta)
+###### 1. ✅ Bot Echo Detection (IMPLEMENTADO 2025-12-22)
 
-**Problema**: Sem detecção, mensagens enviadas pelo bot podem ser reprocessadas causando loops infinitos.
+**Problema**: ~~Sem deteccao, mensagens enviadas pelo bot podem ser reprocessadas causando loops infinitos.~~ **RESOLVIDO**
 
 **Solução N8N**:
 ```javascript
@@ -1692,9 +1693,9 @@ if (isBotEcho(normalized.data.message.content)) {
 
 ---
 
-###### 2. 🔴 WhatsApp 24h Window Tracking (Prioridade Alta)
+###### 2. ✅ WhatsApp 24h Window Tracking (IMPLEMENTADO 2025-12-22)
 
-**Problema**: WhatsApp Business API tem regra de janela 24h. Sem tracking, podemos tentar enviar mensagens quando a janela expirou.
+**Problema**: ~~WhatsApp Business API tem regra de janela 24h. Sem tracking, podemos tentar enviar mensagens quando a janela expirou.~~ **RESOLVIDO**
 
 **Solução N8N**:
 ```javascript
@@ -1757,9 +1758,9 @@ async canReplyToSession(sessionId: string): Promise<boolean> {
 
 ---
 
-###### 3. 🟡 Auto-Pause on Human Reply (Prioridade Média)
+###### 3. ✅ Auto-Pause on Human Reply (IMPLEMENTADO 2025-12-22)
 
-**Problema**: Quando um humano responde via Chatwoot/painel, a IA deve parar automaticamente para não interferir.
+**Problema**: ~~Quando um humano responde via Chatwoot/painel, a IA deve parar automaticamente para nao interferir.~~ **RESOLVIDO**
 
 **Solução N8N**:
 ```javascript
@@ -1800,9 +1801,9 @@ async function processOutgoingMessage(normalized: NormalizedWebhook) {
 
 ---
 
-###### 4. 🟡 Sistema de Comandos via Chat (Prioridade Média)
+###### 4. ✅ Sistema de Comandos via Chat (IMPLEMENTADO 2025-12-22)
 
-**Problema**: Operadores precisam controlar sessões via WhatsApp/Chatwoot sem acessar painel.
+**Problema**: ~~Operadores precisam controlar sessoes via WhatsApp/Chatwoot sem acessar painel.~~ **RESOLVIDO**
 
 **Solução N8N**:
 ```javascript
@@ -1950,6 +1951,102 @@ if (command.type !== 'NONE') {
 |---|----------|------------|---------|
 | 1 | Histórico de atividades do membro | 🟢 Baixo | 4h |
 | 2 | Permissões granulares (feature flags) | 🟡 Médio | 8h |
+
+---
+
+### 3.5.1 🎧 Jornada: Gestão de Atendimentos (Sessões)
+
+> **Novo em 2025-12-22**: Página centralizada para gerenciar sessões de atendimento
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│              FLUXO DE GESTÃO DE ATENDIMENTOS                     │
+└──────────────────────────────────────────────────────────────────┘
+
+[Master] ──► /integracoes/sessions
+             │
+             ├──► 📊 Estatísticas (Cards)
+             │    ├── Sessões Ativas (atendendo agora)
+             │    ├── Sessões Aguardando (fila de espera)
+             │    ├── IA Bloqueada (humano assumiu)
+             │    └── Sessões Encerradas
+             │
+             ├──► 📑 Tabs de Filtro Rápido
+             │    ├── Ativas (status = active)
+             │    ├── Na Fila (status = waiting)
+             │    ├── Encerradas (status = closed)
+             │    └── Todas
+             │
+             ├──► 📋 Lista de Sessões (Cards)
+             │    ├── Contato (nome/telefone)
+             │    ├── Canal (WhatsApp, etc.)
+             │    ├── Status da sessão
+             │    ├── Status da IA (ativo/bloqueado)
+             │    ├── Tempo de espera
+             │    └── Última atualização
+             │
+             └──► ⚡ Ações Rápidas por Sessão
+                  │
+                  ├──► 👤 [Assumir Atendimento]
+                  │    ├── Bloqueia IA (aiEnabled = false)
+                  │    ├── Muda status para active
+                  │    └── Humano assume a conversa
+                  │
+                  ├──► 🤖 [Devolver para IA]
+                  │    ├── Habilita IA (aiEnabled = true)
+                  │    └── Bot volta a responder
+                  │
+                  ├──► ✖️ [Encerrar Sessão]
+                  │    └── Muda status para closed
+                  │
+                  └──► 👁️ [Ver Detalhes]
+                       ├── Dialog com informações completas
+                       ├── Canal associado
+                       ├── Tempo de duração
+                       └── Histórico de status
+```
+
+**Status**: ✅ Funcional (Implementado 2025-12-22)
+
+**APIs Utilizadas**:
+- `GET /sessions?organizationId=...` - Lista sessões da organização
+- `PUT /sessions/:id` - Atualiza status ou aiEnabled
+- `GET /sessions/:id` - Ver detalhes da sessão
+
+**Workflow de Atendimento Humano vs IA**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                CICLO DE ATENDIMENTO IA + HUMANO                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. NOVA MENSAGEM DO CLIENTE                                        │
+│     └──► IA responde automaticamente (aiEnabled = true)             │
+│                                                                     │
+│  2. CLIENTE SOLICITA HUMANO (ou trigger configurado)                │
+│     ├──► IA detecta solicitação                                     │
+│     ├──► Status muda para "waiting" (fila)                          │
+│     └──► Notificação para equipe                                    │
+│                                                                     │
+│  3. HUMANO ASSUME                                                   │
+│     ├──► Clica "Assumir Atendimento"                                │
+│     ├──► aiEnabled = false                                          │
+│     ├──► Status = active                                            │
+│     └──► Humano responde diretamente                                │
+│                                                                     │
+│  4. HUMANO FINALIZA                                                 │
+│     ├──► Opção A: "Devolver para IA" ──► aiEnabled = true           │
+│     └──► Opção B: "Encerrar Sessão" ──► status = closed             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Oportunidades de Melhoria**:
+| # | Melhoria | Prioridade | Esforço |
+|---|----------|------------|---------|
+| 1 | Atribuição de sessão para atendente específico | 🟡 Médio | 4h |
+| 2 | Tempo máximo na fila (auto-escalate) | 🟡 Médio | 3h |
+| 3 | SLA e alertas de tempo de espera | 🟢 Baixo | 2h |
+| 4 | Chat em tempo real na página de sessões | 🟠 Alto | 8h |
 
 ---
 
@@ -2396,13 +2493,13 @@ Quando status === 'connected':
 | # | Melhoria | Arquivo | Linha | Prioridade | Esforço | Status |
 |---|----------|---------|-------|------------|---------|--------|
 | 1 | Unificar clients UAZapi | `uaz.service.ts` / `uazapi.client.ts` | - | 🟡 Médio | 4h | ⏳ Pendente |
-| 2 | Adicionar circuit breaker para UAZapi | `provider.orchestrator.ts` | - | 🟡 Médio | 3h | ⏳ Pendente |
-| 3 | Retry com exponential backoff | `uazapi.client.ts` | 77-82 | 🟢 Baixo | 2h | ⏳ Pendente |
+| ~~2~~ | ~~Adicionar circuit breaker para UAZapi~~ | `uazapi.client.ts` | 28-107 | ~~🟡 Médio~~ | ~~3h~~ | ✅ FEITO 2025-12-22 |
+| ~~3~~ | ~~Retry com exponential backoff~~ | `circuit-breaker.ts` | 123-166 | ~~🟢 Baixo~~ | ~~2h~~ | ✅ FEITO 2025-12-22 |
 | 4 | Rate limiting por organização | `instances.controller.ts` | - | 🟡 Médio | 4h | ⏳ Pendente |
-| 5 | Cache de perfil de foto (5min) | `uazapi.adapter.ts` | 395-403 | 🟢 Baixo | 1h | ⏳ Pendente |
+| ~~5~~ | ~~Cache de perfil de foto (5min)~~ | `orchestrator.ts` | 328-365 | ~~🟢 Baixo~~ | ~~1h~~ | ✅ FEITO 2025-12-22 |
 | 6 | Webhook retry queue (BullMQ) | - | - | 🟡 Médio | 6h | ⏳ Pendente |
 | 7 | Logs estruturados para debugging | Todos controllers | - | 🟢 Baixo | 2h | ⏳ Pendente |
-| 8 | Health check UAZapi periódico | `health.controller.ts` | - | 🟢 Baixo | 1h | ⏳ Pendente |
+| ~~8~~ | ~~Health check UAZapi periodico~~ | `health.controller.ts` | 204-289 | ~~🟢 Baixo~~ | ~~1h~~ | ✅ FEITO 2025-12-22 |
 | ~~9~~ | ~~Limite de extensões de share token~~ | `instances.controller.ts` | 1328-1366, 1463-1495 | ~~🟡 Médio~~ | ~~1h~~ | ✅ FEITO 2025-12-21 |
 | 10 | ~~Validar currentOrgId em contacts~~ | `contacts.controller.ts` | 47+ | ~~🔴 Crítico~~ | ~~30min~~ | ✅ FEITO |
 
@@ -2534,7 +2631,25 @@ Quando status === 'connected':
 | 2025-12-21 | **Seletor de Período Dashboard** | Implementado filtro de período (hoje, 7 dias, 30 dias, todo período) no dashboard do Master |
 | 2025-12-21 | **Limite Real da Organização** | Verificado que já existe em `integracoes/page.tsx:98` - usa `org.maxInstances` dinamicamente |
 | 2025-12-21 | **Comparativo Período Anterior** | Implementado badges com variação % (↑↓) comparando com período anterior (hoje vs ontem, semana vs anterior, etc) |
-| 2025-12-21 | **Segurança Webhooks** | Rate limiting (1000 req/min), IP whitelist UAZapi, Signature verification HMAC-SHA256 |
+| 2025-12-21 | **Seguranca Webhooks** | Rate limiting (1000 req/min), IP whitelist UAZapi, Signature verification HMAC-SHA256 |
+| 2025-12-22 | **Pagina Sessions Admin** | Gestao global de sessoes para admin em `/admin/sessions` |
+| 2025-12-22 | **Pagina Sessions Master** | Gestao de atendimentos para master em `/integracoes/sessions` |
+| 2025-12-22 | **Dead Letter Queue** | DLQ para transcricoes falhas em `transcription.worker.ts` |
+| 2025-12-22 | **Verificacao Funcionalidades N8N** | Bot Echo, 24h Window, Comandos, Auto-Pause - todos ja implementados |
+| 2025-12-22 | **Retry com Backoff** | Retry automatico com exponential backoff em `messages.controller.ts` |
+| 2025-12-22 | **Bulk Actions Sessions** | Acoes em massa para multiplas sessoes em `sessions.controller.ts` |
+| 2025-12-22 | **Cache Foto Perfil** | Cache de 5min para fotos de perfil em `orchestrator.ts` |
+| 2025-12-22 | **Health Check UAZapi** | Endpoint `/health/uazapi` para verificar status das instancias |
+
+### Arquivos Modificados 2025-12-22
+- `src/app/admin/sessions/page.tsx` - Pagina de gestao de sessoes para admin
+- `src/app/integracoes/sessions/page.tsx` - Pagina de atendimentos para master
+- `src/components/app-sidebar.tsx` - Links para sessions nas sidebars
+- `src/lib/transcription/transcription.worker.ts` - Dead Letter Queue
+- `src/features/messages/controllers/messages.controller.ts` - Retry com backoff
+- `src/features/sessions/controllers/sessions.controller.ts` - Bulk actions
+- `src/lib/providers/core/orchestrator.ts` - Cache de foto de perfil
+- `src/features/health/controllers/health.controller.ts` - Health check UAZapi
 
 ### Arquivos Modificados - Seletor de Período
 - `src/features/dashboard/controllers/dashboard.controller.ts` - Query param `period` com cache por período
@@ -2556,5 +2671,5 @@ Quando status === 'connected':
 
 ---
 
-*Documento gerado e mantido por análise automatizada. Última atualização: 2025-12-21*
+*Documento gerado e mantido por analise automatizada. Ultima atualizacao: 2025-12-22*
 

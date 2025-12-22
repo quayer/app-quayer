@@ -325,13 +325,44 @@ export class WhatsAppOrchestrator {
   }
 
   // ===== PROFILE =====
+  // Cache de fotos de perfil (5 minutos)
+  private profilePicCache: Map<string, { url: string | null; expiresAt: number }> = new Map();
+  private readonly PROFILE_PIC_TTL = 5 * 60 * 1000; // 5 minutos
+
   async getProfilePicture(
     instanceId: string,
     brokerType: BrokerType,
     number: string
   ): Promise<string | null> {
+    const cacheKey = `${instanceId}:${number}`;
+
+    // Verificar cache
+    const cached = this.profilePicCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+
+    // Buscar do provider
     const provider = this.getProvider(brokerType);
-    return provider.getProfilePicture(instanceId, number);
+    const url = await provider.getProfilePicture(instanceId, number);
+
+    // Salvar no cache
+    this.profilePicCache.set(cacheKey, {
+      url,
+      expiresAt: Date.now() + this.PROFILE_PIC_TTL,
+    });
+
+    // Limpar cache antigo periodicamente (a cada 100 entradas)
+    if (this.profilePicCache.size > 100) {
+      const now = Date.now();
+      for (const [key, value] of this.profilePicCache.entries()) {
+        if (value.expiresAt < now) {
+          this.profilePicCache.delete(key);
+        }
+      }
+    }
+
+    return url;
   }
 
   async updateProfilePicture(

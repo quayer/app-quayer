@@ -20,6 +20,7 @@ import {
   Eye,
   ClipboardList,
   X,
+  Headset,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -80,6 +81,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           icon: Mail,
         },
         {
+          title: "Sessoes",
+          url: "/admin/sessions",
+          icon: Headset,
+        },
+        {
           title: "Integrações",
           url: "/admin/integracoes",
           icon: Plug,
@@ -136,6 +142,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Conversas",
         url: "/conversas",
         icon: MessagesSquare,
+      },
+      {
+        title: "Atendimentos",
+        url: "/integracoes/sessions",
+        icon: Headset,
       },
       {
         title: "Contatos",
@@ -219,7 +230,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   width={120}
                   height={28}
                   priority
-                  className="dark:invert-0"
+                  className="dark:brightness-100 dark:invert-0 brightness-0"
                 />
               </a>
             </SidebarMenuButton>

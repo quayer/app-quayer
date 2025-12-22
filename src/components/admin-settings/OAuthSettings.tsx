@@ -108,6 +108,7 @@ export function OAuthSettings() {
     mutationFn: async (data: OAuthSettingsData) => {
       return (api['system-settings'].updateOAuth.mutate as any)({
         body: data,
+        headers: getAuthHeaders(),
       })
     },
     onSuccess: () => {

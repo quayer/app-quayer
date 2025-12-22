@@ -9,7 +9,7 @@ export { TranscriptionEngine, transcriptionEngine } from './transcription.engine
 export type { TranscriptionResult } from './transcription.engine';
 
 // Worker (BullMQ)
-export { transcriptionQueue, transcriptionWorker } from './transcription.worker';
+export { transcriptionQueue, transcriptionWorker, transcriptionDLQ } from './transcription.worker';
 export type { TranscriptionJob } from './transcription.worker';
 
 // ===== USAGE EXAMPLE =====

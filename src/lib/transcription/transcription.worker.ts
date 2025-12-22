@@ -5,7 +5,7 @@
  * Suporta: audio, voice, video, image, document
  */
 
-import { Worker, Job, Queue } from 'bullmq';
+import { Worker, Job, Queue, QueueEvents } from 'bullmq';
 import { redis } from '@/services/redis';
 import { database } from '@/services/database';
 import { transcriptionEngine } from './transcription.engine';
@@ -18,6 +18,18 @@ export interface TranscriptionJob {
   mediaUrl: string;
   mimeType?: string;
 }
+
+/**
+ * Dead Letter Queue para transcricoes que falharam apos todos os retries
+ * Permite analise posterior e reprocessamento manual
+ */
+export const transcriptionDLQ = new Queue<TranscriptionJob & { error: string; failedAt: string }>('transcription-dlq', {
+  connection: redis,
+  defaultJobOptions: {
+    removeOnComplete: false, // Manter para analise
+    removeOnFail: false,
+  },
+});
 
 /**
  * Queue de transcrição
@@ -145,8 +157,35 @@ transcriptionWorker.on('completed', (job: Job<TranscriptionJob>) => {
   console.log(`[Transcription Worker] Job ${job.id} completed`);
 });
 
-transcriptionWorker.on('failed', (job: Job<TranscriptionJob> | undefined, error: Error) => {
+transcriptionWorker.on('failed', async (job: Job<TranscriptionJob> | undefined, error: Error) => {
   console.error(`[Transcription Worker] Job ${job?.id} failed:`, error.message);
+
+  // Se esgotou todas as tentativas, mover para Dead Letter Queue
+  if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
+    console.warn(`[Transcription Worker] Moving job ${job.id} to DLQ after ${job.attemptsMade} attempts`);
+
+    try {
+      await transcriptionDLQ.add('failed-transcription', {
+        ...job.data,
+        error: error.message,
+        failedAt: new Date().toISOString(),
+      }, {
+        jobId: `dlq-${job.id}`,
+      });
+
+      // Publicar evento para notificacao
+      await redis.publish('transcription:dlq', JSON.stringify({
+        messageId: job.data.messageId,
+        instanceId: job.data.instanceId,
+        error: error.message,
+        attempts: job.attemptsMade,
+      }));
+
+      console.log(`[Transcription Worker] Job ${job.id} moved to DLQ`);
+    } catch (dlqError) {
+      console.error(`[Transcription Worker] Failed to move job to DLQ:`, dlqError);
+    }
+  }
 });
 
 transcriptionWorker.on('error', (error: Error) => {

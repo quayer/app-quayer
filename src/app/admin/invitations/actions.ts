@@ -68,18 +68,27 @@ export async function createInvitationAction(formData: {
   role: string
   organizationId: string
   expiresInDays: number
+  tokenFromClient?: string
 }) {
   try {
     const cookieStore = await cookies()
-    const token = cookieStore.get('access_token')?.value
+    let token = cookieStore.get('access_token')?.value
+
+    // ✅ FALLBACK: Se não tem token em cookies, usar o token passado pelo cliente
+    if (!token && formData.tokenFromClient) {
+      token = formData.tokenFromClient
+    }
 
     if (!token) {
       return {
         success: false,
-        error: 'Token não encontrado',
+        error: 'Token não encontrado. Faça login novamente.',
         data: null,
       }
     }
+
+    // Remover tokenFromClient do body antes de enviar
+    const { tokenFromClient: _, ...bodyData } = formData
 
     const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/v1/invitations/create`, {
       method: 'POST',
@@ -87,7 +96,7 @@ export async function createInvitationAction(formData: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(formData),
+      body: JSON.stringify(bodyData),
       cache: 'no-store',
     })
 
@@ -120,15 +129,20 @@ export async function createInvitationAction(formData: {
 /**
  * Server Action para reenviar convite
  */
-export async function resendInvitationAction(invitationId: string) {
+export async function resendInvitationAction(invitationId: string, tokenFromClient?: string) {
   try {
     const cookieStore = await cookies()
-    const token = cookieStore.get('access_token')?.value
+    let token = cookieStore.get('access_token')?.value
+
+    // ✅ FALLBACK: Se não tem token em cookies, usar o token passado pelo cliente
+    if (!token && tokenFromClient) {
+      token = tokenFromClient
+    }
 
     if (!token) {
       return {
         success: false,
-        error: 'Token não encontrado',
+        error: 'Token não encontrado. Faça login novamente.',
       }
     }
 
@@ -166,15 +180,20 @@ export async function resendInvitationAction(invitationId: string) {
 /**
  * Server Action para cancelar convite
  */
-export async function deleteInvitationAction(invitationId: string) {
+export async function deleteInvitationAction(invitationId: string, tokenFromClient?: string) {
   try {
     const cookieStore = await cookies()
-    const token = cookieStore.get('access_token')?.value
+    let token = cookieStore.get('access_token')?.value
+
+    // ✅ FALLBACK: Se não tem token em cookies, usar o token passado pelo cliente
+    if (!token && tokenFromClient) {
+      token = tokenFromClient
+    }
 
     if (!token) {
       return {
         success: false,
-        error: 'Token não encontrado',
+        error: 'Token não encontrado. Faça login novamente.',
       }
     }
 

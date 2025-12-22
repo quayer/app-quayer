@@ -357,9 +357,19 @@ export default function WebhooksPage() {
     setDeliveryDetailModalOpen(true)
   }
 
-  // Data - Safe extraction
-  const webhooks = Array.isArray(webhooksResponse?.data) ? webhooksResponse.data : []
-  const deliveries = Array.isArray(deliveriesResponse?.data) ? deliveriesResponse.data : []
+  // Data - Safe extraction (API returns { data: { data: [...], pagination: {...} } })
+  const webhooksData = (webhooksResponse as any)?.data
+  const webhooks = Array.isArray(webhooksData?.data)
+    ? webhooksData.data
+    : Array.isArray(webhooksData)
+      ? webhooksData
+      : []
+  const deliveriesData = (deliveriesResponse as any)?.data
+  const deliveries = Array.isArray(deliveriesData?.data)
+    ? deliveriesData.data
+    : Array.isArray(deliveriesData)
+      ? deliveriesData
+      : []
 
   const filteredWebhooks = webhooks.filter((wh) =>
     wh.url.toLowerCase().includes(searchQuery.toLowerCase())
