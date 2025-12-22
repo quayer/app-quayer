@@ -9,6 +9,7 @@ import { api } from '@/igniter.client';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { extractErrorMessage } from '@/lib/utils/error-handler';
+import { useAuth } from '@/lib/auth/auth-provider';
 import type { Organization } from '@/types/api.types';
 
 // Helper para fazer requests autenticados com cookies
@@ -58,13 +59,14 @@ interface SwitchOrganizationResponse {
 export function useSwitchOrganization() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { refreshUser } = useAuth();
 
   return useMutation({
     mutationFn: async (organizationId: string) => {
       const result = await api.auth.switchOrganization.mutate({ body: { organizationId } });
       return result as SwitchOrganizationResponse;
     },
-    onSuccess: (data: SwitchOrganizationResponse) => {
+    onSuccess: async (data: SwitchOrganizationResponse) => {
       const responseData = data?.data || data;
 
       // Update access token in localStorage AND cookie
@@ -75,6 +77,9 @@ export function useSwitchOrganization() {
         const secureFlag = isSecure ? '; Secure' : '';
         document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax${secureFlag}`;
       }
+
+      // ✅ CRITICAL: Refresh AuthContext user to update currentOrgId
+      await refreshUser();
 
       // Invalidate all queries to refetch with new organization context
       queryClient.invalidateQueries();
@@ -97,13 +102,14 @@ export function useSwitchOrganization() {
 export function useClearOrganizationContext() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { refreshUser } = useAuth();
 
   return useMutation({
     mutationFn: async () => {
       const result = await api.auth.switchOrganization.mutate({ body: { organizationId: null } });
       return result as SwitchOrganizationResponse;
     },
-    onSuccess: (data: SwitchOrganizationResponse) => {
+    onSuccess: async (data: SwitchOrganizationResponse) => {
       const responseData = data?.data || data;
 
       // Update access token in localStorage AND cookie
@@ -113,6 +119,9 @@ export function useClearOrganizationContext() {
         const secureFlag = isSecure ? '; Secure' : '';
         document.cookie = `accessToken=${responseData.accessToken}; path=/; max-age=900; SameSite=Lax${secureFlag}`;
       }
+
+      // ✅ CRITICAL: Refresh AuthContext user to update currentOrgId to null
+      await refreshUser();
 
       // Invalidate all queries to refetch without organization context
       queryClient.invalidateQueries();
