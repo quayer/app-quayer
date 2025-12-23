@@ -185,6 +185,7 @@ export default function ConversationsPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
+  const isInputFocusedRef = useRef(false)
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -195,6 +196,16 @@ export default function ConversationsPage() {
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
+
+  // Restore focus after data refetch if user was typing
+  useEffect(() => {
+    if (isInputFocusedRef.current && messageInputRef.current) {
+      // Small delay to ensure DOM is updated
+      requestAnimationFrame(() => {
+        messageInputRef.current?.focus()
+      })
+    }
+  })
 
   // ==================== QUERIES ====================
 
@@ -1139,6 +1150,8 @@ export default function ConversationsPage() {
                 placeholder={selectedFile ? "Legenda (opcional)..." : "Digite uma mensagem..."}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
+                onFocus={() => { isInputFocusedRef.current = true }}
+                onBlur={() => { isInputFocusedRef.current = false }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()

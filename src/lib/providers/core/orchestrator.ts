@@ -398,8 +398,16 @@ export class WhatsAppOrchestrator {
 
   // ===== HELPERS =====
   private validatePhoneNumber(number: string): string | null {
+    // Se é um grupo (@g.us), retorna como está
+    if (number.includes('@g.us')) {
+      return number;
+    }
+
+    // Se já tem @s.whatsapp.net, extrair apenas o número
+    const cleanedInput = number.replace(/@s\.whatsapp\.net$/, '');
+
     // Remove todos os caracteres não numéricos
-    const cleaned = number.replace(/\D/g, '');
+    const cleaned = cleanedInput.replace(/\D/g, '');
 
     // Mínimo 10 dígitos (código de área + número)
     if (cleaned.length < 10) {
