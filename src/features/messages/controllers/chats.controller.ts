@@ -459,7 +459,86 @@ export const chatsController = igniter.controller({
         if (!result.success) {
           return response.badRequest(result.error || 'Erro ao arquivar chat');
         }
+
+        // Also close the local session
+        const phoneNumber = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+        const contact = await database.contact.findUnique({
+          where: { phoneNumber },
+        });
+
+        if (contact) {
+          await database.chatSession.updateMany({
+            where: {
+              connectionId: instanceId,
+              contactId: contact.id,
+              status: { in: ['QUEUED', 'ACTIVE'] },
+            },
+            data: {
+              status: 'CLOSED',
+              closedAt: new Date(),
+              endReason: 'Arquivado manualmente pelo usuário',
+            },
+          });
+        }
+
         return response.success({ message: 'Chat arquivado com sucesso' });
+      },
+    }),
+
+    /**
+     * POST /api/v1/chats/:chatId/unarchive
+     * Restore an archived chat session
+     */
+    unarchive: igniter.mutation({
+      path: '/:chatId/unarchive',
+      method: 'POST',
+      body: z.object({ instanceId: z.string().uuid() }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const userId = context.auth?.session?.user?.id!;
+        const { chatId } = request.params as { chatId: string };
+        const { instanceId } = request.body;
+
+        const instance = await database.instance.findFirst({
+          where: {
+            id: instanceId,
+            organization: { users: { some: { userId } } },
+          },
+        });
+
+        if (!instance) return response.notFound('Instância não encontrada');
+        if (instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
+          return response.badRequest('Instância não está conectada');
+        }
+
+        // Unarchive on UAZapi
+        const result = await uazapiService.archiveChat(instance.uazapiToken, chatId, false);
+        if (!result.success) {
+          return response.badRequest(result.error || 'Erro ao desarquivar chat');
+        }
+
+        // Also reactivate the local session
+        const phoneNumber = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+        const contact = await database.contact.findUnique({
+          where: { phoneNumber },
+        });
+
+        if (contact) {
+          await database.chatSession.updateMany({
+            where: {
+              connectionId: instanceId,
+              contactId: contact.id,
+              status: 'CLOSED',
+            },
+            data: {
+              status: 'ACTIVE',
+              closedAt: null,
+              endReason: null,
+            },
+          });
+        }
+
+        return response.success({ message: 'Chat desarquivado com sucesso' });
       },
     }),
 
