@@ -263,13 +263,44 @@ export const chatsController = igniter.controller({
           // Mapper
           const mapSessionToChat = (session: any) => {
             const lastMsg = session.messages[0];
-            const isGroup = session.contact.phoneNumber.endsWith('@g.us') || session.contact.isBusiness;
+            const phoneNumber = session.contact.phoneNumber || '';
+            const isGroup = phoneNumber.endsWith('@g.us') || phoneNumber.includes('-');
+
+            // Formatar nome do contato corretamente
+            // Prioridade: name do contato > verifiedName > formatar phoneNumber
+            let displayName = session.contact.name;
+            if (!displayName || displayName === phoneNumber) {
+              displayName = session.contact.verifiedName;
+            }
+            if (!displayName || displayName === phoneNumber) {
+              // Formatar número para exibição
+              if (isGroup) {
+                displayName = 'Grupo WhatsApp';
+              } else {
+                // Extrair apenas os números e formatar
+                const cleanNumber = phoneNumber.replace(/@.*$/, '').replace(/\D/g, '');
+                if (cleanNumber.length >= 10) {
+                  // Formato brasileiro: +55 (11) 99999-9999
+                  const countryCode = cleanNumber.slice(0, 2);
+                  const areaCode = cleanNumber.slice(2, 4);
+                  const part1 = cleanNumber.slice(4, 9);
+                  const part2 = cleanNumber.slice(9);
+                  displayName = `+${countryCode} (${areaCode}) ${part1}-${part2}`;
+                } else {
+                  displayName = cleanNumber || 'Contato';
+                }
+              }
+            }
+
+            // Extrair número limpo para exibição
+            const cleanPhoneNumber = phoneNumber.replace(/@.*$/, '');
 
             return {
               // Session ID for proper identification
               id: session.id,
-              wa_chatid: session.contact.phoneNumber.includes('@') ? session.contact.phoneNumber : `${session.contact.phoneNumber}@s.whatsapp.net`,
-              wa_name: session.contact.name || session.contact.phoneNumber,
+              wa_chatid: phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`,
+              wa_name: displayName,
+              wa_phoneNumber: cleanPhoneNumber, // Número limpo para exibição
               wa_profilePicUrl: session.contact.profilePicUrl,
               wa_isGroup: isGroup,
               wa_lastMsgTimestamp: session.lastMessageAt.getTime(),
@@ -283,8 +314,10 @@ export const chatsController = igniter.controller({
               created_at: session.createdAt.toISOString(),
               updated_at: session.updatedAt.toISOString(),
               // Campos de status e IA
+              // IMPORTANTE: aiEnabled deve ser false por padrão (humano)
+              // IA só é ativada quando explicitamente configurada com webhook
               status: session.status,
-              aiEnabled: session.aiEnabled ?? true,
+              aiEnabled: session.aiEnabled ?? false,
               aiBlockedUntil: session.aiBlockedUntil?.toISOString() ?? null,
             };
           };

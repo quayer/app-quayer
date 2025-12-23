@@ -111,6 +111,7 @@ const ATTENDANCE_FILTERS: { value: AttendanceFilter; label: string; icon: any; c
 interface UAZChat {
   wa_chatid: string
   wa_name: string | null
+  wa_phoneNumber?: string // Número limpo para exibição
   wa_profilePicUrl: string | null
   wa_lastMsgTimestamp: number
   wa_lastMsgBody: string | null
@@ -671,9 +672,9 @@ export default function ConversationsPage() {
 
   // Chats List Component
   const ChatsList = ({ className }: { className?: string }) => (
-    <div className={cn("flex flex-col h-full", className)}>
+    <div className={cn("flex flex-col h-full overflow-hidden", className)}>
       {/* Header with instance filter and search */}
-      <div className="p-4 space-y-3 border-b">
+      <div className="p-4 space-y-3 border-b flex-shrink-0">
         {/* Instance filter */}
         <InstanceFilter />
 
@@ -751,7 +752,7 @@ export default function ConversationsPage() {
       </div>
 
       {/* Chat list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {chatsLoading ? (
           <div className="p-4 space-y-3">
             {[...Array(5)].map((_, i) => (
@@ -776,89 +777,110 @@ export default function ConversationsPage() {
           </div>
         ) : (
           <div className="divide-y">
-            {chats.map((chat: UAZChat) => (
-              <button
-                key={`${chat.instanceId}-${chat.wa_chatid}`}
-                onClick={() => handleSelectChat(chat)}
-                className={cn(
-                  "w-full p-4 text-left transition-colors hover:bg-muted/50",
-                  (selectedChatId === chat.id || selectedChatId === chat.wa_chatid) && "bg-muted"
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={chat.wa_profilePicUrl || ''} />
-                    <AvatarFallback>
-                      {chat.wa_isGroup ? (
-                        <Users className="h-5 w-5" />
-                      ) : (
-                        chat.wa_name?.[0]?.toUpperCase() || '#'
-                      )}
-                    </AvatarFallback>
-                  </Avatar>
+            {chats.map((chat: UAZChat) => {
+              // Determinar nome para exibição
+              const displayName = chat.wa_name || 'Contato'
+              // Determinar se é atendimento humano (default) ou IA
+              const isAIActive = chat.aiEnabled === true && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date())
+              const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">
-                          {chat.wa_name || chat.wa_chatid.split('@')[0]}
-                        </p>
-                        {chat.wa_isPinned && (
-                          <Pin className="h-3 w-3 text-muted-foreground" />
+              return (
+                <button
+                  key={`${chat.instanceId}-${chat.wa_chatid}`}
+                  onClick={() => handleSelectChat(chat)}
+                  className={cn(
+                    "w-full p-3 text-left transition-colors hover:bg-muted/50",
+                    (selectedChatId === chat.id || selectedChatId === chat.wa_chatid) && "bg-muted"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <Avatar className="h-11 w-11 flex-shrink-0">
+                      <AvatarImage src={chat.wa_profilePicUrl || ''} />
+                      <AvatarFallback className="bg-primary/10 text-primary">
+                        {chat.wa_isGroup ? (
+                          <Users className="h-5 w-5" />
+                        ) : (
+                          displayName[0]?.toUpperCase() || '?'
                         )}
-                        {/* Indicador de status IA/Humano/Arquivado */}
-                        {chat.status === 'CLOSED' || chat.status === 'PAUSED' ? (
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <ArchiveIcon className="h-3 w-3 text-orange-500" />
-                            </TooltipTrigger>
-                            <TooltipContent>Arquivado</TooltipContent>
-                          </Tooltip>
-                        ) : chat.aiEnabled && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date()) ? (
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <Bot className="h-3 w-3 text-purple-500" />
-                            </TooltipTrigger>
-                            <TooltipContent>IA ativa</TooltipContent>
-                          </Tooltip>
-                        ) : chat.aiEnabled === false || (chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= new Date()) ? (
-                          <Tooltip>
-                            <TooltipTrigger>
-                              <User className="h-3 w-3 text-blue-500" />
-                            </TooltipTrigger>
-                            <TooltipContent>Atendimento humano</TooltipContent>
-                          </Tooltip>
-                        ) : null}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <p className="font-medium truncate text-sm">
+                            {displayName}
+                          </p>
+                          {chat.wa_isPinned && (
+                            <Pin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                          )}
+                          {/* Indicador de status IA/Humano/Arquivado */}
+                          {isArchived ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <ArchiveIcon className="h-3.5 w-3.5 text-orange-500 flex-shrink-0" />
+                              </TooltipTrigger>
+                              <TooltipContent>Arquivado</TooltipContent>
+                            </Tooltip>
+                          ) : isAIActive ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Bot className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
+                              </TooltipTrigger>
+                              <TooltipContent>IA ativa</TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <User className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                              </TooltipTrigger>
+                              <TooltipContent>Atendimento humano</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        {chat.wa_lastMsgTimestamp && (
+                          <span className="text-[11px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+                            {formatTimestamp(chat.wa_lastMsgTimestamp)}
+                          </span>
+                        )}
                       </div>
-                      {chat.wa_lastMsgTimestamp && (
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {formatTimestamp(chat.wa_lastMsgTimestamp)}
-                        </span>
+
+                      {/* Número de telefone ou indicador de grupo */}
+                      {!chat.wa_isGroup && chat.wa_phoneNumber && (
+                        <p className="text-[11px] text-muted-foreground/70 mb-0.5 truncate">
+                          {chat.wa_phoneNumber}
+                        </p>
+                      )}
+                      {chat.wa_isGroup && (
+                        <p className="text-[11px] text-muted-foreground/70 mb-0.5 flex items-center gap-1">
+                          <Users className="h-3 w-3" />
+                          Grupo
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground truncate flex-1">
+                          {chat.wa_lastMsgBody || 'Sem mensagens'}
+                        </p>
+                        {chat.wa_unreadCount > 0 && (
+                          <Badge className="h-5 min-w-5 flex items-center justify-center text-[10px] flex-shrink-0">
+                            {chat.wa_unreadCount > 99 ? '99+' : chat.wa_unreadCount}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Show instance name when viewing all */}
+                      {selectedInstanceFilter === 'all' && chat.instanceName && (
+                        <p className="text-[10px] text-muted-foreground/60 mt-1 flex items-center gap-1 truncate">
+                          <Smartphone className="h-3 w-3 flex-shrink-0" />
+                          {chat.instanceName}
+                        </p>
                       )}
                     </div>
-
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground truncate pr-2">
-                        {chat.wa_lastMsgBody || 'Sem mensagens'}
-                      </p>
-                      {chat.wa_unreadCount > 0 && (
-                        <Badge className="h-5 min-w-5 flex items-center justify-center">
-                          {chat.wa_unreadCount > 99 ? '99+' : chat.wa_unreadCount}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* Show instance name when viewing all */}
-                    {selectedInstanceFilter === 'all' && chat.instanceName && (
-                      <p className="text-xs text-muted-foreground/70 mt-1 flex items-center gap-1">
-                        <Smartphone className="h-3 w-3" />
-                        {chat.instanceName}
-                      </p>
-                    )}
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              )
+            })}
           </div>
         )}
       </ScrollArea>
@@ -867,11 +889,11 @@ export default function ConversationsPage() {
 
   // Messages Area Component
   const MessagesArea = () => (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {selectedChat ? (
         <>
           {/* Chat Header */}
-          <div className="p-4 border-b flex items-center justify-between bg-card">
+          <div className="p-4 border-b flex items-center justify-between bg-card flex-shrink-0">
             <div className="flex items-center gap-3">
               {isMobile && (
                 <Button
@@ -886,25 +908,33 @@ export default function ConversationsPage() {
 
               <Avatar className="h-10 w-10">
                 <AvatarImage src={selectedChat.wa_profilePicUrl || ''} />
-                <AvatarFallback>
+                <AvatarFallback className="bg-primary/10 text-primary">
                   {selectedChat.wa_isGroup ? (
                     <Users className="h-5 w-5" />
                   ) : (
-                    selectedChat.wa_name?.[0]?.toUpperCase() || '#'
+                    (selectedChat.wa_name || 'C')[0]?.toUpperCase()
                   )}
                 </AvatarFallback>
               </Avatar>
 
-              <div>
-                <p className="font-medium">
-                  {selectedChat.wa_name || selectedChat.wa_chatid.split('@')[0]}
+              <div className="min-w-0 flex-1">
+                <p className="font-medium truncate">
+                  {selectedChat.wa_name || 'Contato'}
                 </p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  {selectedChat.wa_isGroup && <span>Grupo</span>}
+                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                  {selectedChat.wa_isGroup ? (
+                    <>
+                      <Users className="h-3 w-3 flex-shrink-0" />
+                      <span>Grupo</span>
+                    </>
+                  ) : selectedChat.wa_phoneNumber ? (
+                    <span>{selectedChat.wa_phoneNumber}</span>
+                  ) : null}
                   {selectedInstance && (
                     <>
-                      <Smartphone className="h-3 w-3 ml-1" />
-                      {selectedInstance.name}
+                      <span className="mx-1">•</span>
+                      <Smartphone className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{selectedInstance.name}</span>
                     </>
                   )}
                 </p>
@@ -968,7 +998,7 @@ export default function ConversationsPage() {
           </div>
 
           {/* Messages */}
-          <ScrollArea className="flex-1 p-4">
+          <ScrollArea className="flex-1 min-h-0 p-4">
             {messagesLoading ? (
               <div className="space-y-4">
                 {[...Array(5)].map((_, i) => (
@@ -1046,7 +1076,7 @@ export default function ConversationsPage() {
           </ScrollArea>
 
           {/* Input Area */}
-          <div className="p-4 border-t space-y-3 bg-card">
+          <div className="p-4 border-t space-y-3 bg-card flex-shrink-0">
             {/* File Preview */}
             {selectedFile && (
               <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
@@ -1173,22 +1203,24 @@ export default function ConversationsPage() {
   // ==================== MAIN RENDER ====================
   return (
     <TooltipProvider>
-      <div className="h-[calc(100vh-4rem)] flex pt-6" role="main" aria-label="Conversas WhatsApp">
+      <div className="h-[calc(100vh-5rem)] flex flex-col lg:flex-row gap-4 p-4" role="main" aria-label="Conversas WhatsApp">
         {/* Mobile Layout */}
         {isMobile ? (
           <>
             {/* Chats drawer */}
             <Sheet open={isChatsDrawerOpen} onOpenChange={setIsChatsDrawerOpen}>
-              <SheetContent side="left" className="w-full sm:w-96 p-0">
-                <SheetHeader className="p-4 border-b">
+              <SheetContent side="left" className="w-full sm:w-96 p-0 flex flex-col">
+                <SheetHeader className="p-4 border-b flex-shrink-0">
                   <SheetTitle>Conversas</SheetTitle>
                 </SheetHeader>
-                <ChatsList />
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <ChatsList />
+                </div>
               </SheetContent>
             </Sheet>
 
             {/* Main messages area */}
-            <Card className="flex-1 rounded-none border-0">
+            <Card className="flex-1 min-h-0 overflow-hidden">
               <CardContent className="p-0 h-full">
                 {selectedChat ? (
                   <MessagesArea />
@@ -1210,14 +1242,14 @@ export default function ConversationsPage() {
           /* Desktop Layout - 2 columns (chats + messages) */
           <>
             {/* Column 1: Chats with integrated instance filter */}
-            <Card className="w-96 flex-shrink-0 mr-4">
+            <Card className="w-96 flex-shrink-0 overflow-hidden">
               <CardContent className="p-0 h-full">
                 <ChatsList />
               </CardContent>
             </Card>
 
             {/* Column 2: Messages */}
-            <Card className="flex-1">
+            <Card className="flex-1 min-w-0 overflow-hidden">
               <CardContent className="p-0 h-full">
                 <MessagesArea />
               </CardContent>
