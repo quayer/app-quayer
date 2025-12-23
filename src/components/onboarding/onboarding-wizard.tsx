@@ -148,8 +148,7 @@ export function OnboardingWizard() {
   const progress = currentStep === 'welcome' ? 0 : currentStep === 'organization' ? 50 : 100
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
-      <Card className="w-full max-w-2xl shadow-2xl">
+    <Card className="w-full shadow-2xl">
         <CardHeader className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -479,6 +478,5 @@ export function OnboardingWizard() {
           )}
         </CardContent>
       </Card>
-    </div>
   )
 }

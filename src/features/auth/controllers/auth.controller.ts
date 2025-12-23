@@ -975,28 +975,9 @@ export const authController = igniter.controller({
           let isNewGoogleUser = false;
 
           if (!user) {
-            // Criar novo usuário
+            // Criar novo usuário SEM organização - vai criar no onboarding
             const usersCount = await db.user.count();
             const isFirstUser = usersCount === 0;
-
-            // Criar organização padrão para usuário Google OAuth
-            const slug = googleUser.name
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, '-')
-              .substring(0, 50);
-
-            // Gerar documento único baseado em UUID para evitar colisões
-            const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
-
-            const organization = await db.organization.create({
-              data: {
-                name: `${googleUser.name}'s Organization`,
-                slug: `${slug}-${Date.now()}`,
-                document: uniqueDocument, // Documento único gerado automaticamente
-                type: 'pf',
-                isActive: true,
-              },
-            });
 
             // Google OAuth users get a random hashed password (they won't use it)
             const randomPassword = crypto.randomBytes(32).toString('hex');
@@ -1006,16 +987,11 @@ export const authController = igniter.controller({
               data: {
                 email: googleUser.email,
                 name: googleUser.name,
-                password: hashedPassword, // Hashed random password
+                password: hashedPassword,
                 role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
-                emailVerified: new Date(), // Google já verificou - must be DateTime
-                currentOrgId: organization.id,
-                organizations: {
-                  create: {
-                    organizationId: organization.id,
-                    role: 'master',
-                  },
-                },
+                emailVerified: new Date(),
+                currentOrgId: null, // Sem org - vai criar no onboarding
+                onboardingCompleted: false, // Forçar onboarding
               },
             });
             isNewGoogleUser = true;
@@ -1348,19 +1324,8 @@ export const authController = igniter.controller({
         const usersCount = await db.user.count();
         const isFirstUser = usersCount === 0;
 
-        const slug = tempUser.name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 50);
-        const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
-
-        const organization = await db.organization.create({
-          data: {
-            name: `${tempUser.name}'s Organization`,
-            slug: `${slug}-${Date.now()}`,
-            document: uniqueDocument,
-            type: 'pf',
-            isActive: true,
-          },
-        });
-
+        // ✅ CORREÇÃO BRUTAL: NÃO criar org automatica com CPF falso
+        // Usuario deve passar pelo onboarding para preencher dados reais
         const randomPassword = crypto.randomBytes(32).toString('hex');
         const hashedPassword = await hashPassword(randomPassword);
 
@@ -1371,13 +1336,8 @@ export const authController = igniter.controller({
             password: hashedPassword,
             role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
             emailVerified: new Date(),
-            currentOrgId: organization.id,
-            organizations: {
-              create: {
-                organizationId: organization.id,
-                role: 'master',
-              },
-            },
+            currentOrgId: null, // ✅ Sem org - vai criar no onboarding
+            onboardingCompleted: false, // ✅ Forçar onboarding
           },
         });
 
@@ -1387,9 +1347,9 @@ export const authController = igniter.controller({
           userId: user.id,
           email: user.email,
           role: user.role as UserRole,
-          currentOrgId: organization.id,
-          organizationRole: OrganizationRole.MASTER,
-          needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
+          currentOrgId: null,
+          organizationRole: null,
+          needsOnboarding: true, // ✅ SEMPRE true para novo signup - vai para onboarding
         }, '24h');
 
         const refreshTokenData = await db.refreshToken.create({
@@ -1420,8 +1380,9 @@ export const authController = igniter.controller({
             email: user.email,
             name: user.name,
             role: user.role,
-            currentOrgId: organization.id,
-            organizationRole: OrganizationRole.MASTER,
+            currentOrgId: null, // Sem org até completar onboarding
+            organizationRole: null,
+            needsOnboarding: true,
           },
         });
       },
@@ -1865,19 +1826,7 @@ export const authController = igniter.controller({
           const usersCount = await db.user.count();
           const isFirstUser = usersCount === 0;
 
-          const slug = tempUser.name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 50);
-          const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
-
-          const organization = await db.organization.create({
-            data: {
-              name: `${tempUser.name}'s Organization`,
-              slug: `${slug}-${Date.now()}`,
-              document: uniqueDocument,
-              type: 'pf',
-              isActive: true,
-            },
-          });
-
+          // ✅ NÃO criar org automática - usuário vai criar no onboarding
           const randomPassword = crypto.randomBytes(32).toString('hex');
           const hashedPassword = await hashPassword(randomPassword);
 
@@ -1888,13 +1837,8 @@ export const authController = igniter.controller({
               password: hashedPassword,
               role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
               emailVerified: new Date(),
-              currentOrgId: organization.id,
-              organizations: {
-                create: {
-                  organizationId: organization.id,
-                  role: 'master',
-                },
-              },
+              currentOrgId: null, // Sem org - vai criar no onboarding
+              onboardingCompleted: false, // Forçar onboarding
             },
           });
 
@@ -1904,9 +1848,9 @@ export const authController = igniter.controller({
             userId: user.id,
             email: user.email,
             role: user.role as UserRole,
-            currentOrgId: organization.id,
-            organizationRole: OrganizationRole.MASTER,
-            needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
+            currentOrgId: null,
+            organizationRole: null,
+            needsOnboarding: true, // Sempre true para novo signup
           }, '24h');
 
           const refreshTokenData = await db.refreshToken.create({
@@ -1937,8 +1881,9 @@ export const authController = igniter.controller({
               email: user.email,
               name: user.name,
               role: user.role,
-              currentOrgId: organization.id,
-              organizationRole: OrganizationRole.MASTER,
+              currentOrgId: null,
+              organizationRole: null,
+              needsOnboarding: true,
             },
           });
         }

@@ -37,13 +37,13 @@ const tools = [
   {
     id: 'webhooks',
     name: 'Webhooks',
-    description: 'Configure webhooks para receber eventos da sua instância em tempo real.',
+    description: 'Configure webhooks para receber eventos da sua organizacao em tempo real.',
     icon: Webhook,
     href: '/ferramentas/webhooks',
     status: 'active' as const,
     features: [
       'Eventos em tempo real',
-      'Configuração por instância',
+      'Webhooks globais da org',
       'Logs de entrega',
       'Debug e reenvio',
     ],

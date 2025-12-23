@@ -105,10 +105,10 @@ export function CommandPalette() {
     {
       id: 'webhooks',
       title: 'Webhooks',
-      description: 'Configurar webhooks',
+      description: 'Configurar webhooks da organizacao',
       icon: Webhook,
-      action: () => router.push('/configuracoes/webhooks'),
-      keywords: ['webhooks', 'integracao', 'api'],
+      action: () => router.push('/ferramentas/webhooks'),
+      keywords: ['webhooks', 'integracao', 'api', 'ferramentas'],
       group: 'navigation',
     },
     {

@@ -159,11 +159,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         icon: Users,
       },
       {
-        title: "Webhooks",
-        url: "/configuracoes/webhooks",
-        icon: Webhook,
-      },
-      {
         title: "Ferramentas",
         url: "/ferramentas",
         icon: Wrench,
