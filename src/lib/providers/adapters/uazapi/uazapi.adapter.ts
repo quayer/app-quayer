@@ -354,40 +354,80 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   }
 
   normalizeWebhook(rawWebhook: any): NormalizedWebhook {
-    // UAZapi format detection
-    // Pode vir em diferentes formatos dependendo do evento
+    // UAZapi Global Webhook format:
+    // {
+    //   "BaseUrl": "https://quayer.uazapi.com",
+    //   "EventType": "messages",
+    //   "chat": { "wa_chatid": "...", "wa_name": "..." },
+    //   "instanceName": "...",
+    //   "message": { "chatid": "...", "content": { "text": "...", "key": { "ID": "..." } } },
+    //   "token": "..."
+    // }
 
-    const event = this.mapEvent(rawWebhook.event || rawWebhook.type);
-    const instanceId = rawWebhook.instanceId || rawWebhook.instance_id;
+    // Map event type - UAZapi uses "EventType" or "type"
+    const eventType = rawWebhook.EventType || rawWebhook.event || rawWebhook.type || 'messages';
+    const event = this.mapEvent(eventType);
+
+    // Instance ID will be resolved by token in the webhook handler
+    // We pass the token here for lookup
+    const instanceId = rawWebhook.instanceId || rawWebhook.instance_id || rawWebhook.token || '';
+
+    // Extract chat info - UAZapi uses "chat" object
+    const chat = rawWebhook.chat || {};
+    const chatId = chat.wa_chatid || rawWebhook.chatId || rawWebhook.message?.chatid || '';
+
+    // Extract "from" - for incoming messages, it's the chat ID (phone@s.whatsapp.net or group@g.us)
+    const from = chatId || rawWebhook.from || rawWebhook.data?.from || '';
+
+    // Extract message content - UAZapi uses "message" object with "content" inside
+    const rawMessage = rawWebhook.message || rawWebhook.data?.message;
+    const messageContent = rawMessage?.content || rawMessage;
+
+    let message: NormalizedWebhook['data']['message'] = undefined;
+
+    if (rawMessage && messageContent) {
+      const messageId = messageContent.key?.ID || messageContent.key?.id || rawMessage.id || '';
+      const messageType = rawMessage.type || messageContent.type || 'text';
+      const textContent = messageContent.text || messageContent.body || messageContent.caption || rawMessage.text || '';
+
+      // Check for media
+      const mediaUrl = messageContent.mediaUrl || rawMessage.mediaUrl || messageContent.url;
+
+      message = {
+        id: messageId,
+        type: this.mapMessageType(messageType),
+        content: textContent,
+        media: mediaUrl ? {
+          id: messageId,
+          type: this.mapMessageType(messageType),
+          mediaUrl: mediaUrl,
+          caption: messageContent.caption || '',
+          fileName: messageContent.filename || messageContent.fileName || '',
+          mimeType: messageContent.mimetype || messageContent.mimeType || '',
+          size: messageContent.fileSize || messageContent.size,
+          duration: messageContent.seconds || messageContent.duration,
+        } : undefined,
+        timestamp: new Date(messageContent.senderTimestampMS || rawMessage.timestamp || Date.now()),
+        // Location data
+        latitude: messageContent.latitude || messageContent.lat,
+        longitude: messageContent.longitude || messageContent.lng,
+        locationName: messageContent.name || messageContent.locationName,
+      };
+    }
 
     return {
       event,
       instanceId,
-      timestamp: new Date(rawWebhook.timestamp || Date.now()),
+      timestamp: new Date(rawWebhook.timestamp || chat.wa_lastMsgTimestamp || Date.now()),
       data: {
-        chatId: rawWebhook.data?.chatId || rawWebhook.chatId,
-        from: rawWebhook.data?.from || rawWebhook.from,
-        to: rawWebhook.data?.to,
-        message: rawWebhook.data?.message ? {
-          id: rawWebhook.data.message.id || rawWebhook.data.message.key?.id,
-          type: this.mapMessageType(rawWebhook.data.message.type || rawWebhook.data.message.messageType),
-          content: rawWebhook.data.message.body || rawWebhook.data.message.text || rawWebhook.data.message.caption || '',
-          media: rawWebhook.data.message.mediaUrl ? {
-            id: rawWebhook.data.message.id,
-            type: this.mapMessageType(rawWebhook.data.message.type),
-            mediaUrl: rawWebhook.data.message.mediaUrl,
-            caption: rawWebhook.data.message.caption,
-            fileName: rawWebhook.data.message.filename,
-            mimeType: rawWebhook.data.message.mimetype,
-            size: rawWebhook.data.message.fileSize,
-            duration: rawWebhook.data.message.seconds,
-          } : undefined,
-          timestamp: new Date(rawWebhook.data.message.timestamp || Date.now()),
-        } : undefined,
-        status: rawWebhook.data?.status ? this.mapStatus(rawWebhook.data.status) : undefined,
-        qrCode: rawWebhook.data?.qrcode || rawWebhook.qrcode,
+        chatId,
+        from,
+        to: rawWebhook.to || rawWebhook.data?.to,
+        message,
+        status: rawWebhook.state || rawWebhook.data?.status ? this.mapStatus(rawWebhook.state || rawWebhook.data?.status) : undefined,
+        qrCode: rawWebhook.qrcode || rawWebhook.data?.qrcode,
       },
-      rawPayload: rawWebhook, // Para debug
+      rawPayload: rawWebhook,
     };
   }
 

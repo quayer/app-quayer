@@ -259,9 +259,31 @@ export async function POST(
     // 1. NORMALIZAR WEBHOOK
     const normalized = await orchestrator.normalizeWebhook(provider, rawBody);
 
-    // 2. CLOUD API: Map phoneNumberId to real instanceId
+    // 2. RESOLVER instanceId pelo token (UAZapi Global Webhook envia token, não instanceId)
+    if (provider === 'uazapi' && normalized.instanceId) {
+      // O instanceId pode ser um token UUID - buscar a conexão
+      const instance = await database.connection.findFirst({
+        where: {
+          OR: [
+            { id: normalized.instanceId },
+            { uazapiToken: normalized.instanceId },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (instance) {
+        console.log(`[Webhook] UAZapi: Resolved token ${normalized.instanceId} to instanceId ${instance.id}`);
+        normalized.instanceId = instance.id;
+      } else {
+        console.warn(`[Webhook] UAZapi: No instance found for token/id ${normalized.instanceId}`);
+        return NextResponse.json({ success: true, message: 'Instance not found' });
+      }
+    }
+
+    // 3. CLOUD API: Map phoneNumberId to real instanceId
     if (provider === 'cloudapi' && normalized.instanceId) {
-      const instance = await database.instance.findFirst({
+      const instance = await database.connection.findFirst({
         where: { cloudApiPhoneNumberId: normalized.instanceId },
         select: { id: true },
       });
@@ -271,12 +293,11 @@ export async function POST(
         normalized.instanceId = instance.id;
       } else {
         console.warn(`[Webhook] CloudAPI: No instance found for phoneNumberId ${normalized.instanceId}`);
-        // Return success to avoid Meta retrying, but don't process
         return NextResponse.json({ success: true, message: 'Instance not found' });
       }
     }
 
-    console.log(`[Webhook] Normalized event: ${normalized.event}`);
+    console.log(`[Webhook] Normalized event: ${normalized.event}, instanceId: ${normalized.instanceId}, from: ${normalized.data.from}`);
 
     // 3. PROCESSAR POR TIPO DE EVENTO
     switch (normalized.event) {
@@ -384,7 +405,7 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   }
 
   // 2. Buscar instância para obter organizationId
-  const instance = await database.instance.findUnique({
+  const instance = await database.connection.findUnique({
     where: { id: instanceId },
     select: { organizationId: true },
   });
@@ -802,7 +823,7 @@ async function updateInstanceStatus(instanceId: string, status: string): Promise
 
   const mappedStatus = statusMap[status.toLowerCase()] || ConnectionStatus.DISCONNECTED;
 
-  await database.instance.update({
+  await database.connection.update({
     where: { id: instanceId },
     data: { status: mappedStatus },
   });
@@ -823,7 +844,7 @@ async function updateInstanceStatus(instanceId: string, status: string): Promise
 async function updateInstanceQRCode(instanceId: string, qrCode: string): Promise<void> {
   console.log(`[Webhook] Updating QR Code for instance ${instanceId}`);
 
-  await database.instance.update({
+  await database.connection.update({
     where: { id: instanceId },
     data: { qrCode },
   });
