@@ -387,14 +387,32 @@ export class UAZClient {
     text: string;
     delay?: number;
   }) {
-    return this.request('POST', `/send/text`, {
-      token,
-      body: {
-        number: data.number,
-        text: data.text,
-        delay: data.delay,
-      },
-    });
+    // Try Evolution API v2 format first: /message/sendText/{instance}
+    // Fallback to legacy /send/text if needed
+    try {
+      return await this.request('POST', `/message/sendText/${instanceId}`, {
+        token,
+        body: {
+          number: data.number,
+          text: data.text,
+          delay: data.delay,
+        },
+      });
+    } catch (error: any) {
+      // If 404/405, try legacy endpoint
+      if (error.message?.includes('404') || error.message?.includes('405')) {
+        console.log('[UAZClient] Falling back to legacy /send/text endpoint');
+        return this.request('POST', `/send/text`, {
+          token,
+          body: {
+            number: data.number,
+            text: data.text,
+            delay: data.delay,
+          },
+        });
+      }
+      throw error;
+    }
   }
 
   async sendMedia(instanceId: string, token: string, data: {
@@ -405,10 +423,23 @@ export class UAZClient {
     filename?: string;
     mimetype?: string;
   }) {
-    return this.request('POST', `/send/media`, {
-      token,
-      body: data,
-    });
+    // Try Evolution API v2 format first: /message/sendMedia/{instance}
+    try {
+      return await this.request('POST', `/message/sendMedia/${instanceId}`, {
+        token,
+        body: data,
+      });
+    } catch (error: any) {
+      // If 404/405, try legacy endpoint
+      if (error.message?.includes('404') || error.message?.includes('405')) {
+        console.log('[UAZClient] Falling back to legacy /send/media endpoint');
+        return this.request('POST', `/send/media`, {
+          token,
+          body: data,
+        });
+      }
+      throw error;
+    }
   }
 
   // ===== INSTANCE WEBHOOKS =====

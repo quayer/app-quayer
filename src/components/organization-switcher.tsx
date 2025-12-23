@@ -21,9 +21,11 @@ import {
 import { api } from '@/igniter.client'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function OrganizationSwitcher() {
   const { user, updateAuth } = useAuth()
+  const queryClient = useQueryClient()
   const [open, setOpen] = React.useState(false)
   const [isSwitching, setIsSwitching] = React.useState(false)
   const [organizations, setOrganizations] = React.useState<any[]>([])
@@ -63,12 +65,23 @@ export function OrganizationSwitcher() {
 
       const data = result.data as any
       if (data && !data.error) {
-        // Atualizar token e contexto do usuário
+        // Atualizar token em TODOS os lugares
         if (data.accessToken) {
+          // Cookie (para SSR/middleware)
           document.cookie = `accessToken=${data.accessToken}; path=/; max-age=900; SameSite=Lax`
+          // localStorage (para client-side)
+          localStorage.setItem('accessToken', data.accessToken)
         }
 
-        // Atualizar estado do usuário
+        // Invalidar TODOS os caches do React Query
+        // Isso força refetch de todos os dados quando a página recarregar
+        await queryClient.invalidateQueries()
+        queryClient.clear()
+
+        // Limpar sessionStorage cache também
+        sessionStorage.clear()
+
+        // Atualizar estado do usuário (para componentes que renderizam antes do reload)
         updateAuth({
           ...user,
           currentOrgId: data.currentOrgId,
@@ -77,7 +90,10 @@ export function OrganizationSwitcher() {
 
         toast.success('Organização alterada com sucesso!')
 
-        // Recarregar página para atualizar dados
+        // Pequeno delay para garantir que tudo foi salvo antes do reload
+        await new Promise(resolve => setTimeout(resolve, 100))
+
+        // Recarregar página para atualizar dados com nova organização
         window.location.reload()
       } else {
         toast.error(data?.error || (result as any).error?.message || 'Erro ao trocar organização')

@@ -159,12 +159,27 @@ export class UAZService {
 
   /**
    * Enviar mensagem de texto
+   * Tries Evolution API v2 format first, then falls back to legacy endpoint
    */
   async sendText(token: string, data: SendTextDto) {
-    return this.request('/send/text', token, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    // First try the legacy /send/text endpoint (most common)
+    try {
+      return await this.request('/send/text', token, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    } catch (error: any) {
+      // If 404/405, the endpoint format may have changed
+      if (error.message?.includes('404') || error.message?.includes('405')) {
+        console.log('[UAZService] /send/text failed, trying alternative endpoint');
+        // Try Evolution API v2 style endpoint
+        return this.request('/message/sendText', token, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
+      }
+      throw error;
+    }
   }
 
   /**

@@ -16,6 +16,7 @@ import {
   logoutSchema,
   changePasswordSchema,
   updateProfileSchema,
+  updatePreferencesSchema,
   switchOrganizationSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
@@ -256,15 +257,17 @@ export const authController = igniter.controller({
           return response.status(403).json({ error: 'Account disabled' });
         }
 
-        // Se admin não tem org setada, setar primeira org disponível
+        // Se usuário não tem org setada, setar primeira org disponível
+        // FIX: Aplica para TODOS os usuários, não apenas admin (alinhado com passkey login)
         let currentOrgId = user.currentOrgId;
-        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+        if (!currentOrgId && user.organizations.length > 0) {
           currentOrgId = user.organizations[0].organizationId;
           // Atualizar no banco para próximo login
           await db.user.update({
             where: { id: user.id },
             data: { currentOrgId },
           });
+          console.log('[Login] Set currentOrgId for user:', user.email, currentOrgId);
         }
 
         // Obter role na organização atual
@@ -558,6 +561,46 @@ export const authController = igniter.controller({
           email: user.email,
           name: user.name,
           emailVerified: user.emailVerified,
+        });
+      },
+    }),
+
+    /**
+     * Update Preferences
+     * Update user message signature and AI settings
+     */
+    updatePreferences: igniter.mutation({
+      name: 'Update Preferences',
+      description: 'Update user preferences including message signature and AI settings',
+      path: '/preferences',
+      method: 'PATCH',
+      body: updatePreferencesSchema,
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const authUser = context.auth?.session?.user;
+        if (!authUser) {
+          return response.unauthorized('Not authenticated');
+        }
+
+        const { messageSignature, aiSuggestionsEnabled } = request.body;
+
+        const updateData: any = {};
+        if (messageSignature !== undefined) {
+          updateData.messageSignature = messageSignature;
+        }
+        if (aiSuggestionsEnabled !== undefined) {
+          updateData.aiSuggestionsEnabled = aiSuggestionsEnabled;
+        }
+
+        const user = await db.user.update({
+          where: { id: authUser.id },
+          data: updateData,
+        });
+
+        return response.success({
+          id: user.id,
+          messageSignature: user.messageSignature,
+          aiSuggestionsEnabled: user.aiSuggestionsEnabled,
         });
       },
     }),

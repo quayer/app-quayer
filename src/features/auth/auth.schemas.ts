@@ -423,3 +423,26 @@ export const webAuthnLoginVerifyDiscoverableSchema = z.object({
 });
 
 export type WebAuthnLoginVerifyDiscoverableInput = z.infer<typeof webAuthnLoginVerifyDiscoverableSchema>;
+
+/**
+ * Schema for message signature configuration
+ */
+export const messageSignatureSchema = z.object({
+  enabled: z.boolean().default(false),
+  format: z.enum(['first_name', 'full_name', 'name_department', 'custom']).default('full_name'),
+  department: z.string().max(50).optional(),
+  customText: z.string().max(200).optional(),
+  showPreview: z.boolean().default(true),
+});
+
+export type MessageSignatureConfig = z.infer<typeof messageSignatureSchema>;
+
+/**
+ * Schema for updating user preferences
+ */
+export const updatePreferencesSchema = z.object({
+  messageSignature: messageSignatureSchema.optional(),
+  aiSuggestionsEnabled: z.boolean().optional(),
+});
+
+export type UpdatePreferencesInput = z.infer<typeof updatePreferencesSchema>;

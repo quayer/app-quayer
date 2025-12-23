@@ -69,6 +69,7 @@ import {
   User,
   ArchiveIcon,
   Inbox,
+  CheckCircle2,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -76,6 +77,7 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
+import { AudioRecorder } from '@/components/chat/AudioRecorder'
 
 // Common emojis for quick access
 const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check', 'star', 'fire']
@@ -102,7 +104,7 @@ const ATTENDANCE_FILTERS: { value: AttendanceFilter; label: string; icon: any; c
   { value: 'all', label: 'Todas', icon: Inbox, color: 'text-muted-foreground' },
   { value: 'ai', label: 'IA', icon: Bot, color: 'text-purple-500' },
   { value: 'human', label: 'Humano', icon: User, color: 'text-blue-500' },
-  { value: 'archived', label: 'Arquivado', icon: ArchiveIcon, color: 'text-orange-500' },
+  { value: 'archived', label: 'Encerradas', icon: ArchiveIcon, color: 'text-orange-500' },
 ]
 
 // ==================== TYPES ====================
@@ -309,6 +311,34 @@ export default function ConversationsPage() {
     )
   }, [chatsData, searchText])
 
+  // Calculate filter counts for badges
+  const filterCounts = useMemo(() => {
+    const data: UAZChat[] = (chatsData as any)?.chats ?? []
+    const now = new Date()
+
+    return {
+      all: data.length,
+      ai: data.filter(chat => {
+        const isAIActive = chat.aiEnabled === true && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < now)
+        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
+        return isAIActive && !isArchived
+      }).length,
+      human: data.filter(chat => {
+        const isAIBlocked = chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= now
+        const isAIDisabled = chat.aiEnabled === false
+        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
+        return (isAIBlocked || isAIDisabled) && !isArchived
+      }).length,
+      archived: data.filter(chat => chat.status === 'CLOSED' || chat.status === 'PAUSED').length,
+      groups: data.filter(chat => chat.wa_isGroup).length,
+      unread: data.filter(chat => chat.wa_unreadCount > 0).length,
+      pinned: data.filter(chat => chat.wa_isPinned).length,
+    }
+  }, [chatsData])
+
+  // Format count for display (99+ for large numbers)
+  const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
+
   // Fetch messages for selected chat
   const {
     data: messagesData,
@@ -367,7 +397,7 @@ export default function ConversationsPage() {
       return response
     },
     onSuccess: () => {
-      setMessageText('')
+      // Input already cleared optimistically in handleSendMessage
       refetchMessages()
       toast.success('Mensagem enviada!')
     },
@@ -431,6 +461,25 @@ export default function ConversationsPage() {
     }
   })
 
+  // Resolve/Close session
+  const resolveSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await (api.sessions as any).updateStatus.mutate({
+        params: { id: sessionId },
+        body: { status: 'CLOSED' }
+      })
+      return response
+    },
+    onSuccess: () => {
+      toast.success('Conversa encerrada com sucesso!')
+      refetchChats()
+      setSelectedChatId(null)
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao encerrar conversa')
+    }
+  })
+
   // ==================== HANDLERS ====================
 
   const handleSelectChat = useCallback((chat: UAZChat) => {
@@ -456,9 +505,13 @@ export default function ConversationsPage() {
   const handleSendMessage = useCallback(() => {
     if (!messageText.trim() || !selectedChatId) return
 
+    const textToSend = messageText.trim()
+    // Clear input optimistically for better UX
+    setMessageText('')
+
     sendMessageMutation.mutate({
       sessionId: selectedChatId,
-      content: messageText.trim(),
+      content: textToSend,
     })
   }, [messageText, selectedChatId, sendMessageMutation])
 
@@ -531,6 +584,30 @@ export default function ConversationsPage() {
     setFilePreview(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
+
+  // Handle audio message
+  const handleSendAudio = useCallback(async (audioBase64: string, mimeType: string, duration: number) => {
+    if (!selectedChatInstanceId || !selectedChatId) return
+
+    try {
+      await api.media.sendAudio.mutate({
+        body: {
+          instanceId: selectedChatInstanceId,
+          chatId: selectedChatId,
+          mediaBase64: audioBase64,
+          mimeType: mimeType,
+          duration: duration,
+        }
+      })
+
+      refetchMessages()
+      toast.success('Audio enviado!')
+    } catch (error: any) {
+      console.error('[ConversationsPage] Error sending audio:', error)
+      toast.error('Erro ao enviar audio', { description: error.message })
+      throw error // Re-throw so AudioRecorder knows it failed
+    }
+  }, [selectedChatInstanceId, selectedChatId, refetchMessages])
 
   const handleManualRefresh = useCallback(async () => {
     await Promise.all([
@@ -698,32 +775,48 @@ export default function ConversationsPage() {
           />
         </div>
 
-        {/* Attendance type filter - Buttons */}
+        {/* Attendance type filter - Buttons with count badges */}
         <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg">
-          {ATTENDANCE_FILTERS.map(filter => (
-            <Tooltip key={filter.value}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={attendanceFilter === filter.value ? "secondary" : "ghost"}
-                  size="sm"
-                  className={cn(
-                    "flex-1 gap-1.5",
-                    attendanceFilter === filter.value && filter.color
-                  )}
-                  onClick={() => setAttendanceFilter(filter.value)}
-                >
-                  <filter.icon className={cn("h-4 w-4", filter.color)} />
-                  <span className="text-xs hidden sm:inline">{filter.label}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {filter.value === 'ai' && 'Conversas com IA ativa'}
-                {filter.value === 'human' && 'Conversas com atendente humano'}
-                {filter.value === 'archived' && 'Conversas arquivadas/encerradas'}
-                {filter.value === 'all' && 'Todas as conversas'}
-              </TooltipContent>
-            </Tooltip>
-          ))}
+          {ATTENDANCE_FILTERS.map(filter => {
+            const count = filterCounts[filter.value] ?? 0
+            return (
+              <Tooltip key={filter.value}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={attendanceFilter === filter.value ? "secondary" : "ghost"}
+                    size="sm"
+                    className={cn(
+                      "flex-1 gap-1 px-2 relative",
+                      attendanceFilter === filter.value && filter.color
+                    )}
+                    onClick={() => setAttendanceFilter(filter.value)}
+                  >
+                    <filter.icon className={cn("h-3.5 w-3.5", filter.color)} />
+                    <span className="text-xs hidden sm:inline">{filter.label}</span>
+                    {count > 0 && (
+                      <Badge
+                        variant={attendanceFilter === filter.value ? "default" : "secondary"}
+                        className={cn(
+                          "ml-1 h-5 min-w-5 px-1.5 text-[10px] font-medium",
+                          attendanceFilter === filter.value
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted-foreground/20 text-muted-foreground"
+                        )}
+                      >
+                        {formatCount(count)}
+                      </Badge>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {filter.value === 'ai' && `Conversas com IA ativa (${count})`}
+                  {filter.value === 'human' && `Conversas com atendente humano (${count})`}
+                  {filter.value === 'archived' && `Conversas encerradas (${count})`}
+                  {filter.value === 'all' && `Todas as conversas (${count})`}
+                </TooltipContent>
+              </Tooltip>
+            )
+          })}
         </div>
 
         {/* Chat type filter + refresh */}
@@ -958,7 +1051,36 @@ export default function ConversationsPage() {
                 </Badge>
               )}
 
-              {/* Botões de ligação/vídeo removidos - WhatsApp Web não suporta chamadas via API */}
+              {/* Resolve/Close session button */}
+              {selectedChat.status !== 'CLOSED' && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-green-600 border-green-200 hover:bg-green-50 hover:text-green-700"
+                      onClick={() => {
+                        if (!selectedChat.id) {
+                          toast.error('Esta conversa não possui sessão ativa no sistema')
+                          return
+                        }
+                        resolveSessionMutation.mutate(selectedChat.id)
+                      }}
+                      disabled={resolveSessionMutation.isPending || !selectedChat.id}
+                    >
+                      {resolveSessionMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      <span className="hidden sm:inline">Resolver</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Encerrar conversa e mover para Encerradas
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1018,10 +1140,12 @@ export default function ConversationsPage() {
                   >
                     <div
                       className={cn(
-                        "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm",
+                        "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-opacity",
                         message.direction === 'OUTBOUND'
                           ? "bg-primary text-primary-foreground rounded-br-md"
-                          : "bg-muted rounded-bl-md"
+                          : "bg-muted rounded-bl-md",
+                        // Failed messages get faded styling
+                        message.status === 'failed' && "opacity-50"
                       )}
                     >
                       {/* Media content */}
@@ -1162,22 +1286,32 @@ export default function ConversationsPage() {
                 disabled={isUploading || sendMessageMutation.isPending}
               />
 
-              {/* Send button */}
-              <Button
-                onClick={selectedFile ? handleSendFile : handleSendMessage}
-                disabled={
-                  isUploading ||
-                  sendMessageMutation.isPending ||
-                  (!selectedFile && !messageText.trim())
-                }
-                size="icon"
-              >
-                {isUploading || sendMessageMutation.isPending ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Send className="h-5 w-5" />
-                )}
-              </Button>
+              {/* Audio recorder - show when no text and no file */}
+              {!messageText.trim() && !selectedFile && (
+                <AudioRecorder
+                  onSend={handleSendAudio}
+                  disabled={isUploading || sendMessageMutation.isPending}
+                />
+              )}
+
+              {/* Send button - show when there's text or file */}
+              {(messageText.trim() || selectedFile) && (
+                <Button
+                  onClick={selectedFile ? handleSendFile : handleSendMessage}
+                  disabled={
+                    isUploading ||
+                    sendMessageMutation.isPending ||
+                    (!selectedFile && !messageText.trim())
+                  }
+                  size="icon"
+                >
+                  {isUploading || sendMessageMutation.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Send className="h-5 w-5" />
+                  )}
+                </Button>
+              )}
             </div>
           </div>
         </>
@@ -1215,7 +1349,7 @@ export default function ConversationsPage() {
             </Sheet>
 
             {/* Main messages area */}
-            <Card className="flex-1 min-h-0 overflow-hidden">
+            <Card className="flex-1 h-full min-h-0 overflow-hidden">
               <CardContent className="p-0 h-full">
                 {selectedChat ? (
                   <MessagesArea />
@@ -1237,14 +1371,14 @@ export default function ConversationsPage() {
           /* Desktop Layout - 2 columns (chats + messages) */
           <>
             {/* Column 1: Chats with integrated instance filter */}
-            <Card className="w-96 flex-shrink-0 overflow-hidden">
+            <Card className="w-96 flex-shrink-0 h-full overflow-hidden">
               <CardContent className="p-0 h-full">
                 <ChatsList />
               </CardContent>
             </Card>
 
             {/* Column 2: Messages */}
-            <Card className="flex-1 min-w-0 overflow-hidden">
+            <Card className="flex-1 min-w-0 h-full overflow-hidden">
               <CardContent className="p-0 h-full">
                 <MessagesArea />
               </CardContent>

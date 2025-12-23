@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic'
  */
 export default async function RootPage() {
   const cookieStore = await cookies()
-  const token = cookieStore.get('auth_token')
+  // FIX: Cookie correto é 'accessToken', não 'auth_token'
+  const token = cookieStore.get('accessToken')
 
   if (token) {
     redirect('/integracoes')

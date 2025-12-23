@@ -2,6 +2,11 @@ import { igniter } from '@/igniter';
 import { z } from 'zod';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
 import { database } from '@/services/database';
+import { ConnectionStatus } from '@prisma/client';
+
+// Profile picture cache (in-memory for quick lookups)
+const profilePicCache = new Map<string, { url: string | null; expiresAt: number }>();
+const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 30; // 30 minutes
 
 /**
  * Contacts Controller
@@ -359,6 +364,108 @@ export const contactsController = igniter.controller({
             limit,
           },
         });
+      },
+    }),
+
+    /**
+     * GET /api/contacts/profile-picture
+     * Fetch profile picture from WhatsApp API
+     */
+    profilePicture: igniter.query({
+      path: '/profile-picture',
+      query: z.object({
+        instanceId: z.string().uuid(),
+        phoneNumber: z.string(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const { instanceId, phoneNumber } = request.query;
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticação necessária');
+        }
+
+        // Check cache first
+        const cacheKey = `${instanceId}:${phoneNumber}`;
+        const cached = profilePicCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          return response.success({ url: cached.url, source: 'cache' });
+        }
+
+        // Check if we already have it in the database
+        const contact = await database.contact.findUnique({
+          where: { phoneNumber: phoneNumber.replace(/@.*$/, '') },
+          select: { profilePicUrl: true },
+        });
+
+        if (contact?.profilePicUrl) {
+          // Cache and return
+          profilePicCache.set(cacheKey, {
+            url: contact.profilePicUrl,
+            expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL,
+          });
+          return response.success({ url: contact.profilePicUrl, source: 'database' });
+        }
+
+        // Fetch from WhatsApp API
+        const instance = await database.instance.findFirst({
+          where: {
+            id: instanceId,
+            organization: {
+              users: { some: { userId: user.id } },
+            },
+          },
+          select: { uazapiToken: true, status: true },
+        });
+
+        if (!instance || instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
+          // Cache null result to avoid repeated API calls
+          profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
+          return response.success({ url: null, source: 'unavailable' });
+        }
+
+        try {
+          // Fetch from UAZapi
+          const baseUrl = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+          const cleanNumber = phoneNumber.replace(/@.*$/, '');
+
+          const apiResponse = await fetch(`${baseUrl}/profile/image/${cleanNumber}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'token': instance.uazapiToken,
+            },
+          });
+
+          if (!apiResponse.ok) {
+            profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
+            return response.success({ url: null, source: 'api_error' });
+          }
+
+          const data = await apiResponse.json();
+          const profilePicUrl = data.profilePicUrl || data.url || data.data?.url || null;
+
+          // Update database
+          if (profilePicUrl) {
+            await database.contact.updateMany({
+              where: { phoneNumber: cleanNumber },
+              data: { profilePicUrl },
+            });
+          }
+
+          // Cache the result
+          profilePicCache.set(cacheKey, {
+            url: profilePicUrl,
+            expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL,
+          });
+
+          return response.success({ url: profilePicUrl, source: 'api' });
+        } catch (error) {
+          console.error('[ContactsController] Error fetching profile picture:', error);
+          profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
+          return response.success({ url: null, source: 'error' });
+        }
       },
     }),
   },

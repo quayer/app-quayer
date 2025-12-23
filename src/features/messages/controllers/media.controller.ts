@@ -20,6 +20,14 @@ const sendMediaSchema = z.object({
   caption: z.string().optional(),
 })
 
+const sendAudioSchema = z.object({
+  instanceId: z.string().min(1, 'Instance ID é obrigatório'),
+  chatId: z.string().min(1, 'Chat ID é obrigatório'),
+  mediaBase64: z.string().min(1, 'Audio base64 é obrigatório'),
+  mimeType: z.string().min(1, 'MIME type é obrigatório'),
+  duration: z.number().optional(), // Duration in seconds
+})
+
 export const mediaController = igniter.controller({
   name: 'media',
   path: '/messages/media',
@@ -195,6 +203,104 @@ export const mediaController = igniter.controller({
         } catch (error: any) {
           console.error('Erro ao enviar documento:', error)
           return response.badRequest(error.message || 'Erro ao enviar documento')
+        }
+      }
+    }),
+
+    /**
+     * @action sendAudio
+     * @description Envia um audio para um chat (voice message)
+     * @route POST /api/v1/messages/media/audio
+     */
+    sendAudio: igniter.mutation({
+      path: '/audio',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      body: sendAudioSchema,
+      handler: async ({ request, response, context }) => {
+        try {
+          const { instanceId, chatId, mediaBase64, mimeType } = request.body
+
+          // Buscar instância
+          const instance = await database.instance.findUnique({
+            where: { id: instanceId },
+            select: { id: true, uazapiToken: true, status: true, organizationId: true }
+          })
+
+          if (!instance) {
+            return response.notFound('Instância não encontrada')
+          }
+
+          // Verificar permissão de organização
+          const user = context.auth?.session?.user
+          const isAdmin = user?.role === 'admin'
+          const orgId = user?.currentOrgId
+
+          if (!isAdmin && instance.organizationId !== orgId) {
+            return response.forbidden('Sem permissão para acessar esta instância')
+          }
+
+          if (instance.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Instância não está conectada')
+          }
+
+          if (!instance.uazapiToken) {
+            return response.badRequest('Token UAZ não configurado')
+          }
+
+          // Preparar payload para UAZapi
+          // UAZapi expects 'myaudio' mediatype for voice messages (PTT - Push To Talk)
+          const payload = {
+            number: chatId.replace('@s.whatsapp.net', '').replace('@g.us', ''),
+            mediatype: 'myaudio', // 'myaudio' for voice message (PTT)
+            media: `data:${mimeType};base64,${mediaBase64}`,
+          }
+
+          // Enviar para UAZapi
+          const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+
+          // Try Evolution API v2 format first
+          let uazResponse = await fetch(`${UAZAPI_URL}/message/sendMedia/${instanceId}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'token': instance.uazapiToken
+            },
+            body: JSON.stringify(payload)
+          })
+
+          // Fallback to legacy endpoint if needed
+          if (!uazResponse.ok && (uazResponse.status === 404 || uazResponse.status === 405)) {
+            console.log('[MediaController] Falling back to legacy /send/media endpoint for audio')
+            uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': instance.uazapiToken
+              },
+              body: JSON.stringify(payload)
+            })
+          }
+
+          const uazData = await uazResponse.json()
+
+          if (!uazResponse.ok) {
+            console.error('[MediaController] UAZapi error:', uazData)
+            return response.badRequest(uazData.message || 'Erro ao enviar audio')
+          }
+
+          return response.success({
+            data: {
+              success: true,
+              messageId: uazData.messageId || uazData.id || uazData.key?.id,
+              message: 'Audio enviado com sucesso',
+              ...uazData
+            }
+          })
+
+        } catch (error: any) {
+          console.error('Erro ao enviar audio:', error)
+          return response.badRequest(error.message || 'Erro ao enviar audio')
         }
       }
     }),

@@ -435,11 +435,36 @@ export const systemSettingsController = igniter.controller({
       method: 'GET',
       use: [adminProcedure()],
       handler: async ({ context, response }) => {
+        // Get local settings from database
         const settings = await systemSettingsRepository.getByCategory('uazapi')
-        // Return webhook-specific fields
+        const localWebhook = settings?.webhook || null
+
+        // Try to fetch current config from UAZapi
+        let uazapiWebhook = null
+        try {
+          const { getConfiguredUazapiClient } = await import('@/lib/providers/adapters/uazapi/uazapi.client')
+          const client = await getConfiguredUazapiClient()
+          const result = await client.getGlobalWebhook()
+          if (result?.webhook) {
+            uazapiWebhook = result.webhook
+          }
+        } catch (error: any) {
+          console.warn('Failed to fetch webhook from UAZapi:', error.message)
+        }
+
+        // Determine which data to return and its source
+        const data = localWebhook || uazapiWebhook
+        const source = localWebhook ? 'local' : uazapiWebhook ? 'uazapi' : null
+
         return response.json({
           success: true,
-          data: settings?.webhook || null,
+          data,
+          source,
+          // Include both for debugging/comparison if both exist
+          _debug: {
+            local: localWebhook,
+            uazapi: uazapiWebhook,
+          },
         })
       },
     }),

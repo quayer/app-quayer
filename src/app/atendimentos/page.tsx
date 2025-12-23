@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
 import { useOrganization } from '@/hooks/useOrganization'
+import { useAuth } from '@/lib/auth/auth-provider'
 import { PageContainer, PageHeader } from '@/components/layout/page-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -114,6 +115,7 @@ const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon:
 export default function AtendimentosPage() {
   const queryClient = useQueryClient()
   const { currentOrgId } = useOrganization()
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [connectionFilter, setConnectionFilter] = useState<string>('all')
   const [page, setPage] = useState(1)
@@ -122,9 +124,13 @@ export default function AtendimentosPage() {
   const [activeTab, setActiveTab] = useState<string>('active')
   const limit = 20
 
+  // Admin can see all sessions, non-admin requires currentOrgId
+  const isAdmin = user?.role === 'admin'
+  const canFetch = isAdmin || !!currentOrgId
+
   // Fetch sessions
   const { data: sessionsData, isLoading, refetch } = useQuery({
-    queryKey: ['org-sessions', currentOrgId, connectionFilter, search, page, activeTab],
+    queryKey: ['org-sessions', currentOrgId, connectionFilter, search, page, activeTab, isAdmin],
     queryFn: async () => {
       let status: string | undefined = undefined
       if (activeTab === 'active') status = 'ACTIVE'
@@ -132,7 +138,8 @@ export default function AtendimentosPage() {
       else if (activeTab === 'closed') status = 'CLOSED'
 
       const response = await (api.sessions as any).list.query({
-        organizationId: currentOrgId,
+        // Admin without currentOrgId = see all sessions
+        organizationId: currentOrgId || undefined,
         status,
         connectionId: connectionFilter !== 'all' ? connectionFilter : undefined,
         search: search || undefined,
@@ -146,17 +153,17 @@ export default function AtendimentosPage() {
         pagination: { total: number; totalPages: number; page: number }
       }
     },
-    enabled: !!currentOrgId,
+    enabled: canFetch,
   })
 
   // Fetch connections for filter
   const { data: connectionsData } = useQuery({
-    queryKey: ['org-connections', currentOrgId],
+    queryKey: ['org-connections', currentOrgId, isAdmin],
     queryFn: async () => {
       const response = await (api.instances as any).list.query({})
       return response.data?.instances || response.instances || []
     },
-    enabled: !!currentOrgId,
+    enabled: canFetch,
   })
 
   // Block AI mutation

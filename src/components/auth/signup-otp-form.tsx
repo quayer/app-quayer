@@ -87,8 +87,14 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         sessionStorage.removeItem('signup-name')
 
         setTimeout(() => {
-          const redirectPath = loginData.user?.role === "admin" ? "/admin" : "/integracoes"
-          window.location.href = redirectPath
+          // FIX: Novos usuários SEMPRE devem ir para onboarding primeiro
+          // O middleware vai redirecionar caso já tenha completado
+          if (loginData.needsOnboarding) {
+            window.location.href = "/onboarding"
+          } else {
+            const redirectPath = loginData.user?.role === "admin" ? "/admin" : "/integracoes"
+            window.location.href = redirectPath
+          }
         }, 1500)
       }
     } catch (err: any) {

@@ -111,6 +111,10 @@ model User {
   onboardingCompleted Boolean @default(false)
   lastOrganizationId  String?
 
+  // Message signature and AI preferences
+  messageSignature     Json?    @db.JsonB // { enabled, format, department, customText, showPreview }
+  aiSuggestionsEnabled Boolean  @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -794,10 +798,11 @@ model ChatSession {
   totalAiCost        Float @default(0) // Custo total de IA da sessão
 
   // Timing & Expiration
-  lastMessageAt DateTime  @default(now())
-  expiresAt     DateTime? // Calculated expiration based on org timeout
-  pausedUntil   DateTime? // For @pausar command with time limit
-  pausedBy      String? // Who paused: "command", "agent", "system"
+  lastMessageAt       DateTime  @default(now())
+  lastMessageAuthorId String?   // ID of user who sent last message (for signature logic)
+  expiresAt           DateTime? // Calculated expiration based on org timeout
+  pausedUntil         DateTime? // For @pausar command with time limit
+  pausedBy            String?   // Who paused: "command", "agent", "system"
 
   // WhatsApp 24h Window (compliance with WhatsApp Business API)
   lastCustomerMessageAt   DateTime? // Last message FROM customer (inbound)

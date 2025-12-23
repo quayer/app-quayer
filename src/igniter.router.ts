@@ -24,6 +24,7 @@ import { healthController } from '@/features/health'
 import { auditController } from '@/features/audit'
 import { connectionSettingsController } from '@/features/connection-settings'
 import { organizationProvidersController } from '@/features/organization-providers'
+import { aiController } from '@/features/ai/controllers/ai.controller'
 
 /**
  * @description Main application router configuration
@@ -60,6 +61,7 @@ export const AppRouter = igniter.router({
     audit: auditController,
     'connection-settings': connectionSettingsController,
     'organization-providers': organizationProvidersController,
+    ai: aiController,
   }
 })
 

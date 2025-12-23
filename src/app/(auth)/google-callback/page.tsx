@@ -65,8 +65,16 @@ export default function GoogleCallbackPage() {
         console.log('[GOOGLE CALLBACK] Tokens saved')
         console.log('[GOOGLE CALLBACK] User role:', (data as any).user?.role)
 
-        // Redirecionar para dashboard baseado no role
-        const redirectPath = (data as any).user?.role === 'admin' ? '/admin' : '/integracoes'
+        // FIX: Verificar se usuário precisa de onboarding (novos usuários Google)
+        const needsOnboarding = (data as any).needsOnboarding
+        console.log('[GOOGLE CALLBACK] needsOnboarding:', needsOnboarding)
+
+        let redirectPath: string
+        if (needsOnboarding) {
+          redirectPath = '/onboarding'
+        } else {
+          redirectPath = (data as any).user?.role === 'admin' ? '/admin' : '/integracoes'
+        }
         console.log('[GOOGLE CALLBACK] Redirecting to:', redirectPath)
 
         // Usar window.location para forçar reload completo e carregar auth state

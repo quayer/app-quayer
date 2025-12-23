@@ -368,6 +368,16 @@ export function WebhookSettings() {
                     <span className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-green-500" aria-hidden="true" />
                       Webhook configurado
+                      {(globalWebhook as any)?.source === 'uazapi' && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                          via UAZapi
+                        </span>
+                      )}
+                      {(globalWebhook as any)?.source === 'local' && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                          via Quayer
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="flex items-center gap-2">
