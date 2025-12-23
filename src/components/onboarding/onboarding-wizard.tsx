@@ -63,11 +63,17 @@ export function OnboardingWizard() {
       toast.success('Organização criada com sucesso!')
 
       // ✅ CORREÇÃO BRUTAL: Atualizar token com o novo que vem da resposta
-      if (data?.accessToken) {
-        localStorage.setItem('accessToken', data.accessToken)
+      // O igniter wrapa a resposta em { data: { ... } }
+      const responseData = data?.data || data
+      const accessToken = responseData?.accessToken
+
+      if (accessToken) {
+        localStorage.setItem('accessToken', accessToken)
         // Atualizar cookie também para o middleware
-        document.cookie = `accessToken=${encodeURIComponent(data.accessToken)}; path=/; max-age=86400; SameSite=Lax`
-        console.log('[Onboarding] Token atualizado com needsOnboarding: false')
+        document.cookie = `accessToken=${encodeURIComponent(accessToken)}; path=/; max-age=86400; SameSite=Lax`
+        console.log('[Onboarding] Token atualizado com needsOnboarding: false e currentOrgId')
+      } else {
+        console.warn('[Onboarding] accessToken não encontrado na resposta:', data)
       }
 
       // Mostrar tela de sucesso
