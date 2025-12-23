@@ -37,8 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ConnectionModal } from '@/components/whatsapp/connection-modal'
 import { CreateInstanceModal } from '@/components/whatsapp/create-instance-modal'
-// FIXME: Temporarily disabled - ShareToken model not in Prisma schema
-// import { ShareModal } from '@/components/whatsapp/share-modal'
+import { ShareLinkModal } from '@/components/whatsapp/share-link-modal'
 import { EditInstanceModal } from '@/components/whatsapp/edit-instance-modal'
 import { DetailsModal } from '@/components/whatsapp/details-modal'
 import { AssignOrganizationModal } from './assign-organization-modal'
@@ -62,8 +61,7 @@ function safeFormatDate(date: any): string | null {
 export default function IntegracoesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false)
-  // FIXME: Temporarily disabled - ShareToken model not in Prisma schema
-  // const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isAssignOrgModalOpen, setIsAssignOrgModalOpen] = useState(false)
@@ -115,11 +113,10 @@ export default function IntegracoesPage() {
     setIsEditModalOpen(true)
   }
 
-  // FIXME: Temporarily disabled - ShareToken model not in Prisma schema
-  // const handleShare = (instance: Instance) => {
-  //   setSelectedInstance(instance)
-  //   setIsShareModalOpen(true)
-  // }
+  const handleShare = (instance: Instance) => {
+    setSelectedInstance(instance)
+    setIsShareModalOpen(true)
+  }
 
   const handleDetails = (instance: Instance) => {
     setSelectedInstance(instance)
@@ -411,6 +408,9 @@ export default function IntegracoesPage() {
                                   <DropdownMenuItem onClick={() => handleConnect(instance)}>
                                     {isConnected ? 'Reconectar' : 'Conectar'}
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleShare(instance)}>
+                                    Compartilhar Link
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleAssignOrganization(instance)}>
                                     {instance.organization ? 'Alterar Organização' : 'Atribuir Organização'}
                                   </DropdownMenuItem>
@@ -462,15 +462,15 @@ export default function IntegracoesPage() {
         }}
       />
 
-      {/* FIXME: Temporarily disabled - ShareToken model not in Prisma schema */}
-      {/* <ShareModal
-        instance={selectedInstance}
-        isOpen={isShareModalOpen}
-        onClose={() => {
-          setIsShareModalOpen(false)
-          setSelectedInstance(null)
+      <ShareLinkModal
+        open={isShareModalOpen}
+        onOpenChange={(open) => {
+          setIsShareModalOpen(open)
+          if (!open) setSelectedInstance(null)
         }}
-      /> */}
+        instanceId={selectedInstance?.id || ''}
+        instanceName={selectedInstance?.name || ''}
+      />
 
       <EditInstanceModal
         instance={selectedInstance}

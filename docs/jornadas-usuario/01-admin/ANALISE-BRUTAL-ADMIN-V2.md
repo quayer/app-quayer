@@ -684,8 +684,18 @@ disabled={resolveSessionMutation.isPending || !selectedChat.id}
 
 | Categoria | Encontrado | Corrigido | Pendente |
 |-----------|------------|-----------|----------|
-| BUGS CRITICOS | 6 | 2 | 4 |
+| BUGS CRITICOS | 6 | 3 | 3 |
 | BUGS AUTH | 4 | 4 | 0 |
-| BUGS MEDIOS | 8 | 0 | 8 |
+| BUGS MEDIOS | 8 | 1 | 7 |
 | BUGS BAIXOS | 5 | 0 | 5 |
-| ELEMENTOS ORFAOS | 4 | 0 | 4 |
+| ELEMENTOS ORFAOS | 4 | 1 | 3 |
+
+### CORRIGIDO: BUG-C02 - ShareModal Desabilitado (Comentario Errado)
+**Arquivo:** `src/app/admin/integracoes/page.tsx`
+**Problema:** ShareModal estava comentado com FIXME dizendo "ShareToken model not in Prisma schema"
+**Realidade:** O ShareToken JA EXISTE no Prisma schema (Connection model, linhas 363-365)
+**Fix:** Habilitado ShareLinkModal, handleShare e adicionado item "Compartilhar Link" no dropdown menu
+
+### CORRIGIDO: BUG-M01 - Debounce nas Buscas
+**Arquivo:** `src/app/atendimentos/page.tsx`
+**Fix:** Adicionado `useDebounce(search, 300)` para evitar chamadas API excessivas

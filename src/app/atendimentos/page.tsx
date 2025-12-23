@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
 import { useOrganization } from '@/hooks/useOrganization'
 import { useAuth } from '@/lib/auth/auth-provider'
+import { useDebounce } from '@/hooks/useDebounce'
 import { PageContainer, PageHeader } from '@/components/layout/page-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -117,6 +118,7 @@ export default function AtendimentosPage() {
   const { currentOrgId } = useOrganization()
   const { user } = useAuth()
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300) // Debounce search by 300ms
   const [connectionFilter, setConnectionFilter] = useState<string>('all')
   const [page, setPage] = useState(1)
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
@@ -128,9 +130,9 @@ export default function AtendimentosPage() {
   const isAdmin = user?.role === 'admin'
   const canFetch = isAdmin || !!currentOrgId
 
-  // Fetch sessions
+  // Fetch sessions (using debounced search to avoid excessive API calls)
   const { data: sessionsData, isLoading, refetch } = useQuery({
-    queryKey: ['org-sessions', currentOrgId, connectionFilter, search, page, activeTab, isAdmin],
+    queryKey: ['org-sessions', currentOrgId, connectionFilter, debouncedSearch, page, activeTab, isAdmin],
     queryFn: async () => {
       let status: string | undefined = undefined
       if (activeTab === 'active') status = 'ACTIVE'
@@ -142,7 +144,7 @@ export default function AtendimentosPage() {
         organizationId: currentOrgId || undefined,
         status,
         connectionId: connectionFilter !== 'all' ? connectionFilter : undefined,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         page,
         limit,
         sortBy: 'lastMessage',
