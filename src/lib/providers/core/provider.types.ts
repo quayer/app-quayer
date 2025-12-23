@@ -218,6 +218,7 @@ export interface WebhookData {
   chatId?: string;
   from?: string;
   to?: string;
+  contactName?: string;  // Nome do contato ou grupo (wa_name no UAZapi)
   message?: {
     id: string;
     type: 'text' | 'image' | 'video' | 'audio' | 'voice' | 'document' | 'location' | 'contact';

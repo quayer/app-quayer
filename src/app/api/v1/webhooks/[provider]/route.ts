@@ -352,7 +352,7 @@ export async function POST(
  */
 async function processIncomingMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
   const { instanceId, data } = webhook;
-  const { from, message } = data;
+  const { from, message, contactName } = data;
 
   if (!from || !message) {
     console.log('[Webhook] Missing from or message data');
@@ -376,12 +376,21 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   const isNewContact = !contact;
 
   if (!contact) {
-    console.log(`[Webhook] Creating new contact: ${from}`);
+    // Usar contactName se disponível, senão usar o phoneNumber
+    const displayName = contactName && contactName !== from ? contactName : from;
+    console.log(`[Webhook] Creating new contact: ${from} (name: ${displayName})`);
     contact = await database.contact.create({
       data: {
         phoneNumber: from,
-        name: from, // Será atualizado quando soubermos o nome
+        name: displayName,
       },
+    });
+  } else if (contactName && contactName !== from && contact.name === from) {
+    // Atualizar nome do contato se tivermos um nome melhor e o atual é apenas o número
+    console.log(`[Webhook] Updating contact name from ${from} to ${contactName}`);
+    contact = await database.contact.update({
+      where: { id: contact.id },
+      data: { name: contactName },
     });
   }
 

@@ -376,6 +376,10 @@ export class UAZapiAdapter implements IWhatsAppProvider {
     const chat = rawWebhook.chat || {};
     const chatId = chat.wa_chatid || rawWebhook.chatId || rawWebhook.message?.chatid || '';
 
+    // Extract contact/group name from chat object
+    // UAZapi sends wa_name which contains the WhatsApp display name or group subject
+    const contactName = chat.wa_name || chat.wa_contactName || chat.name || rawWebhook.chat?.wa_name || '';
+
     // Extract "from" - for incoming messages, it's the chat ID (phone@s.whatsapp.net or group@g.us)
     const from = chatId || rawWebhook.from || rawWebhook.data?.from || '';
 
@@ -423,6 +427,7 @@ export class UAZapiAdapter implements IWhatsAppProvider {
         chatId,
         from,
         to: rawWebhook.to || rawWebhook.data?.to,
+        contactName,  // Nome do contato ou grupo
         message,
         status: rawWebhook.state || rawWebhook.data?.status ? this.mapStatus(rawWebhook.state || rawWebhook.data?.status) : undefined,
         qrCode: rawWebhook.qrcode || rawWebhook.data?.qrcode,
