@@ -327,9 +327,10 @@ export const instancesController = igniter.controller({
           return response.forbidden('Usuário não possui organização associada. Complete o onboarding primeiro.');
         }
 
-        // Business Rule: Admin vê todas instâncias (sem filtro de organização)
-        // Business Rule: Usuário normal vê apenas instâncias da sua organização
-        const organizationId = isAdmin ? undefined : user?.currentOrgId;
+        // Business Rule: Admin e usuário normal veem instâncias da organização selecionada
+        // Admin pode ver todas se currentOrgId for null (seleção "Todas")
+        // CORREÇÃO: Admin respeita o seletor de organização quando currentOrgId está definido
+        const organizationId = user?.currentOrgId || undefined;
 
         // 🚀 Cache: Verificar cache antes de buscar no banco
         const cacheKey = `instances:list:${organizationId || 'all'}:${status}:${search || ''}:${page}:${limit}`;

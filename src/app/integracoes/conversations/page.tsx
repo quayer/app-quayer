@@ -45,8 +45,6 @@ import {
   Send,
   Paperclip,
   Search,
-  Phone,
-  Video,
   MoreVertical,
   Check,
   CheckCheck,
@@ -949,23 +947,7 @@ export default function ConversationsPage() {
                 </Badge>
               )}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Phone className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Chamada de voz</TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Video className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Chamada de video</TooltipContent>
-              </Tooltip>
+              {/* Botões de ligação/vídeo removidos - WhatsApp Web não suporta chamadas via API */}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
