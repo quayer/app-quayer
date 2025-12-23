@@ -145,7 +145,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       },
       {
         title: "Atendimentos",
-        url: "/integracoes/sessions",
+        url: "/atendimentos",
         icon: Headset,
       },
       {

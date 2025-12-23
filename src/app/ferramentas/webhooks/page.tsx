@@ -82,6 +82,7 @@ import {
   Zap,
   Power,
   PowerOff,
+  ArrowLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -483,6 +484,11 @@ export default function WebhooksPage() {
     <>
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger className="-ml-1" />
+        <Separator orientation="vertical" className="mr-2 h-4" />
+        <Button variant="ghost" size="sm" onClick={() => window.history.back()} className="gap-1">
+          <ArrowLeft className="h-4 w-4" />
+          Voltar
+        </Button>
         <Separator orientation="vertical" className="mr-2 h-4" />
         <Breadcrumb>
           <BreadcrumbList>
