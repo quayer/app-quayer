@@ -17,9 +17,7 @@ import {
   Mail,
   Bell,
   Wrench,
-  Eye,
   ClipboardList,
-  X,
   Headset,
 } from "lucide-react"
 
@@ -38,13 +36,11 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth/auth-provider"
-import { useCurrentOrganization, useClearOrganizationContext } from "@/hooks/useOrganization"
-import { Button } from "@/components/ui/button"
+import { useCurrentOrganization } from "@/hooks/useOrganization"
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth()
   const { data: currentOrgData } = useCurrentOrganization()
-  const clearContext = useClearOrganizationContext()
 
   // Determine effective role for navigation
   const isSystemAdmin = user?.role === 'admin'
@@ -232,39 +228,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenuItem>
         </SidebarMenu>
 
-        {/* Context Switch Indicator - Shows when admin is viewing an organization */}
-        {isSystemAdmin && selectedOrgName && (
-          <div className="mx-2 mt-2 p-2.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-700 dark:text-amber-400 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-semibold min-w-0">
-                <Eye className="h-4 w-4 shrink-0 animate-pulse" />
-                <span className="truncate">{selectedOrgName}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 shrink-0 hover:bg-amber-500/30 text-amber-700 dark:text-amber-400"
-                onClick={() => clearContext.mutate()}
-                disabled={clearContext.isPending}
-                title="Sair do contexto"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-            <p className="text-[10px] text-amber-600/80 dark:text-amber-400/70 mt-1 ml-6">
-              Ações afetam esta organização
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full mt-2 h-7 text-[11px] border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 hover:text-amber-800 dark:hover:text-amber-300"
-              onClick={() => clearContext.mutate()}
-              disabled={clearContext.isPending}
-            >
-              {clearContext.isPending ? 'Saindo...' : 'Sair do contexto'}
-            </Button>
-          </div>
-        )}
       </SidebarHeader>
 
       <SidebarContent>
