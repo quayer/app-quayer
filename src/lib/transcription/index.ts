@@ -8,9 +8,9 @@
 export { TranscriptionEngine, transcriptionEngine } from './transcription.engine';
 export type { TranscriptionResult } from './transcription.engine';
 
-// Worker (BullMQ)
-export { transcriptionQueue, transcriptionWorker, transcriptionDLQ } from './transcription.worker';
-export type { TranscriptionJob } from './transcription.worker';
+// Queues only - Worker is in a separate file to avoid side effects during SSR/build
+export { transcriptionQueue, transcriptionDLQ } from './transcription.queue';
+export type { TranscriptionJob } from './transcription.queue';
 
 // ===== USAGE EXAMPLE =====
 // import { transcriptionQueue } from '@/lib/transcription';

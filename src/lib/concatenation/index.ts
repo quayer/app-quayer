@@ -8,9 +8,9 @@
 export { MessageConcatenator, messageConcatenator } from './message-concatenator';
 export type { IncomingMessage } from './message-concatenator';
 
-// Worker (BullMQ)
-export { concatenationQueue, concatenationWorker } from './concatenation.worker';
-export type { ConcatenationJob } from './concatenation.worker';
+// Queue only - Worker is in a separate file to avoid side effects during SSR/build
+export { concatenationQueue } from './concatenation.queue';
+export type { ConcatenationJob } from './concatenation.queue';
 
 // ===== USAGE EXAMPLE =====
 // import { messageConcatenator } from '@/lib/concatenation';

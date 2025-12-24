@@ -29,7 +29,6 @@ import { messageConcatenator } from '@/lib/concatenation';
 import { transcriptionQueue } from '@/lib/transcription';
 import { database } from '@/services/database';
 import { redis } from '@/services/redis';
-import { chatwootSyncService } from '@/features/chatwoot';
 import {
   type BrokerType,
   type NormalizedWebhook,
@@ -40,6 +39,12 @@ import { parseCommand, hasCommand, type ParsedCommand } from '@/lib/commands';
 import { geocodingService } from '@/lib/geocoding';
 import { webhookRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-limiter';
 import crypto from 'crypto';
+
+// Lazy import to avoid circular dependency during build
+async function getChatwootSyncService() {
+  const { getChatwootSyncService: getService } = await import('@/features/chatwoot');
+  return getService();
+}
 
 // ============================================================================
 // 🔐 SECURITY CONFIGURATION
@@ -530,7 +535,8 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
 
     // Sync com Chatwoot
     try {
-      await chatwootSyncService.syncIncomingMessage({
+      const chatwootSync = await getChatwootSyncService();
+      await chatwootSync.syncIncomingMessage({
         instanceId,
         organizationId: instance.organizationId,
         phoneNumber: from,
@@ -592,7 +598,8 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
 
     // ⭐ CHATWOOT SYNC: Sincronizar mensagem de mídia com Chatwoot
     try {
-      await chatwootSyncService.syncIncomingMessage({
+      const chatwootSync = await getChatwootSyncService();
+      await chatwootSync.syncIncomingMessage({
         instanceId,
         organizationId: instance.organizationId,
         phoneNumber: from,

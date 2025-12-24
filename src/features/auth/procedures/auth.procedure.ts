@@ -2,7 +2,9 @@ import { igniter } from "@/igniter";
 import { AuthRepository } from "../repositories/auth.repository";
 import { User } from "@prisma/client";
 import { verifyAccessToken } from "@/lib/auth/jwt";
-import { apiKeysRepository } from "@/features/api-keys";
+// IMPORTANT: Import directly from repository file to avoid circular dependency
+// DO NOT import from @/features/api-keys index (it loads the controller which imports auth.procedure)
+import { apiKeysRepository } from "@/features/api-keys/api-keys.repository";
 
 /**
  * @typedef {object} AuthProcedureOptions

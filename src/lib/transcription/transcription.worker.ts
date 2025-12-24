@@ -3,55 +3,21 @@
  *
  * BullMQ Worker para processar transcrições de mídia em background
  * Suporta: audio, voice, video, image, document
+ *
+ * NOTE: This file has side effects (creates Worker on import).
+ * Import the queue from ./transcription.queue instead when you only need the queue.
  */
 
-import { Worker, Job, Queue, QueueEvents } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import { redis } from '@/services/redis';
 import { database } from '@/services/database';
 import { transcriptionEngine } from './transcription.engine';
-import type { MessageType } from '@prisma/client';
+import { transcriptionDLQ } from './transcription.queue';
+import type { TranscriptionJob } from './transcription.queue';
 
-export interface TranscriptionJob {
-  messageId: string;
-  instanceId: string;
-  mediaType: MessageType;
-  mediaUrl: string;
-  mimeType?: string;
-}
-
-/**
- * Dead Letter Queue para transcricoes que falharam apos todos os retries
- * Permite analise posterior e reprocessamento manual
- */
-export const transcriptionDLQ = new Queue<TranscriptionJob & { error: string; failedAt: string }>('transcription-dlq', {
-  connection: redis,
-  defaultJobOptions: {
-    removeOnComplete: false, // Manter para analise
-    removeOnFail: false,
-  },
-});
-
-/**
- * Queue de transcrição
- */
-export const transcriptionQueue = new Queue<TranscriptionJob>('transcription', {
-  connection: redis,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 5000, // 5s, 10s, 20s
-    },
-    removeOnComplete: {
-      age: 86400, // Manter completados por 24 horas
-      count: 1000,
-    },
-    removeOnFail: {
-      age: 604800, // Manter falhas por 7 dias
-      count: 500,
-    },
-  },
-});
+// Re-export for backward compatibility
+export type { TranscriptionJob } from './transcription.queue';
+export { transcriptionQueue, transcriptionDLQ } from './transcription.queue';
 
 /**
  * Worker de transcrição

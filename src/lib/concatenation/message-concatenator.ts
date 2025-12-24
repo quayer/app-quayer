@@ -7,8 +7,13 @@
 
 import { redis } from '@/services/redis';
 import { database } from '@/services/database';
-import { chatwootSyncService } from '@/features/chatwoot';
 import type { MessageDirection, MessageType } from '@prisma/client';
+
+// Lazy import to avoid circular dependency
+async function getChatwootSyncService() {
+  const { getChatwootSyncService: getService } = await import('@/features/chatwoot');
+  return getService();
+}
 
 export interface IncomingMessage {
   connectionId: string;
@@ -142,9 +147,10 @@ export class MessageConcatenator {
           where: { id: messages[0].connectionId },
           select: { organizationId: true },
         });
-        
+
         if (contact && instance?.organizationId) {
-          await chatwootSyncService.syncIncomingMessage({
+          const chatwootSync = await getChatwootSyncService();
+          await chatwootSync.syncIncomingMessage({
             instanceId: messages[0].connectionId,
             organizationId: instance.organizationId,
             phoneNumber: contact.phoneNumber,

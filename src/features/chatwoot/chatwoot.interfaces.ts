@@ -460,3 +460,36 @@ export interface ChatwootSyncResult {
   chatwootId?: number;
   error?: string;
 }
+
+// ============================================
+// Sync Service Types (moved here to avoid circular deps)
+// ============================================
+
+/**
+ * @interface SyncMessageInput
+ * @description Input for syncing a WhatsApp message to Chatwoot
+ */
+export interface SyncMessageInput {
+  instanceId: string;
+  organizationId: string;
+  phoneNumber: string;
+  contactName?: string;
+  messageContent: string;
+  messageType: 'text' | 'image' | 'audio' | 'video' | 'document' | 'location' | 'contact';
+  mediaUrl?: string;
+  mediaMimeType?: string;
+  isFromGroup?: boolean;
+}
+
+/**
+ * @interface SyncResult
+ * @description Result of a sync operation
+ */
+export interface SyncResult {
+  success: boolean;
+  synced: boolean;
+  reason?: string;
+  chatwootMessageId?: number;
+  chatwootConversationId?: number;
+  error?: string;
+}

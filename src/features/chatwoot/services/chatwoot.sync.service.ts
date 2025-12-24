@@ -10,36 +10,10 @@
 import { database } from '@/services/database';
 import { ChatwootRepository } from '../repositories/chatwoot.repository';
 import { ChatwootClient } from './chatwoot.client';
-import type { ChatwootConfig, ChatwootAttachment } from '../chatwoot.interfaces';
+import type { ChatwootConfig, ChatwootAttachment, SyncMessageInput, SyncResult } from '../chatwoot.interfaces';
 
-/**
- * @interface SyncMessageInput
- * @description Input for syncing a WhatsApp message to Chatwoot
- */
-export interface SyncMessageInput {
-  instanceId: string;
-  organizationId: string;
-  phoneNumber: string;
-  contactName?: string;
-  messageContent: string;
-  messageType: 'text' | 'image' | 'audio' | 'video' | 'document' | 'location' | 'contact';
-  mediaUrl?: string;
-  mediaMimeType?: string;
-  isFromGroup?: boolean;
-}
-
-/**
- * @interface SyncResult
- * @description Result of a sync operation
- */
-export interface SyncResult {
-  success: boolean;
-  synced: boolean;
-  reason?: string;
-  chatwootMessageId?: number;
-  chatwootConversationId?: number;
-  error?: string;
-}
+// Re-export types for backward compatibility
+export type { SyncMessageInput, SyncResult } from '../chatwoot.interfaces';
 
 /**
  * @class ChatwootSyncService

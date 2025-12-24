@@ -14,11 +14,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { database } from '@/services/database';
 import { orchestrator } from '@/lib/providers';
-import { 
-  normalizeChatwootWebhook, 
+// Import directly from source files to avoid circular dependency
+import {
+  normalizeChatwootWebhook,
   shouldSendToWhatsApp,
-  type ChatwootWebhookPayload,
-} from '@/features/chatwoot';
+} from '@/features/chatwoot/services/chatwoot.normalizer';
+import type { ChatwootWebhookPayload } from '@/features/chatwoot/chatwoot.interfaces';
 import { ChatwootRepository } from '@/features/chatwoot/repositories/chatwoot.repository';
 import type { BrokerType } from '@/lib/providers/core/provider.types';
 

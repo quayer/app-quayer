@@ -3,37 +3,19 @@
  *
  * BullMQ Worker para processar grupos de mensagens concatenadas
  * Dispara após o timeout de concatenação expirar
+ *
+ * NOTE: This file has side effects (creates Worker on import).
+ * Import the queue from ./concatenation.queue instead when you only need the queue.
  */
 
-import { Worker, Job, Queue } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import { redis } from '@/services/redis';
 import { messageConcatenator } from './message-concatenator';
+import type { ConcatenationJob } from './concatenation.queue';
 
-export interface ConcatenationJob {
-  sessionId: string;
-  contactId: string;
-}
-
-/**
- * Queue de concatenação
- */
-export const concatenationQueue = new Queue<ConcatenationJob>('concatenation', {
-  connection: redis,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000, // 2s, 4s, 8s
-    },
-    removeOnComplete: {
-      age: 3600, // Manter completados por 1 hora
-      count: 1000,
-    },
-    removeOnFail: {
-      age: 86400, // Manter falhas por 24 horas
-    },
-  },
-});
+// Re-export for backward compatibility
+export type { ConcatenationJob } from './concatenation.queue';
+export { concatenationQueue } from './concatenation.queue';
 
 /**
  * Worker de concatenação
