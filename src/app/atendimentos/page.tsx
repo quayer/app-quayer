@@ -159,11 +159,13 @@ export default function AtendimentosPage() {
   })
 
   // Fetch connections for filter
+  // API returns { data: { data: [...], pagination: {...} } }
   const { data: connectionsData } = useQuery({
     queryKey: ['org-connections', currentOrgId, isAdmin],
     queryFn: async () => {
       const response = await (api.instances as any).list.query({})
-      return response.data?.instances || response.instances || []
+      const data = response?.data
+      return Array.isArray(data) ? data : (data?.data ?? [])
     },
     enabled: canFetch,
   })
