@@ -147,8 +147,9 @@ export default function AdminSessionsPage() {
         sortBy: 'lastMessage',
         sortOrder: 'desc',
       })
+      // API returns { data: [...], pagination: {...} }
       return response.data as {
-        sessions: Session[]
+        data: Session[]
         pagination: { total: number; totalPages: number; page: number }
       }
     },
@@ -219,7 +220,8 @@ export default function AdminSessionsPage() {
     onError: () => toast.error('Erro ao atualizar status'),
   })
 
-  const sessions = sessionsData?.sessions || []
+  // API returns { data: [...], pagination: {...} } not { sessions: [...] }
+  const sessions = sessionsData?.data || []
   const pagination = sessionsData?.pagination
   const organizations = orgsData || []
 

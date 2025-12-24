@@ -150,8 +150,9 @@ export default function AtendimentosPage() {
         sortBy: 'lastMessage',
         sortOrder: 'desc',
       })
+      // API returns { data: [...], pagination: {...} }
       return response.data as {
-        sessions: Session[]
+        data: Session[]
         pagination: { total: number; totalPages: number; page: number }
       }
     },
@@ -209,7 +210,8 @@ export default function AtendimentosPage() {
     onError: () => toast.error('Erro ao encerrar atendimento'),
   })
 
-  const sessions = sessionsData?.sessions || []
+  // API returns { data: [...], pagination: {...} } not { sessions: [...] }
+  const sessions = sessionsData?.data || []
   const pagination = sessionsData?.pagination
   const connections = connectionsData || []
 
