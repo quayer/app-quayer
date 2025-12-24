@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -105,8 +105,12 @@ export default function ChatwootConfigPage() {
   } | null>(null);
 
   // Get connections list
+  // API returns { data: { data: [...], pagination: {...} } }
   const { data: instancesData, isLoading: loadingInstances } = api.instances.list.useQuery();
-  const instances = (instancesData as any)?.data?.instances || [];
+  const instances = useMemo(() => {
+    const rawData = (instancesData as any)?.data
+    return Array.isArray(rawData) ? rawData : (rawData?.data ?? [])
+  }, [instancesData])
   const connectedInstances = instances.filter((i: any) => i.status === 'CONNECTED');
 
   // Form setup

@@ -155,8 +155,10 @@ export default function IntegrationsPage() {
   });
 
   // Mapear instâncias para o formato do frontend
+  // API returns { data: { data: [...], pagination: {...} } }
   const instances: Instance[] = useMemo(() => {
-    const data = instancesData?.data || [];
+    const rawData = instancesData?.data
+    const data = Array.isArray(rawData) ? rawData : (rawData?.data ?? [])
     return data.map((instance: any) => ({
       id: instance.id,
       name: instance.name,

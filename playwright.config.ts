@@ -3,6 +3,13 @@ import { defineConfig, devices } from '@playwright/test'
 /**
  * Playwright E2E Test Configuration
  * Tests all user interactions and frontend functionality
+ *
+ * AMBIENTES:
+ * - Desenvolvimento: http://localhost:3000 (padrao)
+ * - Producao: https://app.quayer.com (via BASE_URL env)
+ *
+ * Exemplo:
+ * BASE_URL=https://app.quayer.com npx playwright test --headed
  */
 export default defineConfig({
   testDir: './test',
@@ -10,18 +17,29 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'list',
-  timeout: 120000,
+  workers: 1, // Serializado para testes interativos
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: 'playwright-report' }],
+  ],
+  timeout: 300000, // 5 minutos para testes interativos
+  outputDir: 'test-results',
 
   use: {
-    baseURL: process.env.BASE_URL || 'http://localhost:3000',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    // PRODUCAO por padrao para testes de auth
+    baseURL: process.env.BASE_URL || 'https://app.quayer.com',
+    trace: 'on',
+    screenshot: 'on',
+    video: 'on', // Gravar video de todos os testes
     // Block SSE endpoint to prevent networkidle timeout
     extraHTTPHeaders: {
       'X-Test-Mode': 'true',
     },
+    // Viewport desktop
+    viewport: { width: 1280, height: 720 },
+    // Localizacao Brasil
+    locale: 'pt-BR',
+    timezoneId: 'America/Sao_Paulo',
   },
 
   projects: [
