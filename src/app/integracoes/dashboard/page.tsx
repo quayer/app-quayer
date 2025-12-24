@@ -122,7 +122,12 @@ export default function DashboardPage() {
 
   const isInitialLoading = !isHydrated || instancesLoading || metricsLoading
 
-  const instances = useMemo(() => instancesData?.data ?? [], [instancesData])
+  // API returns { data: { data: [...], pagination: {...} } }
+  const instances = useMemo(() => {
+    const data = instancesData?.data
+    // Handle both array format and { data: [], pagination: {} } format
+    return Array.isArray(data) ? data : (data?.data ?? [])
+  }, [instancesData])
 
   // Calculate instance statistics
   const stats = useMemo(() => ({
