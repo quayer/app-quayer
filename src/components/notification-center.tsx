@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, Check, CheckCheck, MessageCircle, Users, AlertTriangle, Info, X, Settings, XCircle, Wifi, Loader2 } from 'lucide-react'
@@ -129,7 +129,11 @@ export function NotificationCenter({ className }: NotificationCenterProps) {
     },
   })
 
-  const notifications: Notification[] = notificationsData?.data || []
+  // API returns { data: { data: [...], pagination: {...} } }
+  const notifications: Notification[] = useMemo(() => {
+    const data = notificationsData?.data
+    return Array.isArray(data) ? data : (data?.data ?? [])
+  }, [notificationsData])
   const unreadCount = countData?.data?.count || notifications.filter(n => !n.read).length
 
   const handleNotificationClick = useCallback((notification: Notification) => {
