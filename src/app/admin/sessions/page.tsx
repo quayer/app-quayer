@@ -155,11 +155,13 @@ export default function AdminSessionsPage() {
   })
 
   // Fetch organizations for filter
+  // API returns { data: { data: [...], pagination: {...} } }
   const { data: orgsData } = useQuery({
     queryKey: ['admin-organizations-list'],
     queryFn: async () => {
       const response = await (api.organizations as any).list.query({ limit: 100 })
-      return response.data?.organizations || []
+      const data = response?.data
+      return Array.isArray(data) ? data : (data?.data ?? [])
     },
   })
 
