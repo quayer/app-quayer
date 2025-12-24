@@ -67,6 +67,11 @@ export const notificationsController = igniter.controller({
       query: listNotificationsQuerySchema,
       handler: async ({ request, context, response }) => {
         // Authentication enforced by authProcedure
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Usuário não autenticado')
+        }
+
         const query = request.query as {
           page?: number
           limit?: number
@@ -75,9 +80,9 @@ export const notificationsController = igniter.controller({
         }
 
         const result = await notificationsRepository.getForUser(
-          context.user!.id,
-          (context.user as any)?.organizationId || null,
-          context.user!.role,
+          user.id,
+          (user as any)?.organizationId || null,
+          user.role,
           {
             page: query.page || 1,
             limit: query.limit || 20,
@@ -104,10 +109,15 @@ export const notificationsController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
         // Authentication enforced by authProcedure
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Usuário não autenticado')
+        }
+
         const count = await notificationsRepository.getUnreadCount(
-          context.user!.id,
-          (context.user as any)?.organizationId || null,
-          context.user!.role
+          user.id,
+          (user as any)?.organizationId || null,
+          user.role
         )
 
         return response.success({
@@ -127,6 +137,11 @@ export const notificationsController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
         // Authentication enforced by authProcedure
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Usuário não autenticado')
+        }
+
         const { id } = request.params as { id: string }
         const notification = await notificationsRepository.findById(id)
 
@@ -136,11 +151,11 @@ export const notificationsController = igniter.controller({
 
         // Check access
         const canAccess =
-          context.user!.role === 'admin' ||
+          user.role === 'admin' ||
           notification.isGlobal ||
-          notification.userId === context.user!.id ||
-          notification.organizationId === (context.user as any)?.organizationId ||
-          notification.role === context.user!.role
+          notification.userId === user.id ||
+          notification.organizationId === (user as any)?.organizationId ||
+          notification.role === user.role
 
         if (!canAccess) {
           return response.forbidden('Acesso negado')
@@ -248,10 +263,15 @@ export const notificationsController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
         // Authentication enforced by authProcedure
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Usuário não autenticado')
+        }
+
         const { id } = request.params as { id: string }
 
         try {
-          await notificationsRepository.markAsRead(id, context.user!.id)
+          await notificationsRepository.markAsRead(id, user.id)
           return response.success({
             message: 'Notificação marcada como lida',
           })
@@ -273,11 +293,16 @@ export const notificationsController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
         // Authentication enforced by authProcedure
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Usuário não autenticado')
+        }
+
         try {
           const result = await notificationsRepository.markAllAsRead(
-            context.user!.id,
-            (context.user as any)?.organizationId || null,
-            context.user!.role
+            user.id,
+            (user as any)?.organizationId || null,
+            user.role
           )
           return response.success({
             data: result,

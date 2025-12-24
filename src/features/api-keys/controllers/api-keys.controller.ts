@@ -13,6 +13,7 @@ import {
   EXPIRATION_OPTIONS,
   API_KEY_SCOPES,
 } from '../api-keys.schemas'
+import { authProcedure } from '@/features/auth/procedures/auth.procedure'
 
 export const apiKeysController = igniter.controller({
   name: 'apiKeys',
@@ -27,23 +28,25 @@ export const apiKeysController = igniter.controller({
       description: 'List all API keys for the current organization',
       path: '/',
       method: 'GET',
+      use: [authProcedure({ required: true })],
       handler: async ({ context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
+        const user = context.auth?.session?.user
+        if (!user) {
+          return response.unauthorized('Não autenticado')
         }
 
         // Admin sees all keys
-        if (context.user.role === 'admin') {
+        if (user.role === 'admin') {
           const keys = await apiKeysRepository.listAll()
           return response.json({ success: true, data: keys })
         }
 
         // Regular users see their org's keys
-        if (!context.user.organizationId) {
-          return response.status(400).json({ error: 'Organização não selecionada' })
+        if (!(user as any).organizationId) {
+          return response.badRequest('Organização não selecionada')
         }
 
-        const keys = await apiKeysRepository.listByOrganization(context.user.organizationId)
+        const keys = await apiKeysRepository.listByOrganization((user as any).organizationId)
         return response.json({ success: true, data: keys })
       },
     }),
@@ -56,28 +59,30 @@ export const apiKeysController = igniter.controller({
       description: 'Create a new API key',
       path: '/',
       method: 'POST',
+      use: [authProcedure({ required: true })],
       body: createApiKeySchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
+        const user = context.auth?.session?.user as any
+        if (!user) {
+          return response.unauthorized('Não autenticado')
         }
 
         const { name, scopes, expiration, organizationId } = request.body
 
         // Determine organization
         let targetOrgId = organizationId
-        if (context.user.role !== 'admin') {
+        if (user.role !== 'admin') {
           // Non-admins can only create for their current org
-          if (!context.user.organizationId) {
-            return response.status(400).json({ error: 'Organização não selecionada' })
+          if (!user.organizationId) {
+            return response.badRequest('Organização não selecionada')
           }
-          targetOrgId = context.user.organizationId
+          targetOrgId = user.organizationId
         } else if (!targetOrgId) {
           // Admin must specify org or have one selected
-          if (!context.user.organizationId) {
-            return response.status(400).json({ error: 'Especifique organizationId ou selecione uma organização' })
+          if (!user.organizationId) {
+            return response.badRequest('Especifique organizationId ou selecione uma organização')
           }
-          targetOrgId = context.user.organizationId
+          targetOrgId = user.organizationId
         }
 
         // Calculate expiration date
@@ -94,7 +99,7 @@ export const apiKeysController = igniter.controller({
           const apiKey = await apiKeysRepository.create({
             name,
             organizationId: targetOrgId!,
-            userId: context.user.id,
+            userId: user.id,
             scopes,
             expiresAt,
           })
@@ -106,7 +111,7 @@ export const apiKeysController = igniter.controller({
           })
         } catch (error: any) {
           console.error('Error creating API key:', error)
-          return response.status(500).json({ error: 'Erro ao criar API Key' })
+          return response.badRequest('Erro ao criar API Key')
         }
       },
     }),
@@ -119,10 +124,12 @@ export const apiKeysController = igniter.controller({
       description: 'Update an API key name or scopes',
       path: '/:id',
       method: 'PUT',
+      use: [authProcedure({ required: true })],
       body: updateApiKeySchema,
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
+        const user = context.auth?.session?.user as any
+        if (!user) {
+          return response.unauthorized('Não autenticado')
         }
 
         const { id } = request.params as { id: string }
@@ -130,13 +137,13 @@ export const apiKeysController = igniter.controller({
         // Check permission
         const canManage = await apiKeysRepository.canManageKey(
           id,
-          context.user.id,
-          context.user.role,
-          context.user.organizationId || undefined
+          user.id,
+          user.role,
+          user.organizationId || undefined
         )
 
         if (!canManage) {
-          return response.status(403).json({ error: 'Sem permissão para gerenciar esta chave' })
+          return response.forbidden('Sem permissão para gerenciar esta chave')
         }
 
         try {
@@ -148,7 +155,7 @@ export const apiKeysController = igniter.controller({
           })
         } catch (error: any) {
           console.error('Error updating API key:', error)
-          return response.status(500).json({ error: 'Erro ao atualizar API Key' })
+          return response.badRequest('Erro ao atualizar API Key')
         }
       },
     }),
@@ -161,9 +168,11 @@ export const apiKeysController = igniter.controller({
       description: 'Revoke an API key (cannot be undone)',
       path: '/:id/revoke',
       method: 'POST',
+      use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
+        const user = context.auth?.session?.user as any
+        if (!user) {
+          return response.unauthorized('Não autenticado')
         }
 
         const { id } = request.params as { id: string }
@@ -171,24 +180,24 @@ export const apiKeysController = igniter.controller({
         // Check permission
         const canManage = await apiKeysRepository.canManageKey(
           id,
-          context.user.id,
-          context.user.role,
-          context.user.organizationId || undefined
+          user.id,
+          user.role,
+          user.organizationId || undefined
         )
 
         if (!canManage) {
-          return response.status(403).json({ error: 'Sem permissão para revogar esta chave' })
+          return response.forbidden('Sem permissão para revogar esta chave')
         }
 
         try {
-          await apiKeysRepository.revoke(id, context.user.id)
+          await apiKeysRepository.revoke(id, user.id)
           return response.json({
             success: true,
             message: 'API Key revogada com sucesso',
           })
         } catch (error: any) {
           console.error('Error revoking API key:', error)
-          return response.status(500).json({ error: 'Erro ao revogar API Key' })
+          return response.badRequest('Erro ao revogar API Key')
         }
       },
     }),
@@ -201,9 +210,11 @@ export const apiKeysController = igniter.controller({
       description: 'Permanently delete an API key',
       path: '/:id',
       method: 'DELETE',
+      use: [authProcedure({ required: true })],
       handler: async ({ request, context, response }) => {
-        if (!context.user) {
-          return response.status(401).json({ error: 'Não autenticado' })
+        const user = context.auth?.session?.user as any
+        if (!user) {
+          return response.unauthorized('Não autenticado')
         }
 
         const { id } = request.params as { id: string }
@@ -211,13 +222,13 @@ export const apiKeysController = igniter.controller({
         // Check permission
         const canManage = await apiKeysRepository.canManageKey(
           id,
-          context.user.id,
-          context.user.role,
-          context.user.organizationId || undefined
+          user.id,
+          user.role,
+          user.organizationId || undefined
         )
 
         if (!canManage) {
-          return response.status(403).json({ error: 'Sem permissão para deletar esta chave' })
+          return response.forbidden('Sem permissão para deletar esta chave')
         }
 
         try {
@@ -225,7 +236,7 @@ export const apiKeysController = igniter.controller({
           return response.noContent()
         } catch (error: any) {
           console.error('Error deleting API key:', error)
-          return response.status(500).json({ error: 'Erro ao deletar API Key' })
+          return response.badRequest('Erro ao deletar API Key')
         }
       },
     }),
