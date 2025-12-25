@@ -110,9 +110,9 @@ export const authProcedure = igniter.procedure({
     const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
     const cookieHeader = request.headers.get("cookie") || "";
 
-    // ✅ CORREÇÃO: Extrair token do cookie se não houver header Authorization
+    // ✅ CORREÇÃO: Sempre extrair token do cookie para fallback
     let tokenFromCookie: string | null = null;
-    if (!authHeader && cookieHeader) {
+    if (cookieHeader) {
       const cookies = cookieHeader.split(';').map(c => c.trim());
       const accessTokenCookie = cookies.find(c => c.startsWith('accessToken='));
       if (accessTokenCookie) {
@@ -120,9 +120,10 @@ export const authProcedure = igniter.procedure({
       }
     }
 
-    const effectiveAuth = authHeader || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : null);
+    // ✅ CORREÇÃO: Usar cookie como fallback se header existir mas for inválido
+    let effectiveAuth = authHeader || (tokenFromCookie ? `Bearer ${tokenFromCookie}` : null);
 
-    console.log('[AuthProcedure] authHeader:', authHeader);
+    console.log('[AuthProcedure] authHeader:', authHeader ? 'present' : 'null');
     console.log('[AuthProcedure] tokenFromCookie:', tokenFromCookie ? 'present' : 'null');
     console.log('[AuthProcedure] required:', required);
 
@@ -211,13 +212,20 @@ export const authProcedure = igniter.procedure({
 
       // JWT Token Authentication
       // Verificar JWT token
-      const payload = await verifyAccessToken(token as string);
+      let payload = await verifyAccessToken(token as string);
 
       console.log('[AuthProcedure] JWT payload:', payload);
 
+      // ✅ CORREÇÃO: Se token do header for inválido, tentar o token do cookie
+      if (!payload && tokenFromCookie && token !== tokenFromCookie) {
+        console.log('[AuthProcedure] Header token invalid, trying cookie token');
+        payload = await verifyAccessToken(tokenFromCookie);
+        console.log('[AuthProcedure] Cookie JWT payload:', payload);
+      }
+
       if (!payload) {
         if (required) {
-          console.log('[AuthProcedure] Invalid JWT, auth required');
+          console.log('[AuthProcedure] Invalid JWT (both header and cookie), auth required');
           return Response.json({ error: "Token inválido" }, { status: 401 });
         }
         // Auth opcional e sem payload
