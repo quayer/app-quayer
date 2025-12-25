@@ -85,6 +85,18 @@ export const billingTypeSchema = z.enum(['free', 'basic', 'pro', 'enterprise'], 
   errorMap: () => ({ message: 'Plano deve ser "free", "basic", "pro" ou "enterprise"' }),
 });
 
+export const autoPauseBehaviorSchema = z.enum(['CLOSE_SESSION', 'WAIT_CUSTOMER'], {
+  errorMap: () => ({ message: 'Comportamento deve ser "CLOSE_SESSION" ou "WAIT_CUSTOMER"' }),
+});
+
+export const groupModeSchema = z.enum(['DISABLED', 'MONITOR_ONLY', 'ACTIVE'], {
+  errorMap: () => ({ message: 'Modo de grupo deve ser "DISABLED", "MONITOR_ONLY" ou "ACTIVE"' }),
+});
+
+export const groupAiResponseModeSchema = z.enum(['IN_GROUP', 'PRIVATE', 'HYBRID'], {
+  errorMap: () => ({ message: 'Modo de resposta IA deve ser "IN_GROUP", "PRIVATE" ou "HYBRID"' }),
+});
+
 export const organizationRoleSchema = z.enum(['master', 'manager', 'user'], {
   errorMap: () => ({
     message: 'Role deve ser "master" (Dono), "manager" (Gerente) ou "user" (Usuário)',
@@ -165,6 +177,13 @@ export const updateOrganizationSchema = z.object({
   // Infrastructure Config
   dbConfig: z.record(z.any()).optional(),
   redisConfig: z.record(z.any()).optional(),
+  // Auto-Pause Settings
+  autoPauseBehavior: autoPauseBehaviorSchema.optional(),
+  autoPauseWaitMinutes: z.number().int().min(5).max(1440).optional(),
+  autoPauseDurationMinutes: z.number().int().min(5).max(120).optional(),
+  // Group Settings
+  groupDefaultMode: groupModeSchema.optional(),
+  groupAiResponseMode: groupAiResponseModeSchema.optional(),
 });
 
 export const listOrganizationsSchema = z.object({

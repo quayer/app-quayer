@@ -40,6 +40,15 @@ model Organization {
   autoGreeting         Boolean @default(false) // Saudação automática
   greetingMessage      String? // Mensagem de saudação
 
+  // Auto-Pause Hybrid Model (quando atendente assume)
+  autoPauseBehavior        AutoPauseBehavior @default(WAIT_CUSTOMER) // O que fazer quando auto-pause expira
+  autoPauseWaitMinutes     Int               @default(30) // Minutos para aguardar cliente (se WAIT_CUSTOMER)
+  autoPauseDurationMinutes Int               @default(15) // Duração padrão do auto-pause
+
+  // Group Chat Settings
+  groupDefaultMode    GroupMode           @default(DISABLED) // Modo padrão para novos grupos
+  groupAiResponseMode GroupAIResponseMode @default(PRIVATE) // Modo de resposta IA padrão
+
   // White-label Branding
   logoUrl        String? // URL do logo customizado
   primaryColor   String  @default("#000000") // Cor primária da marca
@@ -112,8 +121,8 @@ model User {
   lastOrganizationId  String?
 
   // Message signature and AI preferences
-  messageSignature     Json?    @db.JsonB // { enabled, format, department, customText, showPreview }
-  aiSuggestionsEnabled Boolean  @default(true)
+  messageSignature     Json?   @db.JsonB // { enabled, format, department, customText, showPreview }
+  aiSuggestionsEnabled Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -142,23 +151,23 @@ model User {
 // ============================================
 
 model PasskeyCredential {
-  id                  String   @id @default(uuid())
-  userId              String
-  credentialId        String   @unique // Base64URL encoded credential ID
-  publicKey           Bytes    // COSE public key
-  counter             BigInt   @default(0) // Signature counter for clone detection
-  credentialDeviceType String  @default("singleDevice") // singleDevice or multiDevice
-  credentialBackedUp  Boolean  @default(false)
-  transports          String[] // Transports supported by authenticator (usb, ble, nfc, internal)
-  
+  id                   String   @id @default(uuid())
+  userId               String
+  credentialId         String   @unique // Base64URL encoded credential ID
+  publicKey            Bytes // COSE public key
+  counter              BigInt   @default(0) // Signature counter for clone detection
+  credentialDeviceType String   @default("singleDevice") // singleDevice or multiDevice
+  credentialBackedUp   Boolean  @default(false)
+  transports           String[] // Transports supported by authenticator (usb, ble, nfc, internal)
+
   // User-friendly name for the passkey
-  name                String   @default("Minha Passkey")
-  
+  name String @default("Minha Passkey")
+
   // AAGUID for device identification (optional)
-  aaguid              String?
-  
-  createdAt           DateTime @default(now())
-  lastUsedAt          DateTime?
+  aaguid String?
+
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -169,13 +178,13 @@ model PasskeyCredential {
 
 // Temporary challenge for WebAuthn operations
 model PasskeyChallenge {
-  id          String   @id @default(uuid())
-  challenge   String   @unique // Base64URL encoded challenge
-  userId      String?  // Optional for registration (user not yet authenticated)
-  email       String?  // For login without userId
-  type        String   // "registration" or "authentication"
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  challenge String   @unique // Base64URL encoded challenge
+  userId    String? // Optional for registration (user not yet authenticated)
+  email     String? // For login without userId
+  type      String // "registration" or "authentication"
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
   @@index([challenge])
   @@index([userId])
@@ -337,10 +346,10 @@ model Connection {
   lastDisconnectReason String?
 
   // WhatsApp Cloud API Integration (Official Meta API)
-  cloudApiAccessToken   String?   @map("cloud_api_access_token") @db.Text // System User Token (pode ser longo)
-  cloudApiPhoneNumberId String?   @map("cloud_api_phone_number_id") // Phone Number ID do Meta Business
-  cloudApiWabaId        String?   @map("cloud_api_waba_id") // WhatsApp Business Account ID
-  cloudApiVerifiedName  String?   @map("cloud_api_verified_name") // Nome verificado da conta business
+  cloudApiAccessToken   String? @map("cloud_api_access_token") @db.Text // System User Token (pode ser longo)
+  cloudApiPhoneNumberId String? @map("cloud_api_phone_number_id") // Phone Number ID do Meta Business
+  cloudApiWabaId        String? @map("cloud_api_waba_id") // WhatsApp Business Account ID
+  cloudApiVerifiedName  String? @map("cloud_api_verified_name") // Nome verificado da conta business
 
   // n8n Integration (AI Agent)
   n8nWebhookUrl  String? // URL do workflow n8n
@@ -376,6 +385,13 @@ model Connection {
   tabulationIntegrations TabulationIntegration[]
   calls                  Call[]
   n8nCallLogs            N8nCallLog[]
+  groupChats             GroupChat[]
+
+  // Advanced Settings
+  settings ConnectionSettings?
+
+  // Connection Events History
+  events ConnectionEvent[]
 
   @@index([organizationId])
   @@index([projectId])
@@ -387,12 +403,6 @@ model Connection {
   @@index([shareToken])
   @@index([n8nWorkflowId])
   @@map("connections")
-
-  // Advanced Settings
-  settings ConnectionSettings?
-
-  // Connection Events History
-  events ConnectionEvent[]
 }
 
 // ============================================
@@ -404,11 +414,11 @@ model ConnectionSettings {
   connectionId String @unique
 
   // ===== CONCATENAÇÃO DE MENSAGENS =====
-  concatEnabled       Boolean @default(true)
-  concatTimeoutMs     Int     @default(8000)    // 8 segundos
-  concatMaxMessages   Int     @default(10)
-  concatSameType      Boolean @default(false)   // false = concat tudo junto (melhor para IA)
-  concatSameSender    Boolean @default(true)    // apenas mesmo remetente
+  concatEnabled     Boolean @default(true)
+  concatTimeoutMs   Int     @default(8000) // 8 segundos
+  concatMaxMessages Int     @default(10)
+  concatSameType    Boolean @default(false) // false = concat tudo junto (melhor para IA)
+  concatSameSender  Boolean @default(true) // apenas mesmo remetente
 
   // ===== TRANSCRIÇÃO & IA =====
   transcriptionEnabled      Boolean @default(true)
@@ -417,8 +427,8 @@ model ConnectionSettings {
   videoTranscriptionEnabled Boolean @default(true)
 
   // ===== GEOCODING =====
-  geocodingEnabled  Boolean @default(true)
-  geocodingApiKey   String? // Se vazio, usa da organização ou sistema
+  geocodingEnabled Boolean @default(true)
+  geocodingApiKey  String? // Se vazio, usa da organização ou sistema
 
   // ===== AI MODELS (override do padrão) =====
   transcriptionModel String? // whisper-1
@@ -485,27 +495,27 @@ enum ConnectionStatus {
 // ============================================
 
 model ConnectionEvent {
-  id           String   @id @default(uuid())
+  id           String @id @default(uuid())
   connectionId String
 
   // Event Info
-  eventType    ConnectionEventType
-  fromStatus   ConnectionStatus?
-  toStatus     ConnectionStatus
+  eventType  ConnectionEventType
+  fromStatus ConnectionStatus?
+  toStatus   ConnectionStatus
 
   // Context
-  reason       String?   // Reason for disconnection/error
-  metadata     Json?     // Additional context (qr_timeout, manual, etc)
-  ipAddress    String?   // IP where event originated
-  userAgent    String?   // Browser/Device info
+  reason    String? // Reason for disconnection/error
+  metadata  Json? // Additional context (qr_timeout, manual, etc)
+  ipAddress String? // IP where event originated
+  userAgent String? // Browser/Device info
 
   // User who triggered (if manual action)
-  triggeredBy  String?   // User ID if manual
+  triggeredBy String? // User ID if manual
 
   // Timestamps
-  createdAt    DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId])
   @@index([eventType])
@@ -514,15 +524,15 @@ model ConnectionEvent {
 }
 
 enum ConnectionEventType {
-  CONNECTED        // Successfully connected
-  DISCONNECTED     // Disconnected (manual or automatic)
-  CONNECTION_LOST  // Unexpected disconnection
-  QR_GENERATED     // QR Code generated for pairing
-  QR_SCANNED       // QR Code was scanned
-  QR_TIMEOUT       // QR Code expired without scan
-  QR_RETRY         // Automatic QR retry triggered
-  ERROR            // Connection error occurred
-  RECONNECTING     // Attempting to reconnect
+  CONNECTED // Successfully connected
+  DISCONNECTED // Disconnected (manual or automatic)
+  CONNECTION_LOST // Unexpected disconnection
+  QR_GENERATED // QR Code generated for pairing
+  QR_SCANNED // QR Code was scanned
+  QR_TIMEOUT // QR Code expired without scan
+  QR_RETRY // Automatic QR retry triggered
+  ERROR // Connection error occurred
+  RECONNECTING // Attempting to reconnect
 }
 
 // ============================================
@@ -656,7 +666,7 @@ model PermissionResource {
 
 // Mapeia permissões por role
 model RolePermission {
-  id         String @id @default(uuid())
+  id         String   @id @default(uuid())
   resourceId String
   role       String // admin, master, manager, agent, viewer
   actions    String[] // create, read, update, delete, manage, export, etc
@@ -742,6 +752,7 @@ model Contact {
   contactAttributes   ContactAttribute[] // Contact-specific attribute values
   contactObservations ContactObservation[]
   calls               Call[]
+  groupParticipations GroupParticipant[] // Participações em grupos
 
   @@index([phoneNumber])
   @@index([name])
@@ -799,10 +810,10 @@ model ChatSession {
 
   // Timing & Expiration
   lastMessageAt       DateTime  @default(now())
-  lastMessageAuthorId String?   // ID of user who sent last message (for signature logic)
+  lastMessageAuthorId String? // ID of user who sent last message (for signature logic)
   expiresAt           DateTime? // Calculated expiration based on org timeout
   pausedUntil         DateTime? // For @pausar command with time limit
-  pausedBy            String?   // Who paused: "command", "agent", "system"
+  pausedBy            String? // Who paused: "command", "agent", "system"
 
   // WhatsApp 24h Window (compliance with WhatsApp Business API)
   lastCustomerMessageAt   DateTime? // Last message FROM customer (inbound)
@@ -829,6 +840,7 @@ model ChatSession {
   aiAgentConfig      AIAgentConfig?      @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
   messages           Message[]
   sessionTabulations SessionTabulation[]
+  groupParticipants  GroupParticipant[] // Participantes de grupo vinculados a esta sessão
 
   @@index([contactId])
   @@index([connectionId])
@@ -859,6 +871,151 @@ enum SessionStartedBy {
   AGENT // Iniciada por agente
 }
 
+// ============================================
+// AUTO-PAUSE BEHAVIOR (Hybrid Model)
+// ============================================
+
+enum AutoPauseBehavior {
+  CLOSE_SESSION // Encerra sessão imediatamente quando auto-pause expira
+  WAIT_CUSTOMER // Aguarda cliente por X minutos, depois fecha
+}
+
+// ============================================
+// GROUP CHAT (WhatsApp Groups Support)
+// ============================================
+
+enum GroupMode {
+  DISABLED // Bot não processa mensagens do grupo
+  MONITOR_ONLY // Bot escuta mas não responde (analytics, coleta de leads)
+  ACTIVE // Bot escuta e pode responder
+}
+
+enum GroupAIResponseMode {
+  IN_GROUP // IA responde diretamente no grupo
+  PRIVATE // IA responde no privado do participante
+  HYBRID // IA decide baseado no contexto
+}
+
+model GroupChat {
+  id             String @id @default(uuid())
+  groupJid       String @unique // ID do grupo WhatsApp (ex: 5552199998888-123456@g.us)
+  connectionId   String
+  organizationId String
+
+  // Group Info (synced from WhatsApp)
+  name        String?
+  description String?
+  pictureUrl  String?
+  ownerJid    String? // JID do dono do grupo
+  createdAtWa DateTime? // Data de criação no WhatsApp
+
+  // Configuration
+  mode            GroupMode           @default(DISABLED)
+  aiEnabled       Boolean             @default(false)
+  aiResponseMode  GroupAIResponseMode @default(PRIVATE)
+  aiAgentConfigId String? // Qual agente IA usa neste grupo
+
+  // Session (grupos não expiram como contatos individuais)
+  sessionStatus SessionStatus @default(ACTIVE)
+
+  // Analytics
+  totalMessages     Int       @default(0)
+  totalParticipants Int       @default(0)
+  lastMessageAt     DateTime?
+  lastSyncAt        DateTime?
+
+  // Metadata
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  connection    Connection         @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  aiAgentConfig AIAgentConfig?     @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
+  participants  GroupParticipant[]
+  messages      GroupMessage[]
+
+  @@index([connectionId])
+  @@index([organizationId])
+  @@index([mode])
+  @@index([sessionStatus])
+  @@index([lastMessageAt])
+  @@map("group_chats")
+}
+
+model GroupParticipant {
+  id             String @id @default(uuid())
+  groupId        String
+  participantJid String // Número do participante (ex: 5552199998888@s.whatsapp.net)
+
+  // Link com contato existente (se houver)
+  contactId String?
+
+  // Sessão privada vinculada (para responder no privado)
+  privateSessionId String?
+
+  // Role no grupo
+  role String @default("participant") // admin, superadmin, participant
+
+  // Tracking
+  lastMessageAt DateTime?
+  messageCount  Int       @default(0)
+  joinedAt      DateTime?
+  leftAt        DateTime?
+
+  // Status
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  group          GroupChat    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  privateSession ChatSession? @relation(fields: [privateSessionId], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, participantJid])
+  @@index([groupId])
+  @@index([contactId])
+  @@index([participantJid])
+  @@index([isActive])
+  @@map("group_participants")
+}
+
+model GroupMessage {
+  id             String @id @default(uuid())
+  groupId        String
+  participantJid String // Quem enviou a mensagem
+
+  // Message Info
+  waMessageId String      @unique
+  type        MessageType
+  content     String      @db.Text
+
+  // Media (se aplicável)
+  mediaUrl  String?
+  mediaType String?
+  mimeType  String?
+  fileName  String?
+
+  // AI Response (se bot respondeu)
+  isAiResponse Boolean @default(false)
+  aiModel      String?
+  aiCost       Float?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  group GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@index([participantJid])
+  @@index([waMessageId])
+  @@index([createdAt])
+  @@map("group_messages")
+}
+
 model Message {
   id           String @id @default(uuid())
   sessionId    String
@@ -885,18 +1042,18 @@ model Message {
   mediaDuration Int?
 
   // Location Data (quando type = 'location')
-  latitude      Float?
-  longitude     Float?
-  locationName  String?      // Nome do local enviado pelo usuário
+  latitude     Float?
+  longitude    Float?
+  locationName String? // Nome do local enviado pelo usuário
 
   // Geocoded Address (preenchido automaticamente via Google Maps API)
-  geoAddress       String?    // Endereço completo formatado
-  geoNeighborhood  String?    // Bairro
-  geoCity          String?    // Cidade
-  geoState         String?    // Estado (ex: São Paulo)
-  geoStateCode     String?    // Código do estado (ex: SP)
-  geoPostalCode    String?    // CEP
-  geoCountry       String?    // País
+  geoAddress      String? // Endereço completo formatado
+  geoNeighborhood String? // Bairro
+  geoCity         String? // Cidade
+  geoState        String? // Estado (ex: São Paulo)
+  geoStateCode    String? // Código do estado (ex: SP)
+  geoPostalCode   String? // CEP
+  geoCountry      String? // País
 
   // Transcrição
   transcription            String?             @db.Text
@@ -1377,11 +1534,11 @@ enum IntegrationType {
 // ============================================
 
 enum ProviderCategory {
-  AI              // LLMs: openai, anthropic, google, openrouter
-  TRANSCRIPTION   // STT: whisper, deepgram, assemblyai
-  TTS             // Text-to-Speech: elevenlabs, openai-tts
-  INFRASTRUCTURE  // redis, postgresql, supabase, s3
-  AUXILIARY       // google-maps, email, sms
+  AI // LLMs: openai, anthropic, google, openrouter
+  TRANSCRIPTION // STT: whisper, deepgram, assemblyai
+  TTS // Text-to-Speech: elevenlabs, openai-tts
+  INFRASTRUCTURE // redis, postgresql, supabase, s3
+  AUXILIARY // google-maps, email, sms
 }
 
 // ============================================
@@ -1389,35 +1546,35 @@ enum ProviderCategory {
 // ============================================
 
 model OrganizationProvider {
-  id             String   @id @default(uuid())
+  id             String @id @default(uuid())
   organizationId String
 
   // Tipo do provedor
-  category       ProviderCategory
-  provider       String            // openai, anthropic, redis, supabase, etc
+  category ProviderCategory
+  provider String // openai, anthropic, redis, supabase, etc
 
   // Configuração
-  isActive       Boolean  @default(true)
-  isPrimary      Boolean  @default(false)  // Provedor principal da categoria
-  priority       Int      @default(0)       // Para fallback ordering (menor = maior prioridade)
+  isActive  Boolean @default(true)
+  isPrimary Boolean @default(false) // Provedor principal da categoria
+  priority  Int     @default(0) // Para fallback ordering (menor = maior prioridade)
 
   // Credenciais (encriptadas no nível da aplicação)
-  credentials    Json     // { apiKey, apiSecret, apiUrl, region, bucket, etc }
+  credentials Json // { apiKey, apiSecret, apiUrl, region, bucket, etc }
 
   // Configurações específicas do provedor
-  settings       Json?    // { model: "gpt-4o", maxTokens: 4096, temperature: 0.7, etc }
+  settings Json? // { model: "gpt-4o", maxTokens: 4096, temperature: 0.7, etc }
 
   // Metadados de uso
   lastTestedAt   DateTime?
-  lastTestStatus String?   // success, failed, pending
+  lastTestStatus String? // success, failed, pending
   lastTestError  String?
-  usageThisMonth Int       @default(0)  // Para tracking de uso
-  costThisMonth  Float     @default(0)  // Custo estimado do mês
+  usageThisMonth Int       @default(0) // Para tracking de uso
+  costThisMonth  Float     @default(0) // Custo estimado do mês
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, category, provider, priority])
   @@index([organizationId, category])
@@ -1500,7 +1657,8 @@ model AIAgentConfig {
   updatedAt DateTime @updatedAt
 
   // Relacionamentos
-  sessions ChatSession[]
+  sessions   ChatSession[]
+  groupChats GroupChat[] // Grupos que usam este agente IA
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -1512,17 +1670,17 @@ model AIAgentConfig {
 // ============================================
 
 model SystemSettings {
-  id        String   @id @default(uuid())
-  category  String   // uazapi, email, ai, concatenation, oauth, security, system
-  key       String   // setting key within category
-  value     String   @db.Text // setting value (JSON for complex values)
-  encrypted Boolean  @default(false) // whether value is encrypted
+  id        String  @id @default(uuid())
+  category  String // uazapi, email, ai, concatenation, oauth, security, system
+  key       String // setting key within category
+  value     String  @db.Text // setting value (JSON for complex values)
+  encrypted Boolean @default(false) // whether value is encrypted
 
   description String? // human-readable description
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  updatedBy String?  // user id who last updated
+  updatedBy String? // user id who last updated
 
   @@unique([category, key])
   @@index([category])
@@ -1530,13 +1688,13 @@ model SystemSettings {
 
 // Email Templates (customizable by admin)
 model EmailTemplate {
-  id          String  @id @default(uuid())
-  name        String  @unique // welcome, verification, reset_password, invitation
+  id          String   @id @default(uuid())
+  name        String   @unique // welcome, verification, reset_password, invitation
   subject     String
-  htmlContent String  @db.Text
-  textContent String? @db.Text
+  htmlContent String   @db.Text
+  textContent String?  @db.Text
   variables   String[] // available variables like {{name}}, {{link}}
-  isActive    Boolean @default(true)
+  isActive    Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1555,7 +1713,7 @@ model AIPrompt {
   isActive    Boolean @default(true)
 
   // Usage tracking
-  usageCount  Int     @default(0)
+  usageCount Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1616,9 +1774,9 @@ model LogEntry {
   timestamp DateTime @default(now())
 
   // Log Classification
-  level   LogLevel  @default(INFO)
-  source  String    // auth, webhook, api, database, whatsapp, ai, system
-  action  String?   // login, message.received, webhook.failed, etc
+  level  LogLevel @default(INFO)
+  source String // auth, webhook, api, database, whatsapp, ai, system
+  action String? // login, message.received, webhook.failed, etc
 
   // Content
   message    String  @db.Text
@@ -1626,15 +1784,15 @@ model LogEntry {
   stackTrace String? @db.Text
 
   // Context (JSON)
-  context   Json? // { userId, orgId, connectionId, sessionId, requestId, etc }
-  metadata  Json? // Additional metadata
+  context  Json? // { userId, orgId, connectionId, sessionId, requestId, etc }
+  metadata Json? // Additional metadata
 
   // Request tracking
-  requestId    String? // For request correlation
-  requestPath  String? // /api/v1/auth/login
+  requestId     String? // For request correlation
+  requestPath   String? // /api/v1/auth/login
   requestMethod String? // GET, POST, etc
-  statusCode   Int?    // HTTP status code
-  duration     Int?    // Request duration in ms
+  statusCode    Int? // HTTP status code
+  duration      Int? // Request duration in ms
 
   // User context
   userId         String?
@@ -1645,11 +1803,11 @@ model LogEntry {
   userAgent      String?
 
   // AI Analysis
-  aiAnalysis      String?   @db.Text // AI-generated analysis
-  aiAnalyzedAt    DateTime?
-  aiPatternMatch  String?   // Detected pattern type
-  aiSeverity      Int?      @default(0) // 0-10 severity score
-  aiSuggestion    String?   @db.Text // AI suggestion for fix
+  aiAnalysis     String?   @db.Text // AI-generated analysis
+  aiAnalyzedAt   DateTime?
+  aiPatternMatch String? // Detected pattern type
+  aiSeverity     Int?      @default(0) // 0-10 severity score
+  aiSuggestion   String?   @db.Text // AI suggestion for fix
 
   // Tags for filtering
   tags String[] @default([])
@@ -1689,18 +1847,18 @@ model LogAnalysis {
   type String // hourly, daily, realtime, pattern
 
   // Results
-  summary       String  @db.Text // Human-readable summary
-  patterns      Json    // Detected patterns
-  anomalies     Json    // Detected anomalies
-  suggestions   Json    // AI suggestions
-  metrics       Json    // Key metrics
-  severity      Int     @default(0) // 0-10
+  summary     String @db.Text // Human-readable summary
+  patterns    Json // Detected patterns
+  anomalies   Json // Detected anomalies
+  suggestions Json // AI suggestions
+  metrics     Json // Key metrics
+  severity    Int    @default(0) // 0-10
 
   // Model info
   aiModel   String? // gpt-4o, claude-3, etc
   aiTokens  Int?
   aiCost    Float?
-  aiLatency Int?    // ms
+  aiLatency Int? // ms
 
   @@index([createdAt])
   @@index([type])

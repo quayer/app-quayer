@@ -2,8 +2,9 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Building2, Palette, Users, Mail, Globe, Plug, Database } from 'lucide-react'
+import { Building2, Palette, Users, Mail, Globe, Plug, Database, MessageSquare } from 'lucide-react'
 import { GeneralSettings } from '@/components/organization/GeneralSettings'
+import { SessionSettings } from '@/components/organization/SessionSettings'
 import { ProviderSettings } from '@/components/organization/ProviderSettings'
 import { BrandingSettings } from '@/components/organization/BrandingSettings'
 import { TeamSettings } from '@/components/organization/TeamSettings'
@@ -41,10 +42,14 @@ function OrganizationSettingsContent() {
             />
 
             <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid">
+                <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-grid">
                     <TabsTrigger value="general" className="gap-2">
                         <Building2 className="h-4 w-4" />
                         <span className="hidden sm:inline">Geral</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="sessions" className="gap-2">
+                        <MessageSquare className="h-4 w-4" />
+                        <span className="hidden sm:inline">Sessões</span>
                     </TabsTrigger>
                     <TabsTrigger value="provider" className="gap-2">
                         <Plug className="h-4 w-4" />
@@ -80,6 +85,10 @@ function OrganizationSettingsContent() {
 
                 <TabsContent value="general" className="space-y-4">
                     <GeneralSettings />
+                </TabsContent>
+
+                <TabsContent value="sessions" className="space-y-4">
+                    <SessionSettings />
                 </TabsContent>
 
                 <TabsContent value="provider" className="space-y-4">

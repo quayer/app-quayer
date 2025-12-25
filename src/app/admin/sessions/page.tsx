@@ -77,10 +77,13 @@ import { cn } from '@/lib/utils'
 
 type SessionStatus = 'QUEUED' | 'ACTIVE' | 'PAUSED' | 'CLOSED'
 type AIStatus = 'enabled' | 'disabled' | 'blocked'
+type SessionStartedBy = 'CUSTOMER' | 'BUSINESS' | 'AGENT'
+type WhatsAppWindowStatus = 'active' | 'expiring' | 'expired' | 'none'
 
 interface Session {
   id: string
   status: SessionStatus
+  startedBy: SessionStartedBy
   aiEnabled: boolean
   aiBlockedUntil: string | null
   aiBlockReason: string | null
@@ -88,6 +91,9 @@ interface Session {
   updatedAt: string
   closedAt: string | null
   organizationId: string
+  totalMessages: number
+  sessionDuration: number | null
+  whatsappWindowExpiresAt: string | null
   contact: {
     id: string
     name: string | null
@@ -99,6 +105,7 @@ interface Session {
     id: string
     name: string
     provider: string
+    status: string
   }
   organization?: {
     id: string
@@ -113,6 +120,13 @@ interface Session {
     createdAt: string
     author: string
   }
+  computed?: {
+    whatsappWindowStatus: WhatsAppWindowStatus
+    whatsappWindowRemaining: number
+    aiStatus: AIStatus
+    durationMinutes: number
+    messageCount: number
+  }
 }
 
 const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: any }> = {
@@ -120,6 +134,29 @@ const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon:
   ACTIVE: { label: 'Ativo', color: 'bg-green-500/10 text-green-600 border-green-500/30', icon: MessageCircle },
   PAUSED: { label: 'Pausado', color: 'bg-orange-500/10 text-orange-600 border-orange-500/30', icon: Pause },
   CLOSED: { label: 'Encerrado', color: 'bg-gray-500/10 text-gray-600 border-gray-500/30', icon: Archive },
+}
+
+const STARTED_BY_CONFIG: Record<SessionStartedBy, { label: string; color: string }> = {
+  CUSTOMER: { label: 'Cliente', color: 'bg-blue-500/10 text-blue-600 border-blue-500/30' },
+  BUSINESS: { label: 'Empresa', color: 'bg-purple-500/10 text-purple-600 border-purple-500/30' },
+  AGENT: { label: 'Atendente', color: 'bg-teal-500/10 text-teal-600 border-teal-500/30' },
+}
+
+const WHATSAPP_WINDOW_CONFIG: Record<WhatsAppWindowStatus, { label: string; color: string; icon: any }> = {
+  active: { label: 'Ativa', color: 'bg-green-500/10 text-green-600 border-green-500/30', icon: CheckCircle2 },
+  expiring: { label: 'Expirando', color: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30', icon: AlertTriangle },
+  expired: { label: 'Expirada', color: 'bg-red-500/10 text-red-600 border-red-500/30', icon: XCircle },
+  none: { label: 'N/A', color: 'bg-gray-500/10 text-gray-500 border-gray-500/30', icon: Clock },
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}min`
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  if (hours < 24) return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`
 }
 
 export default function AdminSessionsPage() {
@@ -401,9 +438,12 @@ export default function AdminSessionsPage() {
                   <TableHead>Contato</TableHead>
                   <TableHead>Organizacao</TableHead>
                   <TableHead>Canal</TableHead>
+                  <TableHead>Iniciado</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>IA</TableHead>
-                  <TableHead>Ultima Atividade</TableHead>
+                  <TableHead>Janela 24h</TableHead>
+                  <TableHead className="text-center">Msgs</TableHead>
+                  <TableHead>Duracao</TableHead>
                   <TableHead className="text-right">Acoes</TableHead>
                 </TableRow>
               </TableHeader>
@@ -411,6 +451,13 @@ export default function AdminSessionsPage() {
                 {sessions.map((session) => {
                   const statusConfig = STATUS_CONFIG[session.status]
                   const StatusIcon = statusConfig.icon
+                  const startedByConfig = STARTED_BY_CONFIG[session.startedBy || 'CUSTOMER']
+                  const whatsappStatus = session.computed?.whatsappWindowStatus || 'none'
+                  const whatsappConfig = WHATSAPP_WINDOW_CONFIG[whatsappStatus]
+                  const WhatsAppIcon = whatsappConfig.icon
+                  const messageCount = session.computed?.messageCount || session._count?.messages || 0
+                  const durationMinutes = session.computed?.durationMinutes || 0
+                  const isCloudApi = session.connection.provider === 'WHATSAPP_CLOUD_API'
 
                   return (
                     <TableRow key={session.id}>
@@ -424,7 +471,10 @@ export default function AdminSessionsPage() {
                           </Avatar>
                           <div>
                             <p className="font-medium">{session.contact.name || 'Sem nome'}</p>
-                            <p className="text-sm text-muted-foreground">{session.contact.phoneNumber}</p>
+                            <p className="text-sm text-muted-foreground flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {session.contact.phoneNumber}
+                            </p>
                           </div>
                           {session.contact.bypassBots && (
                             <TooltipProvider>
@@ -447,7 +497,23 @@ export default function AdminSessionsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{session.connection.name}</Badge>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Badge variant="outline">{session.connection.name}</Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {session.connection.provider === 'WHATSAPP_CLOUD_API' ? 'WhatsApp Cloud API (Meta)' :
+                               session.connection.provider === 'WHATSAPP_WEB' ? 'WhatsApp Web (UAZApi)' :
+                               session.connection.provider}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={startedByConfig.color}>
+                          {startedByConfig.label}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusConfig.color}>
@@ -457,8 +523,37 @@ export default function AdminSessionsPage() {
                       </TableCell>
                       <TableCell>{getAIBadge(session)}</TableCell>
                       <TableCell>
+                        {isCloudApi ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <Badge variant="outline" className={whatsappConfig.color}>
+                                  <WhatsAppIcon className="h-3 w-3 mr-1" />
+                                  {whatsappStatus === 'expiring' && session.computed?.whatsappWindowRemaining
+                                    ? `${session.computed.whatsappWindowRemaining}min`
+                                    : whatsappConfig.label}
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {whatsappStatus === 'active' && 'Janela de 24h ativa - pode enviar mensagens livremente'}
+                                {whatsappStatus === 'expiring' && `Janela expira em ${session.computed?.whatsappWindowRemaining} minutos`}
+                                {whatsappStatus === 'expired' && 'Janela expirada - apenas templates permitidos'}
+                                {whatsappStatus === 'none' && 'Sem janela ativa - aguardando mensagem do cliente'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/30">
+                            Ilimitado
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-sm font-medium">{messageCount}</span>
+                      </TableCell>
+                      <TableCell>
                         <span className="text-sm text-muted-foreground">
-                          {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true, locale: ptBR })}
+                          {formatDuration(durationMinutes)}
                         </span>
                       </TableCell>
                       <TableCell className="text-right">

@@ -22,7 +22,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { ConnectionStatus } from '@prisma/client';
+import { ConnectionStatus, GroupMode } from '@prisma/client';
 import { orchestrator } from '@/lib/providers';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
 import { messageConcatenator } from '@/lib/concatenation';
@@ -368,6 +368,14 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   // Se a mensagem contém nossa assinatura, é um echo do bot
   if (message.content && isBotEcho(message.content)) {
     console.log('[Webhook] 🔄 Bot echo detected - ignoring to prevent loop');
+    return;
+  }
+
+  // ⭐ GROUP MESSAGE DETECTION - Processar mensagens de grupos separadamente
+  const isGroupMessage = from.endsWith('@g.us');
+  if (isGroupMessage) {
+    console.log(`[Webhook] 👥 Group message detected from ${from}`);
+    await processGroupMessage(webhook, provider);
     return;
   }
 
@@ -873,4 +881,216 @@ async function updateInstanceQRCode(instanceId: string, qrCode: string): Promise
   }));
 
   console.log(`[Webhook] QR Code updated for instance ${instanceId}`);
+}
+
+/**
+ * ⭐ PROCESSAR MENSAGEM DE GRUPO (Session Per Participant Model)
+ *
+ * Modelo de Monitoramento Contínuo:
+ * 1. Mensagens de grupo são registradas no GroupMessage
+ * 2. Cada participante tem sua própria sessão individual (GroupParticipant.privateSessionId)
+ * 3. O grupo pode estar em modo: DISABLED, MONITOR_ONLY, ACTIVE
+ * 4. Se ACTIVE, a IA pode responder no grupo ou no privado (conforme groupAiResponseMode)
+ */
+async function processGroupMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
+  const { instanceId, data } = webhook;
+  const { from: groupJid, message, contactName } = data;
+
+  // Extrair participantJid do payload (quem enviou a mensagem no grupo)
+  // O formato varia por provider: data.participant, data.sender, etc.
+  const participantJid = (data as any).participant ||
+                         (data as any).sender ||
+                         (data as any).author ||
+                         message?.author;
+
+  if (!participantJid) {
+    console.log('[Webhook] 👥 Group message without participant info - skipping');
+    return;
+  }
+
+  console.log(`[Webhook] 👥 Processing group message from ${participantJid} in group ${groupJid}`);
+
+  // 1. Buscar instância e organização
+  const instance = await database.connection.findUnique({
+    where: { id: instanceId },
+    include: {
+      organization: {
+        select: {
+          id: true,
+          groupDefaultMode: true,
+          groupAiResponseMode: true,
+        },
+      },
+    },
+  });
+
+  if (!instance || !instance.organization) {
+    console.error(`[Webhook] Instance ${instanceId} not found or missing organization`);
+    return;
+  }
+
+  const { organization } = instance;
+  const groupMode = organization.groupDefaultMode as GroupMode;
+
+  // 2. Verificar se grupos estão habilitados para esta organização
+  if (groupMode === 'DISABLED') {
+    console.log(`[Webhook] 👥 Groups DISABLED for org ${organization.id} - ignoring`);
+    return;
+  }
+
+  console.log(`[Webhook] 👥 Group mode: ${groupMode}, AI response mode: ${organization.groupAiResponseMode}`);
+
+  // 3. Buscar ou criar GroupChat
+  let groupChat = await database.groupChat.findUnique({
+    where: { groupJid },
+  });
+
+  if (!groupChat) {
+    console.log(`[Webhook] 👥 Creating new GroupChat: ${groupJid}`);
+    groupChat = await database.groupChat.create({
+      data: {
+        groupJid,
+        connectionId: instanceId,
+        organizationId: organization.id,
+        mode: groupMode,
+        groupName: (data as any).groupName || (data as any).subject || groupJid,
+        aiEnabled: groupMode === 'ACTIVE',
+        aiResponseMode: organization.groupAiResponseMode as any || 'PRIVATE',
+      },
+    });
+  }
+
+  // 4. Buscar ou criar Contact para o participante
+  let participantContact = await database.contact.findUnique({
+    where: { phoneNumber: participantJid },
+  });
+
+  if (!participantContact) {
+    const displayName = contactName && contactName !== participantJid ? contactName : participantJid;
+    console.log(`[Webhook] 👥 Creating contact for participant: ${participantJid}`);
+    participantContact = await database.contact.create({
+      data: {
+        phoneNumber: participantJid,
+        name: displayName,
+      },
+    });
+  }
+
+  // 5. Buscar ou criar GroupParticipant
+  let groupParticipant = await database.groupParticipant.findUnique({
+    where: {
+      groupId_participantJid: {
+        groupId: groupChat.id,
+        participantJid,
+      },
+    },
+  });
+
+  if (!groupParticipant) {
+    console.log(`[Webhook] 👥 Creating GroupParticipant for ${participantJid} in ${groupJid}`);
+    groupParticipant = await database.groupParticipant.create({
+      data: {
+        groupId: groupChat.id,
+        participantJid,
+        contactId: participantContact.id,
+        displayName: participantContact.name,
+        role: 'participant',
+      },
+    });
+  }
+
+  // 6. Atualizar lastSeenAt e messageCount
+  await database.groupParticipant.update({
+    where: { id: groupParticipant.id },
+    data: {
+      lastSeenAt: new Date(),
+      messageCount: { increment: 1 },
+    },
+  });
+
+  // 7. Salvar GroupMessage
+  const groupMessage = await database.groupMessage.create({
+    data: {
+      groupId: groupChat.id,
+      participantId: groupParticipant.id,
+      waMessageId: message?.id || `grp_${Date.now()}`,
+      type: message?.type || 'text',
+      content: message?.content || '',
+      mediaUrl: message?.media?.mediaUrl,
+      mediaType: message?.media?.type,
+      mimeType: message?.media?.mimeType,
+      quotedMessageId: (message as any)?.quotedMessageId,
+    },
+  });
+
+  console.log(`[Webhook] 👥 GroupMessage saved: ${groupMessage.id}`);
+
+  // 8. Atualizar estatísticas do grupo
+  await database.groupChat.update({
+    where: { id: groupChat.id },
+    data: {
+      lastMessageAt: new Date(),
+      totalMessages: { increment: 1 },
+    },
+  });
+
+  // 9. Se modo ACTIVE e IA habilitada, criar/atualizar sessão privada do participante
+  if (groupMode === 'ACTIVE' && groupChat.aiEnabled) {
+    // Buscar ou criar sessão privada para o participante
+    let privateSession = groupParticipant.privateSessionId
+      ? await database.chatSession.findUnique({
+          where: { id: groupParticipant.privateSessionId },
+        })
+      : null;
+
+    // Se não existe sessão privada, criar uma nova
+    if (!privateSession) {
+      console.log(`[Webhook] 👥 Creating private session for participant ${participantJid}`);
+      privateSession = await sessionsManager.getOrCreateSession({
+        contactId: participantContact.id,
+        connectionId: instanceId,
+        organizationId: organization.id,
+      });
+
+      // Vincular sessão ao participante
+      await database.groupParticipant.update({
+        where: { id: groupParticipant.id },
+        data: { privateSessionId: privateSession.id },
+      });
+    }
+
+    console.log(`[Webhook] 👥 Private session for ${participantJid}: ${privateSession.id}`);
+
+    // Processar mensagem na sessão privada (pode acionar IA)
+    // Dependendo do groupAiResponseMode:
+    // - IN_GROUP: IA responde no grupo
+    // - PRIVATE: IA responde no privado
+    // - HYBRID: IA decide
+    const aiResponseMode = groupChat.aiResponseMode || organization.groupAiResponseMode;
+    console.log(`[Webhook] 👥 AI response mode: ${aiResponseMode}`);
+
+    // Por enquanto, apenas registrar - a integração com n8n/IA será via job
+    // TODO: Enfileirar job para processar mensagem com IA
+  }
+
+  // 10. Sync com Chatwoot (se habilitado)
+  try {
+    const chatwootSync = await getChatwootSyncService();
+    await chatwootSync.syncIncomingMessage({
+      instanceId,
+      organizationId: organization.id,
+      phoneNumber: participantJid,
+      contactName: participantContact.name || participantJid,
+      messageContent: message?.content || `[${message?.type || 'message'}]`,
+      messageType: message?.type || 'text',
+      mediaUrl: message?.media?.mediaUrl,
+      mediaMimeType: message?.media?.mimeType,
+      isFromGroup: true,
+      groupJid,
+    });
+  } catch (chatwootError) {
+    console.error('[Webhook] Chatwoot sync failed (non-blocking):', chatwootError);
+  }
+
+  console.log(`[Webhook] 👥 Group message processed successfully`);
 }

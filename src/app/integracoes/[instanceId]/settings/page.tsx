@@ -36,6 +36,12 @@ import {
   Terminal,
   Loader2,
   Info,
+  Webhook,
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  Copy,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -112,6 +118,25 @@ interface ConnectionSettings {
   commandPrefix: string;
 }
 
+interface ConnectionInfo {
+  id: string;
+  name: string;
+  provider: string;
+  status: string;
+  n8nWebhookUrl: string | null;
+  n8nWorkflowId: string | null;
+  n8nFallbackUrl: string | null;
+  agentConfig: any;
+  webhooks: Array<{
+    id: string;
+    url: string;
+    events: string[];
+    isActive: boolean;
+    lastDeliveryAt: string | null;
+    lastStatus: string | null;
+  }>;
+}
+
 const DEFAULT_SETTINGS: ConnectionSettings = {
   concatEnabled: true,
   concatTimeoutMs: 8000,
@@ -143,6 +168,7 @@ export default function InstanceSettingsPage() {
   const instanceId = params.instanceId as string;
 
   const [settings, setSettings] = useState<ConnectionSettings>(DEFAULT_SETTINGS);
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null);
   const [isDefault, setIsDefault] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -152,11 +178,30 @@ export default function InstanceSettingsPage() {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const response = await fetchWithAuth(`/api/v1/connection-settings/${instanceId}`);
+        // Carregar settings e info da conexao em paralelo
+        const [settingsResponse, connectionResponse] = await Promise.all([
+          fetchWithAuth(`/api/v1/connection-settings/${instanceId}`),
+          fetchWithAuth(`/api/v1/instances/${instanceId}`).catch(() => null),
+        ]);
 
-        if (response.data) {
-          setSettings(response.data.settings);
-          setIsDefault(response.data.isDefault);
+        if (settingsResponse.data) {
+          setSettings(settingsResponse.data.settings);
+          setIsDefault(settingsResponse.data.isDefault);
+        }
+
+        if (connectionResponse?.data) {
+          const conn = connectionResponse.data;
+          setConnectionInfo({
+            id: conn.id,
+            name: conn.name,
+            provider: conn.provider,
+            status: conn.status,
+            n8nWebhookUrl: conn.n8nWebhookUrl,
+            n8nWorkflowId: conn.n8nWorkflowId,
+            n8nFallbackUrl: conn.n8nFallbackUrl,
+            agentConfig: conn.agentConfig,
+            webhooks: conn.webhooks || [],
+          });
         }
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -274,7 +319,7 @@ export default function InstanceSettingsPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="concatenation" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="concatenation" className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4" />
             <span className="hidden sm:inline">Concatenacao</span>
@@ -294,6 +339,10 @@ export default function InstanceSettingsPage() {
           <TabsTrigger value="commands" className="flex items-center gap-2">
             <Terminal className="h-4 w-4" />
             <span className="hidden sm:inline">Comandos</span>
+          </TabsTrigger>
+          <TabsTrigger value="webhooks" className="flex items-center gap-2">
+            <Webhook className="h-4 w-4" />
+            <span className="hidden sm:inline">Webhooks</span>
           </TabsTrigger>
         </TabsList>
 
@@ -741,6 +790,185 @@ export default function InstanceSettingsPage() {
                     <span className="text-muted-foreground">Mostra status</span>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Webhooks Tab */}
+        <TabsContent value="webhooks">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Webhook className="h-5 w-5" />
+                Webhooks e Integracoes
+              </CardTitle>
+              <CardDescription>
+                Visualize e gerencie webhooks conectados a esta integracao.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* n8n Integration */}
+              <div className="space-y-4">
+                <Label className="text-base font-medium flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Integracao n8n (Agente IA)
+                </Label>
+                {connectionInfo?.n8nWebhookUrl ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 p-3 rounded-lg border bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
+                      <CheckCircle2 className="h-5 w-5 text-green-600" />
+                      <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                        Webhook n8n Conectado
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground mb-1">URL do Webhook</p>
+                          <p className="text-sm font-mono truncate">{connectionInfo.n8nWebhookUrl}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            navigator.clipboard.writeText(connectionInfo.n8nWebhookUrl || '');
+                            toast.success('URL copiada!');
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {connectionInfo.n8nWorkflowId && (
+                        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Workflow ID</p>
+                            <p className="text-sm font-mono">{connectionInfo.n8nWorkflowId}</p>
+                          </div>
+                        </div>
+                      )}
+                      {connectionInfo.n8nFallbackUrl && (
+                        <div className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-muted-foreground mb-1">URL de Fallback</p>
+                            <p className="text-sm font-mono truncate">{connectionInfo.n8nFallbackUrl}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/50">
+                    <XCircle className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      Nenhum webhook n8n configurado
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Custom Webhooks */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium flex items-center gap-2">
+                    <Webhook className="h-4 w-4" />
+                    Webhooks Personalizados
+                  </Label>
+                  <Button variant="outline" size="sm" asChild>
+                    <a href="/ferramentas/webhooks" target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Gerenciar Webhooks
+                    </a>
+                  </Button>
+                </div>
+
+                {connectionInfo?.webhooks && connectionInfo.webhooks.length > 0 ? (
+                  <div className="space-y-2">
+                    {connectionInfo.webhooks.map((webhook) => (
+                      <div
+                        key={webhook.id}
+                        className="flex items-center justify-between p-3 rounded-lg border"
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          {webhook.isActive ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-sm font-mono truncate">{webhook.url}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="outline" className="text-[10px]">
+                                {webhook.events.length} evento(s)
+                              </Badge>
+                              {webhook.lastStatus && (
+                                <Badge
+                                  variant={webhook.lastStatus === 'success' ? 'default' : 'destructive'}
+                                  className="text-[10px]"
+                                >
+                                  {webhook.lastStatus}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/50">
+                    <Webhook className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      Nenhum webhook personalizado configurado
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Webhook URL Info */}
+              <div className="space-y-4">
+                <Label className="text-base font-medium">URL para Receber Webhooks</Label>
+                <div className="p-3 rounded-lg border bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Use esta URL para configurar webhooks externos que enviam dados para esta integracao:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 p-2 rounded bg-background text-sm font-mono truncate">
+                      {typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/webhooks/uazapi/{instanceId}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => {
+                        const url = `${window.location.origin}/api/v1/webhooks/uazapi/${instanceId}`;
+                        navigator.clipboard.writeText(url);
+                        toast.success('URL copiada!');
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Groups Info */}
+              <Separator />
+              <div className="space-y-4">
+                <Label className="text-base font-medium flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Grupos WhatsApp
+                </Label>
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    O suporte a grupos WhatsApp esta disponivel. Configure o modo de operacao
+                    (Desativado, Apenas Monitorar, ou Ativo) nas configuracoes da organizacao.
+                  </AlertDescription>
+                </Alert>
               </div>
             </CardContent>
           </Card>

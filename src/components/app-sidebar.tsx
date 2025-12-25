@@ -140,11 +140,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         icon: MessagesSquare,
       },
       {
-        title: "Atendimentos",
-        url: "/atendimentos",
-        icon: Headset,
-      },
-      {
         title: "Contatos",
         url: "/contatos",
         icon: UserCog,
