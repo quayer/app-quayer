@@ -99,10 +99,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Prisma client e schema
+# Prisma client e schema (com migrations)
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+
+# Copiar script de entrypoint para rodar migrations
+COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
 
 # Segurança: rodar como non-root
 USER nextjs
@@ -116,4 +120,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Init system para signals corretos
 ENTRYPOINT ["/sbin/tini", "--"]
 
-CMD ["node", "server.js"]
+# Usar script de entrypoint que roda migrations antes de iniciar
+CMD ["./docker-entrypoint.sh"]

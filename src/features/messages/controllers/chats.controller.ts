@@ -45,6 +45,13 @@ export const chatsController = igniter.controller({
               },
             },
           },
+          select: {
+            id: true,
+            organizationId: true,
+            uazapiToken: true,
+            status: true,
+            n8nWebhookUrl: true, // Incluir para verificar se IA está disponível na integração
+          },
         });
 
         if (!instance) {
@@ -91,32 +98,51 @@ export const chatsController = igniter.controller({
           }
 
           // Filtro por tipo de atendimento (IA, Humano, Arquivado)
+          // IMPORTANTE: IA só está disponível quando n8nWebhookUrl está configurado na conexão
+          const connectionHasWebhook = !!instance.n8nWebhookUrl;
           const now = new Date();
+
           if (query.attendanceType === 'ai') {
-            // Sessões com IA ativa: aiEnabled = true E (aiBlockedUntil é null OU já expirou)
-            where.AND = [
-              ...(where.AND || []),
-              { aiEnabled: true },
-              {
-                OR: [
-                  { aiBlockedUntil: null },
-                  { aiBlockedUntil: { lt: now } }
-                ]
-              }
-            ];
+            // Sessões com IA ativa:
+            // 1. Conexão deve ter webhook configurado
+            // 2. aiEnabled = true E (aiBlockedUntil é null OU já expirou)
+            if (!connectionHasWebhook) {
+              // Se conexão não tem webhook, nenhuma sessão pode ser IA
+              where.id = 'NEVER_MATCH'; // Força resultado vazio
+            } else {
+              where.AND = [
+                ...(where.AND || []),
+                { aiEnabled: true },
+                {
+                  OR: [
+                    { aiBlockedUntil: null },
+                    { aiBlockedUntil: { lt: now } }
+                  ]
+                },
+                // Exclui arquivados deste filtro
+                { status: { notIn: ['CLOSED', 'PAUSED'] } }
+              ];
+            }
           } else if (query.attendanceType === 'human') {
-            // Sessões com humano: aiEnabled = false OU aiBlockedUntil ainda não expirou
-            where.AND = [
-              ...(where.AND || []),
-              {
-                OR: [
-                  { aiEnabled: false },
-                  { aiBlockedUntil: { gte: now } }
-                ]
-              },
-              // Exclui arquivados deste filtro
-              { status: { notIn: ['CLOSED', 'PAUSED'] } }
-            ];
+            // Sessões com humano:
+            // 1. Se conexão não tem webhook → todas são humanas (exceto arquivadas)
+            // 2. Se tem webhook → aiEnabled = false OU aiBlockedUntil ainda não expirou
+            if (!connectionHasWebhook) {
+              // Sem webhook, todas sessões ativas são humanas
+              where.status = { notIn: ['CLOSED', 'PAUSED'] };
+            } else {
+              where.AND = [
+                ...(where.AND || []),
+                {
+                  OR: [
+                    { aiEnabled: false },
+                    { aiBlockedUntil: { gte: now } }
+                  ]
+                },
+                // Exclui arquivados deste filtro
+                { status: { notIn: ['CLOSED', 'PAUSED'] } }
+              ];
+            }
           } else if (query.attendanceType === 'archived') {
             // Sessões arquivadas: status é CLOSED ou PAUSED
             where.status = { in: ['CLOSED', 'PAUSED'] };
@@ -314,11 +340,15 @@ export const chatsController = igniter.controller({
               created_at: session.createdAt.toISOString(),
               updated_at: session.updatedAt.toISOString(),
               // Campos de status e IA
-              // IMPORTANTE: aiEnabled deve ser false por padrão (humano)
-              // IA só é ativada quando explicitamente configurada com webhook
+              // IMPORTANTE: IA só está disponível quando:
+              // 1. Conexão tem webhook configurado (n8nWebhookUrl)
+              // 2. aiEnabled = true na sessão
+              // 3. aiBlockedUntil não existe ou já expirou
               status: session.status,
               aiEnabled: session.aiEnabled ?? false,
               aiBlockedUntil: session.aiBlockedUntil?.toISOString() ?? null,
+              // Indica se a conexão tem IA disponível (webhook configurado)
+              connectionHasWebhook: connectionHasWebhook,
             };
           };
 

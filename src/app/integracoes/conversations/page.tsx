@@ -1,5 +1,39 @@
 'use client'
 
+/**
+ * Conversations Page - WhatsApp Chat Management
+ *
+ * STATUS FLOW (AI / Human / Closed):
+ * ====================================
+ *
+ * 1. AI ATIVA (Bot respondendo):
+ *    - Condição: connectionHasWebhook=true AND aiEnabled=true AND (aiBlockedUntil=null OR expired)
+ *    - Ícone: Bot roxo (purple-500)
+ *    - Mensagens de entrada são processadas pelo webhook/n8n automaticamente
+ *
+ * 2. HUMANO (Atendente respondendo):
+ *    - Condição: aiEnabled=false OR aiBlockedUntil ainda não expirou OR !connectionHasWebhook
+ *    - Ícone: User azul (blue-500)
+ *    - Triggers:
+ *      a) Humano digita mensagem na interface Quayer (OUTBOUND com author='AGENT')
+ *      b) Próprio número da integração digita no WhatsApp (OUTBOUND com author='HUMAN')
+ *    - Ao detectar intervenção humana:
+ *      - autoPauseOnHumanReply() é chamado
+ *      - aiEnabled=false, aiBlockedUntil=now+24h (ou sessionTimeoutHours da org)
+ *      - aiBlockReason='AUTO_PAUSED_HUMAN'
+ *
+ * 3. ENCERRADA (Conversa finalizada):
+ *    - Condição: status='CLOSED' ou status='PAUSED'
+ *    - Ícone: Archive laranja (orange-500)
+ *    - Triggers:
+ *      a) User clica "Resolver" na interface
+ *      b) Timeout automático (closeExpiredSessions worker)
+ *      c) Arquivar chat manualmente
+ *
+ * IMPORTANTE: IA só está disponível quando n8nWebhookUrl está configurado na Connection.
+ * Sem webhook, todas as sessões são "Humano" por padrão.
+ */
+
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -125,6 +159,8 @@ interface UAZChat {
   status?: 'QUEUED' | 'ACTIVE' | 'PAUSED' | 'CLOSED'
   aiEnabled?: boolean
   aiBlockedUntil?: string | null
+  // Indica se a conexão tem IA disponível (webhook configurado)
+  connectionHasWebhook?: boolean
 }
 
 interface DBMessage {
@@ -312,6 +348,10 @@ export default function ConversationsPage() {
   }, [chatsData, searchText])
 
   // Calculate filter counts for badges
+  // IMPORTANTE: IA só está ativa quando:
+  // 1. Conexão tem webhook configurado (connectionHasWebhook)
+  // 2. aiEnabled = true na sessão
+  // 3. aiBlockedUntil não existe ou já expirou
   const filterCounts = useMemo(() => {
     const data: UAZChat[] = (chatsData as any)?.chats ?? []
     const now = new Date()
@@ -319,15 +359,21 @@ export default function ConversationsPage() {
     return {
       all: data.length,
       ai: data.filter(chat => {
+        // IA só pode estar ativa se conexão tem webhook
+        if (!chat.connectionHasWebhook) return false
         const isAIActive = chat.aiEnabled === true && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < now)
         const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
         return isAIActive && !isArchived
       }).length,
       human: data.filter(chat => {
+        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
+        if (isArchived) return false
+        // Se conexão não tem webhook, todas são humanas
+        if (!chat.connectionHasWebhook) return true
+        // Se tem webhook, verificar se IA está bloqueada ou desabilitada
         const isAIBlocked = chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= now
         const isAIDisabled = chat.aiEnabled === false
-        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
-        return (isAIBlocked || isAIDisabled) && !isArchived
+        return isAIBlocked || isAIDisabled
       }).length,
       archived: data.filter(chat => chat.status === 'CLOSED' || chat.status === 'PAUSED').length,
       groups: data.filter(chat => chat.wa_isGroup).length,
@@ -759,8 +805,16 @@ export default function ConversationsPage() {
   // Chats List Component
   const ChatsList = ({ className }: { className?: string }) => (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
-      {/* Header with instance filter and search */}
+      {/* Header with total count and instance filter */}
       <div className="p-4 space-y-3 border-b flex-shrink-0">
+        {/* Total conversations header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Conversas</h2>
+          <Badge variant="secondary" className="text-xs">
+            {filterCounts.all} {filterCounts.all === 1 ? 'conversa' : 'conversas'}
+          </Badge>
+        </div>
+
         {/* Instance filter */}
         <InstanceFilter />
 
@@ -797,7 +851,7 @@ export default function ConversationsPage() {
                       <Badge
                         variant={attendanceFilter === filter.value ? "default" : "secondary"}
                         className={cn(
-                          "ml-1 h-5 min-w-5 px-1.5 text-[10px] font-medium",
+                          "ml-1 h-5 min-w-5 px-1.5 text-xs font-medium",
                           attendanceFilter === filter.value
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted-foreground/20 text-muted-foreground"
@@ -882,8 +936,14 @@ export default function ConversationsPage() {
             {chats.map((chat: UAZChat) => {
               // Determinar nome para exibição
               const displayName = chat.wa_name || 'Contato'
-              // Determinar se é atendimento humano (default) ou IA
-              const isAIActive = chat.aiEnabled === true && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date())
+              // Determinar se é atendimento IA ou humano
+              // IA só está ativa quando:
+              // 1. Conexão tem webhook configurado (connectionHasWebhook)
+              // 2. aiEnabled = true na sessão
+              // 3. aiBlockedUntil não existe ou já expirou
+              const isAIActive = chat.connectionHasWebhook === true &&
+                chat.aiEnabled === true &&
+                (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date())
               const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
 
               return (
@@ -941,7 +1001,7 @@ export default function ConversationsPage() {
                           )}
                         </div>
                         {chat.wa_lastMsgTimestamp && (
-                          <span className="text-[11px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
                             {formatTimestamp(chat.wa_lastMsgTimestamp)}
                           </span>
                         )}
@@ -949,12 +1009,12 @@ export default function ConversationsPage() {
 
                       {/* Número de telefone ou indicador de grupo */}
                       {!chat.wa_isGroup && chat.wa_phoneNumber && (
-                        <p className="text-[11px] text-muted-foreground/70 mb-0.5 truncate">
+                        <p className="text-xs text-muted-foreground/70 mb-0.5 truncate">
                           {chat.wa_phoneNumber}
                         </p>
                       )}
                       {chat.wa_isGroup && (
-                        <p className="text-[11px] text-muted-foreground/70 mb-0.5 flex items-center gap-1">
+                        <p className="text-xs text-muted-foreground/70 mb-0.5 flex items-center gap-1">
                           <Users className="h-3 w-3" />
                           Grupo
                         </p>
@@ -965,7 +1025,7 @@ export default function ConversationsPage() {
                           {chat.wa_lastMsgBody || 'Sem mensagens'}
                         </p>
                         {chat.wa_unreadCount > 0 && (
-                          <Badge className="h-5 min-w-5 flex items-center justify-center text-[10px] flex-shrink-0">
+                          <Badge className="h-5 min-w-5 flex items-center justify-center text-xs flex-shrink-0">
                             {chat.wa_unreadCount > 99 ? '99+' : chat.wa_unreadCount}
                           </Badge>
                         )}
@@ -973,7 +1033,7 @@ export default function ConversationsPage() {
 
                       {/* Show instance name when viewing all */}
                       {selectedInstanceFilter === 'all' && chat.instanceName && (
-                        <p className="text-[10px] text-muted-foreground/60 mt-1 flex items-center gap-1 truncate">
+                        <p className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-1 truncate">
                           <Smartphone className="h-3 w-3 flex-shrink-0" />
                           {chat.instanceName}
                         </p>
@@ -1179,7 +1239,7 @@ export default function ConversationsPage() {
                           ? "text-primary-foreground/70"
                           : "text-muted-foreground"
                       )}>
-                        <span className="text-[10px]">
+                        <span className="text-xs">
                           {formatTimestamp(message.createdAt)}
                         </span>
                         {getStatusIcon(message.status, message.direction)}

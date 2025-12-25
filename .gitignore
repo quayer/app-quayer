@@ -47,7 +47,7 @@ out/
 *.db
 *.sqlite
 *.sqlite3
-prisma/migrations/
+# prisma/migrations/ # IMPORTANT: Migrations MUST be in version control!
 *.db-shm
 *.db-wal
 
