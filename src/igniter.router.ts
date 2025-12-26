@@ -25,6 +25,7 @@ import { auditController } from '@/features/audit'
 import { connectionSettingsController } from '@/features/connection-settings'
 import { organizationProvidersController } from '@/features/organization-providers'
 import { aiController } from '@/features/ai/controllers/ai.controller'
+import { quickRepliesController } from '@/features/quick-replies'
 
 /**
  * @description Main application router configuration
@@ -63,6 +64,7 @@ export const AppRouter = igniter.router({
     'connection-settings': connectionSettingsController,
     'organization-providers': organizationProvidersController,
     ai: aiController,
+    'quick-replies': quickRepliesController,
   }
 })
 

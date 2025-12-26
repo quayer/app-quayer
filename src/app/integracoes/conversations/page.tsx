@@ -109,6 +109,8 @@ import {
   PinOff,
   Plus,
   Play,
+  Zap,
+  Command,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -239,6 +241,8 @@ export default function ConversationsPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showNotesPanel, setShowNotesPanel] = useState(false)
   const [newNoteText, setNewNoteText] = useState('')
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [quickReplySearch, setQuickReplySearch] = useState('')
 
   // Optimistic messages for immediate UI feedback
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
@@ -583,6 +587,52 @@ export default function ConversationsPage() {
   })
 
   const notes = notesData ?? []
+
+  // ==================== QUICK REPLIES ====================
+
+  // Fetch quick replies
+  const {
+    data: quickRepliesData,
+    isLoading: quickRepliesLoading,
+  } = useQuery({
+    queryKey: ['quick-replies', quickReplySearch],
+    queryFn: async () => {
+      const response = await (api['quick-replies'] as any).list.query({
+        query: { search: quickReplySearch || undefined, limit: 20 }
+      })
+      return (response as any)?.data ?? { quickReplies: [], categories: [] }
+    },
+    enabled: showQuickReplies,
+    staleTime: 60000, // Cache for 1 minute
+  })
+
+  const quickReplies = quickRepliesData?.quickReplies ?? []
+
+  // Handle quick reply selection
+  const handleSelectQuickReply = useCallback((qr: any) => {
+    setMessageText(qr.content)
+    setShowQuickReplies(false)
+    setQuickReplySearch('')
+    messageInputRef.current?.focus()
+
+    // Increment usage count
+    ;(api['quick-replies'] as any).use.mutate({ params: { id: qr.id } }).catch(() => {})
+  }, [])
+
+  // Detect shortcut typing (e.g., /ola)
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setMessageText(value)
+
+    // Detect shortcut pattern
+    if (value.startsWith('/') && value.length > 1 && !value.includes(' ')) {
+      setQuickReplySearch(value)
+      setShowQuickReplies(true)
+    } else if (showQuickReplies && !value.startsWith('/')) {
+      setShowQuickReplies(false)
+      setQuickReplySearch('')
+    }
+  }, [showQuickReplies])
 
   // Create note mutation
   const createNoteMutation = useMutation({
@@ -1897,6 +1947,63 @@ export default function ConversationsPage() {
                 </PopoverContent>
               </Popover>
 
+              {/* Quick Replies button */}
+              <Popover open={showQuickReplies} onOpenChange={setShowQuickReplies}>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Zap className="h-5 w-5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="start" side="top">
+                  <div className="p-3 border-b">
+                    <div className="flex items-center gap-2">
+                      <Command className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar ou digite /atalho..."
+                        value={quickReplySearch}
+                        onChange={(e) => setQuickReplySearch(e.target.value)}
+                        className="h-8 text-sm"
+                        autoFocus
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Digite / no chat para ativar atalhos
+                    </p>
+                  </div>
+                  <ScrollArea className="max-h-64">
+                    {quickRepliesLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : quickReplies.length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground text-sm">
+                        {quickReplySearch ? 'Nenhum atalho encontrado' : 'Nenhuma resposta rápida'}
+                      </div>
+                    ) : (
+                      <div className="p-1">
+                        {quickReplies.map((qr: any) => (
+                          <button
+                            key={qr.id}
+                            onClick={() => handleSelectQuickReply(qr)}
+                            className="w-full text-left p-2 rounded-md hover:bg-muted transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-sm">{qr.title}</span>
+                              <Badge variant="outline" className="text-xs font-mono">
+                                {qr.shortcut}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                              {qr.content}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
+
               {/* Attachment button */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1912,23 +2019,56 @@ export default function ConversationsPage() {
                 <TooltipContent>Anexar arquivo (max 16MB)</TooltipContent>
               </Tooltip>
 
-              {/* Message input */}
-              <Input
-                ref={messageInputRef}
-                placeholder={selectedFile ? "Legenda (opcional)..." : "Digite uma mensagem..."}
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                onFocus={() => { isInputFocusedRef.current = true }}
-                onBlur={() => { isInputFocusedRef.current = false }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    selectedFile ? handleSendFile() : handleSendMessage()
-                  }
-                }}
-                className="flex-1"
-                disabled={isUploading || sendMessageMutation.isPending}
-              />
+              {/* Message input with quick reply detection */}
+              <div className="relative flex-1">
+                <Input
+                  ref={messageInputRef}
+                  placeholder={selectedFile ? "Legenda (opcional)..." : "Digite / para atalhos ou mensagem..."}
+                  value={messageText}
+                  onChange={handleMessageChange}
+                  onFocus={() => { isInputFocusedRef.current = true }}
+                  onBlur={() => { isInputFocusedRef.current = false }}
+                  onKeyDown={(e) => {
+                    // Handle quick reply selection with Enter
+                    if (e.key === 'Enter' && showQuickReplies && quickReplies.length > 0) {
+                      e.preventDefault()
+                      handleSelectQuickReply(quickReplies[0])
+                      return
+                    }
+                    // Handle Escape to close quick replies
+                    if (e.key === 'Escape' && showQuickReplies) {
+                      setShowQuickReplies(false)
+                      setQuickReplySearch('')
+                      return
+                    }
+                    // Normal message send
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      selectedFile ? handleSendFile() : handleSendMessage()
+                    }
+                  }}
+                  className="w-full"
+                  disabled={isUploading || sendMessageMutation.isPending}
+                />
+                {/* Quick reply suggestions dropdown */}
+                {showQuickReplies && quickReplies.length > 0 && messageText.startsWith('/') && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto">
+                    {quickReplies.slice(0, 5).map((qr: any, idx: number) => (
+                      <button
+                        key={qr.id}
+                        onClick={() => handleSelectQuickReply(qr)}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors flex items-center justify-between",
+                          idx === 0 && "bg-muted/50"
+                        )}
+                      >
+                        <span className="truncate">{qr.title}</span>
+                        <span className="text-xs font-mono text-muted-foreground ml-2">{qr.shortcut}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Audio recorder - show when no text and no file */}
               {!messageText.trim() && !selectedFile && (

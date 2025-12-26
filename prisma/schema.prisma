@@ -80,7 +80,8 @@ model Organization {
   auditLogs    AuditLog[]
   chatSessions ChatSession[]
   calls        Call[]
-  providers    OrganizationProvider[]
+  providers     OrganizationProvider[]
+  quickReplies QuickReply[]
 
   @@index([document])
   @@index([slug])
@@ -139,7 +140,8 @@ model User {
   assignedConnections Connection[]         @relation("AssignedCustomer")
 
   passkeyCredentials PasskeyCredential[]
-  sessionNotes       SessionNote[] // Notas criadas pelo usuário
+  sessionNotes       SessionNote[]  // Notas criadas pelo usuário
+  quickReplies       QuickReply[]   // Respostas rápidas criadas pelo usuário
 
   @@index([email])
   @@index([currentOrgId])
@@ -1042,6 +1044,43 @@ model SessionNote {
   @@index([authorId])
   @@index([createdAt])
   @@map("session_notes")
+}
+
+// ============================================
+// QUICK REPLIES (Canned Responses for Agents)
+// ============================================
+
+model QuickReply {
+  id             String  @id @default(uuid())
+  organizationId String
+  createdById    String  // User who created
+
+  // Content
+  shortcut  String // e.g. "/ola", "/preco", "/horario"
+  title     String // Display title
+  content   String @db.Text // The actual message content
+  category  String? // Optional category for grouping
+
+  // Usage stats
+  usageCount Int @default(0)
+
+  // Visibility
+  isGlobal  Boolean @default(true) // Available to all org users
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, shortcut]) // Shortcut must be unique per org
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([category])
+  @@index([isActive])
+  @@map("quick_replies")
 }
 
 model Message {
