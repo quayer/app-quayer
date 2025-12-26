@@ -243,6 +243,10 @@ export default function ConversationsPage() {
   const [newNoteText, setNewNoteText] = useState('')
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [quickReplySearch, setQuickReplySearch] = useState('')
+  const [showMessageSearch, setShowMessageSearch] = useState(false)
+  const [messageSearchText, setMessageSearchText] = useState('')
+  const [messageSearchResults, setMessageSearchResults] = useState<number[]>([]) // indices of matching messages
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(0)
 
   // Optimistic messages for immediate UI feedback
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
@@ -633,6 +637,68 @@ export default function ConversationsPage() {
       setQuickReplySearch('')
     }
   }, [showQuickReplies])
+
+  // ==================== MESSAGE SEARCH ====================
+
+  // Search messages within current conversation
+  const handleMessageSearch = useCallback((searchTerm: string) => {
+    setMessageSearchText(searchTerm)
+
+    if (!searchTerm.trim()) {
+      setMessageSearchResults([])
+      setCurrentSearchIndex(0)
+      return
+    }
+
+    const term = searchTerm.toLowerCase()
+    const results: number[] = []
+
+    messages.forEach((msg: any, index: number) => {
+      if (msg.content?.toLowerCase().includes(term)) {
+        results.push(index)
+      }
+    })
+
+    setMessageSearchResults(results)
+    setCurrentSearchIndex(results.length > 0 ? 0 : -1)
+
+    // Scroll to first result
+    if (results.length > 0) {
+      scrollToMessage(results[0])
+    }
+  }, [messages])
+
+  // Navigate to next search result
+  const goToNextResult = useCallback(() => {
+    if (messageSearchResults.length === 0) return
+    const next = (currentSearchIndex + 1) % messageSearchResults.length
+    setCurrentSearchIndex(next)
+    scrollToMessage(messageSearchResults[next])
+  }, [messageSearchResults, currentSearchIndex])
+
+  // Navigate to previous search result
+  const goToPrevResult = useCallback(() => {
+    if (messageSearchResults.length === 0) return
+    const prev = currentSearchIndex === 0 ? messageSearchResults.length - 1 : currentSearchIndex - 1
+    setCurrentSearchIndex(prev)
+    scrollToMessage(messageSearchResults[prev])
+  }, [messageSearchResults, currentSearchIndex])
+
+  // Scroll to specific message
+  const scrollToMessage = useCallback((index: number) => {
+    const messageElements = messagesContainerRef.current?.querySelectorAll('[data-message-index]')
+    if (messageElements && messageElements[index]) {
+      messageElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [])
+
+  // Close search
+  const closeMessageSearch = useCallback(() => {
+    setShowMessageSearch(false)
+    setMessageSearchText('')
+    setMessageSearchResults([])
+    setCurrentSearchIndex(0)
+  }, [])
 
   // Create note mutation
   const createNoteMutation = useMutation({
@@ -1496,6 +1562,21 @@ export default function ConversationsPage() {
                 </TooltipContent>
               </Tooltip>
 
+              {/* Search button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showMessageSearch ? "secondary" : "ghost"}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setShowMessageSearch(!showMessageSearch)}
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Buscar na conversa</TooltipContent>
+              </Tooltip>
+
               {/* Notes button */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1623,6 +1704,64 @@ export default function ConversationsPage() {
             </div>
           </div>
 
+          {/* Search panel */}
+          {showMessageSearch && (
+            <div className="p-3 border-b bg-muted/30 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar mensagens..."
+                  value={messageSearchText}
+                  onChange={(e) => handleMessageSearch(e.target.value)}
+                  className="pl-9 h-9"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      goToNextResult()
+                    }
+                    if (e.key === 'Escape') {
+                      closeMessageSearch()
+                    }
+                  }}
+                />
+              </div>
+              {messageSearchResults.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {currentSearchIndex + 1} de {messageSearchResults.length}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={goToPrevResult}
+                    disabled={messageSearchResults.length <= 1}
+                  >
+                    <ArrowLeft className="h-4 w-4 rotate-90" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={goToNextResult}
+                    disabled={messageSearchResults.length <= 1}
+                  >
+                    <ArrowLeft className="h-4 w-4 -rotate-90" />
+                  </Button>
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={closeMessageSearch}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
           {/* Messages */}
           <ScrollArea
             className="flex-1 min-h-0 p-4"
@@ -1670,28 +1809,48 @@ export default function ConversationsPage() {
             ) : (
               <div className="space-y-3">
                 {/* Messages already sorted ascending by createdAt (oldest to newest) */}
-                {messages.map((message: DBMessage | OptimisticMessage) => {
+                {messages.map((message: DBMessage | OptimisticMessage, msgIndex: number) => {
                   const isOptimistic = message.id.startsWith('optimistic-')
                   const isFailed = message.status === 'failed'
                   const isPending = message.status === 'pending'
+                  const isSearchMatch = messageSearchResults.includes(msgIndex)
+                  const isCurrentMatch = messageSearchResults[currentSearchIndex] === msgIndex
+
+                  // Highlight search matches in content
+                  const highlightContent = (content: string) => {
+                    if (!messageSearchText || !isSearchMatch) return content
+                    const regex = new RegExp(`(${messageSearchText})`, 'gi')
+                    const parts = content.split(regex)
+                    return parts.map((part, i) =>
+                      regex.test(part) ? (
+                        <mark key={i} className="bg-yellow-300 dark:bg-yellow-600 rounded px-0.5">
+                          {part}
+                        </mark>
+                      ) : part
+                    )
+                  }
 
                   return (
                     <div
                       key={message.id}
+                      data-message-index={msgIndex}
                       className={cn(
-                        "flex",
-                        message.direction === 'OUTBOUND' ? "justify-end" : "justify-start"
+                        "flex transition-all duration-300",
+                        message.direction === 'OUTBOUND' ? "justify-end" : "justify-start",
+                        isCurrentMatch && "scale-[1.02]"
                       )}
                     >
                       <div className="flex flex-col items-end gap-1">
                         <div
                           className={cn(
-                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-opacity",
+                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-all",
                             message.direction === 'OUTBOUND'
                               ? "bg-primary text-primary-foreground rounded-br-md"
                               : "bg-muted rounded-bl-md",
                             // Failed messages get faded styling
-                            isFailed && "opacity-50 border-2 border-destructive/50"
+                            isFailed && "opacity-50 border-2 border-destructive/50",
+                            // Search highlight
+                            isCurrentMatch && "ring-2 ring-yellow-400 ring-offset-2"
                           )}
                         >
                           {/* Media content */}
@@ -1713,9 +1872,9 @@ export default function ConversationsPage() {
                             </div>
                           )}
 
-                          {/* Text content */}
+                          {/* Text content with search highlighting */}
                           <p className="text-sm whitespace-pre-wrap break-words">
-                            {message.content}
+                            {highlightContent(message.content)}
                           </p>
 
                           {/* Timestamp and status */}
