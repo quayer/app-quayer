@@ -310,16 +310,16 @@ export const messagesController = igniter.controller({
         // 8. BLOQUEAR IA (quando agente humano responde)
         // Usa autoPauseOnHumanReply para pausar IA automaticamente
         if (author === 'AGENT' && direction === 'OUTBOUND') {
-          // Buscar configurações da conexão
-          const connectionSettings = await database.connection.findUnique({
-            where: { id: session.connectionId },
+          // Buscar configurações da conexão (ConnectionSettings model)
+          const connectionSettings = await database.connectionSettings.findUnique({
+            where: { connectionId: session.connectionId },
             select: {
               autoPauseOnHumanReply: true,
               autoPauseDurationHours: true,
             },
           });
 
-          // Se auto-pause está habilitado, usar duração configurada
+          // Se auto-pause está habilitado (default: true), usar duração configurada
           if (connectionSettings?.autoPauseOnHumanReply !== false) {
             const pauseDurationMinutes = (connectionSettings?.autoPauseDurationHours || 24) * 60;
             await sessionsManager.blockAI(sessionId, pauseDurationMinutes, 'AUTO_PAUSED_HUMAN');

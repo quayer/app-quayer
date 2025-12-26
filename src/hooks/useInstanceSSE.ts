@@ -112,15 +112,20 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
           case 'instance.status':
             queryClient.invalidateQueries({ queryKey: ['all-instances'] })
             queryClient.invalidateQueries({ queryKey: ['instance', instanceId] })
+            queryClient.invalidateQueries({ queryKey: ['conversations', 'instances'] })
             break
           case 'message.received':
           case 'message.sent':
+            // Invalidate both legacy and conversation page queryKeys
             queryClient.invalidateQueries({ queryKey: ['messages'] })
             queryClient.invalidateQueries({ queryKey: ['sessions'] })
+            queryClient.invalidateQueries({ queryKey: ['conversations', 'messages'] })
+            queryClient.invalidateQueries({ queryKey: ['conversations', 'chats'] })
             break
           case 'session.updated':
           case 'session.labels.changed':
             queryClient.invalidateQueries({ queryKey: ['sessions'] })
+            queryClient.invalidateQueries({ queryKey: ['conversations', 'chats'] })
             break
           case 'contact.updated':
           case 'contact.labels.changed':

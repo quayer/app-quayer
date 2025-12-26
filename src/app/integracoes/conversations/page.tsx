@@ -258,6 +258,8 @@ export default function ConversationsPage() {
   const messageInputRef = useRef<HTMLInputElement>(null)
   const isInputFocusedRef = useRef(false)
   const previousScrollHeightRef = useRef<number>(0)
+  const isNearBottomRef = useRef(true)
+  const previousMessageCountRef = useRef<number>(0)
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -546,6 +548,11 @@ export default function ConversationsPage() {
   // Handle scroll to load more messages (scroll to top = older messages)
   const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement
+
+    // Track if user is near bottom (within 150px) for smart auto-scroll
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+    isNearBottomRef.current = distanceFromBottom < 150
+
     // Load more when scrolled near top (within 100px)
     if (target.scrollTop < 100 && hasNextPage && !isFetchingNextPage) {
       // Save current scroll position to restore after loading
@@ -1078,12 +1085,26 @@ export default function ConversationsPage() {
     toast.success('Dados atualizados')
   }, [refetchInstances, refetchChats, refetchMessages])
 
-  // Auto-scroll to latest message
+  // Smart auto-scroll: only scroll to bottom when user was near bottom or sent a new message
   useEffect(() => {
-    if (messages.length > 0) {
+    const currentCount = messages.length
+    const previousCount = previousMessageCountRef.current
+    const hasNewMessages = currentCount > previousCount
+
+    // Update previous count
+    previousMessageCountRef.current = currentCount
+
+    // Only auto-scroll if:
+    // 1. User was near bottom (not scrolling through history)
+    // 2. OR there are new messages and optimistic messages exist (user sent a message)
+    const shouldScroll =
+      hasNewMessages &&
+      (isNearBottomRef.current || optimisticMessages.length > 0)
+
+    if (shouldScroll && messages.length > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [messages])
+  }, [messages, optimisticMessages.length])
 
   // ==================== HELPER FUNCTIONS ====================
 
@@ -1876,8 +1897,8 @@ export default function ConversationsPage() {
                                   Seu navegador não suporta vídeo.
                                 </video>
                               )}
-                              {/* Audio */}
-                              {message.type === 'audio' && (
+                              {/* Audio & Voice (PTT) */}
+                              {(message.type === 'audio' || message.type === 'voice') && (
                                 <audio
                                   src={message.mediaUrl}
                                   controls
