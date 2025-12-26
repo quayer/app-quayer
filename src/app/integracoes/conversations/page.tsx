@@ -110,7 +110,7 @@ import { api } from '@/igniter.client'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useInfiniteQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { AudioRecorder } from '@/components/chat/AudioRecorder'
 import { useInstanceSSE } from '@/hooks/useInstanceSSE'
@@ -239,9 +239,11 @@ export default function ConversationsPage() {
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
   const isInputFocusedRef = useRef(false)
+  const previousScrollHeightRef = useRef<number>(0)
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -457,26 +459,37 @@ export default function ConversationsPage() {
   // Format count for display (99+ for large numbers)
   const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
 
-  // Fetch messages for selected chat
+  // Fetch messages for selected chat with infinite scroll
+  const MESSAGES_PER_PAGE = 50
   const {
     data: messagesData,
     isLoading: messagesLoading,
     isFetching: messagesFetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
     refetch: refetchMessages,
-  } = useQuery({
+  } = useInfiniteQuery({
     queryKey: ['conversations', 'messages', selectedChatId],
-    queryFn: async () => {
+    queryFn: async ({ pageParam = 1 }) => {
       if (!selectedChatId) return null
-      // Use sessions-based API
       const response = await api.messages.list.query({
         query: {
           sessionId: selectedChatId,
-          limit: 100,
-          page: 1,
+          limit: MESSAGES_PER_PAGE,
+          page: pageParam,
         }
       })
       return response
     },
+    getNextPageParam: (lastPage: any) => {
+      const pagination = lastPage?.data?.pagination
+      if (pagination?.has_next_page) {
+        return pagination.page + 1
+      }
+      return undefined
+    },
+    initialPageParam: 1,
     enabled: !!selectedChatId,
     // Reduce polling when SSE is connected (SSE handles real-time updates)
     refetchInterval: sseConnected ? false : MESSAGE_REFRESH_INTERVAL,
@@ -484,10 +497,24 @@ export default function ConversationsPage() {
     staleTime: 0,
   })
 
-  // Extract messages and merge with optimistic messages
+  // Extract messages from all pages and merge with optimistic messages
   const messages = useMemo(() => {
-    const response = messagesData as any
-    const serverMessages = response?.data?.data ?? response?.data ?? []
+    const pages = messagesData?.pages ?? []
+    const allServerMessages: DBMessage[] = []
+
+    // Flatten all pages into single array
+    for (const page of pages) {
+      const pageData = (page as any)?.data?.data ?? (page as any)?.data ?? []
+      allServerMessages.push(...pageData)
+    }
+
+    // Sort all messages by createdAt ascending (oldest first)
+    // Backend returns desc order, but with pagination we need to re-sort
+    allServerMessages.sort((a, b) => {
+      const dateA = new Date(a.createdAt).getTime()
+      const dateB = new Date(b.createdAt).getTime()
+      return dateA - dateB // Ascending order (oldest to newest)
+    })
 
     // Filter optimistic messages for current session
     const sessionOptimistic = optimisticMessages.filter(
@@ -495,11 +522,34 @@ export default function ConversationsPage() {
     )
 
     // Merge: add optimistic messages that aren't yet in server response
-    const serverIds = new Set(serverMessages.map((m: DBMessage) => m.waMessageId || m.id))
+    const serverIds = new Set(allServerMessages.map((m: DBMessage) => m.waMessageId || m.id))
     const newOptimistic = sessionOptimistic.filter(m => !serverIds.has(m.id))
 
-    return [...serverMessages, ...newOptimistic]
+    // Return sorted messages with optimistic ones at the end (they are the newest)
+    return [...allServerMessages, ...newOptimistic]
   }, [messagesData, optimisticMessages, selectedChatId])
+
+  // Handle scroll to load more messages (scroll to top = older messages)
+  const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement
+    // Load more when scrolled near top (within 100px)
+    if (target.scrollTop < 100 && hasNextPage && !isFetchingNextPage) {
+      // Save current scroll position to restore after loading
+      previousScrollHeightRef.current = target.scrollHeight
+      fetchNextPage()
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  // Restore scroll position after loading more messages
+  useEffect(() => {
+    if (!isFetchingNextPage && previousScrollHeightRef.current > 0 && messagesContainerRef.current) {
+      const container = messagesContainerRef.current
+      const newScrollHeight = container.scrollHeight
+      const scrollDiff = newScrollHeight - previousScrollHeightRef.current
+      container.scrollTop = scrollDiff
+      previousScrollHeightRef.current = 0
+    }
+  }, [isFetchingNextPage])
 
   // Selected items
   const selectedInstance = selectedChatInstanceId
@@ -975,8 +1025,12 @@ export default function ConversationsPage() {
           />
         </div>
 
-        {/* Main tabs: IA | Atendente | Resolvidos */}
-        <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg">
+        {/* Main tabs: IA | Atendente | Resolvidos - WCAG 2.1 compliant */}
+        <div
+          className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded-xl"
+          role="tablist"
+          aria-label="Filtrar conversas por status"
+        >
           {MAIN_TABS.map(tab => {
             const count = tabCounts[tab.value] ?? 0
             const isActive = mainTab === tab.value
@@ -985,21 +1039,37 @@ export default function ConversationsPage() {
                 <TooltipTrigger asChild>
                   <Button
                     variant={isActive ? "secondary" : "ghost"}
-                    size="sm"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-label={`${tab.label}: ${count} conversas. ${tab.description}`}
                     className={cn(
-                      "flex-1 gap-1.5 px-2 relative",
-                      isActive && tab.color
+                      // WCAG 2.1: min 44px height for touch targets
+                      "flex-1 gap-2 px-3 py-2.5 min-h-[44px] relative transition-all",
+                      // Focus ring for keyboard navigation
+                      "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-400",
+                      // Active state styling
+                      isActive && [
+                        "shadow-sm",
+                        tab.value === 'ia' && "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300",
+                        tab.value === 'atendente' && "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300",
+                        tab.value === 'resolvidos' && "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300",
+                      ]
                     )}
                     onClick={() => setMainTab(tab.value)}
                   >
-                    <tab.icon className={cn("h-4 w-4", tab.color)} />
-                    <span className="text-xs font-medium">{tab.label}</span>
+                    <tab.icon className={cn(
+                      "h-4 w-4 flex-shrink-0",
+                      isActive ? "" : tab.color
+                    )} />
+                    <span className="text-sm font-medium">{tab.label}</span>
                     <Badge
                       variant={isActive ? "default" : "secondary"}
                       className={cn(
-                        "ml-1 h-5 min-w-5 px-1.5 text-xs font-medium",
+                        "ml-auto h-5 min-w-6 px-1.5 text-xs font-semibold",
                         isActive
-                          ? "bg-primary text-primary-foreground"
+                          ? tab.value === 'ia' ? "bg-purple-600 text-white" :
+                            tab.value === 'atendente' ? "bg-blue-600 text-white" :
+                            "bg-green-600 text-white"
                           : "bg-muted-foreground/20 text-muted-foreground"
                       )}
                     >
@@ -1007,7 +1077,7 @@ export default function ConversationsPage() {
                     </Badge>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{tab.description}</TooltipContent>
+                <TooltipContent side="bottom">{tab.description}</TooltipContent>
               </Tooltip>
             )
           })}
@@ -1336,7 +1406,35 @@ export default function ConversationsPage() {
           </div>
 
           {/* Messages */}
-          <ScrollArea className="flex-1 min-h-0 p-4">
+          <ScrollArea
+            className="flex-1 min-h-0 p-4"
+            ref={messagesContainerRef}
+            onScrollCapture={handleMessagesScroll}
+          >
+            {/* Loading indicator for older messages */}
+            {isFetchingNextPage && (
+              <div className="flex justify-center py-2 mb-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando mensagens anteriores...
+                </div>
+              </div>
+            )}
+
+            {/* Show "Load more" button if there are more pages */}
+            {hasNextPage && !isFetchingNextPage && (
+              <div className="flex justify-center py-2 mb-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fetchNextPage()}
+                  className="text-xs text-muted-foreground"
+                >
+                  Carregar mensagens anteriores
+                </Button>
+              </div>
+            )}
+
             {messagesLoading ? (
               <div className="space-y-4">
                 {[...Array(5)].map((_, i) => (
@@ -1353,7 +1451,8 @@ export default function ConversationsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {[...messages].reverse().map((message: DBMessage | OptimisticMessage) => {
+                {/* Messages already sorted ascending by createdAt (oldest to newest) */}
+                {messages.map((message: DBMessage | OptimisticMessage) => {
                   const isOptimistic = message.id.startsWith('optimistic-')
                   const isFailed = message.status === 'failed'
                   const isPending = message.status === 'pending'

@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Mic, MicOff, Square, Send, Trash2, Pause, Play, Loader2 } from 'lucide-react'
+import { Mic, MicOff, Square, Send, Trash2, Pause, Play, Loader2, Volume2 } from 'lucide-react'
 import { useAudioRecorder, formatDuration, audioToBase64 } from '@/hooks/useAudioRecorder'
 import {
   Tooltip,
@@ -29,6 +29,8 @@ interface AudioRecorderProps {
  */
 export function AudioRecorder({ onSend, disabled, className }: AudioRecorderProps) {
   const [isSending, setIsSending] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const audioRef = useRef<HTMLAudioElement>(null)
 
   const {
     isRecording,
@@ -75,7 +77,26 @@ export function AudioRecorder({ onSend, disabled, className }: AudioRecorderProp
     } else {
       resetRecording()
     }
+    setIsPlaying(false)
   }, [isRecording, cancelRecording, resetRecording])
+
+  // Toggle audio preview playback
+  const handleTogglePlay = useCallback(() => {
+    if (!audioRef.current) return
+
+    if (isPlaying) {
+      audioRef.current.pause()
+      setIsPlaying(false)
+    } else {
+      audioRef.current.play()
+      setIsPlaying(true)
+    }
+  }, [isPlaying])
+
+  // Handle audio ended
+  const handleAudioEnded = useCallback(() => {
+    setIsPlaying(false)
+  }, [])
 
   // Error state
   if (error) {
@@ -182,16 +203,45 @@ export function AudioRecorder({ onSend, disabled, className }: AudioRecorderProp
   if (audioBlob && audioUrl) {
     return (
       <div className={cn('flex items-center gap-2', className)}>
-        {/* Audio preview */}
+        {/* Hidden audio element for playback */}
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          onEnded={handleAudioEnded}
+          className="hidden"
+        />
+
+        {/* Audio preview with play button */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-full border border-primary/30">
-          <Mic className="h-4 w-4 text-primary" />
+          {/* Play/Pause preview button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleTogglePlay}
+                  disabled={isSending}
+                  className="h-6 w-6 p-0 hover:bg-primary/20"
+                >
+                  {isPlaying ? (
+                    <Pause className="h-4 w-4 text-primary" />
+                  ) : (
+                    <Play className="h-4 w-4 text-primary" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isPlaying ? 'Pausar' : 'Ouvir'}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <Volume2 className="h-3.5 w-3.5 text-primary/70" />
           <span className="text-sm font-medium text-primary tabular-nums">
             {formatDuration(duration)}
           </span>
         </div>
-
-        {/* Play preview button */}
-        <audio src={audioUrl} controls className="hidden" />
 
         {/* Send button */}
         <TooltipProvider>
