@@ -105,6 +105,10 @@ import {
   RotateCcw,
   Wifi,
   WifiOff,
+  StickyNote,
+  PinOff,
+  Plus,
+  Play,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -233,6 +237,8 @@ export default function ConversationsPage() {
   const [isMobile, setIsMobile] = useState(false)
   const [isChatsDrawerOpen, setIsChatsDrawerOpen] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showNotesPanel, setShowNotesPanel] = useState(false)
+  const [newNoteText, setNewNoteText] = useState('')
 
   // Optimistic messages for immediate UI feedback
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
@@ -557,6 +563,66 @@ export default function ConversationsPage() {
     : null
   const selectedChat = chats.find((c: UAZChat) => c.id === selectedChatId || c.wa_chatid === selectedChatId)
 
+  // ==================== SESSION NOTES ====================
+
+  // Fetch notes for selected session
+  const {
+    data: notesData,
+    isLoading: notesLoading,
+    refetch: refetchNotes,
+  } = useQuery({
+    queryKey: ['session-notes', selectedChatId],
+    queryFn: async () => {
+      if (!selectedChatId) return []
+      const response = await api.notes.list.query({
+        query: { sessionId: selectedChatId }
+      })
+      return (response as any)?.data ?? []
+    },
+    enabled: !!selectedChatId && showNotesPanel,
+  })
+
+  const notes = notesData ?? []
+
+  // Create note mutation
+  const createNoteMutation = useMutation({
+    mutationFn: async (content: string) => {
+      if (!selectedChatId) throw new Error('Sessão não selecionada')
+      return api.notes.create.mutate({
+        body: { sessionId: selectedChatId, content }
+      })
+    },
+    onSuccess: () => {
+      setNewNoteText('')
+      refetchNotes()
+      toast.success('Nota adicionada!')
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao criar nota')
+    },
+  })
+
+  // Delete note mutation
+  const deleteNoteMutation = useMutation({
+    mutationFn: async (noteId: string) => {
+      return (api.notes.delete as any).mutate({ params: { id: noteId } })
+    },
+    onSuccess: () => {
+      refetchNotes()
+      toast.success('Nota removida')
+    },
+  })
+
+  // Toggle pin mutation
+  const togglePinMutation = useMutation({
+    mutationFn: async (noteId: string) => {
+      return (api.notes.togglePin as any).mutate({ params: { id: noteId } })
+    },
+    onSuccess: () => {
+      refetchNotes()
+    },
+  })
+
   // ==================== MUTATIONS ====================
 
   // Send text message with optimistic updates
@@ -716,6 +782,42 @@ export default function ConversationsPage() {
     },
     onError: (error: any) => {
       toast.error(error.message || 'Erro ao encerrar conversa')
+    }
+  })
+
+  // Reopen session (CLOSED -> ACTIVE)
+  const reopenSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await (api.sessions as any).updateStatus.mutate({
+        params: { id: sessionId },
+        body: { status: 'ACTIVE' }
+      })
+      return response
+    },
+    onSuccess: () => {
+      toast.success('Conversa reaberta!')
+      refetchChats()
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao reabrir conversa')
+    }
+  })
+
+  // Delete session/conversation
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await (api.sessions as any).delete.mutate({
+        params: { id: sessionId }
+      })
+      return response
+    },
+    onSuccess: () => {
+      toast.success('Conversa apagada!')
+      refetchChats()
+      setSelectedChatId(null)
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao apagar conversa')
     }
   })
 
@@ -1344,8 +1446,57 @@ export default function ConversationsPage() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Resolve/Close session button */}
-              {selectedChat.status !== 'CLOSED' && (
+              {/* Notes button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showNotesPanel ? "secondary" : "outline"}
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setShowNotesPanel(!showNotesPanel)}
+                  >
+                    <StickyNote className="h-4 w-4" />
+                    <span className="hidden sm:inline">Notas</span>
+                    {notes.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 h-5 px-1.5">
+                        {notes.length}
+                      </Badge>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Notas internas do atendente</TooltipContent>
+              </Tooltip>
+
+              {/* Resolve/Close session button OR Reopen button */}
+              {selectedChat.status === 'CLOSED' || selectedChat.status === 'PAUSED' ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                      onClick={() => {
+                        if (!selectedChat.id) {
+                          toast.error('Esta conversa não possui sessão ativa no sistema')
+                          return
+                        }
+                        reopenSessionMutation.mutate(selectedChat.id)
+                      }}
+                      disabled={reopenSessionMutation.isPending || !selectedChat.id}
+                    >
+                      {reopenSessionMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                      <span className="hidden sm:inline">Reabrir</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Reabrir conversa e mover para Atendente
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1370,7 +1521,7 @@ export default function ConversationsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Encerrar conversa e mover para Encerradas
+                    Encerrar conversa e mover para Resolvidos
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -1396,8 +1547,25 @@ export default function ConversationsPage() {
                     Bloquear contato
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive">
-                    <Trash2 className="h-4 w-4 mr-2" />
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => {
+                      if (!selectedChat.id) {
+                        toast.error('Esta conversa não possui sessão ativa no sistema')
+                        return
+                      }
+                      // Confirmar antes de apagar
+                      if (window.confirm('Tem certeza que deseja apagar esta conversa? Esta ação não pode ser desfeita.')) {
+                        deleteSessionMutation.mutate(selectedChat.id)
+                      }
+                    }}
+                    disabled={deleteSessionMutation.isPending}
+                  >
+                    {deleteSessionMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
                     Apagar conversa
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1567,6 +1735,106 @@ export default function ConversationsPage() {
               </div>
             )}
           </ScrollArea>
+
+          {/* Notes Panel (Collapsible) */}
+          {showNotesPanel && (
+            <div className="border-t bg-amber-50/50 dark:bg-amber-900/10 p-4 max-h-64 overflow-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium flex items-center gap-2">
+                  <StickyNote className="h-4 w-4 text-amber-600" />
+                  Notas internas
+                </h4>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowNotesPanel(false)}
+                  className="h-6 w-6 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Add note form */}
+              <div className="flex gap-2 mb-3">
+                <Input
+                  placeholder="Adicionar nota..."
+                  value={newNoteText}
+                  onChange={(e) => setNewNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newNoteText.trim()) {
+                      createNoteMutation.mutate(newNoteText.trim())
+                    }
+                  }}
+                  className="text-sm"
+                />
+                <Button
+                  size="sm"
+                  onClick={() => newNoteText.trim() && createNoteMutation.mutate(newNoteText.trim())}
+                  disabled={!newNoteText.trim() || createNoteMutation.isPending}
+                >
+                  {createNoteMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+
+              {/* Notes list */}
+              {notesLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : notes.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Nenhuma nota adicionada
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {notes.map((note: any) => (
+                    <div
+                      key={note.id}
+                      className={cn(
+                        "p-2 rounded-lg text-sm bg-white dark:bg-neutral-800 border",
+                        note.isPinned && "border-amber-400 bg-amber-50 dark:bg-amber-900/20"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="flex-1 whitespace-pre-wrap">{note.content}</p>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => togglePinMutation.mutate(note.id)}
+                          >
+                            {note.isPinned ? (
+                              <PinOff className="h-3 w-3 text-amber-600" />
+                            ) : (
+                              <Pin className="h-3 w-3" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => deleteNoteMutation.mutate(note.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                        <span>{note.author?.name || 'Agente'}</span>
+                        <span>•</span>
+                        <span>{format(new Date(note.createdAt), "dd/MM HH:mm")}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Input Area */}
           <div className="p-4 border-t space-y-3 bg-card flex-shrink-0">

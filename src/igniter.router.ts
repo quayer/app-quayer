@@ -7,7 +7,7 @@ import { onboardingController } from '@/features/onboarding/controllers/onboardi
 import { invitationsController } from '@/features/invitations'
 import { dashboardController } from '@/features/dashboard'
 import { chatsController, messagesController, mediaController } from '@/features/messages'
-import { sessionsController } from '@/features/sessions'
+import { sessionsController, notesController } from '@/features/sessions'
 import { attributesController, contactAttributeController } from '@/features/attributes'
 import { observationsController } from '@/features/observations'
 import { sseController } from '@/features/sse'
@@ -46,6 +46,7 @@ export const AppRouter = igniter.router({
     messages: messagesController,
     media: mediaController,
     sessions: sessionsController,
+    notes: notesController,
     webhooks: webhooksController,
     calls: callsController,
     sse: sseController,

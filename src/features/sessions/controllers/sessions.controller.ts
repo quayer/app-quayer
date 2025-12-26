@@ -1636,5 +1636,50 @@ export const sessionsController = igniter.controller({
         });
       },
     }),
+
+    /**
+     * DELETE /sessions/:id
+     * Deletar uma sessão e todas suas mensagens/notas
+     * CUIDADO: Esta ação é irreversível!
+     */
+    delete: igniter.mutation({
+      path: '/:id',
+      method: 'DELETE',
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+
+        if (!user) {
+          return response.unauthorized('Autenticacao necessaria');
+        }
+
+        const { id } = request.params as { id: string };
+
+        // Buscar sessão
+        const session = await database.chatSession.findUnique({
+          where: { id },
+          select: { id: true, organizationId: true },
+        });
+
+        if (!session) {
+          return response.notFound('Sessão não encontrada');
+        }
+
+        // Verificar permissões
+        if (user.role !== 'admin' && session.organizationId !== user.currentOrgId) {
+          return response.forbidden('Acesso negado a esta sessão');
+        }
+
+        // Deletar em cascata (mensagens, notas, etc são deletados via onDelete: Cascade)
+        await database.chatSession.delete({
+          where: { id },
+        });
+
+        return response.success({
+          message: 'Sessão deletada com sucesso',
+          deletedId: id,
+        });
+      },
+    }),
   },
 });

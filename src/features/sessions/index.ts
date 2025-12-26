@@ -5,3 +5,4 @@
  */
 
 export { sessionsController } from './controllers/sessions.controller';
+export { notesController } from './controllers/notes.controller';

@@ -139,6 +139,7 @@ model User {
   assignedConnections Connection[]         @relation("AssignedCustomer")
 
   passkeyCredentials PasskeyCredential[]
+  sessionNotes       SessionNote[] // Notas criadas pelo usuário
 
   @@index([email])
   @@index([currentOrgId])
@@ -841,6 +842,7 @@ model ChatSession {
   messages           Message[]
   sessionTabulations SessionTabulation[]
   groupParticipants  GroupParticipant[] // Participantes de grupo vinculados a esta sessão
+  notes              SessionNote[] // Notas internas do atendente
 
   @@index([contactId])
   @@index([connectionId])
@@ -1014,6 +1016,32 @@ model GroupMessage {
   @@index([waMessageId])
   @@index([createdAt])
   @@map("group_messages")
+}
+
+// ============================================
+// SESSION NOTES (Internal Notes for Agents)
+// ============================================
+
+model SessionNote {
+  id        String @id @default(uuid())
+  sessionId String
+  authorId  String // ID do usuário que criou a nota
+
+  // Content
+  content String @db.Text
+  isPinned Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("session_notes")
 }
 
 model Message {
