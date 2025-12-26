@@ -788,7 +788,10 @@ export default function ConversationsPage() {
       setOptimisticMessages(prev =>
         prev.map(m => m.id === variables.tempId ? { ...m, status: 'failed' as const } : m)
       )
-      toast.error(error.message || 'Erro ao enviar mensagem')
+      console.error('[Conversations] Send message error:', error)
+      const errorMessage = error?.message || error?.data?.message || 'Erro ao enviar mensagem'
+      const errorDetails = error?.data?.error || error?.response?.data?.error || ''
+      toast.error(errorMessage, { description: errorDetails || undefined })
     }
   })
 
@@ -947,8 +950,22 @@ export default function ConversationsPage() {
   // ==================== HANDLERS ====================
 
   const handleSelectChat = useCallback((chat: UAZChat) => {
-    // Use session ID for messages API, fallback to wa_chatid if no session ID
-    const sessionId = chat.id || chat.wa_chatid
+    // Use session ID for messages API - chat.id should be a UUID from the database
+    const sessionId = chat.id
+
+    // Validate session ID is present and is a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!sessionId || !uuidRegex.test(sessionId)) {
+      console.error('[Conversations] Invalid or missing session ID for chat:', {
+        id: chat.id,
+        wa_chatid: chat.wa_chatid,
+        wa_name: chat.wa_name
+      })
+      toast.error('Sessão não encontrada', { description: 'Esta conversa não possui uma sessão válida' })
+      return
+    }
+
+    console.log('[Conversations] Selected chat session:', sessionId)
     setSelectedChatId(sessionId)
     setSelectedChatInstanceId(chat.instanceId || null)
 
@@ -969,11 +986,21 @@ export default function ConversationsPage() {
   const handleSendMessage = useCallback(() => {
     if (!messageText.trim() || !selectedChatId) return
 
+    // Validate that selectedChatId is a valid UUID (not a wa_chatid)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(selectedChatId)) {
+      console.error('[Conversations] Invalid session ID:', selectedChatId)
+      toast.error('Erro: ID de sessão inválido', { description: 'Selecione outra conversa' })
+      return
+    }
+
     const textToSend = messageText.trim()
     const tempId = `optimistic-${selectedChatId}-${Date.now()}`
 
     // Clear input optimistically for better UX
     setMessageText('')
+
+    console.log('[Conversations] Sending message to session:', selectedChatId)
 
     sendMessageMutation.mutate({
       sessionId: selectedChatId,
