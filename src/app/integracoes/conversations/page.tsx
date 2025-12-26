@@ -293,9 +293,9 @@ export default function ConversationsPage() {
       const response = await api.instances.list.query({ query: {} })
       return response
     },
-    refetchInterval: CHAT_REFRESH_INTERVAL,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    refetchInterval: 60000, // Instances don't need frequent updates
+    refetchOnWindowFocus: false, // Disable to prevent constant updates
+    staleTime: 60000, // Cache for 60 seconds
   })
 
   // Extract connected instances
@@ -388,8 +388,8 @@ export default function ConversationsPage() {
     enabled: instanceIdsToFetch.length > 0,
     // Reduce polling when SSE is connected (SSE handles real-time updates)
     refetchInterval: sseConnected ? false : CHAT_REFRESH_INTERVAL,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    refetchOnWindowFocus: false, // Disable to prevent constant updates
+    staleTime: 15000, // Cache for 15 seconds
   })
 
   // Helper functions para categorizar chats
@@ -507,8 +507,8 @@ export default function ConversationsPage() {
     enabled: !!selectedChatId,
     // Reduce polling when SSE is connected (SSE handles real-time updates)
     refetchInterval: sseConnected ? false : MESSAGE_REFRESH_INTERVAL,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    refetchOnWindowFocus: false, // Disable to prevent scroll jumps
+    staleTime: 10000, // Cache for 10 seconds
   })
 
   // Extract messages from all pages and merge with optimistic messages
@@ -1245,7 +1245,7 @@ export default function ConversationsPage() {
 
         {/* Main tabs: IA | Atendente | Resolvidos - WCAG 2.1 compliant */}
         <div
-          className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded-xl"
+          className="grid grid-cols-3 gap-1 p-1 bg-muted/50 rounded-lg"
           role="tablist"
           aria-label="Filtrar conversas por status"
         >
@@ -1262,9 +1262,9 @@ export default function ConversationsPage() {
                     aria-label={`${tab.label}: ${count} conversas. ${tab.description}`}
                     className={cn(
                       // WCAG 2.1: min 44px height for touch targets
-                      "flex-1 gap-2 px-3 py-2.5 min-h-[44px] relative transition-all",
+                      "flex items-center justify-center gap-1.5 px-2 py-2 min-h-[44px] transition-all",
                       // Focus ring for keyboard navigation
-                      "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-400",
+                      "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-neutral-400",
                       // Active state styling
                       isActive && [
                         "shadow-sm",
@@ -1279,11 +1279,11 @@ export default function ConversationsPage() {
                       "h-4 w-4 flex-shrink-0",
                       isActive ? "" : tab.color
                     )} />
-                    <span className="text-sm font-medium">{tab.label}</span>
+                    <span className="text-xs sm:text-sm font-medium truncate">{tab.label}</span>
                     <Badge
                       variant={isActive ? "default" : "secondary"}
                       className={cn(
-                        "ml-auto h-5 min-w-6 px-1.5 text-xs font-semibold",
+                        "h-5 min-w-5 px-1 text-[10px] font-semibold",
                         isActive
                           ? tab.value === 'ia' ? "bg-purple-600 text-white" :
                             tab.value === 'atendente' ? "bg-blue-600 text-white" :
@@ -1856,18 +1856,57 @@ export default function ConversationsPage() {
                           {/* Media content */}
                           {'mediaUrl' in message && message.mediaUrl && (
                             <div className="mb-2">
+                              {/* Image */}
                               {message.type === 'image' && (
                                 <img
                                   src={message.mediaUrl}
                                   alt="Imagem"
-                                  className="rounded-lg max-w-full"
+                                  className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-opacity"
+                                  loading="lazy"
                                 />
                               )}
+                              {/* Video */}
+                              {message.type === 'video' && (
+                                <video
+                                  src={message.mediaUrl}
+                                  controls
+                                  preload="metadata"
+                                  className="rounded-lg max-w-full max-h-64"
+                                >
+                                  Seu navegador não suporta vídeo.
+                                </video>
+                              )}
+                              {/* Audio */}
+                              {message.type === 'audio' && (
+                                <audio
+                                  src={message.mediaUrl}
+                                  controls
+                                  preload="metadata"
+                                  className="w-full max-w-[240px] h-10"
+                                >
+                                  Seu navegador não suporta áudio.
+                                </audio>
+                              )}
+                              {/* Document */}
                               {message.type === 'document' && (
-                                <div className="flex items-center gap-2 p-2 bg-background/20 rounded">
-                                  <FileText className="h-8 w-8" />
+                                <a
+                                  href={message.mediaUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-2 p-2 bg-background/20 rounded hover:bg-background/30 transition-colors"
+                                >
+                                  <FileText className="h-8 w-8 flex-shrink-0" />
                                   <span className="text-sm truncate">{message.fileName || 'Documento'}</span>
-                                </div>
+                                </a>
+                              )}
+                              {/* Sticker (treated as image) */}
+                              {message.type === 'sticker' && (
+                                <img
+                                  src={message.mediaUrl}
+                                  alt="Sticker"
+                                  className="max-w-32 max-h-32"
+                                  loading="lazy"
+                                />
                               )}
                             </div>
                           )}
