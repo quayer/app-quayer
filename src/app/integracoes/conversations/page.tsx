@@ -102,6 +102,9 @@ import {
   Bot,
   User,
   CheckCircle2,
+  RotateCcw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -110,6 +113,7 @@ import { ptBR } from 'date-fns/locale'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { AudioRecorder } from '@/components/chat/AudioRecorder'
+import { useInstanceSSE } from '@/hooks/useInstanceSSE'
 
 // Common emojis for quick access
 const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check', 'star', 'fire']
@@ -118,8 +122,9 @@ const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check
   .slice(0, 10)
 
 // ==================== CONSTANTS ====================
-const CHAT_REFRESH_INTERVAL = 10 * 1000 // 10 segundos
-const MESSAGE_REFRESH_INTERVAL = 5 * 1000 // 5 segundos
+// Fallback polling intervals (only used when SSE is not connected)
+const CHAT_REFRESH_INTERVAL = 30 * 1000 // 30 segundos (fallback)
+const MESSAGE_REFRESH_INTERVAL = 15 * 1000 // 15 segundos (fallback)
 
 // Nova arquitetura: 3 tabs principais por responsabilidade
 type MainTab = 'ia' | 'atendente' | 'resolvidos'
@@ -182,6 +187,17 @@ interface DBMessage {
   }
 }
 
+// Optimistic message for immediate UI feedback
+interface OptimisticMessage {
+  id: string
+  content: string
+  status: 'pending' | 'sent' | 'failed'
+  createdAt: string
+  direction: 'OUTBOUND'
+  type: 'text'
+  author: 'AGENT'
+}
+
 interface Instance {
   id: string
   name: string
@@ -218,6 +234,9 @@ export default function ConversationsPage() {
   const [isChatsDrawerOpen, setIsChatsDrawerOpen] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
+  // Optimistic messages for immediate UI feedback
+  const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -251,7 +270,6 @@ export default function ConversationsPage() {
     data: instancesData,
     isLoading: instancesLoading,
     error: instancesError,
-    isFetching: instancesFetching,
     refetch: refetchInstances,
   } = useQuery({
     queryKey: ['conversations', 'instances'],
@@ -278,6 +296,32 @@ export default function ConversationsPage() {
     }
     return [selectedInstanceFilter]
   }, [selectedInstanceFilter, instances])
+
+  // SSE for real-time updates (use first instance for now, later can support multiple)
+  const sseInstanceId = instanceIdsToFetch.length === 1 ? instanceIdsToFetch[0] : instances[0]?.id
+  const {
+    connected: sseConnected,
+    reconnect: sseReconnect,
+  } = useInstanceSSE({
+    instanceId: sseInstanceId,
+    enabled: !!sseInstanceId && isHydrated,
+    autoInvalidate: true, // Auto-invalidate React Query on SSE events
+    onEvent: (event) => {
+      // Handle specific events for optimistic message updates
+      if (event.type === 'message.sent' && event.data?.waMessageId) {
+        // Mark optimistic message as sent when confirmed
+        setOptimisticMessages(prev =>
+          prev.filter(m => m.id !== event.data.tempId)
+        )
+      }
+    },
+    onConnect: () => {
+      console.log('[SSE] Connected to real-time updates')
+    },
+    onDisconnect: () => {
+      console.log('[SSE] Disconnected from real-time updates')
+    },
+  })
 
   // Fetch chats for selected instance(s)
   // Nova arquitetura: busca todos e filtra no cliente para ter contagens corretas
@@ -326,7 +370,8 @@ export default function ConversationsPage() {
       return { chats: allChats }
     },
     enabled: instanceIdsToFetch.length > 0,
-    refetchInterval: CHAT_REFRESH_INTERVAL,
+    // Reduce polling when SSE is connected (SSE handles real-time updates)
+    refetchInterval: sseConnected ? false : CHAT_REFRESH_INTERVAL,
     refetchOnWindowFocus: true,
     staleTime: 0,
   })
@@ -433,16 +478,28 @@ export default function ConversationsPage() {
       return response
     },
     enabled: !!selectedChatId,
-    refetchInterval: MESSAGE_REFRESH_INTERVAL,
+    // Reduce polling when SSE is connected (SSE handles real-time updates)
+    refetchInterval: sseConnected ? false : MESSAGE_REFRESH_INTERVAL,
     refetchOnWindowFocus: true,
     staleTime: 0,
   })
 
-  // Extract messages
+  // Extract messages and merge with optimistic messages
   const messages = useMemo(() => {
     const response = messagesData as any
-    return response?.data?.data ?? response?.data ?? []
-  }, [messagesData])
+    const serverMessages = response?.data?.data ?? response?.data ?? []
+
+    // Filter optimistic messages for current session
+    const sessionOptimistic = optimisticMessages.filter(
+      m => m.id.startsWith(`optimistic-${selectedChatId}`)
+    )
+
+    // Merge: add optimistic messages that aren't yet in server response
+    const serverIds = new Set(serverMessages.map((m: DBMessage) => m.waMessageId || m.id))
+    const newOptimistic = sessionOptimistic.filter(m => !serverIds.has(m.id))
+
+    return [...serverMessages, ...newOptimistic]
+  }, [messagesData, optimisticMessages, selectedChatId])
 
   // Selected items
   const selectedInstance = selectedChatInstanceId
@@ -452,9 +509,9 @@ export default function ConversationsPage() {
 
   // ==================== MUTATIONS ====================
 
-  // Send text message
+  // Send text message with optimistic updates
   const sendMessageMutation = useMutation({
-    mutationFn: async (data: { sessionId: string; content: string }) => {
+    mutationFn: async (data: { sessionId: string; content: string; tempId: string }) => {
       const response = await api.messages.create.mutate({
         body: {
           sessionId: data.sessionId,
@@ -467,17 +524,76 @@ export default function ConversationsPage() {
           delayMs: 500,
         }
       })
-      return response
+      return { ...response, tempId: data.tempId }
     },
-    onSuccess: () => {
-      // Input already cleared optimistically in handleSendMessage
+    onMutate: async (data) => {
+      // Add optimistic message immediately
+      const optimisticMsg: OptimisticMessage = {
+        id: data.tempId,
+        content: data.content,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        direction: 'OUTBOUND',
+        type: 'text',
+        author: 'AGENT',
+      }
+      setOptimisticMessages(prev => [...prev, optimisticMsg])
+    },
+    onSuccess: (_, variables) => {
+      // Remove optimistic message on success (server message will appear via SSE/refetch)
+      setOptimisticMessages(prev => prev.filter(m => m.id !== variables.tempId))
       refetchMessages()
-      toast.success('Mensagem enviada!')
     },
-    onError: (error: any) => {
+    onError: (error: any, variables) => {
+      // Mark optimistic message as failed
+      setOptimisticMessages(prev =>
+        prev.map(m => m.id === variables.tempId ? { ...m, status: 'failed' as const } : m)
+      )
       toast.error(error.message || 'Erro ao enviar mensagem')
     }
   })
+
+  // Retry failed message
+  const retryMessageMutation = useMutation({
+    mutationFn: async (data: { tempId: string; sessionId: string; content: string }) => {
+      // Mark as pending again
+      setOptimisticMessages(prev =>
+        prev.map(m => m.id === data.tempId ? { ...m, status: 'pending' as const } : m)
+      )
+
+      const response = await api.messages.create.mutate({
+        body: {
+          sessionId: data.sessionId,
+          type: 'text',
+          direction: 'OUTBOUND',
+          author: 'AGENT',
+          content: data.content,
+          sendExternalMessage: true,
+          showTyping: true,
+          delayMs: 500,
+        }
+      })
+      return { ...response, tempId: data.tempId }
+    },
+    onSuccess: (_, variables) => {
+      // Remove optimistic message on success
+      setOptimisticMessages(prev => prev.filter(m => m.id !== variables.tempId))
+      refetchMessages()
+      toast.success('Mensagem reenviada!')
+    },
+    onError: (error: any, variables) => {
+      // Keep as failed
+      setOptimisticMessages(prev =>
+        prev.map(m => m.id === variables.tempId ? { ...m, status: 'failed' as const } : m)
+      )
+      toast.error(error.message || 'Erro ao reenviar mensagem')
+    }
+  })
+
+  // Delete failed optimistic message
+  const deleteOptimisticMessage = useCallback((tempId: string) => {
+    setOptimisticMessages(prev => prev.filter(m => m.id !== tempId))
+  }, [])
 
   // Mark chat as read
   const markAsReadMutation = useMutation({
@@ -579,12 +695,15 @@ export default function ConversationsPage() {
     if (!messageText.trim() || !selectedChatId) return
 
     const textToSend = messageText.trim()
+    const tempId = `optimistic-${selectedChatId}-${Date.now()}`
+
     // Clear input optimistically for better UX
     setMessageText('')
 
     sendMessageMutation.mutate({
       sessionId: selectedChatId,
       content: textToSend,
+      tempId,
     })
   }, [messageText, selectedChatId, sendMessageMutation])
 
@@ -1119,12 +1238,41 @@ export default function ConversationsPage() {
             </div>
 
             <div className="flex items-center gap-1">
-              {messagesFetching && (
-                <Badge variant="outline" className="gap-1 mr-2 text-xs">
-                  <Radio className="h-3 w-3 animate-pulse" />
-                  Sincronizando
-                </Badge>
-              )}
+              {/* SSE connection status */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "gap-1 mr-2 text-xs cursor-pointer",
+                      sseConnected ? "text-green-600 border-green-200" : "text-muted-foreground"
+                    )}
+                    onClick={() => !sseConnected && sseReconnect()}
+                  >
+                    {sseConnected ? (
+                      <>
+                        <Wifi className="h-3 w-3" />
+                        Ao vivo
+                      </>
+                    ) : messagesFetching ? (
+                      <>
+                        <Radio className="h-3 w-3 animate-pulse" />
+                        Sincronizando
+                      </>
+                    ) : (
+                      <>
+                        <WifiOff className="h-3 w-3" />
+                        Offline
+                      </>
+                    )}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sseConnected
+                    ? 'Recebendo atualizacoes em tempo real'
+                    : 'Clique para reconectar'}
+                </TooltipContent>
+              </Tooltip>
 
               {/* Resolve/Close session button */}
               {selectedChat.status !== 'CLOSED' && (
@@ -1205,63 +1353,117 @@ export default function ConversationsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {[...messages].reverse().map((message: DBMessage) => (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "flex",
-                      message.direction === 'OUTBOUND' ? "justify-end" : "justify-start"
-                    )}
-                  >
+                {[...messages].reverse().map((message: DBMessage | OptimisticMessage) => {
+                  const isOptimistic = message.id.startsWith('optimistic-')
+                  const isFailed = message.status === 'failed'
+                  const isPending = message.status === 'pending'
+
+                  return (
                     <div
+                      key={message.id}
                       className={cn(
-                        "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-opacity",
-                        message.direction === 'OUTBOUND'
-                          ? "bg-primary text-primary-foreground rounded-br-md"
-                          : "bg-muted rounded-bl-md",
-                        // Failed messages get faded styling
-                        message.status === 'failed' && "opacity-50"
+                        "flex",
+                        message.direction === 'OUTBOUND' ? "justify-end" : "justify-start"
                       )}
                     >
-                      {/* Media content */}
-                      {message.mediaUrl && (
-                        <div className="mb-2">
-                          {message.type === 'image' && (
-                            <img
-                              src={message.mediaUrl}
-                              alt="Imagem"
-                              className="rounded-lg max-w-full"
-                            />
+                      <div className="flex flex-col items-end gap-1">
+                        <div
+                          className={cn(
+                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-opacity",
+                            message.direction === 'OUTBOUND'
+                              ? "bg-primary text-primary-foreground rounded-br-md"
+                              : "bg-muted rounded-bl-md",
+                            // Failed messages get faded styling
+                            isFailed && "opacity-50 border-2 border-destructive/50"
                           )}
-                          {message.type === 'document' && (
-                            <div className="flex items-center gap-2 p-2 bg-background/20 rounded">
-                              <FileText className="h-8 w-8" />
-                              <span className="text-sm truncate">{message.fileName || 'Documento'}</span>
+                        >
+                          {/* Media content */}
+                          {'mediaUrl' in message && message.mediaUrl && (
+                            <div className="mb-2">
+                              {message.type === 'image' && (
+                                <img
+                                  src={message.mediaUrl}
+                                  alt="Imagem"
+                                  className="rounded-lg max-w-full"
+                                />
+                              )}
+                              {message.type === 'document' && (
+                                <div className="flex items-center gap-2 p-2 bg-background/20 rounded">
+                                  <FileText className="h-8 w-8" />
+                                  <span className="text-sm truncate">{message.fileName || 'Documento'}</span>
+                                </div>
+                              )}
                             </div>
                           )}
+
+                          {/* Text content */}
+                          <p className="text-sm whitespace-pre-wrap break-words">
+                            {message.content}
+                          </p>
+
+                          {/* Timestamp and status */}
+                          <div className={cn(
+                            "flex items-center justify-end gap-1 mt-1",
+                            message.direction === 'OUTBOUND'
+                              ? "text-primary-foreground/70"
+                              : "text-muted-foreground"
+                          )}>
+                            <span className="text-xs">
+                              {formatTimestamp(message.createdAt)}
+                            </span>
+                            {isPending ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              getStatusIcon(message.status, message.direction)
+                            )}
+                          </div>
                         </div>
-                      )}
 
-                      {/* Text content */}
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {message.content}
-                      </p>
-
-                      {/* Timestamp and status */}
-                      <div className={cn(
-                        "flex items-center justify-end gap-1 mt-1",
-                        message.direction === 'OUTBOUND'
-                          ? "text-primary-foreground/70"
-                          : "text-muted-foreground"
-                      )}>
-                        <span className="text-xs">
-                          {formatTimestamp(message.createdAt)}
-                        </span>
-                        {getStatusIcon(message.status, message.direction)}
+                        {/* Failed message actions */}
+                        {isFailed && isOptimistic && (
+                          <div className="flex items-center gap-1 px-2">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs text-destructive hover:text-destructive"
+                                  onClick={() => {
+                                    if (selectedChatId) {
+                                      retryMessageMutation.mutate({
+                                        tempId: message.id,
+                                        sessionId: selectedChatId,
+                                        content: message.content,
+                                      })
+                                    }
+                                  }}
+                                  disabled={retryMessageMutation.isPending}
+                                >
+                                  <RotateCcw className="h-3 w-3 mr-1" />
+                                  Reenviar
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Tentar enviar novamente</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                                  onClick={() => deleteOptimisticMessage(message.id)}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Descartar mensagem</TooltipContent>
+                            </Tooltip>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
                 <div ref={messagesEndRef} />
               </div>
             )}
