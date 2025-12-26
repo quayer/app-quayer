@@ -387,22 +387,20 @@ export class UAZClient {
     text: string;
     delay?: number;
   }) {
-    // Try Evolution API v2 format first: /message/sendText/{instance}
-    // Fallback to legacy /send/text if needed
-    try {
-      return await this.request('POST', `/message/sendText/${instanceId}`, {
-        token,
-        body: {
-          number: data.number,
-          text: data.text,
-          delay: data.delay,
-        },
-      });
-    } catch (error: any) {
-      // If 404/405, try legacy endpoint
-      if (error.message?.includes('404') || error.message?.includes('405')) {
-        console.log('[UAZClient] Falling back to legacy /send/text endpoint');
-        return this.request('POST', `/send/text`, {
+    // Try multiple endpoint formats for compatibility with different UAZapi versions
+    const endpoints = [
+      `/message/sendText/${instanceId}`,  // Evolution API v2
+      `/send/text`,                         // Legacy format
+      `/sendText`,                          // Alternative
+      `/chat/sendText/${instanceId}`,      // Another common format
+    ];
+
+    let lastError: any = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[UAZClient] Trying endpoint: ${endpoint}`);
+        return await this.request('POST', endpoint, {
           token,
           body: {
             number: data.number,
@@ -410,9 +408,21 @@ export class UAZClient {
             delay: data.delay,
           },
         });
+      } catch (error: any) {
+        lastError = error;
+        // If 404/405, try next endpoint
+        if (error.message?.includes('404') || error.message?.includes('405')) {
+          console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
+          continue;
+        }
+        // For other errors, throw immediately
+        throw error;
       }
-      throw error;
     }
+
+    // If all endpoints failed, throw the last error
+    console.error('[UAZClient] All sendText endpoints failed');
+    throw lastError || new Error('All sendText endpoints failed');
   }
 
   async sendMedia(instanceId: string, token: string, data: {
@@ -423,23 +433,38 @@ export class UAZClient {
     filename?: string;
     mimetype?: string;
   }) {
-    // Try Evolution API v2 format first: /message/sendMedia/{instance}
-    try {
-      return await this.request('POST', `/message/sendMedia/${instanceId}`, {
-        token,
-        body: data,
-      });
-    } catch (error: any) {
-      // If 404/405, try legacy endpoint
-      if (error.message?.includes('404') || error.message?.includes('405')) {
-        console.log('[UAZClient] Falling back to legacy /send/media endpoint');
-        return this.request('POST', `/send/media`, {
+    // Try multiple endpoint formats for compatibility with different UAZapi versions
+    const endpoints = [
+      `/message/sendMedia/${instanceId}`,  // Evolution API v2
+      `/send/media`,                        // Legacy format
+      `/sendMedia`,                         // Alternative
+      `/chat/sendMedia/${instanceId}`,     // Another common format
+    ];
+
+    let lastError: any = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[UAZClient] Trying media endpoint: ${endpoint}`);
+        return await this.request('POST', endpoint, {
           token,
           body: data,
         });
+      } catch (error: any) {
+        lastError = error;
+        // If 404/405, try next endpoint
+        if (error.message?.includes('404') || error.message?.includes('405')) {
+          console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
+          continue;
+        }
+        // For other errors, throw immediately
+        throw error;
       }
-      throw error;
     }
+
+    // If all endpoints failed, throw the last error
+    console.error('[UAZClient] All sendMedia endpoints failed');
+    throw lastError || new Error('All sendMedia endpoints failed');
   }
 
   // ===== INSTANCE WEBHOOKS =====
