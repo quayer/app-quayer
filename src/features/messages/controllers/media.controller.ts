@@ -250,17 +250,24 @@ export const mediaController = igniter.controller({
 
           // Preparar payload para UAZapi
           // UAZapi expects 'myaudio' mediatype for voice messages (PTT - Push To Talk)
+          // Format: chatId as-is (with @s.whatsapp.net or @g.us suffix)
           const payload = {
-            number: chatId.replace('@s.whatsapp.net', '').replace('@g.us', ''),
+            chatId: chatId, // Use chatId directly like sendImage does
             mediatype: 'myaudio', // 'myaudio' for voice message (PTT)
             media: `data:${mimeType};base64,${mediaBase64}`,
           }
 
-          // Enviar para UAZapi
+          // Enviar para UAZapi usando /send/media (mesmo endpoint do sendImage)
           const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
 
-          // Try Evolution API v2 format first
-          let uazResponse = await fetch(`${UAZAPI_URL}/message/sendMedia/${instanceId}`, {
+          console.log('[MediaController] Sending audio to UAZapi:', {
+            endpoint: `${UAZAPI_URL}/send/media`,
+            chatId,
+            mimeType,
+            mediaLength: mediaBase64.length
+          })
+
+          const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -269,23 +276,13 @@ export const mediaController = igniter.controller({
             body: JSON.stringify(payload)
           })
 
-          // Fallback to legacy endpoint if needed
-          if (!uazResponse.ok && (uazResponse.status === 404 || uazResponse.status === 405)) {
-            console.log('[MediaController] Falling back to legacy /send/media endpoint for audio')
-            uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'token': instance.uazapiToken
-              },
-              body: JSON.stringify(payload)
-            })
-          }
-
           const uazData = await uazResponse.json()
 
           if (!uazResponse.ok) {
-            console.error('[MediaController] UAZapi error:', uazData)
+            console.error('[MediaController] UAZapi audio error:', {
+              status: uazResponse.status,
+              data: uazData
+            })
             return response.badRequest(uazData.message || 'Erro ao enviar audio')
           }
 
