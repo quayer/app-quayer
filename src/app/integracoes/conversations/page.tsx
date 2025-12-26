@@ -1085,6 +1085,15 @@ export default function ConversationsPage() {
     toast.success('Dados atualizados')
   }, [refetchInstances, refetchChats, refetchMessages])
 
+  // Reset scroll state when switching chats - always scroll to bottom on new chat
+  useEffect(() => {
+    if (selectedChatId) {
+      // Reset state for new chat
+      isNearBottomRef.current = true
+      previousMessageCountRef.current = 0
+    }
+  }, [selectedChatId])
+
   // Smart auto-scroll: only scroll to bottom when user was near bottom or sent a new message
   useEffect(() => {
     const currentCount = messages.length
@@ -1097,12 +1106,17 @@ export default function ConversationsPage() {
     // Only auto-scroll if:
     // 1. User was near bottom (not scrolling through history)
     // 2. OR there are new messages and optimistic messages exist (user sent a message)
+    // 3. OR this is the initial load (previousCount was 0)
+    const isInitialLoad = previousCount === 0 && currentCount > 0
     const shouldScroll =
-      hasNewMessages &&
-      (isNearBottomRef.current || optimisticMessages.length > 0)
+      (hasNewMessages && (isNearBottomRef.current || optimisticMessages.length > 0)) ||
+      isInitialLoad
 
     if (shouldScroll && messages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      // Use instant scroll for initial load, smooth for subsequent updates
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isInitialLoad ? 'instant' : 'smooth'
+      })
     }
   }, [messages, optimisticMessages.length])
 
