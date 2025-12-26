@@ -22,9 +22,9 @@
  *      - aiEnabled=false, aiBlockedUntil=now+24h (ou sessionTimeoutHours da org)
  *      - aiBlockReason='AUTO_PAUSED_HUMAN'
  *
- * 3. ENCERRADA (Conversa finalizada):
+ * 3. RESOLVIDOS (Conversa finalizada):
  *    - Condição: status='CLOSED' ou status='PAUSED'
- *    - Ícone: Archive laranja (orange-500)
+ *    - Ícone: CheckCircle2 verde (green-500)
  *    - Triggers:
  *      a) User clica "Resolver" na interface
  *      b) Timeout automático (closeExpiredSessions worker)
@@ -101,8 +101,6 @@ import {
   Layers,
   Bot,
   User,
-  ArchiveIcon,
-  Inbox,
   CheckCircle2,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
@@ -123,22 +121,22 @@ const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check
 const CHAT_REFRESH_INTERVAL = 10 * 1000 // 10 segundos
 const MESSAGE_REFRESH_INTERVAL = 5 * 1000 // 5 segundos
 
-type ChatFilter = 'all' | 'unread' | 'groups' | 'pinned'
-type AttendanceFilter = 'all' | 'ai' | 'human' | 'archived'
+// Nova arquitetura: 3 tabs principais por responsabilidade
+type MainTab = 'ia' | 'atendente' | 'resolvidos'
+type ChatTypeFilter = 'all' | 'direct' | 'groups'
 
-const CHAT_FILTERS: { value: ChatFilter; label: string; icon: any }[] = [
-  { value: 'all', label: 'Todas', icon: MessageCircle },
-  { value: 'unread', label: 'Nao lidas', icon: MessageSquare },
-  { value: 'groups', label: 'Grupos', icon: Users },
-  { value: 'pinned', label: 'Fixadas', icon: Pin },
+// Tabs principais: IA | Atendente | Resolvidos
+const MAIN_TABS: { value: MainTab; label: string; icon: any; color: string; description: string }[] = [
+  { value: 'ia', label: 'IA', icon: Bot, color: 'text-purple-500', description: 'IA está respondendo automaticamente' },
+  { value: 'atendente', label: 'Atendente', icon: User, color: 'text-blue-500', description: 'Aguardando resposta humana' },
+  { value: 'resolvidos', label: 'Resolvidos', icon: CheckCircle2, color: 'text-green-500', description: 'Conversas finalizadas' },
 ]
 
-// Filtros de tipo de atendimento
-const ATTENDANCE_FILTERS: { value: AttendanceFilter; label: string; icon: any; color: string }[] = [
-  { value: 'all', label: 'Todas', icon: Inbox, color: 'text-muted-foreground' },
-  { value: 'ai', label: 'IA', icon: Bot, color: 'text-purple-500' },
-  { value: 'human', label: 'Humano', icon: User, color: 'text-blue-500' },
-  { value: 'archived', label: 'Encerradas', icon: ArchiveIcon, color: 'text-orange-500' },
+// Filtro opcional de tipo de chat
+const CHAT_TYPE_FILTERS: { value: ChatTypeFilter; label: string; icon: any }[] = [
+  { value: 'all', label: 'Todos', icon: MessageCircle },
+  { value: 'direct', label: 'Diretos', icon: Smartphone },
+  { value: 'groups', label: 'Grupos', icon: Users },
 ]
 
 // ==================== TYPES ====================
@@ -206,8 +204,9 @@ export default function ConversationsPage() {
   // Input state
   const [messageText, setMessageText] = useState('')
   const [searchText, setSearchText] = useState('')
-  const [chatFilter, setChatFilter] = useState<ChatFilter>('all')
-  const [attendanceFilter, setAttendanceFilter] = useState<AttendanceFilter>('all')
+  // Nova arquitetura: tab principal (IA/Atendente/Resolvidos) + filtro opcional de tipo
+  const [mainTab, setMainTab] = useState<MainTab>('atendente') // Foco no que precisa de ação
+  const [chatTypeFilter, setChatTypeFilter] = useState<ChatTypeFilter>('all')
 
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -281,6 +280,7 @@ export default function ConversationsPage() {
   }, [selectedInstanceFilter, instances])
 
   // Fetch chats for selected instance(s)
+  // Nova arquitetura: busca todos e filtra no cliente para ter contagens corretas
   const {
     data: chatsData,
     isLoading: chatsLoading,
@@ -288,7 +288,7 @@ export default function ConversationsPage() {
     isFetching: chatsFetching,
     refetch: refetchChats,
   } = useQuery({
-    queryKey: ['conversations', 'chats', instanceIdsToFetch, chatFilter, attendanceFilter],
+    queryKey: ['conversations', 'chats', instanceIdsToFetch],
     queryFn: async () => {
       if (instanceIdsToFetch.length === 0) return { chats: [] }
 
@@ -299,9 +299,7 @@ export default function ConversationsPage() {
             const response = await api.chats.list.query({
               query: {
                 instanceId,
-                status: chatFilter,
-                attendanceType: attendanceFilter,
-                limit: 50,
+                limit: 100, // Busca mais para ter todos os dados
                 offset: 0,
               }
             })
@@ -320,7 +318,7 @@ export default function ConversationsPage() {
         })
       )
 
-      // Flatten and sort by timestamp
+      // Flatten and sort by timestamp (temporal - mais recente primeiro)
       const allChats = results.flat().sort((a, b) =>
         (b.wa_lastMsgTimestamp || 0) - (a.wa_lastMsgTimestamp || 0)
       )
@@ -333,54 +331,83 @@ export default function ConversationsPage() {
     staleTime: 0,
   })
 
-  // Extract chats with search filter
+  // Helper functions para categorizar chats
+  const isAIActive = useCallback((chat: UAZChat) => {
+    const now = new Date()
+    if (!chat.connectionHasWebhook) return false
+    const aiEnabled = chat.aiEnabled === true
+    const aiNotBlocked = !chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < now
+    const notArchived = chat.status !== 'CLOSED' && chat.status !== 'PAUSED'
+    return aiEnabled && aiNotBlocked && notArchived
+  }, [])
+
+  const isHumanAttending = useCallback((chat: UAZChat) => {
+    const now = new Date()
+    const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
+    if (isArchived) return false
+    // Se conexão não tem webhook, todas são humanas
+    if (!chat.connectionHasWebhook) return true
+    // Se tem webhook, verificar se IA está bloqueada ou desabilitada
+    const isAIBlocked = chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= now
+    const isAIDisabled = chat.aiEnabled === false
+    return isAIBlocked || isAIDisabled
+  }, [])
+
+  const isResolved = useCallback((chat: UAZChat) => {
+    return chat.status === 'CLOSED' || chat.status === 'PAUSED'
+  }, [])
+
+  // Calculate tab counts
+  const tabCounts = useMemo(() => {
+    const data: UAZChat[] = (chatsData as any)?.chats ?? []
+
+    return {
+      ia: data.filter(isAIActive).length,
+      atendente: data.filter(isHumanAttending).length,
+      resolvidos: data.filter(isResolved).length,
+      // Contagens extras para o filtro de tipo
+      groups: data.filter(chat => chat.wa_isGroup && !isResolved(chat)).length,
+      direct: data.filter(chat => !chat.wa_isGroup && !isResolved(chat)).length,
+    }
+  }, [chatsData, isAIActive, isHumanAttending, isResolved])
+
+  // Extract and filter chats based on mainTab, chatTypeFilter and search
   const chats = useMemo(() => {
     const data: UAZChat[] = (chatsData as any)?.chats ?? []
 
-    if (!searchText.trim()) return data
+    // 1. Filtrar por tab principal (IA / Atendente / Resolvidos)
+    let filtered = data.filter(chat => {
+      switch (mainTab) {
+        case 'ia':
+          return isAIActive(chat)
+        case 'atendente':
+          return isHumanAttending(chat)
+        case 'resolvidos':
+          return isResolved(chat)
+        default:
+          return true
+      }
+    })
 
-    const search = searchText.toLowerCase()
-    return data.filter(chat =>
-      chat.wa_name?.toLowerCase().includes(search) ||
-      chat.wa_chatid.toLowerCase().includes(search) ||
-      chat.wa_lastMsgBody?.toLowerCase().includes(search)
-    )
-  }, [chatsData, searchText])
-
-  // Calculate filter counts for badges
-  // IMPORTANTE: IA só está ativa quando:
-  // 1. Conexão tem webhook configurado (connectionHasWebhook)
-  // 2. aiEnabled = true na sessão
-  // 3. aiBlockedUntil não existe ou já expirou
-  const filterCounts = useMemo(() => {
-    const data: UAZChat[] = (chatsData as any)?.chats ?? []
-    const now = new Date()
-
-    return {
-      all: data.length,
-      ai: data.filter(chat => {
-        // IA só pode estar ativa se conexão tem webhook
-        if (!chat.connectionHasWebhook) return false
-        const isAIActive = chat.aiEnabled === true && (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < now)
-        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
-        return isAIActive && !isArchived
-      }).length,
-      human: data.filter(chat => {
-        const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
-        if (isArchived) return false
-        // Se conexão não tem webhook, todas são humanas
-        if (!chat.connectionHasWebhook) return true
-        // Se tem webhook, verificar se IA está bloqueada ou desabilitada
-        const isAIBlocked = chat.aiBlockedUntil && new Date(chat.aiBlockedUntil) >= now
-        const isAIDisabled = chat.aiEnabled === false
-        return isAIBlocked || isAIDisabled
-      }).length,
-      archived: data.filter(chat => chat.status === 'CLOSED' || chat.status === 'PAUSED').length,
-      groups: data.filter(chat => chat.wa_isGroup).length,
-      unread: data.filter(chat => chat.wa_unreadCount > 0).length,
-      pinned: data.filter(chat => chat.wa_isPinned).length,
+    // 2. Filtrar por tipo de chat (Todos / Diretos / Grupos)
+    if (chatTypeFilter === 'direct') {
+      filtered = filtered.filter(chat => !chat.wa_isGroup)
+    } else if (chatTypeFilter === 'groups') {
+      filtered = filtered.filter(chat => chat.wa_isGroup)
     }
-  }, [chatsData])
+
+    // 3. Filtrar por busca
+    if (searchText.trim()) {
+      const search = searchText.toLowerCase()
+      filtered = filtered.filter(chat =>
+        chat.wa_name?.toLowerCase().includes(search) ||
+        chat.wa_chatid.toLowerCase().includes(search) ||
+        chat.wa_lastMsgBody?.toLowerCase().includes(search)
+      )
+    }
+
+    return filtered
+  }, [chatsData, mainTab, chatTypeFilter, searchText, isAIActive, isHumanAttending, isResolved])
 
   // Format count for display (99+ for large numbers)
   const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
@@ -811,7 +838,7 @@ export default function ConversationsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Conversas</h2>
           <Badge variant="secondary" className="text-xs">
-            {filterCounts.all} {filterCounts.all === 1 ? 'conversa' : 'conversas'}
+            {chats.length} {chats.length === 1 ? 'conversa' : 'conversas'}
           </Badge>
         </div>
 
@@ -829,58 +856,52 @@ export default function ConversationsPage() {
           />
         </div>
 
-        {/* Attendance type filter - Buttons with count badges */}
+        {/* Main tabs: IA | Atendente | Resolvidos */}
         <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg">
-          {ATTENDANCE_FILTERS.map(filter => {
-            const count = filterCounts[filter.value] ?? 0
+          {MAIN_TABS.map(tab => {
+            const count = tabCounts[tab.value] ?? 0
+            const isActive = mainTab === tab.value
             return (
-              <Tooltip key={filter.value}>
+              <Tooltip key={tab.value}>
                 <TooltipTrigger asChild>
                   <Button
-                    variant={attendanceFilter === filter.value ? "secondary" : "ghost"}
+                    variant={isActive ? "secondary" : "ghost"}
                     size="sm"
                     className={cn(
-                      "flex-1 gap-1 px-2 relative",
-                      attendanceFilter === filter.value && filter.color
+                      "flex-1 gap-1.5 px-2 relative",
+                      isActive && tab.color
                     )}
-                    onClick={() => setAttendanceFilter(filter.value)}
+                    onClick={() => setMainTab(tab.value)}
                   >
-                    <filter.icon className={cn("h-3.5 w-3.5", filter.color)} />
-                    <span className="text-xs hidden sm:inline">{filter.label}</span>
-                    {count > 0 && (
-                      <Badge
-                        variant={attendanceFilter === filter.value ? "default" : "secondary"}
-                        className={cn(
-                          "ml-1 h-5 min-w-5 px-1.5 text-xs font-medium",
-                          attendanceFilter === filter.value
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted-foreground/20 text-muted-foreground"
-                        )}
-                      >
-                        {formatCount(count)}
-                      </Badge>
-                    )}
+                    <tab.icon className={cn("h-4 w-4", tab.color)} />
+                    <span className="text-xs font-medium">{tab.label}</span>
+                    <Badge
+                      variant={isActive ? "default" : "secondary"}
+                      className={cn(
+                        "ml-1 h-5 min-w-5 px-1.5 text-xs font-medium",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted-foreground/20 text-muted-foreground"
+                      )}
+                    >
+                      {formatCount(count)}
+                    </Badge>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {filter.value === 'ai' && `Conversas com IA ativa (${count})`}
-                  {filter.value === 'human' && `Conversas com atendente humano (${count})`}
-                  {filter.value === 'archived' && `Conversas encerradas (${count})`}
-                  {filter.value === 'all' && `Todas as conversas (${count})`}
-                </TooltipContent>
+                <TooltipContent>{tab.description}</TooltipContent>
               </Tooltip>
             )
           })}
         </div>
 
-        {/* Chat type filter + refresh */}
+        {/* Chat type filter (Todos/Diretos/Grupos) + refresh */}
         <div className="flex items-center gap-2">
-          <Select value={chatFilter} onValueChange={(v) => setChatFilter(v as ChatFilter)}>
+          <Select value={chatTypeFilter} onValueChange={(v) => setChatTypeFilter(v as ChatTypeFilter)}>
             <SelectTrigger className="flex-1">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {CHAT_FILTERS.map(filter => (
+              {CHAT_TYPE_FILTERS.map(filter => (
                 <SelectItem key={filter.value} value={filter.value}>
                   <div className="flex items-center gap-2">
                     <filter.icon className="h-4 w-4" />
@@ -936,15 +957,9 @@ export default function ConversationsPage() {
             {chats.map((chat: UAZChat) => {
               // Determinar nome para exibição
               const displayName = chat.wa_name || 'Contato'
-              // Determinar se é atendimento IA ou humano
-              // IA só está ativa quando:
-              // 1. Conexão tem webhook configurado (connectionHasWebhook)
-              // 2. aiEnabled = true na sessão
-              // 3. aiBlockedUntil não existe ou já expirou
-              const isAIActive = chat.connectionHasWebhook === true &&
-                chat.aiEnabled === true &&
-                (!chat.aiBlockedUntil || new Date(chat.aiBlockedUntil) < new Date())
-              const isArchived = chat.status === 'CLOSED' || chat.status === 'PAUSED'
+              // Usar helper functions para categorização
+              const chatIsAIActive = isAIActive(chat)
+              const chatIsResolved = isResolved(chat)
 
               return (
                 <button
@@ -976,15 +991,15 @@ export default function ConversationsPage() {
                           {chat.wa_isPinned && (
                             <Pin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                           )}
-                          {/* Indicador de status IA/Humano/Arquivado */}
-                          {isArchived ? (
+                          {/* Indicador de status IA/Humano/Resolvido */}
+                          {chatIsResolved ? (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <ArchiveIcon className="h-3.5 w-3.5 text-orange-500 flex-shrink-0" />
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
                               </TooltipTrigger>
-                              <TooltipContent>Arquivado</TooltipContent>
+                              <TooltipContent>Resolvido</TooltipContent>
                             </Tooltip>
-                          ) : isAIActive ? (
+                          ) : chatIsAIActive ? (
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Bot className="h-3.5 w-3.5 text-purple-500 flex-shrink-0" />
@@ -996,7 +1011,7 @@ export default function ConversationsPage() {
                               <TooltipTrigger asChild>
                                 <User className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
                               </TooltipTrigger>
-                              <TooltipContent>Atendimento humano</TooltipContent>
+                              <TooltipContent>Atendente</TooltipContent>
                             </Tooltip>
                           )}
                         </div>

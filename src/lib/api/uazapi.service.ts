@@ -562,6 +562,85 @@ export class UAZapiService {
       }
     }
   }
+
+  /**
+   * @method fetchContactProfilePicture
+   * @description Obtém a foto de perfil de um contato específico
+   * @param {string} instanceToken - Token da instância
+   * @param {string} number - Número do contato (ex: 5511999999999 ou 5511999999999@s.whatsapp.net)
+   * @returns {Promise<UAZapiResponse<{ profilePictureUrl: string | null }>>} URL da foto de perfil
+   */
+  async fetchContactProfilePicture(instanceToken: string, number: string): Promise<UAZapiResponse<{ profilePictureUrl: string | null }>> {
+    try {
+      // Garantir formato correto do número
+      const formattedNumber = number.includes('@') ? number : `${number}@s.whatsapp.net`
+
+      const response = await fetch(`${this.baseURL}/chat/fetchProfilePictureUrl`, {
+        method: 'POST',
+        headers: { ...this.getHeaders(), 'token': instanceToken },
+        body: JSON.stringify({ number: formattedNumber })
+      })
+
+      const result = await this.handleResponse<any>(response)
+
+      if (result.success && result.data) {
+        return {
+          success: true,
+          data: {
+            profilePictureUrl: result.data.profilePictureUrl || result.data.url || result.data.picture || null
+          },
+          message: 'Foto de perfil obtida com sucesso'
+        }
+      }
+
+      // Se não encontrou foto, retorna null (não é erro)
+      return {
+        success: true,
+        data: { profilePictureUrl: null },
+        message: 'Contato não possui foto de perfil'
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        message: 'Falha ao obter foto de perfil do contato'
+      }
+    }
+  }
+
+  /**
+   * @method fetchContactsProfilePictures
+   * @description Obtém fotos de perfil de múltiplos contatos (batch)
+   * @param {string} instanceToken - Token da instância
+   * @param {string[]} numbers - Array de números (ex: ['5511999999999', '5511888888888'])
+   * @returns {Promise<Map<string, string | null>>} Mapa de número -> URL da foto
+   */
+  async fetchContactsProfilePictures(instanceToken: string, numbers: string[]): Promise<Map<string, string | null>> {
+    const results = new Map<string, string | null>()
+
+    // Processar em batches de 5 para não sobrecarregar a API
+    const batchSize = 5
+    for (let i = 0; i < numbers.length; i += batchSize) {
+      const batch = numbers.slice(i, i + batchSize)
+
+      const promises = batch.map(async (number) => {
+        const result = await this.fetchContactProfilePicture(instanceToken, number)
+        return { number, url: result.data?.profilePictureUrl || null }
+      })
+
+      const batchResults = await Promise.all(promises)
+      for (const { number, url } of batchResults) {
+        results.set(number.replace(/@.*$/, ''), url)
+      }
+
+      // Pequeno delay entre batches para evitar rate limiting
+      if (i + batchSize < numbers.length) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    }
+
+    return results
+  }
 }
 
 // Instância singleton do serviço

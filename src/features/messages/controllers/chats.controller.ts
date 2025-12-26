@@ -186,6 +186,9 @@ export const chatsController = igniter.controller({
               if (Array.isArray(uazChats) && uazChats.length > 0) {
                 console.log(`[ChatsController] Processando ${uazChats.length} chats...`);
 
+                // Coletar números para buscar fotos de perfil em batch
+                const numbersToFetchPics: string[] = [];
+
                 for (const chat of uazChats) {
                   const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
                   if (!phoneNumber) continue;
@@ -193,9 +196,26 @@ export const chatsController = igniter.controller({
                   const ts = Number(chat.lastMsgTimestamp);
                   const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
 
+                  // Verificar se já temos foto de perfil
+                  let existingProfilePic = chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl;
+
+                  // Se não tem foto no payload, verificar no banco
+                  if (!existingProfilePic) {
+                    const existingContact = await database.contact.findUnique({
+                      where: { phoneNumber },
+                      select: { profilePicUrl: true }
+                    });
+                    existingProfilePic = existingContact?.profilePicUrl;
+
+                    // Se ainda não tem, adicionar à lista para buscar
+                    if (!existingProfilePic && !phoneNumber.includes('@g.us')) {
+                      numbersToFetchPics.push(phoneNumber);
+                    }
+                  }
+
                   const contactData = {
                     name: chat.name || chat.formattedTitle || phoneNumber,
-                    profilePicUrl: chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl,
+                    profilePicUrl: existingProfilePic || null,
                     verifiedName: chat.pushname || chat.name,
                     isBusiness: chat.isBusiness || false
                   };
@@ -214,7 +234,8 @@ export const chatsController = igniter.controller({
                     },
                     update: {
                       name: contactData.name,
-                      profilePicUrl: contactData.profilePicUrl,
+                      // Só atualiza foto se tiver uma nova (não sobrescrever com null)
+                      ...(contactData.profilePicUrl && { profilePicUrl: contactData.profilePicUrl }),
                       verifiedName: contactData.verifiedName,
                       // Não sobrescreve organizationId se já existe
                     }
@@ -264,6 +285,40 @@ export const chatsController = igniter.controller({
                     }
                   });
                 }
+
+                // Buscar fotos de perfil em batch para contatos sem foto
+                if (numbersToFetchPics.length > 0 && instance.uazapiToken) {
+                  console.log(`[ChatsController] Buscando fotos de perfil para ${numbersToFetchPics.length} contatos...`);
+
+                  // Limitar a 20 fotos por sync para não demorar muito
+                  const numbersToFetch = numbersToFetchPics.slice(0, 20);
+
+                  try {
+                    const profilePics = await uazapiService.fetchContactsProfilePictures(
+                      instance.uazapiToken,
+                      numbersToFetch
+                    );
+
+                    // Atualizar contatos com as fotos encontradas
+                    let updatedCount = 0;
+                    for (const [phoneNumber, profilePicUrl] of profilePics) {
+                      if (profilePicUrl) {
+                        await database.contact.updateMany({
+                          where: {
+                            phoneNumber: { contains: phoneNumber }
+                          },
+                          data: { profilePicUrl }
+                        });
+                        updatedCount++;
+                      }
+                    }
+                    console.log(`[ChatsController] ${updatedCount} fotos de perfil atualizadas.`);
+                  } catch (picErr) {
+                    console.warn('[ChatsController] Erro ao buscar fotos de perfil:', picErr);
+                    // Não falhar o sync por causa de fotos
+                  }
+                }
+
                 console.log('[ChatsController] Sync finalizado.');
                 return true;
               }
