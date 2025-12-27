@@ -1225,13 +1225,32 @@ export default function ConversationsPage() {
   }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
 
   const handleManualRefresh = useCallback(async () => {
-    await Promise.all([
-      refetchInstances(),
-      refetchChats(),
-      refetchMessages(),
-    ])
-    toast.success('Dados atualizados')
-  }, [refetchInstances, refetchChats, refetchMessages])
+    // Fazer sync forçado com UAZapi para buscar novos chats
+    try {
+      toast.loading('Sincronizando com WhatsApp...', { id: 'sync' })
+
+      // Chamar API com forceSync=true para sincronizar novos chats do UAZapi
+      await api.chats.all.query({
+        query: {
+          instanceIds: instanceIdsToFetch,
+          limit: 100,
+          forceSync: true, // Força sync com UAZapi
+        }
+      })
+
+      // Refetch todos os dados
+      await Promise.all([
+        refetchInstances(),
+        refetchChats(),
+        refetchMessages(),
+      ])
+
+      toast.success('Sincronizado com sucesso!', { id: 'sync' })
+    } catch (error: any) {
+      console.error('[Conversations] Force sync error:', error)
+      toast.error('Erro ao sincronizar', { id: 'sync', description: error.message })
+    }
+  }, [refetchInstances, refetchChats, refetchMessages, instanceIdsToFetch])
 
   // Navegação por teclado na lista de chats (WCAG 2.1.1)
   const handleChatListKeyDown = useCallback((e: React.KeyboardEvent) => {

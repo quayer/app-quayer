@@ -58,6 +58,8 @@ export const listAllChatsSchema = z.object({
   status: z.enum(['all', 'unread', 'groups', 'pinned']).optional(),
   attendanceType: z.enum(['all', 'ai', 'human', 'archived']).optional().default('all'),
   sessionStatus: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
+  // Forçar sincronização com UAZapi mesmo que já existam sessões
+  forceSync: z.coerce.boolean().optional().default(false),
 });
 
 // Schema para buscar mensagens de um chat

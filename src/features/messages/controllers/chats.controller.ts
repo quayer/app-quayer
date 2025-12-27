@@ -580,8 +580,9 @@ export const chatsController = igniter.controller({
           const instanceIds = instances.map(i => i.id);
           const instancesMap = new Map(instances.map(i => [i.id, i]));
 
-          // 2. SYNC: Check if any connected instance needs sync (no sessions exist)
-          // This ensures chats appear on first load
+          // 2. SYNC: Sincronizar chats do UAZapi
+          // - Blocking sync quando não há sessões OU forceSync=true
+          // - Isso garante que novos chats apareçam
           const connectedInstances = instances.filter(i => i.status === ConnectionStatus.CONNECTED);
           if (connectedInstances.length > 0) {
             // Check if we have ANY sessions for these instances
@@ -589,9 +590,11 @@ export const chatsController = igniter.controller({
               where: { connectionId: { in: instanceIds } },
             });
 
-            // If no sessions exist, run blocking sync for connected instances
-            if (existingSessionCount === 0) {
-              console.log('[ChatsController.all] No sessions found, running sync for connected instances...');
+            // Rodar sync se: não há sessões OU forceSync foi solicitado
+            const shouldSync = existingSessionCount === 0 || query.forceSync === true;
+
+            if (shouldSync) {
+              console.log(`[ChatsController.all] Running sync (forceSync=${query.forceSync}, existingSessions=${existingSessionCount})...`);
 
               // Fetch uazapiTokens for connected instances
               const instancesWithTokens = await database.connection.findMany({
@@ -678,8 +681,21 @@ export const chatsController = igniter.controller({
                   });
                   const updatedContactsMap = new Map(allContacts.map(c => [c.phoneNumber, c]));
 
-                  // Create sessions
+                  // CORREÇÃO: Buscar sessões existentes para evitar duplicatas
+                  const contactIds = allContacts.map(c => c.id);
+                  const existingSessions = await database.chatSession.findMany({
+                    where: {
+                      connectionId: inst.id,
+                      contactId: { in: contactIds }
+                    },
+                    select: { id: true, contactId: true }
+                  });
+                  const existingSessionsMap = new Map(existingSessions.map(s => [s.contactId, s]));
+
+                  // Create/update sessions
                   const sessionsToCreate: any[] = [];
+                  const sessionsToUpdate: { id: string; lastMessageAt: Date }[] = [];
+
                   for (const chat of uazChats) {
                     const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
                     if (!phoneNumber) continue;
@@ -691,19 +707,39 @@ export const chatsController = igniter.controller({
                     const ts = Number(chat.wa_lastMsgTimestamp || chat.lastMsgTimestamp);
                     const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts) : new Date();
 
-                    sessionsToCreate.push({
-                      connectionId: inst.id,
-                      contactId: contact.id,
-                      organizationId: inst.organizationId,
-                      status: 'ACTIVE',
-                      lastMessageAt,
-                      customerJourney: 'new',
-                    });
+                    const existingSession = existingSessionsMap.get(contact.id);
+                    if (existingSession) {
+                      // Update existing session
+                      sessionsToUpdate.push({ id: existingSession.id, lastMessageAt });
+                    } else {
+                      // Create new session
+                      sessionsToCreate.push({
+                        connectionId: inst.id,
+                        contactId: contact.id,
+                        organizationId: inst.organizationId,
+                        status: 'ACTIVE',
+                        lastMessageAt,
+                        customerJourney: 'new',
+                      });
+                    }
                   }
 
                   if (sessionsToCreate.length > 0) {
                     await database.chatSession.createMany({ data: sessionsToCreate, skipDuplicates: true });
                     console.log(`[ChatsController.all] Created ${sessionsToCreate.length} sessions for instance ${inst.id}`);
+                  }
+
+                  // Update existing sessions timestamps in batch
+                  if (sessionsToUpdate.length > 0) {
+                    await database.$transaction(
+                      sessionsToUpdate.map(({ id, lastMessageAt }) =>
+                        database.chatSession.update({
+                          where: { id },
+                          data: { lastMessageAt }
+                        })
+                      )
+                    );
+                    console.log(`[ChatsController.all] Updated ${sessionsToUpdate.length} sessions for instance ${inst.id}`);
                   }
                 } catch (err) {
                   console.error(`[ChatsController.all] Sync failed for instance ${inst.id}:`, err);
@@ -712,15 +748,17 @@ export const chatsController = igniter.controller({
             }
           }
 
-          // 3. Cache check
+          // 3. Cache check (skip if forceSync)
           const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${query.cursor || '0'}:${query.limit || 50}`;
-          try {
-            const cached = await igniter.store.get<any>(cacheKey);
-            if (cached) {
-              return response.success({ ...cached, source: 'cache' });
+          if (!query.forceSync) {
+            try {
+              const cached = await igniter.store.get<any>(cacheKey);
+              if (cached) {
+                return response.success({ ...cached, source: 'cache' });
+              }
+            } catch {
+              // Cache miss - continue
             }
-          } catch {
-            // Cache miss - continue
           }
 
           // 4. Build filters for unified query
