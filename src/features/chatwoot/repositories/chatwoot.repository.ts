@@ -204,7 +204,7 @@ export class ChatwootRepository {
           isActive: data.isActive ?? false,
           apiUrl: data.apiUrl,
           apiKey: data.apiKey,
-          settings: data.settings,
+          settings: data.settings as any,
           organizationId,
         },
       });

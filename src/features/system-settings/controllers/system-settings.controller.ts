@@ -445,8 +445,8 @@ export const systemSettingsController = igniter.controller({
           const { getConfiguredUazapiClient } = await import('@/lib/providers/adapters/uazapi/uazapi.client')
           const client = await getConfiguredUazapiClient()
           const result = await client.getGlobalWebhook()
-          if (result?.webhook) {
-            uazapiWebhook = result.webhook
+          if (result) {
+            uazapiWebhook = (result as any).webhook || result
           }
         } catch (error: any) {
           console.warn('Failed to fetch webhook from UAZapi:', error.message)

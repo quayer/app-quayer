@@ -6,16 +6,16 @@
 import { igniter } from '@/igniter';
 import { database } from '@/services/database';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
-import { listChatsSchema, markAsReadSchema } from '../messages.schemas';
+import { listChatsSchema, listAllChatsSchema, markAsReadSchema } from '../messages.schemas';
 import { z } from 'zod';
 import { ConnectionStatus } from '@prisma/client';
 import { uazapiService } from '@/lib/api/uazapi.service';
 
 /**
  * Cache TTL para listagem de chats (em segundos)
- * TTL curto para manter dados frescos, mas reduzir carga no banco
+ * TTL aumentado para 60s - SSE garante atualizações em tempo real
  */
-const CHATS_CACHE_TTL = 15; // 15 segundos
+const CHATS_CACHE_TTL = 60; // 60 segundos (SSE garante real-time)
 
 export const chatsController = igniter.controller({
   name: 'chats',
@@ -173,155 +173,204 @@ export const chatsController = igniter.controller({
 
           let [sessions, total] = await fetchLocalChats();
 
-          // Lógica de Sync (Função isolada)
+          // Lógica de Sync (Função isolada) - OTIMIZADA para evitar N+1
           const runSync = async () => {
             if (!instance.uazapiToken || instance.status !== ConnectionStatus.CONNECTED) return false;
 
             try {
-              console.log('[ChatsController] Iniciando sync brutal com UAZapi...');
+              console.log('[ChatsController] Iniciando sync otimizado com UAZapi...');
               const uazChatsResponse = await uazapiService.findChats(instance.uazapiToken);
               const rawData = uazChatsResponse.data;
               const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
 
-              if (Array.isArray(uazChats) && uazChats.length > 0) {
-                console.log(`[ChatsController] Processando ${uazChats.length} chats...`);
+              if (!Array.isArray(uazChats) || uazChats.length === 0) return false;
 
-                // Coletar números para buscar fotos de perfil em batch
-                const numbersToFetchPics: string[] = [];
+              console.log(`[ChatsController] Processando ${uazChats.length} chats em batch...`);
 
-                for (const chat of uazChats) {
-                  const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
-                  if (!phoneNumber) continue;
+              // OTIMIZAÇÃO: Extrair todos os phoneNumbers primeiro
+              const phoneNumbers = uazChats
+                .map(chat => chat.id || chat.id?._serialized || chat.chatId)
+                .filter(Boolean) as string[];
 
-                  const ts = Number(chat.lastMsgTimestamp);
-                  const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
+              if (phoneNumbers.length === 0) return false;
 
-                  // Verificar se já temos foto de perfil
-                  let existingProfilePic = chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl;
+              // OTIMIZAÇÃO: Buscar todos os contatos existentes em UMA query
+              const existingContacts = await database.contact.findMany({
+                where: { phoneNumber: { in: phoneNumbers } },
+                select: { id: true, phoneNumber: true, profilePicUrl: true }
+              });
+              const contactsMap = new Map(existingContacts.map(c => [c.phoneNumber, c]));
 
-                  // Se não tem foto no payload, verificar no banco
-                  if (!existingProfilePic) {
-                    const existingContact = await database.contact.findUnique({
-                      where: { phoneNumber },
-                      select: { profilePicUrl: true }
-                    });
-                    existingProfilePic = existingContact?.profilePicUrl;
+              // Preparar dados para batch operations
+              const contactsToCreate: any[] = [];
+              const contactsToUpdate: { phoneNumber: string; data: any }[] = [];
+              const numbersToFetchPics: string[] = [];
 
-                    // Se ainda não tem, adicionar à lista para buscar
-                    if (!existingProfilePic && !phoneNumber.includes('@g.us')) {
-                      numbersToFetchPics.push(phoneNumber);
-                    }
-                  }
+              for (const chat of uazChats) {
+                const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                if (!phoneNumber) continue;
 
-                  const contactData = {
-                    name: chat.name || chat.formattedTitle || phoneNumber,
-                    profilePicUrl: existingProfilePic || null,
-                    verifiedName: chat.pushname || chat.name,
-                    isBusiness: chat.isBusiness || false
-                  };
+                const existingContact = contactsMap.get(phoneNumber);
+                let profilePicUrl = chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl || existingContact?.profilePicUrl || null;
 
-                  // Upsert Contact
-                  const contact = await database.contact.upsert({
-                    where: { phoneNumber },
-                    create: {
-                      phoneNumber,
-                      name: contactData.name,
-                      profilePicUrl: contactData.profilePicUrl,
-                      verifiedName: contactData.verifiedName,
-                      isBusiness: contactData.isBusiness,
-                      organizationId: instance.organizationId,
-                      source: instance.id
-                    },
-                    update: {
-                      name: contactData.name,
-                      // Só atualiza foto se tiver uma nova (não sobrescrever com null)
-                      ...(contactData.profilePicUrl && { profilePicUrl: contactData.profilePicUrl }),
-                      verifiedName: contactData.verifiedName,
-                      // Não sobrescreve organizationId se já existe
-                    }
-                  });
-
-                  // Upsert ChatSession
-                  const sessionOrgId = instance.organizationId ?? undefined;
-                  await (database.chatSession.upsert as any)({
-                    where: {
-                      connectionId_contactId: { // Check composite unique constraint if exists, otherwise assume manual check logic if unique constraint is missing
-                        connectionId: instance.id,
-                        contactId: contact.id
-                      }
-                    },
-                    create: {
-                      connectionId: instance.id,
-                      contactId: contact.id,
-                      organizationId: sessionOrgId,
-                      status: 'ACTIVE',
-                      lastMessageAt,
-                      customerJourney: 'new'
-                    },
-                    update: {
-                      lastMessageAt
-                    }
-                  }).catch(async (_e: unknown) => {
-                    // Fallback se unique key não existir como esperado (Prisma às vezes trick)
-                    // Tentativa manual se upsert falhar por constraint name mismatch
-                    const existing = await database.chatSession.findFirst({
-                      where: { connectionId: instance.id, contactId: contact.id }
-                    });
-                    if (existing) {
-                      await database.chatSession.update({
-                        where: { id: existing.id },
-                        data: { lastMessageAt }
-                      });
-                    } else if (sessionOrgId) {
-                      await database.chatSession.create({
-                        data: {
-                          connectionId: instance.id,
-                          contactId: contact.id,
-                          organizationId: sessionOrgId,
-                          status: 'ACTIVE',
-                          lastMessageAt
-                        }
-                      });
-                    }
-                  });
+                // Se não tem foto, adicionar à lista para buscar depois
+                if (!profilePicUrl && !phoneNumber.includes('@g.us')) {
+                  numbersToFetchPics.push(phoneNumber);
                 }
 
-                // Buscar fotos de perfil em batch para contatos sem foto
-                if (numbersToFetchPics.length > 0 && instance.uazapiToken) {
-                  console.log(`[ChatsController] Buscando fotos de perfil para ${numbersToFetchPics.length} contatos...`);
+                const contactData = {
+                  name: chat.name || chat.formattedTitle || phoneNumber,
+                  profilePicUrl,
+                  verifiedName: chat.pushname || chat.name,
+                  isBusiness: chat.isBusiness || false
+                };
 
-                  // Limitar a 20 fotos por sync para não demorar muito
-                  const numbersToFetch = numbersToFetchPics.slice(0, 20);
+                if (existingContact) {
+                  contactsToUpdate.push({
+                    phoneNumber,
+                    data: {
+                      name: contactData.name,
+                      verifiedName: contactData.verifiedName,
+                      ...(contactData.profilePicUrl && { profilePicUrl: contactData.profilePicUrl }),
+                    }
+                  });
+                } else {
+                  contactsToCreate.push({
+                    phoneNumber,
+                    name: contactData.name,
+                    profilePicUrl: contactData.profilePicUrl,
+                    verifiedName: contactData.verifiedName,
+                    isBusiness: contactData.isBusiness,
+                    organizationId: instance.organizationId,
+                    source: instance.id
+                  });
+                }
+              }
 
-                  try {
-                    const profilePics = await uazapiService.fetchContactsProfilePictures(
-                      instance.uazapiToken,
-                      numbersToFetch
+              // OTIMIZAÇÃO: Batch create novos contatos
+              if (contactsToCreate.length > 0) {
+                await database.contact.createMany({
+                  data: contactsToCreate,
+                  skipDuplicates: true
+                });
+                console.log(`[ChatsController] ${contactsToCreate.length} contatos criados em batch.`);
+              }
+
+              // OTIMIZAÇÃO: Batch update contatos existentes usando transaction
+              if (contactsToUpdate.length > 0) {
+                await database.$transaction(
+                  contactsToUpdate.map(({ phoneNumber, data }) =>
+                    database.contact.update({
+                      where: { phoneNumber },
+                      data
+                    })
+                  )
+                );
+                console.log(`[ChatsController] ${contactsToUpdate.length} contatos atualizados em batch.`);
+              }
+
+              // OTIMIZAÇÃO: Buscar todos os contatos atualizados em UMA query
+              const allContacts = await database.contact.findMany({
+                where: { phoneNumber: { in: phoneNumbers } },
+                select: { id: true, phoneNumber: true }
+              });
+              const updatedContactsMap = new Map(allContacts.map(c => [c.phoneNumber, c]));
+
+              // OTIMIZAÇÃO: Buscar sessões existentes em UMA query
+              const contactIds = allContacts.map(c => c.id);
+              const existingSessions = await database.chatSession.findMany({
+                where: {
+                  connectionId: instance.id,
+                  contactId: { in: contactIds }
+                },
+                select: { id: true, contactId: true }
+              });
+              const sessionsMap = new Map(existingSessions.map(s => [s.contactId, s]));
+
+              // Preparar sessões para batch operations
+              const sessionsToCreate: any[] = [];
+              const sessionsToUpdate: { id: string; lastMessageAt: Date }[] = [];
+              const sessionOrgId = instance.organizationId ?? undefined;
+
+              for (const chat of uazChats) {
+                const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                if (!phoneNumber) continue;
+
+                const contact = updatedContactsMap.get(phoneNumber);
+                if (!contact) continue;
+
+                const ts = Number(chat.lastMsgTimestamp);
+                const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
+
+                const existingSession = sessionsMap.get(contact.id);
+                if (existingSession) {
+                  sessionsToUpdate.push({ id: existingSession.id, lastMessageAt });
+                } else if (sessionOrgId) {
+                  sessionsToCreate.push({
+                    connectionId: instance.id,
+                    contactId: contact.id,
+                    organizationId: sessionOrgId,
+                    status: 'ACTIVE',
+                    lastMessageAt,
+                    customerJourney: 'new'
+                  });
+                }
+              }
+
+              // OTIMIZAÇÃO: Batch create sessões
+              if (sessionsToCreate.length > 0) {
+                await database.chatSession.createMany({
+                  data: sessionsToCreate,
+                  skipDuplicates: true
+                });
+                console.log(`[ChatsController] ${sessionsToCreate.length} sessões criadas em batch.`);
+              }
+
+              // OTIMIZAÇÃO: Batch update sessões usando transaction
+              if (sessionsToUpdate.length > 0) {
+                await database.$transaction(
+                  sessionsToUpdate.map(({ id, lastMessageAt }) =>
+                    database.chatSession.update({
+                      where: { id },
+                      data: { lastMessageAt }
+                    })
+                  )
+                );
+                console.log(`[ChatsController] ${sessionsToUpdate.length} sessões atualizadas em batch.`);
+              }
+
+              // Buscar fotos de perfil em batch para contatos sem foto (limitado a 20)
+              if (numbersToFetchPics.length > 0 && instance.uazapiToken) {
+                const numbersToFetch = numbersToFetchPics.slice(0, 20);
+                console.log(`[ChatsController] Buscando fotos de perfil para ${numbersToFetch.length} contatos...`);
+
+                try {
+                  const profilePics = await uazapiService.fetchContactsProfilePictures(
+                    instance.uazapiToken,
+                    numbersToFetch
+                  );
+
+                  // OTIMIZAÇÃO: Batch update fotos usando transaction
+                  const picUpdates = Array.from(profilePics.entries())
+                    .filter(([, url]) => url)
+                    .map(([phoneNumber, profilePicUrl]) =>
+                      database.contact.updateMany({
+                        where: { phoneNumber: { contains: phoneNumber } },
+                        data: { profilePicUrl }
+                      })
                     );
 
-                    // Atualizar contatos com as fotos encontradas
-                    let updatedCount = 0;
-                    for (const [phoneNumber, profilePicUrl] of profilePics) {
-                      if (profilePicUrl) {
-                        await database.contact.updateMany({
-                          where: {
-                            phoneNumber: { contains: phoneNumber }
-                          },
-                          data: { profilePicUrl }
-                        });
-                        updatedCount++;
-                      }
-                    }
-                    console.log(`[ChatsController] ${updatedCount} fotos de perfil atualizadas.`);
-                  } catch (picErr) {
-                    console.warn('[ChatsController] Erro ao buscar fotos de perfil:', picErr);
-                    // Não falhar o sync por causa de fotos
+                  if (picUpdates.length > 0) {
+                    await database.$transaction(picUpdates);
+                    console.log(`[ChatsController] ${picUpdates.length} fotos de perfil atualizadas em batch.`);
                   }
+                } catch (picErr) {
+                  console.warn('[ChatsController] Erro ao buscar fotos de perfil:', picErr);
                 }
-
-                console.log('[ChatsController] Sync finalizado.');
-                return true;
               }
+
+              console.log('[ChatsController] Sync otimizado finalizado.');
+              return true;
             } catch (err) {
               console.error('[ChatsController] Erro no sync:', err);
             }
@@ -340,6 +389,27 @@ export const chatsController = igniter.controller({
             // Background Sync
             setImmediate(() => runSync());
           }
+
+          // Helper para formatar preview de mensagem baseada no tipo
+          const formatMessagePreview = (msg: any): string => {
+            if (!msg) return '';
+            if (msg.content && msg.content.trim()) return msg.content;
+
+            // Fallback para tipos de mídia
+            const typeLabels: Record<string, string> = {
+              'image': '📷 Imagem',
+              'video': '🎥 Vídeo',
+              'audio': '🎵 Áudio',
+              'voice': '🎤 Mensagem de voz',
+              'ptt': '🎤 Mensagem de voz',
+              'document': '📄 Documento',
+              'sticker': '🎨 Sticker',
+              'location': '📍 Localização',
+              'contact': '👤 Contato',
+            };
+
+            return typeLabels[msg.type] || `📎 ${msg.type || 'Mídia'}`;
+          };
 
           // Mapper
           const mapSessionToChat = (session: any) => {
@@ -385,7 +455,7 @@ export const chatsController = igniter.controller({
               wa_profilePicUrl: session.contact.profilePicUrl,
               wa_isGroup: isGroup,
               wa_lastMsgTimestamp: session.lastMessageAt.getTime(),
-              wa_lastMsgBody: lastMsg?.content || null,
+              wa_lastMsgBody: formatMessagePreview(lastMsg),
               wa_unreadCount: 0,
               wa_isPinned: false,
               wa_isArchived: session.status === 'CLOSED',
@@ -428,6 +498,366 @@ export const chatsController = igniter.controller({
 
         } catch (error: any) {
           console.error('[ChatsController] Erro geral:', error);
+          return response.badRequest(`Erro ao buscar conversas: ${error.message}`);
+        }
+      },
+    }),
+
+    /**
+     * GET /api/v1/chats/all
+     * Endpoint unificado que busca chats de TODAS as instâncias do usuário
+     * Elimina a necessidade de N requisições paralelas no frontend
+     * Suporta cursor-based pagination para melhor performance
+     */
+    all: igniter.query({
+      path: '/all',
+      method: 'GET',
+      query: listAllChatsSchema,
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const userId = context.auth?.session?.user?.id!;
+        const query = request.query as z.infer<typeof listAllChatsSchema>;
+
+        try {
+          // 1. Buscar todas as instâncias do usuário (ou filtrar pelas solicitadas)
+          const instanceFilter: any = {
+            organization: {
+              users: {
+                some: { userId },
+              },
+            },
+          };
+
+          if (query.instanceIds && query.instanceIds.length > 0) {
+            instanceFilter.id = { in: query.instanceIds };
+          }
+
+          const instances = await database.instance.findMany({
+            where: instanceFilter,
+            select: {
+              id: true,
+              name: true,
+              organizationId: true,
+              n8nWebhookUrl: true,
+              status: true,
+            },
+          });
+
+          if (instances.length === 0) {
+            return response.success({
+              chats: [],
+              instances: [],
+              pagination: {
+                total: 0,
+                limit: query.limit || 50,
+                cursor: null,
+                hasMore: false,
+              },
+              counts: { ai: 0, human: 0, archived: 0, groups: 0 },
+            });
+          }
+
+          const instanceIds = instances.map(i => i.id);
+          const instancesMap = new Map(instances.map(i => [i.id, i]));
+
+          // 2. Cache check
+          const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${query.cursor || '0'}:${query.limit || 50}`;
+          try {
+            const cached = await igniter.store.get<any>(cacheKey);
+            if (cached) {
+              return response.success({ ...cached, source: 'cache' });
+            }
+          } catch {
+            // Cache miss - continue
+          }
+
+          // 3. Build filters for unified query
+          const now = new Date();
+          const where: any = {
+            connectionId: { in: instanceIds },
+          };
+
+          // Search filter
+          if (query.search) {
+            where.contact = {
+              OR: [
+                { name: { contains: query.search, mode: 'insensitive' } },
+                { phoneNumber: { contains: query.search } },
+              ],
+            };
+          }
+
+          // Groups filter
+          if (query.status === 'groups') {
+            where.contact = {
+              ...where.contact,
+              phoneNumber: { contains: '@g.us' },
+            };
+          }
+
+          // Session status filter
+          if (query.sessionStatus) {
+            where.status = query.sessionStatus;
+          }
+
+          // 4. Attendance type filter (more complex with multi-instance)
+          // For unified endpoint, we need to handle per-instance webhook status
+          if (query.attendanceType === 'ai') {
+            // Only instances with webhook can have AI sessions
+            const instancesWithWebhook = instances.filter(i => !!i.n8nWebhookUrl).map(i => i.id);
+            if (instancesWithWebhook.length === 0) {
+              // No instances have webhook - return empty
+              return response.success({
+                chats: [],
+                instances: instances.map(i => ({ id: i.id, name: i.name, status: i.status })),
+                pagination: { total: 0, limit: query.limit || 50, cursor: null, hasMore: false },
+                counts: { ai: 0, human: 0, archived: 0, groups: 0 },
+              });
+            }
+            where.connectionId = { in: instancesWithWebhook };
+            where.AND = [
+              ...(where.AND || []),
+              { aiEnabled: true },
+              {
+                OR: [
+                  { aiBlockedUntil: null },
+                  { aiBlockedUntil: { lt: now } },
+                ],
+              },
+              { status: { notIn: ['CLOSED', 'PAUSED'] } },
+            ];
+          } else if (query.attendanceType === 'human') {
+            const instancesWithWebhook = instances.filter(i => !!i.n8nWebhookUrl).map(i => i.id);
+            const instancesWithoutWebhook = instances.filter(i => !i.n8nWebhookUrl).map(i => i.id);
+
+            // Human = (instances without webhook) OR (instances with webhook but AI disabled/blocked)
+            where.AND = [
+              ...(where.AND || []),
+              { status: { notIn: ['CLOSED', 'PAUSED'] } },
+              {
+                OR: [
+                  // All sessions from instances without webhook
+                  { connectionId: { in: instancesWithoutWebhook } },
+                  // Sessions from instances with webhook but AI is disabled or blocked
+                  {
+                    connectionId: { in: instancesWithWebhook },
+                    OR: [
+                      { aiEnabled: false },
+                      { aiBlockedUntil: { gte: now } },
+                    ],
+                  },
+                ],
+              },
+            ];
+          } else if (query.attendanceType === 'archived') {
+            where.status = { in: ['CLOSED', 'PAUSED'] };
+          }
+
+          // 5. Pagination (cursor-based or offset-based)
+          const limit = query.limit || 50;
+          let paginationOptions: any = {
+            take: limit + 1, // Take one extra to check if there's more
+            orderBy: { lastMessageAt: 'desc' as const },
+          };
+
+          if (query.cursor) {
+            // Cursor-based: cursor is the ID of the last item
+            paginationOptions.cursor = { id: query.cursor };
+            paginationOptions.skip = 1; // Skip the cursor item itself
+          } else if (query.offset) {
+            // Fallback to offset-based
+            paginationOptions.skip = query.offset;
+          }
+
+          // 6. Fetch sessions with all necessary data
+          const [sessions, totalCount] = await Promise.all([
+            database.chatSession.findMany({
+              where,
+              include: {
+                contact: true,
+                messages: {
+                  take: 1,
+                  orderBy: { createdAt: 'desc' },
+                },
+                connection: {
+                  select: {
+                    id: true,
+                    name: true,
+                    n8nWebhookUrl: true,
+                    status: true,
+                  },
+                },
+              },
+              ...paginationOptions,
+            }),
+            // Get total count for stats (without pagination)
+            database.chatSession.count({ where }),
+          ]);
+
+          // Check if there's more data
+          const hasMore = sessions.length > limit;
+          const resultSessions = hasMore ? sessions.slice(0, limit) : sessions;
+          const nextCursor = hasMore ? resultSessions[resultSessions.length - 1]?.id : null;
+
+          // 7. Calculate counts for tabs (from ALL sessions matching base filters)
+          // We need counts without attendance type filter
+          const baseWhere: any = { connectionId: { in: instanceIds } };
+          if (query.search) {
+            baseWhere.contact = {
+              OR: [
+                { name: { contains: query.search, mode: 'insensitive' } },
+                { phoneNumber: { contains: query.search } },
+              ],
+            };
+          }
+
+          const [allSessions, archivedCount, groupsCount] = await Promise.all([
+            database.chatSession.findMany({
+              where: {
+                ...baseWhere,
+                status: { notIn: ['CLOSED', 'PAUSED'] },
+              },
+              select: {
+                id: true,
+                aiEnabled: true,
+                aiBlockedUntil: true,
+                connectionId: true,
+                contact: { select: { phoneNumber: true } },
+              },
+            }),
+            database.chatSession.count({
+              where: { ...baseWhere, status: { in: ['CLOSED', 'PAUSED'] } },
+            }),
+            database.chatSession.count({
+              where: {
+                ...baseWhere,
+                status: { notIn: ['CLOSED', 'PAUSED'] },
+                contact: { phoneNumber: { contains: '@g.us' } },
+              },
+            }),
+          ]);
+
+          // Calculate AI and Human counts
+          let aiCount = 0;
+          let humanCount = 0;
+          for (const s of allSessions) {
+            const inst = instancesMap.get(s.connectionId);
+            const hasWebhook = !!inst?.n8nWebhookUrl;
+            const aiNotBlocked = !s.aiBlockedUntil || new Date(s.aiBlockedUntil) < now;
+
+            if (hasWebhook && s.aiEnabled && aiNotBlocked) {
+              aiCount++;
+            } else {
+              humanCount++;
+            }
+          }
+
+          // 8. Map sessions to chat format with instance info
+          const formatMessagePreview = (msg: any): string => {
+            if (!msg) return '';
+            if (msg.content && msg.content.trim()) return msg.content;
+            const typeLabels: Record<string, string> = {
+              image: '📷 Imagem',
+              video: '🎥 Vídeo',
+              audio: '🎵 Áudio',
+              voice: '🎤 Mensagem de voz',
+              ptt: '🎤 Mensagem de voz',
+              document: '📄 Documento',
+              sticker: '🎨 Sticker',
+              location: '📍 Localização',
+              contact: '👤 Contato',
+            };
+            return typeLabels[msg.type] || `📎 ${msg.type || 'Mídia'}`;
+          };
+
+          const chats = resultSessions.map((session: any) => {
+            const lastMsg = session.messages[0];
+            const phoneNumber = session.contact.phoneNumber || '';
+            const isGroup = phoneNumber.endsWith('@g.us') || phoneNumber.includes('-');
+            const instance = instancesMap.get(session.connectionId);
+            const connectionHasWebhook = !!instance?.n8nWebhookUrl;
+
+            // Format contact name
+            let displayName = session.contact.name;
+            if (!displayName || displayName === phoneNumber) {
+              displayName = session.contact.verifiedName;
+            }
+            if (!displayName || displayName === phoneNumber) {
+              if (isGroup) {
+                displayName = 'Grupo WhatsApp';
+              } else {
+                const cleanNumber = phoneNumber.replace(/@.*$/, '').replace(/\D/g, '');
+                if (cleanNumber.length >= 10) {
+                  const countryCode = cleanNumber.slice(0, 2);
+                  const areaCode = cleanNumber.slice(2, 4);
+                  const part1 = cleanNumber.slice(4, 9);
+                  const part2 = cleanNumber.slice(9);
+                  displayName = `+${countryCode} (${areaCode}) ${part1}-${part2}`;
+                } else {
+                  displayName = cleanNumber || 'Contato';
+                }
+              }
+            }
+
+            return {
+              id: session.id,
+              wa_chatid: phoneNumber.includes('@') ? phoneNumber : `${phoneNumber}@s.whatsapp.net`,
+              wa_name: displayName,
+              wa_phoneNumber: phoneNumber.replace(/@.*$/, ''),
+              wa_profilePicUrl: session.contact.profilePicUrl,
+              wa_isGroup: isGroup,
+              wa_lastMsgTimestamp: session.lastMessageAt.getTime(),
+              wa_lastMsgBody: formatMessagePreview(lastMsg),
+              wa_unreadCount: 0,
+              wa_isPinned: false,
+              wa_isArchived: session.status === 'CLOSED',
+              wa_isMuted: false,
+              lead_status: session.customerJourney || null,
+              lead_source: session.leadSource || 'whatsapp',
+              created_at: session.createdAt.toISOString(),
+              updated_at: session.updatedAt.toISOString(),
+              status: session.status,
+              aiEnabled: session.aiEnabled ?? false,
+              aiBlockedUntil: session.aiBlockedUntil?.toISOString() ?? null,
+              connectionHasWebhook,
+              // Instance info attached to each chat
+              instanceId: session.connectionId,
+              instanceName: instance?.name || 'Instância',
+            };
+          });
+
+          const result = {
+            chats,
+            instances: instances.map(i => ({
+              id: i.id,
+              name: i.name,
+              status: i.status,
+              hasWebhook: !!i.n8nWebhookUrl,
+            })),
+            pagination: {
+              total: totalCount,
+              limit,
+              cursor: nextCursor,
+              hasMore,
+            },
+            counts: {
+              ai: aiCount,
+              human: humanCount,
+              archived: archivedCount,
+              groups: groupsCount,
+            },
+          };
+
+          // 9. Cache result
+          try {
+            await igniter.store.set(cacheKey, result, { ttl: CHATS_CACHE_TTL });
+          } catch {
+            // Cache error - non-critical
+          }
+
+          return response.success(result);
+        } catch (error: any) {
+          console.error('[ChatsController] Erro no endpoint all:', error);
           return response.badRequest(`Erro ao buscar conversas: ${error.message}`);
         }
       },

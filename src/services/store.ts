@@ -73,8 +73,8 @@ export async function resilientCacheDel(key: string): Promise<boolean> {
 
   try {
     await storeCircuitBreaker.execute(
-      async () => store.del(key),
-      async () => { /* Fallback: do nothing */ }
+      async () => { await redis.del(key); return 1; },
+      async () => 0 // Fallback: return 0 (no keys deleted)
     )
 
     const duration = Date.now() - start
@@ -98,7 +98,7 @@ export async function getOrFetch<T>(
 ): Promise<T> {
   return getCachedOrFetch<T>(
     () => resilientCacheGet<T>(key),
-    (data) => resilientCacheSet(key, data, options).then(() => {}),
+    (data: T) => resilientCacheSet(key, data, options).then(() => {}),
     fetchFn,
     { circuitBreaker: storeCircuitBreaker, logPrefix: 'Store' }
   )

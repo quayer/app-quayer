@@ -266,7 +266,7 @@ export class SessionsManager {
     const [sessions, total] = await Promise.all([
       database.chatSession.findMany({
         where,
-        ...cursorConfig,
+        ...(cursorConfig as any),
         take: limit,
         orderBy,
         include: {
@@ -312,7 +312,7 @@ export class SessionsManager {
     ]);
 
     // ⭐ Enriquecer sessões com dados computados
-    const enrichedSessions = sessions.map((session) => {
+    const enrichedSessions = sessions.map((session: any) => {
       const lastMessage = session.messages?.[0];
 
       // Calcular status do WhatsApp Window

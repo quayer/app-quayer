@@ -200,14 +200,14 @@ export class UAZapiAdapter implements IWhatsAppProvider {
     const token = await this.getInstanceToken(instanceId);
     const response = await uazService.sendLocation(token, {
       number: data.to,
-      lat: data.latitude,
-      lng: data.longitude,
+      latitude: data.latitude,
+      longitude: data.longitude,
       name: data.name,
       address: data.address,
     });
 
     return {
-      messageId: response.messageId || response.id || `loc_${Date.now()}`,
+      messageId: (response as any).messageId || (response as any).id || `loc_${Date.now()}`,
       status: 'sent',
       timestamp: new Date(),
     };
@@ -215,16 +215,18 @@ export class UAZapiAdapter implements IWhatsAppProvider {
 
   async sendContact(instanceId: string, data: SendContactInput): Promise<MessageResult> {
     const token = await this.getInstanceToken(instanceId);
+    // Build vCard format for contact
+    const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${data.contact.name}\nTEL;type=CELL;type=VOICE;waid=${data.contact.phone}:+${data.contact.phone}\nEND:VCARD`;
     const response = await uazService.sendContact(token, {
       number: data.to,
       contact: {
-        name: data.contact.name,
-        number: data.contact.phone,
+        displayName: data.contact.name,
+        vcard: vcard,
       },
     });
 
     return {
-      messageId: response.messageId || response.id || `contact_${Date.now()}`,
+      messageId: (response as any).messageId || (response as any).id || `contact_${Date.now()}`,
       status: 'sent',
       timestamp: new Date(),
     };
@@ -239,11 +241,11 @@ export class UAZapiAdapter implements IWhatsAppProvider {
       description: data.description,
       buttonText: data.buttonText,
       sections: data.sections,
-      footer: data.footer,
+      footerText: data.footer,
     });
 
     return {
-      messageId: response.messageId || response.id || `list_${Date.now()}`,
+      messageId: (response as any).messageId || (response as any).id || `list_${Date.now()}`,
       status: 'sent',
       timestamp: new Date(),
     };
@@ -255,11 +257,11 @@ export class UAZapiAdapter implements IWhatsAppProvider {
       number: data.to,
       text: data.text,
       buttons: data.buttons,
-      footer: data.footer,
+      footerText: data.footer,
     });
 
     return {
-      messageId: response.messageId || response.id || `btn_${Date.now()}`,
+      messageId: (response as any).messageId || (response as any).id || `btn_${Date.now()}`,
       status: 'sent',
       timestamp: new Date(),
     };

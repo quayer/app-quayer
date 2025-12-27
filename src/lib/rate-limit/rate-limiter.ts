@@ -216,13 +216,29 @@ export const webhookRateLimiter = new RateLimiter({
 
 /**
  * Rate limiter por sessão de chat
- * 20 mensagens por minuto por sessão
+ * 30 mensagens por minuto por sessão (aumentado para melhor UX)
  * Previne spam e abuso de envio de mensagens
  */
 export const sessionRateLimiter = new RateLimiter({
-  limit: 20,
+  limit: 30,
   window: 60, // 1 minuto
   prefix: 'ratelimit:session',
+});
+
+/**
+ * Rate limiter para burst de mensagens
+ * Permite 5 mensagens rápidas em 10 segundos
+ * Usado em conjunto com sessionRateLimiter para controle granular
+ *
+ * Lógica: usuário pode enviar burst de até 5 msgs rapidamente,
+ * mas deve esperar 10s entre bursts. Combinado com o limite
+ * de 30/min do sessionRateLimiter, previne abuso enquanto
+ * permite conversas fluidas.
+ */
+export const burstRateLimiter = new RateLimiter({
+  limit: 5,
+  window: 10, // 10 segundos
+  prefix: 'ratelimit:burst',
 });
 
 /**

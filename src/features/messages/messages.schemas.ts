@@ -46,6 +46,20 @@ export const listChatsSchema = z.object({
   sessionStatus: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
 });
 
+// Schema para listar chats de TODAS as instâncias (endpoint unificado)
+export const listAllChatsSchema = z.object({
+  // Opcional: filtrar por instâncias específicas (se vazio, busca todas do usuário)
+  instanceIds: z.array(z.string().uuid()).optional(),
+  limit: z.coerce.number().int().positive().max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+  // Cursor-based pagination (mais eficiente que offset)
+  cursor: z.string().optional(),
+  search: z.string().optional(),
+  status: z.enum(['all', 'unread', 'groups', 'pinned']).optional(),
+  attendanceType: z.enum(['all', 'ai', 'human', 'archived']).optional().default('all'),
+  sessionStatus: z.enum(['QUEUED', 'ACTIVE', 'PAUSED', 'CLOSED']).optional(),
+});
+
 // Schema para buscar mensagens de um chat
 export const listMessagesSchema = z.object({
   instanceId: z.string().min(1, 'Instance ID é obrigatório'),
@@ -90,6 +104,7 @@ export const markAsReadSchema = z.object({
 });
 
 export type ListChatsInput = z.infer<typeof listChatsSchema>;
+export type ListAllChatsInput = z.infer<typeof listAllChatsSchema>;
 export type ListMessagesInput = z.infer<typeof listMessagesSchema>;
 export type SendTextMessageInput = z.infer<typeof sendTextMessageSchema>;
 export type SendImageInput = z.infer<typeof sendImageSchema>;

@@ -20,6 +20,10 @@ async function main() {
     console.log(`✅ Instance: ${instance.name}`);
 
     // Create Contact
+    if (!instance.organizationId) {
+        console.log('❌ Instance has no organization.');
+        return;
+    }
     const phone = '5511999999999';
     console.log('Creating contact...');
     let contact = await prisma.contact.findUnique({ where: { phoneNumber: phone } });
@@ -60,11 +64,14 @@ async function main() {
     await prisma.message.create({
         data: {
             sessionId: session.id,
-            content: 'Olá! Esta conversa valida a lógica de listagem.',
-            fromMe: false,
+            contactId: contact.id,
+            connectionId: instance.id,
+            waMessageId: `seed_${Date.now()}`,
+            direction: 'INBOUND',
             type: 'text',
-            status: 'RECEIVED',
-            timestamp: new Date()
+            author: 'CUSTOMER',
+            content: 'Olá! Esta conversa valida a lógica de listagem.',
+            status: 'delivered',
         }
     });
 

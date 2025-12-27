@@ -215,8 +215,8 @@ class MetricsCollector {
    * Get complete metrics summary
    */
   getSummary(): {
-    jobs: ReturnType<typeof this.getJobStats>
-    cache: ReturnType<typeof this.getCacheStats>
+    jobs: { started: number; completed: number; failed: number; successRate: string; recentJobs: JobMetric[] }
+    cache: { hits: number; misses: number; errors: number; hitRate: string; recentOperations: StoreMetric[] }
     health: Record<string, HealthStatus>
     timestamp: Date
   } {

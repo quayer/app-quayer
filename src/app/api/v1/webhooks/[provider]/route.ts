@@ -38,6 +38,7 @@ import {
 import { parseCommand, hasCommand, type ParsedCommand } from '@/lib/commands';
 import { geocodingService } from '@/lib/geocoding';
 import { webhookRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-limiter';
+import { logger } from '@/lib/logging/logger';
 import crypto from 'crypto';
 
 // Lazy import to avoid circular dependency during build
@@ -122,7 +123,7 @@ function verifySignature(
 
   // Require signature if secret is configured
   if (!signature) {
-    console.warn(`[Webhook] ⚠️ Missing signature header for ${provider}`);
+    logger.warn('Missing signature header', { provider });
     return SECURITY_MODE !== 'strict';
   }
 
@@ -130,7 +131,7 @@ function verifySignature(
     // UAZapi uses format: sha256=<signature>
     const [algo, sig] = signature.split('=');
     if (algo !== 'sha256' || !sig) {
-      console.warn(`[Webhook] ⚠️ Invalid signature format: ${signature}`);
+      logger.warn('Invalid signature format', { provider });
       return SECURITY_MODE !== 'strict';
     }
 
@@ -145,12 +146,12 @@ function verifySignature(
     );
 
     if (!isValid) {
-      console.warn(`[Webhook] ⚠️ Signature mismatch for ${provider}`);
+      logger.warn('Signature mismatch', { provider });
     }
 
     return isValid || SECURITY_MODE !== 'strict';
   } catch (error) {
-    console.error('[Webhook] Signature verification error:', error);
+    logger.error('Signature verification error', { provider, error: error instanceof Error ? error.message : error });
     return SECURITY_MODE !== 'strict';
   }
 }
@@ -207,7 +208,7 @@ export async function POST(
   // 1. RATE LIMITING
   const rateLimitResult = await webhookRateLimiter.check(clientIP);
   if (!rateLimitResult.success) {
-    console.warn(`[Webhook] 🚫 Rate limit exceeded for IP ${clientIP}`);
+    logger.warn('Rate limit exceeded', { clientIP, provider });
     return NextResponse.json(
       { error: 'Rate limit exceeded', retryAfter: rateLimitResult.retryAfter },
       {
@@ -224,7 +225,7 @@ export async function POST(
 
   // 2. IP WHITELIST CHECK
   if (!isIPWhitelisted(clientIP, provider)) {
-    console.warn(`[Webhook] 🚫 IP ${clientIP} not whitelisted for ${provider}`);
+    logger.warn('IP not whitelisted', { clientIP, provider });
     return NextResponse.json(
       { error: 'Forbidden', message: 'IP not allowed' },
       { status: 403 }
@@ -238,7 +239,7 @@ export async function POST(
   try {
     rawBody = JSON.parse(rawBodyText);
   } catch (parseError) {
-    console.error('[Webhook] Failed to parse JSON body:', parseError);
+    logger.error('Failed to parse JSON body', { provider, error: parseError instanceof Error ? parseError.message : 'Unknown error' });
     return NextResponse.json(
       { error: 'Invalid JSON body' },
       { status: 400 }
@@ -249,7 +250,7 @@ export async function POST(
   const signature = request.headers.get('x-webhook-signature') ||
                    request.headers.get('x-hub-signature-256'); // Meta uses this
   if (!verifySignature(rawBodyText, signature, provider)) {
-    console.warn(`[Webhook] 🚫 Invalid signature from IP ${clientIP}`);
+    logger.warn('Invalid signature', { clientIP, provider });
     return NextResponse.json(
       { error: 'Forbidden', message: 'Invalid signature' },
       { status: 403 }
@@ -258,7 +259,15 @@ export async function POST(
 
   // =========================================================================
 
-  console.log(`[Webhook] ✅ Security passed - Received from ${provider} (IP: ${clientIP}):`, JSON.stringify(rawBody, null, 2));
+  // Log estruturado - evita logar payload inteiro em produção
+  logger.info('Webhook received', {
+    provider,
+    clientIP,
+    eventType: rawBody?.event || rawBody?.data?.event || 'unknown',
+    instanceId: rawBody?.instanceId || rawBody?.instance?.instanceId || 'unknown',
+    // Apenas em desenvolvimento logamos o payload completo
+    ...(process.env.NODE_ENV === 'development' && { payload: rawBody }),
+  });
 
   try {
     // 1. NORMALIZAR WEBHOOK
@@ -282,7 +291,11 @@ export async function POST(
         normalized.instanceId = instance.id;
       } else {
         console.warn(`[Webhook] UAZapi: No instance found for token/id ${normalized.instanceId}`);
-        return NextResponse.json({ success: true, message: 'Instance not found' });
+        // Return 404 so provider knows instance doesn't exist (not 200 which silently drops messages)
+        return NextResponse.json(
+          { success: false, error: 'Instance not found', instanceId: normalized.instanceId },
+          { status: 404 }
+        );
       }
     }
 
@@ -298,7 +311,11 @@ export async function POST(
         normalized.instanceId = instance.id;
       } else {
         console.warn(`[Webhook] CloudAPI: No instance found for phoneNumberId ${normalized.instanceId}`);
-        return NextResponse.json({ success: true, message: 'Instance not found' });
+        // Return 404 so provider knows instance doesn't exist (not 200 which silently drops messages)
+        return NextResponse.json(
+          { success: false, error: 'Instance not found', phoneNumberId: normalized.instanceId },
+          { status: 404 }
+        );
       }
     }
 
@@ -344,7 +361,11 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('[Webhook] Error:', error);
+    logger.error('Webhook processing failed', {
+      provider,
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: 'Webhook processing failed', message: error.message },
       { status: 500 }
@@ -894,14 +915,21 @@ async function updateInstanceQRCode(instanceId: string, qrCode: string): Promise
  */
 async function processGroupMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
   const { instanceId, data } = webhook;
-  const { from: groupJid, message, contactName } = data;
+  const { from, message, contactName } = data;
+
+  // Garantir que temos o groupJid
+  if (!from) {
+    console.log('[Webhook] 👥 Group message without group ID - skipping');
+    return;
+  }
+  const groupJid = from;
 
   // Extrair participantJid do payload (quem enviou a mensagem no grupo)
   // O formato varia por provider: data.participant, data.sender, etc.
   const participantJid = (data as any).participant ||
                          (data as any).sender ||
                          (data as any).author ||
-                         message?.author;
+                         (message as any)?.author;
 
   if (!participantJid) {
     console.log('[Webhook] 👥 Group message without participant info - skipping');
@@ -953,7 +981,7 @@ async function processGroupMessage(webhook: NormalizedWebhook, provider: BrokerT
         connectionId: instanceId,
         organizationId: organization.id,
         mode: groupMode,
-        groupName: (data as any).groupName || (data as any).subject || groupJid,
+        name: (data as any).groupName || (data as any).subject || groupJid,
         aiEnabled: groupMode === 'ACTIVE',
         aiResponseMode: organization.groupAiResponseMode as any || 'PRIVATE',
       },
@@ -993,17 +1021,16 @@ async function processGroupMessage(webhook: NormalizedWebhook, provider: BrokerT
         groupId: groupChat.id,
         participantJid,
         contactId: participantContact.id,
-        displayName: participantContact.name,
         role: 'participant',
       },
     });
   }
 
-  // 6. Atualizar lastSeenAt e messageCount
+  // 6. Atualizar lastMessageAt e messageCount
   await database.groupParticipant.update({
     where: { id: groupParticipant.id },
     data: {
-      lastSeenAt: new Date(),
+      lastMessageAt: new Date(),
       messageCount: { increment: 1 },
     },
   });
@@ -1012,14 +1039,13 @@ async function processGroupMessage(webhook: NormalizedWebhook, provider: BrokerT
   const groupMessage = await database.groupMessage.create({
     data: {
       groupId: groupChat.id,
-      participantId: groupParticipant.id,
+      participantJid,
       waMessageId: message?.id || `grp_${Date.now()}`,
       type: message?.type || 'text',
       content: message?.content || '',
       mediaUrl: message?.media?.mediaUrl,
       mediaType: message?.media?.type,
       mimeType: message?.media?.mimeType,
-      quotedMessageId: (message as any)?.quotedMessageId,
     },
   });
 

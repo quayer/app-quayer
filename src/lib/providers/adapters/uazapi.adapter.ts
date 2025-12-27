@@ -733,6 +733,8 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
       'videoMessage': MessageType.VIDEO,
       'audio': MessageType.AUDIO,
       'audioMessage': MessageType.AUDIO,
+      'voice': MessageType.AUDIO,
+      'ptt': MessageType.AUDIO, // Push-to-talk voice messages
       'document': MessageType.DOCUMENT,
       'documentMessage': MessageType.DOCUMENT,
       'sticker': MessageType.STICKER,

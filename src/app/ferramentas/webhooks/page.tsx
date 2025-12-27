@@ -372,12 +372,12 @@ export default function WebhooksPage() {
       ? deliveriesData
       : []
 
-  const filteredWebhooks = webhooks.filter((wh) =>
+  const filteredWebhooks = webhooks.filter((wh: WebhookType) =>
     wh.url.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const activeWebhooks = webhooks.filter((w) => w.isActive).length
-  const totalDeliveries = webhooks.reduce((acc, w) => acc + (w._count?.deliveries || 0), 0)
+  const activeWebhooks = webhooks.filter((w: WebhookType) => w.isActive).length
+  const totalDeliveries = webhooks.reduce((acc: number, w: WebhookType) => acc + (w._count?.deliveries || 0), 0)
 
   // No organization selected
   if (!currentOrgId && !isAdmin) {
@@ -612,7 +612,7 @@ export default function WebhooksPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredWebhooks.map((webhook) => (
+                    {filteredWebhooks.map((webhook: WebhookType) => (
                       <TableRow key={webhook.id}>
                         <TableCell className="font-mono text-sm max-w-xs truncate">
                           {webhook.url}
@@ -948,7 +948,7 @@ export default function WebhooksPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {deliveries.map((delivery) => (
+                    {deliveries.map((delivery: Delivery) => (
                       <TableRow key={delivery.id}>
                         <TableCell className="font-mono text-sm">
                           {delivery.event}

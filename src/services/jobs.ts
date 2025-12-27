@@ -48,7 +48,6 @@ export const REGISTERED_JOBS = jobs.merge({
           );
         },
         ...createJobHooks('concatenation.processConcatenatedMessages'),
-        retryStrategy: 'exponential',
         attempts: 3,
       })
     }

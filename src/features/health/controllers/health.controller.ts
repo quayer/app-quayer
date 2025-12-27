@@ -238,10 +238,10 @@ export const healthController = igniter.controller({
           const start = Date.now();
           try {
             // Verificar status da instancia na UAZapi
-            const statusResponse = await uazapiService.getStatus(instance.uazapiToken);
+            const statusResponse = await uazapiService.getInstanceStatus(instance.uazapiToken);
             const latency = Date.now() - start;
 
-            if (statusResponse.connected) {
+            if (statusResponse.success && statusResponse.data?.status === 'connected') {
               results.push({
                 instanceId: instance.id,
                 name: instance.name,

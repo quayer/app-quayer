@@ -98,7 +98,13 @@ export const messagesController = igniter.controller({
         const rateLimitResult = await sessionRateLimiter.check(sessionId);
         if (!rateLimitResult.success) {
           return response.badRequest(
-            `Limite de mensagens excedido. Aguarde ${rateLimitResult.retryAfter || 60} segundos.`
+            `Limite de mensagens excedido. Aguarde ${rateLimitResult.retryAfter || 60} segundos.`,
+            {
+              code: 'RATE_LIMITED',
+              retryAfter: rateLimitResult.retryAfter || 60,
+              remaining: rateLimitResult.remaining,
+              reset: rateLimitResult.reset,
+            }
           );
         }
 

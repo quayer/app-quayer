@@ -39,9 +39,20 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { LazyAvatar } from '@/components/ui/lazy-avatar'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Sheet,
@@ -111,6 +122,8 @@ import {
   Play,
   Zap,
   Command,
+  Mic,
+  Download,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -119,7 +132,10 @@ import { ptBR } from 'date-fns/locale'
 import { useQuery, useMutation, useInfiniteQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
 import { AudioRecorder } from '@/components/chat/AudioRecorder'
+import { AIMessageInput } from '@/components/chat/AIMessageInput'
 import { useInstanceSSE } from '@/hooks/useInstanceSSE'
+import { useDebounce } from '@/hooks/useDebounce'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
 // Common emojis for quick access
 const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check', 'star', 'fire']
@@ -222,10 +238,12 @@ export default function ConversationsPage() {
   const [selectedInstanceFilter, setSelectedInstanceFilter] = useState<string>('all')
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [selectedChatInstanceId, setSelectedChatInstanceId] = useState<string | null>(null)
+  const [focusedChatIndex, setFocusedChatIndex] = useState<number>(-1) // Para navegação por teclado
 
   // Input state
   const [messageText, setMessageText] = useState('')
   const [searchText, setSearchText] = useState('')
+  const debouncedSearchText = useDebounce(searchText, 300) // 300ms debounce for search
   // Nova arquitetura: tab principal (IA/Atendente/Resolvidos) + filtro opcional de tipo
   const [mainTab, setMainTab] = useState<MainTab>('atendente') // Foco no que precisa de ação
   const [chatTypeFilter, setChatTypeFilter] = useState<ChatTypeFilter>('all')
@@ -248,6 +266,12 @@ export default function ConversationsPage() {
   const [messageSearchResults, setMessageSearchResults] = useState<number[]>([]) // indices of matching messages
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0)
 
+  // Estados para diálogos de confirmação de ações destrutivas
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false)
+  const [showBlockDialog, setShowBlockDialog] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [pendingBlockAction, setPendingBlockAction] = useState<{ chatId: string; block: boolean } | null>(null)
+
   // Optimistic messages for immediate UI feedback
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
 
@@ -256,6 +280,7 @@ export default function ConversationsPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
   const isInputFocusedRef = useRef(false)
   const previousScrollHeightRef = useRef<number>(0)
   const isNearBottomRef = useRef(true)
@@ -324,6 +349,7 @@ export default function ConversationsPage() {
     instanceId: sseInstanceId,
     enabled: !!sseInstanceId && isHydrated,
     autoInvalidate: true, // Auto-invalidate React Query on SSE events
+    selectedSessionId: selectedChatId ?? undefined, // Only invalidate messages for the selected chat
     onEvent: (event) => {
       // Handle specific events for optimistic message updates
       if (event.type === 'message.sent' && event.data?.waMessageId) {
@@ -342,7 +368,8 @@ export default function ConversationsPage() {
   })
 
   // Fetch chats for selected instance(s)
-  // Nova arquitetura: busca todos e filtra no cliente para ter contagens corretas
+  // OTIMIZADO: Usa endpoint unificado /api/v1/chats/all
+  // Uma única requisição busca chats de todas as instâncias
   const {
     data: chatsData,
     isLoading: chatsLoading,
@@ -350,48 +377,39 @@ export default function ConversationsPage() {
     isFetching: chatsFetching,
     refetch: refetchChats,
   } = useQuery({
-    queryKey: ['conversations', 'chats', instanceIdsToFetch],
+    queryKey: ['conversations', 'chats', 'all', instanceIdsToFetch],
     queryFn: async () => {
-      if (instanceIdsToFetch.length === 0) return { chats: [] }
+      if (instanceIdsToFetch.length === 0) {
+        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 } }
+      }
 
-      // Fetch chats from all selected instances in parallel
-      const results = await Promise.all(
-        instanceIdsToFetch.map(async (instanceId: string) => {
-          try {
-            const response = await api.chats.list.query({
-              query: {
-                instanceId,
-                limit: 100, // Busca mais para ter todos os dados
-                offset: 0,
-              }
-            })
-            const chats = (response as any)?.data?.chats ?? (response as any)?.chats ?? []
-            const instance = instances.find((i: Instance) => i.id === instanceId)
-            // Add instance info to each chat
-            return chats.map((chat: UAZChat) => ({
-              ...chat,
-              instanceId,
-              instanceName: instance?.name || 'Instancia',
-            }))
-          } catch (error) {
-            console.error(`Error fetching chats for instance ${instanceId}:`, error)
-            return []
+      try {
+        // Endpoint unificado - uma única requisição para todas as instâncias
+        const response = await api.chats.all.query({
+          query: {
+            instanceIds: instanceIdsToFetch,
+            limit: 100,
           }
         })
-      )
 
-      // Flatten and sort by timestamp (temporal - mais recente primeiro)
-      const allChats = results.flat().sort((a, b) =>
-        (b.wa_lastMsgTimestamp || 0) - (a.wa_lastMsgTimestamp || 0)
-      )
-
-      return { chats: allChats }
+        const data = (response as any)?.data ?? response
+        return {
+          chats: data?.chats ?? [],
+          counts: data?.counts ?? { ai: 0, human: 0, archived: 0, groups: 0 },
+          instances: data?.instances ?? [],
+          pagination: data?.pagination ?? { total: 0, limit: 100, hasMore: false },
+        }
+      } catch (error) {
+        console.error('[Conversations] Erro ao buscar chats:', error)
+        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 } }
+      }
     },
     enabled: instanceIdsToFetch.length > 0,
     // Reduce polling when SSE is connected (SSE handles real-time updates)
     refetchInterval: sseConnected ? false : CHAT_REFRESH_INTERVAL,
     refetchOnWindowFocus: false, // Disable to prevent constant updates
-    staleTime: 15000, // Cache for 15 seconds
+    staleTime: 60000, // Cache for 60 seconds (SSE garante real-time)
+    gcTime: 120000, // Manter em cache por 2 minutos
   })
 
   // Helper functions para categorizar chats
@@ -421,14 +439,27 @@ export default function ConversationsPage() {
   }, [])
 
   // Calculate tab counts
+  // OTIMIZADO: Usa contagens do servidor quando disponíveis
   const tabCounts = useMemo(() => {
+    const serverCounts = (chatsData as any)?.counts
     const data: UAZChat[] = (chatsData as any)?.chats ?? []
 
+    // Usar contagens do servidor se disponíveis (mais eficiente)
+    if (serverCounts) {
+      return {
+        ia: serverCounts.ai ?? 0,
+        atendente: serverCounts.human ?? 0,
+        resolvidos: serverCounts.archived ?? 0,
+        groups: serverCounts.groups ?? 0,
+        direct: (serverCounts.human + serverCounts.ai) - (serverCounts.groups ?? 0),
+      }
+    }
+
+    // Fallback para cálculo no cliente (compatibilidade)
     return {
       ia: data.filter(isAIActive).length,
       atendente: data.filter(isHumanAttending).length,
       resolvidos: data.filter(isResolved).length,
-      // Contagens extras para o filtro de tipo
       groups: data.filter(chat => chat.wa_isGroup && !isResolved(chat)).length,
       direct: data.filter(chat => !chat.wa_isGroup && !isResolved(chat)).length,
     }
@@ -459,9 +490,9 @@ export default function ConversationsPage() {
       filtered = filtered.filter(chat => chat.wa_isGroup)
     }
 
-    // 3. Filtrar por busca
-    if (searchText.trim()) {
-      const search = searchText.toLowerCase()
+    // 3. Filtrar por busca (usando valor debounced para evitar re-renders excessivos)
+    if (debouncedSearchText.trim()) {
+      const search = debouncedSearchText.toLowerCase()
       filtered = filtered.filter(chat =>
         chat.wa_name?.toLowerCase().includes(search) ||
         chat.wa_chatid.toLowerCase().includes(search) ||
@@ -470,7 +501,16 @@ export default function ConversationsPage() {
     }
 
     return filtered
-  }, [chatsData, mainTab, chatTypeFilter, searchText, isAIActive, isHumanAttending, isResolved])
+  }, [chatsData, mainTab, chatTypeFilter, debouncedSearchText, isAIActive, isHumanAttending, isResolved])
+
+  // Virtualização da lista de chats para performance
+  const CHAT_ITEM_HEIGHT = 88 // altura estimada de cada item de chat em pixels
+  const chatListVirtualizer = useVirtualizer({
+    count: chats.length,
+    getScrollElement: () => chatListRef.current,
+    estimateSize: () => CHAT_ITEM_HEIGHT,
+    overscan: 5, // renderizar 5 itens extras acima/abaixo para scroll suave
+  })
 
   // Format count for display (99+ for large numbers)
   const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
@@ -547,7 +587,13 @@ export default function ConversationsPage() {
 
   // Handle scroll to load more messages (scroll to top = older messages)
   const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    // ScrollArea dispara eventos do viewport interno
     const target = e.target as HTMLDivElement
+
+    // Verificar se é o viewport do ScrollArea (não o wrapper)
+    if (!target.hasAttribute('data-radix-scroll-area-viewport')) {
+      return // Ignorar eventos do wrapper externo
+    }
 
     // Track if user is near bottom (within 150px) for smart auto-scroll
     const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
@@ -562,13 +608,33 @@ export default function ConversationsPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Restore scroll position after loading more messages
+  // Usa requestAnimationFrame para garantir que o DOM foi atualizado
   useEffect(() => {
     if (!isFetchingNextPage && previousScrollHeightRef.current > 0 && messagesContainerRef.current) {
-      const container = messagesContainerRef.current
-      const newScrollHeight = container.scrollHeight
-      const scrollDiff = newScrollHeight - previousScrollHeightRef.current
-      container.scrollTop = scrollDiff
-      previousScrollHeightRef.current = 0
+      const savedScrollHeight = previousScrollHeightRef.current
+      previousScrollHeightRef.current = 0 // Reset imediatamente para evitar re-execução
+
+      // Usar requestAnimationFrame para garantir que o DOM foi atualizado
+      requestAnimationFrame(() => {
+        if (messagesContainerRef.current) {
+          // ScrollArea usa um viewport interno - precisamos acessá-lo
+          const viewport = messagesContainerRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
+          const container = viewport || messagesContainerRef.current
+          const newScrollHeight = container.scrollHeight
+          const scrollDiff = newScrollHeight - savedScrollHeight
+
+          // Restaurar posição do scroll
+          container.scrollTop = scrollDiff
+
+          // Double-check com segundo frame para garantir estabilidade
+          requestAnimationFrame(() => {
+            const checkContainer = viewport || messagesContainerRef.current
+            if (checkContainer && checkContainer.scrollTop !== scrollDiff) {
+              checkContainer.scrollTop = scrollDiff
+            }
+          })
+        }
+      })
     }
   }, [isFetchingNextPage])
 
@@ -631,8 +697,7 @@ export default function ConversationsPage() {
   }, [])
 
   // Detect shortcut typing (e.g., /ola)
-  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value
+  const handleMessageChange = useCallback((value: string) => {
     setMessageText(value)
 
     // Detect shortcut pattern
@@ -789,9 +854,35 @@ export default function ConversationsPage() {
         prev.map(m => m.id === variables.tempId ? { ...m, status: 'failed' as const } : m)
       )
       console.error('[Conversations] Send message error:', error)
-      const errorMessage = error?.message || error?.data?.message || 'Erro ao enviar mensagem'
-      const errorDetails = error?.data?.error || error?.response?.data?.error || ''
-      toast.error(errorMessage, { description: errorDetails || undefined })
+
+      // Extrair código de erro para mensagens específicas
+      const errorCode = error?.data?.code || error?.code
+      let errorMessage = 'Erro ao enviar mensagem'
+      let errorDescription = ''
+
+      switch (errorCode) {
+        case 'INSTANCE_DISCONNECTED':
+          errorMessage = 'WhatsApp desconectado'
+          errorDescription = 'Reconecte a instância para enviar mensagens'
+          break
+        case 'RATE_LIMITED':
+          errorMessage = 'Limite de mensagens atingido'
+          errorDescription = 'Aguarde alguns segundos e tente novamente'
+          break
+        case 'SESSION_CLOSED':
+          errorMessage = 'Conversa encerrada'
+          errorDescription = 'Reabra a conversa para continuar'
+          break
+        case 'CIRCUIT_OPEN':
+          errorMessage = 'Serviço temporariamente indisponível'
+          errorDescription = 'Aguarde 30 segundos e tente novamente'
+          break
+        default:
+          errorMessage = error?.message || error?.data?.message || 'Falha ao enviar mensagem'
+          errorDescription = error?.data?.error || error?.response?.data?.error || ''
+      }
+
+      toast.error(errorMessage, { description: errorDescription || undefined })
     }
   })
 
@@ -828,7 +919,25 @@ export default function ConversationsPage() {
       setOptimisticMessages(prev =>
         prev.map(m => m.id === variables.tempId ? { ...m, status: 'failed' as const } : m)
       )
-      toast.error(error.message || 'Erro ao reenviar mensagem')
+      // Usar mesmo tratamento de erros do sendMessageMutation
+      const errorCode = error?.data?.code || error?.code
+      let errorMessage = 'Erro ao reenviar mensagem'
+
+      switch (errorCode) {
+        case 'INSTANCE_DISCONNECTED':
+          errorMessage = 'WhatsApp desconectado - reconecte para reenviar'
+          break
+        case 'RATE_LIMITED':
+          errorMessage = 'Limite atingido - aguarde e tente novamente'
+          break
+        case 'CIRCUIT_OPEN':
+          errorMessage = 'Serviço indisponível - aguarde 30s'
+          break
+        default:
+          errorMessage = error?.message || 'Erro ao reenviar mensagem'
+      }
+
+      toast.error(errorMessage)
     }
   })
 
@@ -981,6 +1090,11 @@ export default function ConversationsPage() {
     if (isMobile) {
       setIsChatsDrawerOpen(false)
     }
+
+    // Focus management: mover foco para o input de mensagem após selecionar chat
+    setTimeout(() => {
+      messageInputRef.current?.focus()
+    }, 100)
   }, [isMobile, markAsReadMutation])
 
   const handleSendMessage = useCallback(() => {
@@ -1007,6 +1121,9 @@ export default function ConversationsPage() {
       content: textToSend,
       tempId,
     })
+
+    // Manter foco no input após enviar
+    messageInputRef.current?.focus()
   }, [messageText, selectedChatId, sendMessageMutation])
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1032,7 +1149,9 @@ export default function ConversationsPage() {
   }, [])
 
   const handleSendFile = useCallback(async () => {
-    if (!selectedFile || !selectedChatInstanceId || !selectedChatId) return
+    // Use wa_chatid (WhatsApp chat ID) for UAZapi, not session UUID
+    const waChatId = selectedChat?.wa_chatid
+    if (!selectedFile || !selectedChatInstanceId || !waChatId) return
 
     setIsUploading(true)
 
@@ -1048,7 +1167,7 @@ export default function ConversationsPage() {
         await endpoint.mutate({
           body: {
             instanceId: selectedChatInstanceId,
-            chatId: selectedChatId,
+            chatId: waChatId, // Use WhatsApp chat ID, not session UUID
             mediaBase64: base64,
             mimeType: selectedFile.type,
             fileName: selectedFile.name,
@@ -1071,7 +1190,7 @@ export default function ConversationsPage() {
     } finally {
       setIsUploading(false)
     }
-  }, [selectedFile, selectedChatInstanceId, selectedChatId, messageText, refetchMessages])
+  }, [selectedFile, selectedChatInstanceId, selectedChat?.wa_chatid, messageText, refetchMessages])
 
   const handleCancelFile = useCallback(() => {
     setSelectedFile(null)
@@ -1081,13 +1200,15 @@ export default function ConversationsPage() {
 
   // Handle audio message
   const handleSendAudio = useCallback(async (audioBase64: string, mimeType: string, duration: number) => {
-    if (!selectedChatInstanceId || !selectedChatId) return
+    // Use wa_chatid (WhatsApp chat ID) for UAZapi, not session UUID
+    const waChatId = selectedChat?.wa_chatid
+    if (!selectedChatInstanceId || !waChatId) return
 
     try {
       await api.media.sendAudio.mutate({
         body: {
           instanceId: selectedChatInstanceId,
-          chatId: selectedChatId,
+          chatId: waChatId, // Use WhatsApp chat ID, not session UUID
           mediaBase64: audioBase64,
           mimeType: mimeType,
           duration: duration,
@@ -1101,7 +1222,7 @@ export default function ConversationsPage() {
       toast.error('Erro ao enviar audio', { description: error.message })
       throw error // Re-throw so AudioRecorder knows it failed
     }
-  }, [selectedChatInstanceId, selectedChatId, refetchMessages])
+  }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
 
   const handleManualRefresh = useCallback(async () => {
     await Promise.all([
@@ -1111,6 +1232,48 @@ export default function ConversationsPage() {
     ])
     toast.success('Dados atualizados')
   }, [refetchInstances, refetchChats, refetchMessages])
+
+  // Navegação por teclado na lista de chats (WCAG 2.1.1)
+  const handleChatListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (chats.length === 0) return
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setFocusedChatIndex(prev => {
+          const next = prev < chats.length - 1 ? prev + 1 : 0
+          // Scroll para o item focado
+          chatListVirtualizer.scrollToIndex(next, { align: 'auto' })
+          return next
+        })
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setFocusedChatIndex(prev => {
+          const next = prev > 0 ? prev - 1 : chats.length - 1
+          chatListVirtualizer.scrollToIndex(next, { align: 'auto' })
+          return next
+        })
+        break
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        if (focusedChatIndex >= 0 && focusedChatIndex < chats.length) {
+          handleSelectChat(chats[focusedChatIndex] as UAZChat)
+        }
+        break
+      case 'Home':
+        e.preventDefault()
+        setFocusedChatIndex(0)
+        chatListVirtualizer.scrollToIndex(0, { align: 'start' })
+        break
+      case 'End':
+        e.preventDefault()
+        setFocusedChatIndex(chats.length - 1)
+        chatListVirtualizer.scrollToIndex(chats.length - 1, { align: 'end' })
+        break
+    }
+  }, [chats, focusedChatIndex, handleSelectChat, chatListVirtualizer])
 
   // Reset scroll state when switching chats - always scroll to bottom on new chat
   useEffect(() => {
@@ -1307,9 +1470,28 @@ export default function ConversationsPage() {
 
         {/* Main tabs: IA | Atendente | Resolvidos - WCAG 2.1 compliant */}
         <div
-          className="grid grid-cols-3 gap-1 p-1 bg-muted/50 rounded-lg"
+          className="flex gap-1 p-1 bg-muted/50 rounded-lg"
           role="tablist"
           aria-label="Filtrar conversas por status"
+          onKeyDown={(e) => {
+            const tabs = MAIN_TABS.map(t => t.value)
+            const currentIndex = tabs.indexOf(mainTab)
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault()
+              const nextIndex = (currentIndex + 1) % tabs.length
+              setMainTab(tabs[nextIndex])
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length
+              setMainTab(tabs[prevIndex])
+            } else if (e.key === 'Home') {
+              e.preventDefault()
+              setMainTab(tabs[0])
+            } else if (e.key === 'End') {
+              e.preventDefault()
+              setMainTab(tabs[tabs.length - 1])
+            }
+          }}
         >
           {MAIN_TABS.map(tab => {
             const count = tabCounts[tab.value] ?? 0
@@ -1318,15 +1500,18 @@ export default function ConversationsPage() {
               <Tooltip key={tab.value}>
                 <TooltipTrigger asChild>
                   <Button
+                    id={`tab-${tab.value}`}
                     variant={isActive ? "secondary" : "ghost"}
                     role="tab"
+                    tabIndex={isActive ? 0 : -1}
                     aria-selected={isActive}
+                    aria-controls={`tabpanel-${tab.value}`}
                     aria-label={`${tab.label}: ${count} conversas. ${tab.description}`}
                     className={cn(
-                      // WCAG 2.1: min 44px height for touch targets
-                      "flex items-center justify-center gap-1.5 px-2 py-2 min-h-[44px] transition-all",
-                      // Focus ring for keyboard navigation
-                      "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-neutral-400",
+                      // Flex-1 para distribuir espaço igualmente
+                      "flex-1 flex items-center justify-center gap-1 px-2 py-2.5 min-h-[44px] transition-all",
+                      // Focus ring for keyboard navigation (WCAG 2.1)
+                      "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring",
                       // Active state styling
                       isActive && [
                         "shadow-sm",
@@ -1340,17 +1525,17 @@ export default function ConversationsPage() {
                     <tab.icon className={cn(
                       "h-4 w-4 flex-shrink-0",
                       isActive ? "" : tab.color
-                    )} />
-                    <span className="text-xs sm:text-sm font-medium truncate">{tab.label}</span>
+                    )} aria-hidden="true" />
+                    <span className="text-xs sm:text-sm font-medium whitespace-nowrap">{tab.label}</span>
                     <Badge
                       variant={isActive ? "default" : "secondary"}
                       className={cn(
-                        "h-5 min-w-5 px-1 text-[10px] font-semibold",
+                        "h-5 min-w-[20px] px-1.5 text-[10px] font-semibold flex-shrink-0",
                         isActive
                           ? tab.value === 'ia' ? "bg-purple-600 text-white" :
                             tab.value === 'atendente' ? "bg-blue-600 text-white" :
                             "bg-green-600 text-white"
-                          : "bg-muted-foreground/20 text-muted-foreground"
+                          : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
                       )}
                     >
                       {formatCount(count)}
@@ -1388,6 +1573,7 @@ export default function ConversationsPage() {
                 size="icon"
                 onClick={handleManualRefresh}
                 disabled={chatsFetching}
+                aria-label="Atualizar lista de conversas"
               >
                 <RefreshCw className={cn("h-4 w-4", chatsFetching && "animate-spin")} />
               </Button>
@@ -1397,59 +1583,95 @@ export default function ConversationsPage() {
         </div>
       </div>
 
-      {/* Chat list */}
-      <ScrollArea className="flex-1 min-h-0">
+      {/* Chat list - Virtualizado para performance */}
+      <div
+        id={`tabpanel-${mainTab}`}
+        ref={chatListRef}
+        className="flex-1 min-h-0 overflow-auto"
+        role="listbox"
+        aria-label={`Lista de conversas - ${mainTab === 'ia' ? 'IA ativa' : mainTab === 'atendente' ? 'Atendente' : 'Resolvidos'}`}
+        aria-labelledby={`tab-${mainTab}`}
+        tabIndex={0}
+        onKeyDown={handleChatListKeyDown}
+      >
         {chatsLoading ? (
-          <div className="p-4 space-y-3">
-            {[...Array(5)].map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
+          <div className="p-4 space-y-2" aria-busy="true" aria-label="Carregando conversas">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="flex items-center gap-3 p-2">
+                <Skeleton className="h-11 w-11 rounded-full flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+                <Skeleton className="h-3 w-10" />
+              </div>
             ))}
           </div>
         ) : chatsError ? (
           <div className="p-4 text-center">
-            <AlertCircle className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-            <p className="text-sm text-muted-foreground">Erro ao carregar conversas</p>
+            <AlertCircle className="h-8 w-8 mx-auto text-destructive mb-2" />
+            <p className="text-sm text-slate-600 dark:text-slate-300">Erro ao carregar conversas</p>
             <Button variant="link" size="sm" onClick={() => refetchChats()}>
               Tentar novamente
             </Button>
           </div>
         ) : chats.length === 0 ? (
           <div className="p-8 text-center">
-            <MessageCircle className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
-            <p className="text-muted-foreground">Nenhuma conversa encontrada</p>
-            <p className="text-sm text-muted-foreground/70 mt-1">
+            <MessageCircle className="h-12 w-12 mx-auto text-slate-400 dark:text-slate-500 mb-3" />
+            <p className="text-slate-600 dark:text-slate-300">Nenhuma conversa encontrada</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
               As conversas aparecerao aqui quando voce receber mensagens
             </p>
           </div>
         ) : (
-          <div className="divide-y">
-            {chats.map((chat: UAZChat) => {
+          <div
+            style={{
+              height: `${chatListVirtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {chatListVirtualizer.getVirtualItems().map((virtualItem) => {
+              const chat = chats[virtualItem.index] as UAZChat
               // Determinar nome para exibição
               const displayName = chat.wa_name || 'Contato'
               // Usar helper functions para categorização
               const chatIsAIActive = isAIActive(chat)
               const chatIsResolved = isResolved(chat)
 
+              const isSelected = selectedChatId === chat.id || selectedChatId === chat.wa_chatid
+              const isFocused = focusedChatIndex === virtualItem.index
+
               return (
                 <button
                   key={`${chat.instanceId}-${chat.wa_chatid}`}
                   onClick={() => handleSelectChat(chat)}
+                  role="option"
+                  aria-selected={isSelected}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualItem.size}px`,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
                   className={cn(
-                    "w-full p-3 text-left transition-colors hover:bg-muted/50",
-                    (selectedChatId === chat.id || selectedChatId === chat.wa_chatid) && "bg-muted"
+                    "w-full p-3 text-left transition-colors hover:bg-muted/50 border-b",
+                    isSelected && "bg-muted",
+                    isFocused && "ring-2 ring-primary ring-inset"
                   )}
                 >
                   <div className="flex items-start gap-3">
-                    <Avatar className="h-11 w-11 flex-shrink-0">
-                      <AvatarImage src={chat.wa_profilePicUrl || ''} />
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {chat.wa_isGroup ? (
-                          <Users className="h-5 w-5" />
-                        ) : (
-                          displayName[0]?.toUpperCase() || '?'
-                        )}
-                      </AvatarFallback>
-                    </Avatar>
+                    <LazyAvatar
+                      src={chat.wa_profilePicUrl}
+                      phoneNumber={chat.wa_chatid}
+                      instanceId={chat.instanceId}
+                      name={displayName}
+                      isGroup={chat.wa_isGroup}
+                      size="lg"
+                      className="flex-shrink-0"
+                    />
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -1485,7 +1707,7 @@ export default function ConversationsPage() {
                           )}
                         </div>
                         {chat.wa_lastMsgTimestamp && (
-                          <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                          <span className="text-xs text-slate-600 dark:text-slate-400 whitespace-nowrap flex-shrink-0">
                             {formatTimestamp(chat.wa_lastMsgTimestamp)}
                           </span>
                         )}
@@ -1493,19 +1715,19 @@ export default function ConversationsPage() {
 
                       {/* Número de telefone ou indicador de grupo */}
                       {!chat.wa_isGroup && chat.wa_phoneNumber && (
-                        <p className="text-xs text-muted-foreground/70 mb-0.5 truncate">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5 truncate">
                           {chat.wa_phoneNumber}
                         </p>
                       )}
                       {chat.wa_isGroup && (
-                        <p className="text-xs text-muted-foreground/70 mb-0.5 flex items-center gap-1">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5 flex items-center gap-1">
                           <Users className="h-3 w-3" />
                           Grupo
                         </p>
                       )}
 
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs text-muted-foreground truncate flex-1">
+                        <p className="text-xs text-slate-600 dark:text-slate-400 truncate flex-1">
                           {chat.wa_lastMsgBody || 'Sem mensagens'}
                         </p>
                         {chat.wa_unreadCount > 0 && (
@@ -1517,7 +1739,7 @@ export default function ConversationsPage() {
 
                       {/* Show instance name when viewing all */}
                       {selectedInstanceFilter === 'all' && chat.instanceName && (
-                        <p className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-1 truncate">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 truncate">
                           <Smartphone className="h-3 w-3 flex-shrink-0" />
                           {chat.instanceName}
                         </p>
@@ -1529,17 +1751,21 @@ export default function ConversationsPage() {
             })}
           </div>
         )}
-      </ScrollArea>
+      </div>
     </div>
   )
 
   // Messages Area Component
   const MessagesArea = () => (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div
+      className="flex flex-col h-full overflow-hidden"
+      role="region"
+      aria-label={selectedChat ? `Conversa com ${selectedChat.wa_name || 'Contato'}` : 'Selecione uma conversa'}
+    >
       {selectedChat ? (
         <>
           {/* Chat Header */}
-          <div className="p-4 border-b flex items-center justify-between bg-card flex-shrink-0">
+          <header className="p-4 border-b flex items-center justify-between bg-card flex-shrink-0" role="banner">
             <div className="flex items-center gap-3">
               {isMobile && (
                 <Button
@@ -1547,27 +1773,26 @@ export default function ConversationsPage() {
                   size="icon"
                   onClick={() => setIsChatsDrawerOpen(true)}
                   className="mr-1"
+                  aria-label="Voltar para lista de conversas"
                 >
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
               )}
 
-              <Avatar className="h-10 w-10">
-                <AvatarImage src={selectedChat.wa_profilePicUrl || ''} />
-                <AvatarFallback className="bg-primary/10 text-primary">
-                  {selectedChat.wa_isGroup ? (
-                    <Users className="h-5 w-5" />
-                  ) : (
-                    (selectedChat.wa_name || 'C')[0]?.toUpperCase()
-                  )}
-                </AvatarFallback>
-              </Avatar>
+              <LazyAvatar
+                src={selectedChat.wa_profilePicUrl}
+                phoneNumber={selectedChat.wa_chatid}
+                instanceId={selectedChat.instanceId}
+                name={selectedChat.wa_name}
+                isGroup={selectedChat.wa_isGroup}
+                size="md"
+              />
 
               <div className="min-w-0 flex-1">
                 <p className="font-medium truncate">
                   {selectedChat.wa_name || 'Contato'}
                 </p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1 truncate">
+                <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 truncate">
                   {selectedChat.wa_isGroup ? (
                     <>
                       <Users className="h-3 w-3 flex-shrink-0" />
@@ -1595,7 +1820,7 @@ export default function ConversationsPage() {
                     variant="outline"
                     className={cn(
                       "gap-1 mr-2 text-xs cursor-pointer",
-                      sseConnected ? "text-green-600 border-green-200" : "text-muted-foreground"
+                      sseConnected ? "text-green-600 border-green-200" : "text-slate-500 dark:text-slate-400"
                     )}
                     onClick={() => !sseConnected && sseReconnect()}
                   >
@@ -1632,6 +1857,8 @@ export default function ConversationsPage() {
                     size="icon"
                     className="h-8 w-8"
                     onClick={() => setShowMessageSearch(!showMessageSearch)}
+                    aria-label="Buscar na conversa"
+                    aria-pressed={showMessageSearch}
                   >
                     <Search className="h-4 w-4" />
                   </Button>
@@ -1647,6 +1874,8 @@ export default function ConversationsPage() {
                     size="sm"
                     className="gap-1.5"
                     onClick={() => setShowNotesPanel(!showNotesPanel)}
+                    aria-label={`Notas internas${notes.length > 0 ? ` (${notes.length})` : ''}`}
+                    aria-pressed={showNotesPanel}
                   >
                     <StickyNote className="h-4 w-4" />
                     <span className="hidden sm:inline">Notas</span>
@@ -1721,20 +1950,20 @@ export default function ConversationsPage() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" aria-label="Mais opções">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => archiveChatMutation.mutate(selectedChat.wa_chatid)}>
+                  <DropdownMenuItem onClick={() => setShowArchiveDialog(true)}>
                     <Archive className="h-4 w-4 mr-2" />
                     Arquivar conversa
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => blockContactMutation.mutate({
-                      chatId: selectedChat.wa_chatid,
-                      block: true
-                    })}
+                    onClick={() => {
+                      setPendingBlockAction({ chatId: selectedChat.wa_chatid, block: true })
+                      setShowBlockDialog(true)
+                    }}
                   >
                     <Ban className="h-4 w-4 mr-2" />
                     Bloquear contato
@@ -1747,10 +1976,7 @@ export default function ConversationsPage() {
                         toast.error('Esta conversa não possui sessão ativa no sistema')
                         return
                       }
-                      // Confirmar antes de apagar
-                      if (window.confirm('Tem certeza que deseja apagar esta conversa? Esta ação não pode ser desfeita.')) {
-                        deleteSessionMutation.mutate(selectedChat.id)
-                      }
+                      setShowDeleteDialog(true)
                     }}
                     disabled={deleteSessionMutation.isPending}
                   >
@@ -1764,7 +1990,7 @@ export default function ConversationsPage() {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-          </div>
+          </header>
 
           {/* Search panel */}
           {showMessageSearch && (
@@ -1790,7 +2016,7 @@ export default function ConversationsPage() {
               </div>
               {messageSearchResults.length > 0 && (
                 <div className="flex items-center gap-1">
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap" aria-live="polite">
                     {currentSearchIndex + 1} de {messageSearchResults.length}
                   </span>
                   <Button
@@ -1799,6 +2025,7 @@ export default function ConversationsPage() {
                     className="h-7 w-7"
                     onClick={goToPrevResult}
                     disabled={messageSearchResults.length <= 1}
+                    aria-label="Resultado anterior"
                   >
                     <ArrowLeft className="h-4 w-4 rotate-90" />
                   </Button>
@@ -1808,6 +2035,7 @@ export default function ConversationsPage() {
                     className="h-7 w-7"
                     onClick={goToNextResult}
                     disabled={messageSearchResults.length <= 1}
+                    aria-label="Próximo resultado"
                   >
                     <ArrowLeft className="h-4 w-4 -rotate-90" />
                   </Button>
@@ -1818,6 +2046,7 @@ export default function ConversationsPage() {
                 size="icon"
                 className="h-7 w-7"
                 onClick={closeMessageSearch}
+                aria-label="Fechar busca"
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -1826,9 +2055,14 @@ export default function ConversationsPage() {
 
           {/* Messages */}
           <ScrollArea
+            id="messages-area"
             className="flex-1 min-h-0 p-4"
             ref={messagesContainerRef}
             onScrollCapture={handleMessagesScroll}
+            role="log"
+            aria-label="Histórico de mensagens"
+            aria-live="polite"
+            aria-relevant="additions"
           >
             {/* Loading indicator for older messages */}
             {isFetchingNextPage && (
@@ -1855,17 +2089,33 @@ export default function ConversationsPage() {
             )}
 
             {messagesLoading ? (
-              <div className="space-y-4">
-                {[...Array(5)].map((_, i) => (
-                  <Skeleton key={i} className={cn("h-16", i % 2 === 0 ? "w-3/4" : "w-3/4 ml-auto")} />
-                ))}
+              <div className="space-y-3" aria-busy="true" aria-label="Carregando mensagens">
+                {[...Array(5)].map((_, i) => {
+                  const isOutbound = i % 2 === 1
+                  const widthClass = i === 0 ? 'w-2/3' : i === 2 ? 'w-1/2' : i === 4 ? 'w-3/5' : 'w-2/5'
+                  return (
+                    <div key={i} className={cn("flex", isOutbound && "justify-end")}>
+                      <div className={cn(
+                        "space-y-1.5",
+                        widthClass,
+                        isOutbound ? "items-end" : "items-start"
+                      )}>
+                        <Skeleton className={cn(
+                          "h-12 rounded-2xl",
+                          isOutbound ? "rounded-br-sm bg-emerald-200/30 dark:bg-emerald-900/30" : "rounded-bl-sm"
+                        )} />
+                        <Skeleton className="h-3 w-16" />
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             ) : messages.length === 0 ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center">
-                  <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
-                  <p className="text-muted-foreground">Nenhuma mensagem ainda</p>
-                  <p className="text-sm text-muted-foreground/70">Envie a primeira mensagem!</p>
+                  <MessageSquare className="h-12 w-12 mx-auto text-slate-400 dark:text-slate-500 mb-3" />
+                  <p className="text-slate-600 dark:text-slate-300">Nenhuma mensagem ainda</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Envie a primeira mensagem!</p>
                 </div>
               </div>
             ) : (
@@ -1901,16 +2151,25 @@ export default function ConversationsPage() {
                         message.direction === 'OUTBOUND' ? "justify-end" : "justify-start",
                         isCurrentMatch && "scale-[1.02]"
                       )}
+                      role={isFailed ? "alert" : undefined}
+                      aria-label={isFailed ? "Falha ao enviar mensagem" : undefined}
                     >
                       <div className="flex flex-col items-end gap-1">
+                        {/* Failed message indicator badge */}
+                        {isFailed && (
+                          <div className="flex items-center gap-1 text-destructive text-xs font-medium mb-1">
+                            <AlertCircle className="h-3.5 w-3.5" />
+                            <span>Falha no envio</span>
+                          </div>
+                        )}
                         <div
                           className={cn(
-                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-all",
+                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-all relative",
                             message.direction === 'OUTBOUND'
-                              ? "bg-primary text-primary-foreground rounded-br-md"
-                              : "bg-muted rounded-bl-md",
-                            // Failed messages get faded styling
-                            isFailed && "opacity-50 border-2 border-destructive/50",
+                              ? "bg-emerald-600 text-white rounded-br-md"
+                              : "bg-slate-100 dark:bg-slate-800 text-foreground rounded-bl-md border border-slate-200 dark:border-slate-700",
+                            // Failed messages get error styling
+                            isFailed && "bg-destructive/10 border-2 border-destructive text-destructive-foreground",
                             // Search highlight
                             isCurrentMatch && "ring-2 ring-yellow-400 ring-offset-2"
                           )}
@@ -1918,14 +2177,29 @@ export default function ConversationsPage() {
                           {/* Media content */}
                           {'mediaUrl' in message && message.mediaUrl && (
                             <div className="mb-2">
-                              {/* Image */}
+                              {/* Image with skeleton loading */}
                               {message.type === 'image' && (
-                                <img
-                                  src={message.mediaUrl}
-                                  alt="Imagem"
-                                  className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-opacity"
-                                  loading="lazy"
-                                />
+                                <div className="relative rounded-lg overflow-hidden bg-muted animate-pulse min-h-[100px] min-w-[100px]">
+                                  <img
+                                    src={message.mediaUrl}
+                                    alt={`Imagem ${message.direction === 'OUTBOUND' ? 'enviada' : 'recebida'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
+                                    className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-all duration-300"
+                                    loading="lazy"
+                                    onLoad={(e) => {
+                                      const parent = e.currentTarget.parentElement
+                                      if (parent) {
+                                        parent.classList.remove('animate-pulse', 'bg-muted', 'min-h-[100px]', 'min-w-[100px]')
+                                      }
+                                    }}
+                                    onError={(e) => {
+                                      const parent = e.currentTarget.parentElement
+                                      if (parent) {
+                                        parent.classList.remove('animate-pulse')
+                                        parent.classList.add('bg-destructive/10')
+                                      }
+                                    }}
+                                  />
+                                </div>
                               )}
                               {/* Video */}
                               {message.type === 'video' && (
@@ -1934,20 +2208,34 @@ export default function ConversationsPage() {
                                   controls
                                   preload="metadata"
                                   className="rounded-lg max-w-full max-h-64"
+                                  aria-label={`Vídeo ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
                                 >
                                   Seu navegador não suporta vídeo.
                                 </video>
                               )}
                               {/* Audio & Voice (PTT) */}
-                              {(message.type === 'audio' || message.type === 'voice') && (
-                                <audio
-                                  src={message.mediaUrl}
-                                  controls
-                                  preload="metadata"
-                                  className="w-full max-w-[240px] h-10"
-                                >
-                                  Seu navegador não suporta áudio.
-                                </audio>
+                              {(message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (
+                                <div className="flex items-center gap-2" role="group" aria-label="Mensagem de áudio">
+                                  <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                  <audio
+                                    src={message.mediaUrl}
+                                    controls
+                                    preload="metadata"
+                                    className="w-full max-w-[280px] h-12"
+                                    aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
+                                  >
+                                    Seu navegador não suporta áudio.
+                                  </audio>
+                                  <a
+                                    href={message.mediaUrl}
+                                    download
+                                    className="p-1.5 hover:bg-background/20 rounded transition-colors"
+                                    title="Baixar áudio"
+                                    aria-label="Baixar áudio"
+                                  >
+                                    <Download className="h-4 w-4" aria-hidden="true" />
+                                  </a>
+                                </div>
                               )}
                               {/* Document */}
                               {message.type === 'document' && (
@@ -1956,8 +2244,9 @@ export default function ConversationsPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 p-2 bg-background/20 rounded hover:bg-background/30 transition-colors"
+                                  aria-label={`Abrir documento: ${message.fileName || 'Documento'}`}
                                 >
-                                  <FileText className="h-8 w-8 flex-shrink-0" />
+                                  <FileText className="h-8 w-8 flex-shrink-0" aria-hidden="true" />
                                   <span className="text-sm truncate">{message.fileName || 'Documento'}</span>
                                 </a>
                               )}
@@ -1965,7 +2254,7 @@ export default function ConversationsPage() {
                               {message.type === 'sticker' && (
                                 <img
                                   src={message.mediaUrl}
-                                  alt="Sticker"
+                                  alt={`Sticker ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'}`}
                                   className="max-w-32 max-h-32"
                                   loading="lazy"
                                 />
@@ -1982,8 +2271,8 @@ export default function ConversationsPage() {
                           <div className={cn(
                             "flex items-center justify-end gap-1 mt-1",
                             message.direction === 'OUTBOUND'
-                              ? "text-primary-foreground/70"
-                              : "text-muted-foreground"
+                              ? "text-emerald-100"
+                              : "text-slate-600 dark:text-slate-300"
                           )}>
                             <span className="text-xs">
                               {formatTimestamp(message.createdAt)}
@@ -2027,8 +2316,9 @@ export default function ConversationsPage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                                  className="h-6 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-destructive"
                                   onClick={() => deleteOptimisticMessage(message.id)}
+                                  aria-label="Descartar mensagem"
                                 >
                                   <X className="h-3 w-3" />
                                 </Button>
@@ -2059,6 +2349,7 @@ export default function ConversationsPage() {
                   size="sm"
                   onClick={() => setShowNotesPanel(false)}
                   className="h-6 w-6 p-0"
+                  aria-label="Fechar painel de notas"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -2081,6 +2372,7 @@ export default function ConversationsPage() {
                   size="sm"
                   onClick={() => newNoteText.trim() && createNoteMutation.mutate(newNoteText.trim())}
                   disabled={!newNoteText.trim() || createNoteMutation.isPending}
+                  aria-label={createNoteMutation.isPending ? "Adicionando nota..." : "Adicionar nota"}
                 >
                   {createNoteMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -2093,10 +2385,10 @@ export default function ConversationsPage() {
               {/* Notes list */}
               {notesLoading ? (
                 <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
                 </div>
               ) : notes.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
+                <p className="text-sm text-slate-600 dark:text-slate-300 text-center py-4">
                   Nenhuma nota adicionada
                 </p>
               ) : (
@@ -2117,6 +2409,7 @@ export default function ConversationsPage() {
                             size="sm"
                             className="h-6 w-6 p-0"
                             onClick={() => togglePinMutation.mutate(note.id)}
+                            aria-label={note.isPinned ? "Desafixar nota" : "Fixar nota"}
                           >
                             {note.isPinned ? (
                               <PinOff className="h-3 w-3 text-amber-600" />
@@ -2129,12 +2422,13 @@ export default function ConversationsPage() {
                             size="sm"
                             className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
                             onClick={() => deleteNoteMutation.mutate(note.id)}
+                            aria-label="Excluir nota"
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                         <span>{note.author?.name || 'Agente'}</span>
                         <span>•</span>
                         <span>{format(new Date(note.createdAt), "dd/MM HH:mm")}</span>
@@ -2150,21 +2444,25 @@ export default function ConversationsPage() {
           <div className="p-4 border-t space-y-3 bg-card flex-shrink-0">
             {/* File Preview */}
             {selectedFile && (
-              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+              <div
+                className="flex items-center gap-3 p-3 bg-muted rounded-lg"
+                role="region"
+                aria-label={`Arquivo selecionado: ${selectedFile.name}`}
+              >
                 {filePreview ? (
-                  <img src={filePreview} alt="Preview" className="h-16 w-16 object-cover rounded" />
+                  <img src={filePreview} alt={`Preview do arquivo ${selectedFile?.name || 'selecionado'}`} className="h-16 w-16 object-cover rounded" />
                 ) : (
-                  <div className="h-16 w-16 flex items-center justify-center bg-background rounded">
+                  <div className="h-16 w-16 flex items-center justify-center bg-background rounded" aria-hidden="true">
                     <FileText className="h-8 w-8 text-muted-foreground" />
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{selectedFile.name}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
                     {(selectedFile.size / 1024).toFixed(2)} KB
                   </p>
                 </div>
-                <Button size="icon" variant="ghost" onClick={handleCancelFile} disabled={isUploading}>
+                <Button size="icon" variant="ghost" onClick={handleCancelFile} disabled={isUploading} aria-label="Remover arquivo selecionado">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
@@ -2177,6 +2475,8 @@ export default function ConversationsPage() {
               accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
               onChange={handleFileSelect}
               className="hidden"
+              aria-label="Selecionar arquivo para enviar"
+              aria-hidden="true"
             />
 
             {/* Message input bar */}
@@ -2184,7 +2484,7 @@ export default function ConversationsPage() {
               {/* Emoji picker */}
               <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" aria-label="Abrir seletor de emojis">
                     <Smile className="h-5 w-5" />
                   </Button>
                 </PopoverTrigger>
@@ -2210,7 +2510,7 @@ export default function ConversationsPage() {
               {/* Quick Replies button */}
               <Popover open={showQuickReplies} onOpenChange={setShowQuickReplies}>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" aria-label="Abrir respostas rápidas">
                     <Zap className="h-5 w-5" />
                   </Button>
                 </PopoverTrigger>
@@ -2226,17 +2526,17 @@ export default function ConversationsPage() {
                         autoFocus
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                       Digite / no chat para ativar atalhos
                     </p>
                   </div>
                   <ScrollArea className="max-h-64">
                     {quickRepliesLoading ? (
                       <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
                       </div>
                     ) : quickReplies.length === 0 ? (
-                      <div className="py-8 text-center text-muted-foreground text-sm">
+                      <div className="py-8 text-center text-slate-600 dark:text-slate-300 text-sm">
                         {quickReplySearch ? 'Nenhum atalho encontrado' : 'Nenhuma resposta rápida'}
                       </div>
                     ) : (
@@ -2253,7 +2553,7 @@ export default function ConversationsPage() {
                                 {qr.shortcut}
                               </Badge>
                             </div>
-                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
                               {qr.content}
                             </p>
                           </button>
@@ -2272,6 +2572,7 @@ export default function ConversationsPage() {
                     size="icon"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploading || !!selectedFile}
+                    aria-label="Anexar arquivo"
                   >
                     <Paperclip className="h-5 w-5" />
                   </Button>
@@ -2279,40 +2580,21 @@ export default function ConversationsPage() {
                 <TooltipContent>Anexar arquivo (max 16MB)</TooltipContent>
               </Tooltip>
 
-              {/* Message input with quick reply detection */}
-              <div className="relative flex-1">
-                <Input
-                  ref={messageInputRef}
-                  placeholder={selectedFile ? "Legenda (opcional)..." : "Digite / para atalhos ou mensagem..."}
+              {/* Message input com sugestões de IA e detecção de quick replies */}
+              <div id="message-input" className="relative flex-1">
+                <AIMessageInput
                   value={messageText}
                   onChange={handleMessageChange}
-                  onFocus={() => { isInputFocusedRef.current = true }}
-                  onBlur={() => { isInputFocusedRef.current = false }}
-                  onKeyDown={(e) => {
-                    // Handle quick reply selection with Enter
-                    if (e.key === 'Enter' && showQuickReplies && quickReplies.length > 0) {
-                      e.preventDefault()
-                      handleSelectQuickReply(quickReplies[0])
-                      return
-                    }
-                    // Handle Escape to close quick replies
-                    if (e.key === 'Escape' && showQuickReplies) {
-                      setShowQuickReplies(false)
-                      setQuickReplySearch('')
-                      return
-                    }
-                    // Normal message send
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      selectedFile ? handleSendFile() : handleSendMessage()
-                    }
-                  }}
-                  className="w-full"
+                  onSend={() => selectedFile ? handleSendFile() : handleSendMessage()}
+                  placeholder={selectedFile ? "Legenda (opcional)..." : "Digite / para atalhos ou mensagem..."}
                   disabled={isUploading || sendMessageMutation.isPending}
+                  aiEnabled={!messageText.startsWith('/') && !selectedFile} // Desabilitar IA quando usando quick replies ou com arquivo
+                  conversationContext={messages.slice(-5).map((m: any) => m.content || '').filter(Boolean)}
+                  className="w-full"
                 />
-                {/* Quick reply suggestions dropdown */}
+                {/* Quick reply suggestions dropdown - sobrepõe sugestões de IA */}
                 {showQuickReplies && quickReplies.length > 0 && messageText.startsWith('/') && (
-                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto">
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto z-50">
                     {quickReplies.slice(0, 5).map((qr: any, idx: number) => (
                       <button
                         key={qr.id}
@@ -2323,7 +2605,7 @@ export default function ConversationsPage() {
                         )}
                       >
                         <span className="truncate">{qr.title}</span>
-                        <span className="text-xs font-mono text-muted-foreground ml-2">{qr.shortcut}</span>
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 ml-2">{qr.shortcut}</span>
                       </button>
                     ))}
                   </div>
@@ -2348,6 +2630,7 @@ export default function ConversationsPage() {
                     (!selectedFile && !messageText.trim())
                   }
                   size="icon"
+                  aria-label={isUploading || sendMessageMutation.isPending ? "Enviando..." : "Enviar mensagem"}
                 >
                   {isUploading || sendMessageMutation.isPending ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -2362,9 +2645,9 @@ export default function ConversationsPage() {
       ) : (
         <div className="flex-1 flex items-center justify-center bg-muted/30">
           <div className="text-center p-8">
-            <MessageSquare className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
+            <MessageSquare className="h-16 w-16 mx-auto text-slate-400 dark:text-slate-500 mb-4" />
             <h3 className="text-lg font-medium mb-1">Selecione uma conversa</h3>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               Escolha uma conversa para comecar a enviar mensagens
             </p>
           </div>
@@ -2376,6 +2659,20 @@ export default function ConversationsPage() {
   // ==================== MAIN RENDER ====================
   return (
     <TooltipProvider>
+      {/* Skip links para acessibilidade */}
+      <a
+        href="#messages-area"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground focus:rounded"
+      >
+        Pular para mensagens
+      </a>
+      <a
+        href="#message-input"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground focus:rounded focus:top-8"
+      >
+        Pular para campo de mensagem
+      </a>
+
       <div className="h-[calc(100vh-5rem)] flex flex-col lg:flex-row gap-4 p-4" role="main" aria-label="Conversas WhatsApp">
         {/* Mobile Layout */}
         {isMobile ? (
@@ -2430,6 +2727,86 @@ export default function ConversationsPage() {
           </>
         )}
       </div>
+
+      {/* Diálogo de confirmação para arquivar */}
+      <AlertDialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Arquivar conversa</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja arquivar esta conversa? Ela será movida para os arquivados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (selectedChat?.wa_chatid) {
+                  archiveChatMutation.mutate(selectedChat.wa_chatid)
+                }
+                setShowArchiveDialog(false)
+              }}
+            >
+              Arquivar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Diálogo de confirmação para bloquear */}
+      <AlertDialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Bloquear contato</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja bloquear este contato? Você não receberá mais mensagens dele.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingBlockAction(null)}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (pendingBlockAction) {
+                  blockContactMutation.mutate(pendingBlockAction)
+                }
+                setPendingBlockAction(null)
+                setShowBlockDialog(false)
+              }}
+            >
+              Bloquear
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Diálogo de confirmação para apagar */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar conversa</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja apagar esta conversa? Esta ação não pode ser desfeita e todas as mensagens serão perdidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (selectedChat?.id) {
+                  deleteSessionMutation.mutate(selectedChat.id)
+                }
+                setShowDeleteDialog(false)
+              }}
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   )
 }

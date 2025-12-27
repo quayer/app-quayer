@@ -143,16 +143,16 @@ export class MessageConcatenator {
           where: { id: contactId },
           select: { phoneNumber: true, name: true },
         });
-        const instance = await database.instance.findUnique({
+        const connection = await database.connection.findUnique({
           where: { id: messages[0].connectionId },
           select: { organizationId: true },
         });
 
-        if (contact && instance?.organizationId) {
+        if (contact && connection?.organizationId) {
           const chatwootSync = await getChatwootSyncService();
           await chatwootSync.syncIncomingMessage({
             instanceId: messages[0].connectionId,
-            organizationId: instance.organizationId,
+            organizationId: connection.organizationId,
             phoneNumber: contact.phoneNumber,
             contactName: contact.name || contact.phoneNumber,
             messageContent: concatenatedText,

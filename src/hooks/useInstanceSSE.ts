@@ -34,6 +34,30 @@ export interface UseInstanceSSEOptions {
   onError?: (error: Event) => void
   /** Auto-invalidar queries do React Query ao receber eventos */
   autoInvalidate?: boolean
+  /** ID da sessão atualmente selecionada (para invalidações específicas) */
+  selectedSessionId?: string
+}
+
+/**
+ * Debounce simples para invalidações
+ */
+function createDebouncedInvalidator(delay: number = 500) {
+  const pending = new Map<string, NodeJS.Timeout>()
+
+  return {
+    invalidate: (key: string, fn: () => void) => {
+      const existing = pending.get(key)
+      if (existing) clearTimeout(existing)
+      pending.set(key, setTimeout(() => {
+        fn()
+        pending.delete(key)
+      }, delay))
+    },
+    cancel: () => {
+      pending.forEach(timeout => clearTimeout(timeout))
+      pending.clear()
+    }
+  }
 }
 
 /**
@@ -69,6 +93,7 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
     onDisconnect,
     onError,
     autoInvalidate = false,
+    selectedSessionId,
   } = options
 
   const [connected, setConnected] = useState(false)
@@ -76,6 +101,9 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
   const [error, setError] = useState<Error | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const queryClient = useQueryClient()
+
+  // Debouncer para evitar cascata de invalidações
+  const invalidatorRef = useRef(createDebouncedInvalidator(500))
 
   // Determinar URL do SSE baseado nas opções
   const getSSEUrl = useCallback(() => {
@@ -94,7 +122,7 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
     return null
   }, [instanceId, organizationId, sessionId])
 
-  // Handler para eventos SSE
+  // Handler para eventos SSE com invalidações inteligentes e debounce
   const handleSSEEvent = useCallback(
     (eventType: SSEEventType, data: any) => {
       const event: SSEEvent = {
@@ -106,39 +134,113 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
       setEvents((prev) => [...prev.slice(-99), event]) // Keep last 100 events
       onEvent?.(event)
 
-      // Auto-invalidar queries relacionadas
+      // Auto-invalidar queries relacionadas COM DEBOUNCE
       if (autoInvalidate) {
+        const invalidator = invalidatorRef.current
+        const eventSessionId = data?.sessionId || data?.session?.id
+
         switch (eventType) {
           case 'instance.status':
-            queryClient.invalidateQueries({ queryKey: ['all-instances'] })
-            queryClient.invalidateQueries({ queryKey: ['instance', instanceId] })
-            queryClient.invalidateQueries({ queryKey: ['conversations', 'instances'] })
+            // Debounce por instância
+            invalidator.invalidate(`instance-${instanceId}`, () => {
+              queryClient.invalidateQueries({ queryKey: ['all-instances'] })
+              queryClient.invalidateQueries({ queryKey: ['instance', instanceId] })
+              queryClient.invalidateQueries({ queryKey: ['conversations', 'instances'] })
+            })
             break
+
           case 'message.received':
           case 'message.sent':
-            // Invalidate both legacy and conversation page queryKeys
-            queryClient.invalidateQueries({ queryKey: ['messages'] })
-            queryClient.invalidateQueries({ queryKey: ['sessions'] })
-            queryClient.invalidateQueries({ queryKey: ['conversations', 'messages'] })
-            queryClient.invalidateQueries({ queryKey: ['conversations', 'chats'] })
+            // OTIMIZAÇÃO: Invalidar apenas a sessão específica se disponível
+            if (eventSessionId) {
+              // Se a mensagem é da sessão selecionada, invalidar mensagens
+              if (eventSessionId === selectedSessionId) {
+                invalidator.invalidate(`messages-${eventSessionId}`, () => {
+                  queryClient.invalidateQueries({
+                    queryKey: ['conversations', 'messages', eventSessionId],
+                  })
+                })
+              }
+              // Atualizar lista de chats de forma otimista (mover para o topo)
+              invalidator.invalidate('chats-list', () => {
+                queryClient.invalidateQueries({
+                  queryKey: ['conversations', 'chats'],
+                  // Não forçar refetch imediato, deixar staleTime funcionar
+                  refetchType: 'active',
+                })
+              })
+            } else {
+              // Fallback: invalidar tudo se não temos sessionId
+              invalidator.invalidate('messages-all', () => {
+                queryClient.invalidateQueries({ queryKey: ['messages'] })
+                queryClient.invalidateQueries({ queryKey: ['conversations', 'messages'] })
+              })
+              invalidator.invalidate('chats-list', () => {
+                queryClient.invalidateQueries({
+                  queryKey: ['conversations', 'chats'],
+                  refetchType: 'active',
+                })
+              })
+            }
             break
+
           case 'session.updated':
           case 'session.labels.changed':
-            queryClient.invalidateQueries({ queryKey: ['sessions'] })
-            queryClient.invalidateQueries({ queryKey: ['conversations', 'chats'] })
+            // Debounce por tipo de evento
+            invalidator.invalidate('session-update', () => {
+              if (eventSessionId) {
+                queryClient.invalidateQueries({ queryKey: ['sessions', eventSessionId] })
+              }
+              queryClient.invalidateQueries({
+                queryKey: ['conversations', 'chats'],
+                refetchType: 'active',
+              })
+            })
             break
+
           case 'contact.updated':
           case 'contact.labels.changed':
-            queryClient.invalidateQueries({ queryKey: ['contacts'] })
+            invalidator.invalidate('contacts', () => {
+              queryClient.invalidateQueries({ queryKey: ['contacts'] })
+            })
             break
         }
       }
     },
-    [autoInvalidate, instanceId, onEvent, queryClient]
+    [autoInvalidate, instanceId, selectedSessionId, onEvent, queryClient]
   )
 
-  // Conectar ao SSE
+  // State para forçar reconexão
+  const [reconnectKey, setReconnectKey] = useState(0)
+
+  // Desconectar do SSE
+  const disconnect = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+      setConnected(false)
+    }
+  }, [])
+
+  // Reconectar - incrementa o key para forçar o useEffect a recriar a conexão
+  const reconnect = useCallback(() => {
+    disconnect()
+    setTimeout(() => setReconnectKey(k => k + 1), 1000)
+  }, [disconnect])
+
+  // Função connect mantida para API externa (deprecated, use reconnect instead)
   const connect = useCallback(() => {
+    setReconnectKey(k => k + 1)
+  }, [])
+
+  // Limpar eventos
+  const clearEvents = useCallback(() => {
+    setEvents([])
+  }, [])
+
+  // Effect para conectar/desconectar automaticamente
+  // Note: Using refs to avoid dependency issues with connect/disconnect
+  useEffect(() => {
     const url = getSSEUrl()
     if (!url || !enabled) return
 
@@ -200,39 +302,18 @@ export function useInstanceSSE(options: UseInstanceSSEOptions) {
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to connect SSE'))
     }
-  }, [getSSEUrl, enabled, onConnect, onError, onDisconnect, handleSSEEvent])
 
-  // Desconectar do SSE
-  const disconnect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
-      setConnected(false)
-      onDisconnect?.()
-    }
-  }, [onDisconnect])
-
-  // Reconectar
-  const reconnect = useCallback(() => {
-    disconnect()
-    setTimeout(connect, 1000)
-  }, [disconnect, connect])
-
-  // Limpar eventos
-  const clearEvents = useCallback(() => {
-    setEvents([])
-  }, [])
-
-  // Effect para conectar/desconectar automaticamente
-  useEffect(() => {
-    if (enabled && (instanceId || organizationId || sessionId)) {
-      connect()
-    }
-
+    // Cleanup: fechar conexão e cancelar debounces pendentes ao desmontar
     return () => {
-      disconnect()
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+        setConnected(false)
+      }
+      invalidatorRef.current.cancel()
     }
-  }, [instanceId, organizationId, sessionId, enabled, connect, disconnect])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId, organizationId, sessionId, enabled, reconnectKey])
 
   return {
     connected,
