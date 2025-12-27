@@ -422,7 +422,11 @@ export class UAZapiService {
 
         const response = await fetch(`${this.baseURL}${endpoint.path}`, {
           method: endpoint.method,
-          headers: { ...this.getHeaders(), 'token': instanceToken },
+          headers: {
+            'Content-Type': 'application/json',
+            'token': instanceToken,
+            'apikey': this.token, // Admin token também necessário para algumas APIs
+          },
           ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
         });
 
