@@ -188,8 +188,9 @@ export const chatsController = igniter.controller({
               console.log(`[ChatsController] Processando ${uazChats.length} chats em batch...`);
 
               // OTIMIZAÇÃO: Extrair todos os phoneNumbers primeiro
+              // UAZapi uses wa_chatid as the chat identifier
               const phoneNumbers = uazChats
-                .map(chat => chat.id || chat.id?._serialized || chat.chatId)
+                .map(chat => chat.wa_chatid || chat.chatId || chat.id)
                 .filter(Boolean) as string[];
 
               if (phoneNumbers.length === 0) return false;
@@ -207,11 +208,13 @@ export const chatsController = igniter.controller({
               const numbersToFetchPics: string[] = [];
 
               for (const chat of uazChats) {
-                const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                // UAZapi uses wa_chatid as the chat identifier
+                const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
                 if (!phoneNumber) continue;
 
                 const existingContact = contactsMap.get(phoneNumber);
-                let profilePicUrl = chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl || existingContact?.profilePicUrl || null;
+                // UAZapi uses imagePreview for profile pictures
+                let profilePicUrl = chat.imagePreview || chat.image || chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl || existingContact?.profilePicUrl || null;
 
                 // Se não tem foto, adicionar à lista para buscar depois
                 if (!profilePicUrl && !phoneNumber.includes('@g.us')) {
@@ -219,9 +222,9 @@ export const chatsController = igniter.controller({
                 }
 
                 const contactData = {
-                  name: chat.name || chat.formattedTitle || phoneNumber,
+                  name: chat.name || chat.wa_name || chat.formattedTitle || phoneNumber,
                   profilePicUrl,
-                  verifiedName: chat.pushname || chat.name,
+                  verifiedName: chat.wa_contactName || chat.pushname || chat.name,
                   isBusiness: chat.isBusiness || false
                 };
 
@@ -293,14 +296,16 @@ export const chatsController = igniter.controller({
               const sessionOrgId = instance.organizationId ?? undefined;
 
               for (const chat of uazChats) {
-                const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                // UAZapi uses wa_chatid as the chat identifier
+                const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
                 if (!phoneNumber) continue;
 
                 const contact = updatedContactsMap.get(phoneNumber);
                 if (!contact) continue;
 
-                const ts = Number(chat.lastMsgTimestamp);
-                const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
+                // UAZapi uses wa_lastMsgTimestamp (already in milliseconds)
+                const ts = Number(chat.wa_lastMsgTimestamp || chat.lastMsgTimestamp);
+                const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts) : new Date();
 
                 const existingSession = sessionsMap.get(contact.id);
                 if (existingSession) {
