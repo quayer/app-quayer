@@ -106,12 +106,43 @@ class CircuitBreaker {
   }
 }
 
-// Singleton circuit breaker for UAZapi
-const uazapiCircuitBreaker = new CircuitBreaker({
-  failureThreshold: 5,    // Open after 5 consecutive failures
-  successThreshold: 2,    // Close after 2 successes in half-open
-  timeout: 30000,         // Wait 30s before retrying
-});
+// Per-endpoint category circuit breakers
+// Each category has its own breaker to prevent cascading failures
+type EndpointCategory = 'instance' | 'message' | 'webhook' | 'chat' | 'profile' | 'default';
+
+const circuitBreakers: Record<EndpointCategory, CircuitBreaker> = {
+  instance: new CircuitBreaker({ failureThreshold: 5, successThreshold: 2, timeout: 30000 }),
+  message: new CircuitBreaker({ failureThreshold: 3, successThreshold: 2, timeout: 15000 }), // More sensitive for messages
+  webhook: new CircuitBreaker({ failureThreshold: 5, successThreshold: 2, timeout: 30000 }),
+  chat: new CircuitBreaker({ failureThreshold: 5, successThreshold: 2, timeout: 30000 }),
+  profile: new CircuitBreaker({ failureThreshold: 5, successThreshold: 2, timeout: 60000 }), // Longer timeout for profile ops
+  default: new CircuitBreaker({ failureThreshold: 5, successThreshold: 2, timeout: 30000 }),
+};
+
+/**
+ * Get the appropriate circuit breaker for a given endpoint path
+ */
+function getCircuitBreaker(path: string): CircuitBreaker {
+  if (path.includes('/instance') || path.includes('/connect') || path.includes('/disconnect')) {
+    return circuitBreakers.instance;
+  }
+  if (path.includes('/message') || path.includes('/send')) {
+    return circuitBreakers.message;
+  }
+  if (path.includes('/webhook') || path.includes('/globalwebhook')) {
+    return circuitBreakers.webhook;
+  }
+  if (path.includes('/chat') || path.includes('/chats')) {
+    return circuitBreakers.chat;
+  }
+  if (path.includes('/profile')) {
+    return circuitBreakers.profile;
+  }
+  return circuitBreakers.default;
+}
+
+// Legacy: Global circuit breaker for backwards compatibility
+const uazapiCircuitBreaker = circuitBreakers.default;
 
 // ============================================================================
 // CLIENT TYPES
@@ -156,14 +187,59 @@ export class UAZClient {
   }
 
   /**
-   * Get circuit breaker status
+   * Retry com backoff exponencial
+   * Tenta a operação até 3 vezes com delays crescentes (1s, 2s, 4s)
    */
-  getCircuitBreakerStatus() {
-    return uazapiCircuitBreaker.getStats();
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<T> {
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+
+        // Don't retry on client errors (4xx) or circuit open
+        if (
+          error.message?.includes('HTTP 4') ||
+          error.name === 'CircuitOpenError'
+        ) {
+          throw error;
+        }
+
+        // If not last attempt, wait before retry
+        if (attempt < maxRetries - 1) {
+          const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+          console.warn(`[UAZClient] Attempt ${attempt + 1} failed, retry in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    console.error(`[UAZClient] All ${maxRetries} attempts failed`);
+    throw lastError || new Error('All retry attempts failed');
   }
 
   /**
-   * Request genérico com Circuit Breaker
+   * Get all circuit breaker statuses
+   */
+  getCircuitBreakerStatus() {
+    return {
+      instance: circuitBreakers.instance.getStats(),
+      message: circuitBreakers.message.getStats(),
+      webhook: circuitBreakers.webhook.getStats(),
+      chat: circuitBreakers.chat.getStats(),
+      profile: circuitBreakers.profile.getStats(),
+      default: circuitBreakers.default.getStats(),
+    };
+  }
+
+  /**
+   * Request genérico com Circuit Breaker por categoria de endpoint
    */
   private async request<T = any>(
     method: string,
@@ -174,9 +250,12 @@ export class UAZClient {
       headers?: Record<string, string>;
     } = {}
   ): Promise<UAZResponse<T>> {
+    // Get circuit breaker for this endpoint category
+    const breaker = getCircuitBreaker(path);
+
     // Check circuit breaker
-    if (this.useCircuitBreaker && !uazapiCircuitBreaker.canRequest()) {
-      const stats = uazapiCircuitBreaker.getStats();
+    if (this.useCircuitBreaker && !breaker.canRequest()) {
+      const stats = breaker.getStats();
       throw new CircuitOpenError(stats.nextAttempt);
     }
 
@@ -212,14 +291,14 @@ export class UAZClient {
       if (!response.ok) {
         const error = new Error(data.error || data.message || `HTTP ${response.status}`);
         if (this.useCircuitBreaker) {
-          uazapiCircuitBreaker.recordFailure(error);
+          breaker.recordFailure(error);
         }
         throw error;
       }
 
       // Record success
       if (this.useCircuitBreaker) {
-        uazapiCircuitBreaker.recordSuccess();
+        breaker.recordSuccess();
       }
 
       return data;
@@ -227,12 +306,12 @@ export class UAZClient {
       if (error.name === 'AbortError') {
         const timeoutError = new Error(`Request timeout after ${this.timeout}ms`);
         if (this.useCircuitBreaker) {
-          uazapiCircuitBreaker.recordFailure(timeoutError);
+          breaker.recordFailure(timeoutError);
         }
         throw timeoutError;
       }
       if (this.useCircuitBreaker && error.name !== 'CircuitOpenError') {
-        uazapiCircuitBreaker.recordFailure(error);
+        breaker.recordFailure(error);
       }
       throw error;
     }
@@ -387,42 +466,45 @@ export class UAZClient {
     text: string;
     delay?: number;
   }) {
-    // Try multiple endpoint formats for compatibility with different UAZapi versions
-    const endpoints = [
-      `/message/sendText/${instanceId}`,  // Evolution API v2
-      `/send/text`,                         // Legacy format
-      `/sendText`,                          // Alternative
-      `/chat/sendText/${instanceId}`,      // Another common format
-    ];
+    // Use withRetry for resilience
+    return this.withRetry(async () => {
+      // Try multiple endpoint formats for compatibility with different UAZapi versions
+      const endpoints = [
+        `/message/sendText/${instanceId}`,  // Evolution API v2
+        `/send/text`,                         // Legacy format
+        `/sendText`,                          // Alternative
+        `/chat/sendText/${instanceId}`,      // Another common format
+      ];
 
-    let lastError: any = null;
+      let lastError: any = null;
 
-    for (const endpoint of endpoints) {
-      try {
-        console.log(`[UAZClient] Trying endpoint: ${endpoint}`);
-        return await this.request('POST', endpoint, {
-          token,
-          body: {
-            number: data.number,
-            text: data.text,
-            delay: data.delay,
-          },
-        });
-      } catch (error: any) {
-        lastError = error;
-        // If 404/405, try next endpoint
-        if (error.message?.includes('404') || error.message?.includes('405')) {
-          console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
-          continue;
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`[UAZClient] Trying endpoint: ${endpoint}`);
+          return await this.request('POST', endpoint, {
+            token,
+            body: {
+              number: data.number,
+              text: data.text,
+              delay: data.delay,
+            },
+          });
+        } catch (error: any) {
+          lastError = error;
+          // If 404/405, try next endpoint
+          if (error.message?.includes('404') || error.message?.includes('405')) {
+            console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
+            continue;
+          }
+          // For other errors, throw immediately
+          throw error;
         }
-        // For other errors, throw immediately
-        throw error;
       }
-    }
 
-    // If all endpoints failed, throw the last error
-    console.error('[UAZClient] All sendText endpoints failed');
-    throw lastError || new Error('All sendText endpoints failed');
+      // If all endpoints failed, throw the last error
+      console.error('[UAZClient] All sendText endpoints failed');
+      throw lastError || new Error('All sendText endpoints failed');
+    });
   }
 
   async sendMedia(instanceId: string, token: string, data: {
@@ -433,38 +515,41 @@ export class UAZClient {
     filename?: string;
     mimetype?: string;
   }) {
-    // Try multiple endpoint formats for compatibility with different UAZapi versions
-    const endpoints = [
-      `/message/sendMedia/${instanceId}`,  // Evolution API v2
-      `/send/media`,                        // Legacy format
-      `/sendMedia`,                         // Alternative
-      `/chat/sendMedia/${instanceId}`,     // Another common format
-    ];
+    // Use withRetry for resilience
+    return this.withRetry(async () => {
+      // Try multiple endpoint formats for compatibility with different UAZapi versions
+      const endpoints = [
+        `/message/sendMedia/${instanceId}`,  // Evolution API v2
+        `/send/media`,                        // Legacy format
+        `/sendMedia`,                         // Alternative
+        `/chat/sendMedia/${instanceId}`,     // Another common format
+      ];
 
-    let lastError: any = null;
+      let lastError: any = null;
 
-    for (const endpoint of endpoints) {
-      try {
-        console.log(`[UAZClient] Trying media endpoint: ${endpoint}`);
-        return await this.request('POST', endpoint, {
-          token,
-          body: data,
-        });
-      } catch (error: any) {
-        lastError = error;
-        // If 404/405, try next endpoint
-        if (error.message?.includes('404') || error.message?.includes('405')) {
-          console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
-          continue;
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`[UAZClient] Trying media endpoint: ${endpoint}`);
+          return await this.request('POST', endpoint, {
+            token,
+            body: data,
+          });
+        } catch (error: any) {
+          lastError = error;
+          // If 404/405, try next endpoint
+          if (error.message?.includes('404') || error.message?.includes('405')) {
+            console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
+            continue;
+          }
+          // For other errors, throw immediately
+          throw error;
         }
-        // For other errors, throw immediately
-        throw error;
       }
-    }
 
-    // If all endpoints failed, throw the last error
-    console.error('[UAZClient] All sendMedia endpoints failed');
-    throw lastError || new Error('All sendMedia endpoints failed');
+      // If all endpoints failed, throw the last error
+      console.error('[UAZClient] All sendMedia endpoints failed');
+      throw lastError || new Error('All sendMedia endpoints failed');
+    });
   }
 
   // ===== INSTANCE WEBHOOKS =====

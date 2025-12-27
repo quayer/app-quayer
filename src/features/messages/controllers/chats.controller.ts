@@ -36,7 +36,7 @@ export const chatsController = igniter.controller({
         const { instanceId } = query;
 
         // Buscar instância e verificar permissão
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: {
@@ -876,7 +876,7 @@ export const chatsController = igniter.controller({
 
         if (!instanceId) return response.badRequest('instanceId é obrigatório');
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: { users: { some: { userId } } },
@@ -925,7 +925,7 @@ export const chatsController = igniter.controller({
         const userId = context.auth?.session?.user?.id!;
         const body = request.body;
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: body.instanceId,
             organization: { users: { some: { userId } } },
@@ -958,7 +958,7 @@ export const chatsController = igniter.controller({
         const { chatId } = request.params as { chatId: string };
         const { instanceId } = request.body;
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: { users: { some: { userId } } },
@@ -1014,7 +1014,7 @@ export const chatsController = igniter.controller({
         const { chatId } = request.params as { chatId: string };
         const { instanceId } = request.body;
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: { users: { some: { userId } } },
@@ -1070,7 +1070,7 @@ export const chatsController = igniter.controller({
         const { chatId } = request.params as { chatId: string };
         const { instanceId } = request.body;
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: { users: { some: { userId } } },
@@ -1115,7 +1115,7 @@ export const chatsController = igniter.controller({
         const { chatId } = request.params as { chatId: string };
         const { instanceId, block } = request.body;
 
-        const instance = await database.instance.findFirst({
+        const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: { users: { some: { userId } } },

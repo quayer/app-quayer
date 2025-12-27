@@ -117,6 +117,41 @@ export class UAZService {
   }
 
   /**
+   * Retry com backoff exponencial
+   * Tenta a operação até 3 vezes com delays crescentes (1s, 2s, 4s)
+   */
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<T> {
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+
+        // Don't retry on client errors (4xx)
+        if (error.message?.includes('HTTP 4')) {
+          throw error;
+        }
+
+        // If not last attempt, wait before retry
+        if (attempt < maxRetries - 1) {
+          const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+          console.warn(`[UAZService] Attempt ${attempt + 1} failed, retry in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    console.error(`[UAZService] All ${maxRetries} attempts failed`);
+    throw lastError || new Error('All retry attempts failed');
+  }
+
+  /**
    * Fazer request para UAZ API
    */
   private async request<T>(
@@ -160,35 +195,61 @@ export class UAZService {
   /**
    * Enviar mensagem de texto
    * Tries Evolution API v2 format first, then falls back to legacy endpoint
+   * Uses retry with exponential backoff for resilience
    */
   async sendText(token: string, data: SendTextDto) {
-    // First try the legacy /send/text endpoint (most common)
-    try {
-      return await this.request('/send/text', token, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch (error: any) {
-      // If 404/405, the endpoint format may have changed
-      if (error.message?.includes('404') || error.message?.includes('405')) {
-        console.log('[UAZService] /send/text failed, trying alternative endpoint');
-        // Try Evolution API v2 style endpoint
-        return this.request('/message/sendText', token, {
-          method: 'POST',
-          body: JSON.stringify(data),
-        });
+    return this.withRetry(async () => {
+      // Try multiple endpoints for compatibility
+      const endpoints = ['/send/text', '/message/sendText'];
+      let lastError: any = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          return await this.request(endpoint, token, {
+            method: 'POST',
+            body: JSON.stringify(data),
+          });
+        } catch (error: any) {
+          lastError = error;
+          // If 404/405, try next endpoint
+          if (error.message?.includes('404') || error.message?.includes('405')) {
+            console.log(`[UAZService] ${endpoint} failed, trying next endpoint`);
+            continue;
+          }
+          throw error;
+        }
       }
-      throw error;
-    }
+
+      throw lastError || new Error('All sendText endpoints failed');
+    });
   }
 
   /**
    * Enviar mídia (imagem, vídeo, áudio, documento)
+   * Uses retry with exponential backoff for resilience
    */
   async sendMedia(token: string, data: SendMediaDto) {
-    return this.request('/send/media', token, {
-      method: 'POST',
-      body: JSON.stringify(data),
+    return this.withRetry(async () => {
+      const endpoints = ['/send/media', '/message/sendMedia'];
+      let lastError: any = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          return await this.request(endpoint, token, {
+            method: 'POST',
+            body: JSON.stringify(data),
+          });
+        } catch (error: any) {
+          lastError = error;
+          if (error.message?.includes('404') || error.message?.includes('405')) {
+            console.log(`[UAZService] ${endpoint} failed, trying next endpoint`);
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      throw lastError || new Error('All sendMedia endpoints failed');
     });
   }
 
