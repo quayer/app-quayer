@@ -482,32 +482,80 @@ export class UAZapiService {
   /**
    * @method findMessages
    * @description Busca mensagens de um chat
+   * Tenta múltiplos endpoints para compatibilidade com diferentes versões da API
    * @param {string} instanceToken - Token da instância
-   * @param {string} chatId - ID do chat
+   * @param {string} chatId - ID do chat (ex: 5511999999999@s.whatsapp.net)
    * @param {number} limit - Limite de mensagens
    * @returns {Promise<UAZapiResponse<any[]>>} Lista de mensagens
    */
   async findMessages(instanceToken: string, chatId: string, limit: number = 50): Promise<UAZapiResponse<any[]>> {
-    try {
-      // Tenta padrão POST /chat/findMessages (Evolution API)
-      const response = await fetch(`${this.baseURL}/chat/findMessages/${chatId}`, {
-        method: 'POST',
-        headers: { ...this.getHeaders(), 'token': instanceToken },
-        body: JSON.stringify({
-          count: limit,
-          limit: limit,
-          page: 1
-        })
-      })
+    // Lista de endpoints para tentar
+    const endpoints = [
+      { method: 'POST', path: '/message/find', body: { chatId, limit } },
+      { method: 'POST', path: '/chat/findMessages', body: { chatId, count: limit } },
+      { method: 'GET', path: `/chat/findMessages/${encodeURIComponent(chatId)}`, body: null },
+    ];
 
-      return await this.handleResponse(response)
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Erro desconhecido',
-        message: 'Falha ao buscar mensagens'
+    let lastError: string = '';
+
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[UAZapi.findMessages] Trying ${endpoint.method} ${endpoint.path}...`);
+
+        const response = await fetch(`${this.baseURL}${endpoint.path}`, {
+          method: endpoint.method,
+          headers: {
+            'Content-Type': 'application/json',
+            'token': instanceToken,
+            'apikey': this.token,
+          },
+          ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
+        });
+
+        console.log(`[UAZapi.findMessages] ${endpoint.path} status: ${response.status}`);
+
+        if (response.ok) {
+          const result = await this.handleResponse<any>(response);
+          if (result.success) {
+            // Normalizar resposta - pode vir como { messages: [] } ou array direto
+            let messages = result.data;
+            if (!Array.isArray(messages) && messages?.messages) {
+              messages = messages.messages;
+            }
+            if (!Array.isArray(messages)) {
+              messages = [];
+            }
+            console.log(`[UAZapi.findMessages] Success! Found ${messages.length} messages via ${endpoint.path}`);
+            return {
+              success: true,
+              data: messages,
+              message: `Mensagens obtidas via ${endpoint.path}`
+            };
+          }
+        }
+
+        // Se 404 ou 405, tentar próximo endpoint
+        if (response.status === 404 || response.status === 405) {
+          console.log(`[UAZapi.findMessages] ${endpoint.path} returned ${response.status}, trying next...`);
+          continue;
+        }
+
+        const errorData = await response.json().catch(() => ({}));
+        lastError = errorData.message || `HTTP ${response.status}`;
+        console.warn(`[UAZapi.findMessages] ${endpoint.path} error: ${lastError}`);
+
+      } catch (error: any) {
+        lastError = error.message || 'Erro desconhecido';
+        console.warn(`[UAZapi.findMessages] ${endpoint.path} exception: ${lastError}`);
       }
     }
+
+    console.error(`[UAZapi.findMessages] All endpoints failed. Last error: ${lastError}`);
+    return {
+      success: false,
+      error: lastError || 'Todos os endpoints falharam',
+      message: 'Falha ao buscar mensagens - nenhum endpoint funcionou'
+    };
   }
 
   // ==================== CHAT OPERATIONS ====================
