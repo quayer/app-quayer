@@ -560,7 +560,120 @@ export const chatsController = igniter.controller({
           const instanceIds = instances.map(i => i.id);
           const instancesMap = new Map(instances.map(i => [i.id, i]));
 
-          // 2. Cache check
+          // 2. SYNC: Check if any connected instance needs sync (no sessions exist)
+          // This ensures chats appear on first load
+          const connectedInstances = instances.filter(i => i.status === ConnectionStatus.CONNECTED);
+          if (connectedInstances.length > 0) {
+            // Check if we have ANY sessions for these instances
+            const existingSessionCount = await database.chatSession.count({
+              where: { connectionId: { in: instanceIds } },
+            });
+
+            // If no sessions exist, run blocking sync for connected instances
+            if (existingSessionCount === 0) {
+              console.log('[ChatsController.all] No sessions found, running sync for connected instances...');
+
+              // Fetch uazapiTokens for connected instances
+              const instancesWithTokens = await database.connection.findMany({
+                where: {
+                  id: { in: connectedInstances.map(i => i.id) },
+                  uazapiToken: { not: null },
+                },
+                select: {
+                  id: true,
+                  organizationId: true,
+                  uazapiToken: true,
+                },
+              });
+
+              // Run sync for each instance (in parallel for performance)
+              await Promise.all(instancesWithTokens.map(async (inst) => {
+                if (!inst.uazapiToken || !inst.organizationId) return;
+
+                try {
+                  console.log(`[ChatsController.all] Syncing instance ${inst.id}...`);
+                  const uazChatsResponse = await uazapiService.findChats(inst.uazapiToken);
+                  const rawData = uazChatsResponse.data;
+                  const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
+
+                  if (!Array.isArray(uazChats) || uazChats.length === 0) return;
+
+                  // Extract phone numbers
+                  const phoneNumbers = uazChats
+                    .map(chat => chat.id || chat.id?._serialized || chat.chatId)
+                    .filter(Boolean) as string[];
+
+                  if (phoneNumbers.length === 0) return;
+
+                  // Get existing contacts
+                  const existingContacts = await database.contact.findMany({
+                    where: { phoneNumber: { in: phoneNumbers } },
+                    select: { id: true, phoneNumber: true },
+                  });
+                  const contactsMap = new Map(existingContacts.map(c => [c.phoneNumber, c]));
+
+                  // Create missing contacts
+                  const contactsToCreate: any[] = [];
+                  for (const chat of uazChats) {
+                    const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                    if (!phoneNumber || contactsMap.has(phoneNumber)) continue;
+
+                    contactsToCreate.push({
+                      phoneNumber,
+                      name: chat.name || chat.formattedTitle || phoneNumber,
+                      profilePicUrl: chat.imgUrl || chat.picUrl || null,
+                      verifiedName: chat.pushname || chat.name,
+                      isBusiness: chat.isBusiness || false,
+                      organizationId: inst.organizationId,
+                      source: inst.id,
+                    });
+                  }
+
+                  if (contactsToCreate.length > 0) {
+                    await database.contact.createMany({ data: contactsToCreate, skipDuplicates: true });
+                  }
+
+                  // Refetch all contacts
+                  const allContacts = await database.contact.findMany({
+                    where: { phoneNumber: { in: phoneNumbers } },
+                    select: { id: true, phoneNumber: true },
+                  });
+                  const updatedContactsMap = new Map(allContacts.map(c => [c.phoneNumber, c]));
+
+                  // Create sessions
+                  const sessionsToCreate: any[] = [];
+                  for (const chat of uazChats) {
+                    const phoneNumber = chat.id || chat.id?._serialized || chat.chatId;
+                    if (!phoneNumber) continue;
+
+                    const contact = updatedContactsMap.get(phoneNumber);
+                    if (!contact) continue;
+
+                    const ts = Number(chat.lastMsgTimestamp);
+                    const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts * 1000) : new Date();
+
+                    sessionsToCreate.push({
+                      connectionId: inst.id,
+                      contactId: contact.id,
+                      organizationId: inst.organizationId,
+                      status: 'ACTIVE',
+                      lastMessageAt,
+                      customerJourney: 'new',
+                    });
+                  }
+
+                  if (sessionsToCreate.length > 0) {
+                    await database.chatSession.createMany({ data: sessionsToCreate, skipDuplicates: true });
+                    console.log(`[ChatsController.all] Created ${sessionsToCreate.length} sessions for instance ${inst.id}`);
+                  }
+                } catch (err) {
+                  console.error(`[ChatsController.all] Sync failed for instance ${inst.id}:`, err);
+                }
+              }));
+            }
+          }
+
+          // 3. Cache check
           const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${query.cursor || '0'}:${query.limit || 50}`;
           try {
             const cached = await igniter.store.get<any>(cacheKey);
@@ -571,7 +684,7 @@ export const chatsController = igniter.controller({
             // Cache miss - continue
           }
 
-          // 3. Build filters for unified query
+          // 4. Build filters for unified query
           const now = new Date();
           const where: any = {
             connectionId: { in: instanceIds },
@@ -600,7 +713,7 @@ export const chatsController = igniter.controller({
             where.status = query.sessionStatus;
           }
 
-          // 4. Attendance type filter (more complex with multi-instance)
+          // 5. Attendance type filter (more complex with multi-instance)
           // For unified endpoint, we need to handle per-instance webhook status
           if (query.attendanceType === 'ai') {
             // Only instances with webhook can have AI sessions
@@ -653,7 +766,7 @@ export const chatsController = igniter.controller({
             where.status = { in: ['CLOSED', 'PAUSED'] };
           }
 
-          // 5. Pagination (cursor-based or offset-based)
+          // 6. Pagination (cursor-based or offset-based)
           const limit = query.limit || 50;
           let paginationOptions: any = {
             take: limit + 1, // Take one extra to check if there's more
@@ -669,7 +782,7 @@ export const chatsController = igniter.controller({
             paginationOptions.skip = query.offset;
           }
 
-          // 6. Fetch sessions with all necessary data
+          // 7. Fetch sessions with all necessary data
           const [sessions, totalCount] = await Promise.all([
             database.chatSession.findMany({
               where,
@@ -699,7 +812,7 @@ export const chatsController = igniter.controller({
           const resultSessions = hasMore ? sessions.slice(0, limit) : sessions;
           const nextCursor = hasMore ? resultSessions[resultSessions.length - 1]?.id : null;
 
-          // 7. Calculate counts for tabs (from ALL sessions matching base filters)
+          // 8. Calculate counts for tabs (from ALL sessions matching base filters)
           // We need counts without attendance type filter
           const baseWhere: any = { connectionId: { in: instanceIds } };
           if (query.search) {
@@ -752,7 +865,7 @@ export const chatsController = igniter.controller({
             }
           }
 
-          // 8. Map sessions to chat format with instance info
+          // 9. Map sessions to chat format with instance info
           const formatMessagePreview = (msg: any): string => {
             if (!msg) return '';
             if (msg.content && msg.content.trim()) return msg.content;
@@ -848,7 +961,7 @@ export const chatsController = igniter.controller({
             },
           };
 
-          // 9. Cache result
+          // 10. Cache result
           try {
             await igniter.store.set(cacheKey, result, { ttl: CHATS_CACHE_TTL });
           } catch {
