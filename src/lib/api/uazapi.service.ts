@@ -407,10 +407,12 @@ export class UAZapiService {
    */
   async findChats(instanceToken: string): Promise<UAZapiResponse<any[]>> {
     // Lista de endpoints para tentar (ordem de prioridade)
+    // IMPORTANT: POST /chat/find with empty body {} returns chats correctly
+    // Using count/limit/page parameters returns empty chats array
     const endpoints = [
-      { method: 'POST', path: '/chat/findChats', body: { count: 100, limit: 100, page: 1 } },
+      { method: 'POST', path: '/chat/find', body: {} }, // This works! Empty body returns all chats
+      { method: 'POST', path: '/chat/findChats', body: {} },
       { method: 'GET', path: '/chat/findChats', body: null },
-      { method: 'POST', path: '/chat/find', body: { count: 100, limit: 100, page: 1 } },
       { method: 'GET', path: '/chat/find', body: null },
     ];
 
