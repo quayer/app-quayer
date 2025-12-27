@@ -401,30 +401,76 @@ export class UAZapiService {
   /**
    * @method findChats
    * @description Busca chats da instância
+   * Tenta múltiplos endpoints para compatibilidade com diferentes versões da API
    * @param {string} instanceToken - Token da instância
    * @returns {Promise<UAZapiResponse<any[]>>} Lista de chats
    */
   async findChats(instanceToken: string): Promise<UAZapiResponse<any[]>> {
-    try {
-      // Tenta padrão POST /chat/find (Evolution API custom/v1.5)
-      const response = await fetch(`${this.baseURL}/chat/find`, {
-        method: 'POST',
-        headers: { ...this.getHeaders(), 'token': instanceToken },
-        body: JSON.stringify({
-          count: 100,
-          limit: 100,
-          page: 1
-        })
-      })
+    // Lista de endpoints para tentar (ordem de prioridade)
+    const endpoints = [
+      { method: 'POST', path: '/chat/findChats', body: { count: 100, limit: 100, page: 1 } },
+      { method: 'GET', path: '/chat/findChats', body: null },
+      { method: 'POST', path: '/chat/find', body: { count: 100, limit: 100, page: 1 } },
+      { method: 'GET', path: '/chat/find', body: null },
+    ];
 
-      return await this.handleResponse(response)
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Erro desconhecido',
-        message: 'Falha ao buscar chats'
+    let lastError: string = '';
+
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`[UAZapi.findChats] Trying ${endpoint.method} ${endpoint.path}...`);
+
+        const response = await fetch(`${this.baseURL}${endpoint.path}`, {
+          method: endpoint.method,
+          headers: { ...this.getHeaders(), 'token': instanceToken },
+          ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
+        });
+
+        console.log(`[UAZapi.findChats] ${endpoint.path} status: ${response.status}`);
+
+        if (response.ok) {
+          const result = await this.handleResponse<any[]>(response);
+          if (result.success) {
+            // Normalizar resposta - pode vir como array ou como { chats: [] }
+            let chats = result.data;
+            if (!Array.isArray(chats) && chats && Array.isArray((chats as any).chats)) {
+              chats = (chats as any).chats;
+            }
+            if (!Array.isArray(chats)) {
+              chats = [];
+            }
+            console.log(`[UAZapi.findChats] Success! Found ${chats.length} chats via ${endpoint.path}`);
+            return {
+              success: true,
+              data: chats,
+              message: `Chats obtidos via ${endpoint.path}`
+            };
+          }
+        }
+
+        // Se 404 ou 405, tentar próximo endpoint
+        if (response.status === 404 || response.status === 405) {
+          console.log(`[UAZapi.findChats] ${endpoint.path} returned ${response.status}, trying next...`);
+          continue;
+        }
+
+        // Outros erros - registrar mas continuar tentando
+        const errorData = await response.json().catch(() => ({}));
+        lastError = errorData.message || `HTTP ${response.status}`;
+        console.warn(`[UAZapi.findChats] ${endpoint.path} error: ${lastError}`);
+
+      } catch (error: any) {
+        lastError = error.message || 'Erro desconhecido';
+        console.warn(`[UAZapi.findChats] ${endpoint.path} exception: ${lastError}`);
       }
     }
+
+    console.error(`[UAZapi.findChats] All endpoints failed. Last error: ${lastError}`);
+    return {
+      success: false,
+      error: lastError || 'Todos os endpoints falharam',
+      message: 'Falha ao buscar chats - nenhum endpoint funcionou'
+    };
   }
 
   /**
