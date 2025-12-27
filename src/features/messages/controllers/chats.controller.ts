@@ -516,17 +516,30 @@ export const chatsController = igniter.controller({
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
         const userId = context.auth?.session?.user?.id!;
+        const user = context.auth?.session?.user;
+        const organizationId = user?.currentOrgId;
         const query = request.query as z.infer<typeof listAllChatsSchema>;
 
+        console.log('[ChatsController.all] Request:', { userId, organizationId, instanceIds: query.instanceIds });
+
         try {
-          // 1. Buscar todas as instâncias do usuário (ou filtrar pelas solicitadas)
-          const instanceFilter: any = {
-            organization: {
-              users: {
-                some: { userId },
-              },
-            },
-          };
+          // 1. Buscar todas as instâncias do usuário (usando organizationId como o endpoint de instances)
+          // CORREÇÃO: Usar organizationId diretamente em vez de relação indireta
+          const instanceFilter: any = {};
+
+          // Filtrar por organização do usuário
+          if (organizationId) {
+            instanceFilter.organizationId = organizationId;
+          } else {
+            // Se usuário não tem organização, não retorna nada (segurança)
+            console.warn('[ChatsController.all] User has no organizationId, returning empty');
+            return response.success({
+              chats: [],
+              instances: [],
+              pagination: { total: 0, limit: query.limit || 50, cursor: null, hasMore: false },
+              counts: { ai: 0, human: 0, archived: 0, groups: 0 },
+            });
+          }
 
           if (query.instanceIds && query.instanceIds.length > 0) {
             instanceFilter.id = { in: query.instanceIds };
@@ -542,6 +555,8 @@ export const chatsController = igniter.controller({
               status: true,
             },
           });
+
+          console.log('[ChatsController.all] Found instances:', instances.length, instances.map(i => ({ id: i.id, name: i.name, status: i.status })));
 
           if (instances.length === 0) {
             return response.success({
@@ -593,8 +608,24 @@ export const chatsController = igniter.controller({
                 try {
                   console.log(`[ChatsController.all] Syncing instance ${inst.id}...`);
                   const uazChatsResponse = await uazapiService.findChats(inst.uazapiToken);
+
+                  // Log response for debugging
+                  console.log(`[ChatsController.all] UAZapi response for ${inst.id}:`, {
+                    success: uazChatsResponse.success,
+                    hasData: !!uazChatsResponse.data,
+                    error: uazChatsResponse.error,
+                    dataType: typeof uazChatsResponse.data,
+                  });
+
+                  if (!uazChatsResponse.success) {
+                    console.error(`[ChatsController.all] findChats failed for ${inst.id}:`, uazChatsResponse.error);
+                    return;
+                  }
+
                   const rawData = uazChatsResponse.data;
                   const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
+
+                  console.log(`[ChatsController.all] Found ${uazChats.length} chats from UAZapi for instance ${inst.id}`);
 
                   if (!Array.isArray(uazChats) || uazChats.length === 0) return;
 
