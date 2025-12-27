@@ -2712,7 +2712,7 @@ export default function ConversationsPage() {
           /* Desktop Layout - 2 columns (chats + messages) */
           <>
             {/* Column 1: Chats with integrated instance filter */}
-            <Card className="w-96 flex-shrink-0 h-full overflow-hidden">
+            <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden">
               <CardContent className="p-0 h-full">
                 <ChatsList />
               </CardContent>

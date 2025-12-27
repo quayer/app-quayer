@@ -532,7 +532,7 @@ export const chatsController = igniter.controller({
             instanceFilter.id = { in: query.instanceIds };
           }
 
-          const instances = await database.instance.findMany({
+          const instances = await database.connection.findMany({
             where: instanceFilter,
             select: {
               id: true,
