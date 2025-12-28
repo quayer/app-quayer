@@ -297,14 +297,17 @@ export default function ConversationsPage() {
   }, [])
 
   // Restore focus after data refetch if user was typing
+  // Note: This effect intentionally has an empty dep array - it only needs to run once on mount
+  // The ref values are checked at runtime, not as dependencies
   useEffect(() => {
-    if (isInputFocusedRef.current && messageInputRef.current) {
-      // Small delay to ensure DOM is updated
-      requestAnimationFrame(() => {
+    const restoreFocus = () => {
+      if (isInputFocusedRef.current && messageInputRef.current) {
         messageInputRef.current?.focus()
-      })
+      }
     }
-  })
+    // Only restore focus on initial mount
+    restoreFocus()
+  }, [])
 
   // ==================== QUERIES ====================
 
@@ -506,16 +509,19 @@ export default function ConversationsPage() {
   // Virtualização da lista de chats para performance
   // Aumentamos a altura para acomodar casos onde há nome de instância mostrado
   const CHAT_ITEM_HEIGHT = 96 // altura estimada de cada item de chat em pixels (aumentado)
+
+  // Memoize getItemKey to prevent infinite re-renders
+  const getItemKey = useCallback((index: number) => {
+    const chat = chats[index] as any
+    return chat?.id || chat?.wa_chatid || `chat-${index}`
+  }, [chats])
+
   const chatListVirtualizer = useVirtualizer({
     count: chats.length,
     getScrollElement: () => chatListRef.current,
     estimateSize: () => CHAT_ITEM_HEIGHT,
     overscan: 8, // renderizar 8 itens extras acima/abaixo para scroll suave
-    // Manter identidade dos itens para evitar scroll jumping
-    getItemKey: (index) => {
-      const chat = chats[index] as any
-      return chat?.id || chat?.wa_chatid || `chat-${index}`
-    },
+    getItemKey,
   })
 
   // Format count for display (99+ for large numbers)
