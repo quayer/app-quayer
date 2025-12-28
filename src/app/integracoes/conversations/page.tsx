@@ -1331,6 +1331,27 @@ export default function ConversationsPage() {
 
   // ==================== HELPER FUNCTIONS ====================
 
+  /**
+   * Normaliza texto removendo caracteres Unicode problemáticos
+   * que causam espaçamentos estranhos em mensagens do WhatsApp
+   */
+  const normalizeTextContent = (text: string): string => {
+    if (!text) return ''
+    return text
+      // Substituir zero-width spaces e caracteres invisíveis
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      // Substituir non-breaking space por espaço normal
+      .replace(/\u00A0/g, ' ')
+      // Substituir múltiplos espaços consecutivos por um
+      .replace(/ {2,}/g, ' ')
+      // Remover espaços no início e fim de cada linha
+      .split('\n')
+      .map(line => line.trim())
+      .join('\n')
+      // Remover linhas vazias consecutivas (máximo 1 linha vazia)
+      .replace(/\n{3,}/g, '\n\n')
+  }
+
   const formatTimestamp = (timestamp: number | string) => {
     const date = typeof timestamp === 'number'
       ? new Date(timestamp > 9999999999 ? timestamp : timestamp * 1000)
@@ -2147,11 +2168,14 @@ export default function ConversationsPage() {
                   const isSearchMatch = messageSearchResults.includes(msgIndex)
                   const isCurrentMatch = messageSearchResults[currentSearchIndex] === msgIndex
 
-                  // Highlight search matches in content
+                  // Highlight search matches in content (after normalizing)
                   const highlightContent = (content: string) => {
-                    if (!messageSearchText || !isSearchMatch) return content
+                    // Primeiro normaliza o texto para remover caracteres problemáticos
+                    const normalizedContent = normalizeTextContent(content)
+
+                    if (!messageSearchText || !isSearchMatch) return normalizedContent
                     const regex = new RegExp(`(${messageSearchText})`, 'gi')
-                    const parts = content.split(regex)
+                    const parts = normalizedContent.split(regex)
                     return parts.map((part, i) =>
                       regex.test(part) ? (
                         <mark key={i} className="bg-yellow-300 dark:bg-yellow-600 rounded px-0.5">

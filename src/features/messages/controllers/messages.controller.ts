@@ -143,11 +143,17 @@ export const messagesController = igniter.controller({
           return response.forbidden('Acesso negado a esta sessão');
         }
 
-        // 3. VERIFICAR SE SESSÃO ESTÁ FECHADA
+        // 3. SE SESSÃO ESTÁ FECHADA, REABRIR AUTOMATICAMENTE
         if (session.status === 'CLOSED') {
-          return response.badRequest(
-            'Não é possível enviar mensagens para uma sessão fechada'
-          );
+          await database.chatSession.update({
+            where: { id: sessionId },
+            data: {
+              status: 'ACTIVE',
+              closedAt: null,
+              endReason: null,
+            },
+          });
+          console.log(`[MessagesController.create] Session ${sessionId} reopened automatically for message send`);
         }
 
         // 4. GERAR waMessageId único
