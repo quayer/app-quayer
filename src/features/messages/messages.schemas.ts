@@ -49,7 +49,16 @@ export const listChatsSchema = z.object({
 // Schema para listar chats de TODAS as instâncias (endpoint unificado)
 export const listAllChatsSchema = z.object({
   // Opcional: filtrar por instâncias específicas (se vazio, busca todas do usuário)
-  instanceIds: z.array(z.string().uuid()).optional(),
+  // Aceita tanto string única quanto array (query params podem vir como string)
+  instanceIds: z.preprocess(
+    (val) => {
+      if (val === undefined || val === null || val === '') return undefined;
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string') return val.split(',').map(s => s.trim()).filter(Boolean);
+      return undefined;
+    },
+    z.array(z.string().uuid()).optional()
+  ),
   limit: z.coerce.number().int().positive().max(100).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
   // Cursor-based pagination (mais eficiente que offset)
