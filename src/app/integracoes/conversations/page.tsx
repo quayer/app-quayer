@@ -504,12 +504,18 @@ export default function ConversationsPage() {
   }, [chatsData, mainTab, chatTypeFilter, debouncedSearchText, isAIActive, isHumanAttending, isResolved])
 
   // Virtualização da lista de chats para performance
-  const CHAT_ITEM_HEIGHT = 88 // altura estimada de cada item de chat em pixels
+  // Aumentamos a altura para acomodar casos onde há nome de instância mostrado
+  const CHAT_ITEM_HEIGHT = 96 // altura estimada de cada item de chat em pixels (aumentado)
   const chatListVirtualizer = useVirtualizer({
     count: chats.length,
     getScrollElement: () => chatListRef.current,
     estimateSize: () => CHAT_ITEM_HEIGHT,
-    overscan: 5, // renderizar 5 itens extras acima/abaixo para scroll suave
+    overscan: 8, // renderizar 8 itens extras acima/abaixo para scroll suave
+    // Manter identidade dos itens para evitar scroll jumping
+    getItemKey: (index) => {
+      const chat = chats[index] as any
+      return chat?.id || chat?.wa_chatid || `chat-${index}`
+    },
   })
 
   // Format count for display (99+ for large numbers)
@@ -1337,14 +1343,30 @@ export default function ConversationsPage() {
    */
   const normalizeTextContent = (text: string): string => {
     if (!text) return ''
-    return text
+
+    let normalized = text
       // Substituir zero-width spaces e caracteres invisíveis
       .replace(/[\u200B-\u200D\uFEFF]/g, '')
       // Substituir non-breaking space por espaço normal
       .replace(/\u00A0/g, ' ')
       // Substituir múltiplos espaços consecutivos por um
       .replace(/ {2,}/g, ' ')
-      // Remover espaços no início e fim de cada linha
+
+    // Detectar e corrigir texto "vertical" (ex: "T\nb\no\nm" → "Tbom")
+    // Se a maioria das linhas tem apenas 1-2 caracteres, provavelmente é texto quebrado
+    const lines = normalized.split('\n')
+    if (lines.length > 2) {
+      const shortLines = lines.filter(line => line.trim().length <= 2 && line.trim().length > 0)
+      const ratio = shortLines.length / lines.length
+
+      // Se mais de 60% das linhas são curtas (1-2 chars), juntar tudo
+      if (ratio > 0.6) {
+        normalized = lines.map(line => line.trim()).join('')
+      }
+    }
+
+    // Limpar linhas
+    return normalized
       .split('\n')
       .map(line => line.trim())
       .join('\n')
@@ -1697,7 +1719,7 @@ export default function ConversationsPage() {
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                   className={cn(
-                    "w-full p-3 text-left transition-colors hover:bg-muted/50 border-b",
+                    "w-full p-3 text-left transition-colors hover:bg-muted/50 border-b overflow-hidden",
                     isSelected && "bg-muted",
                     isFocused && "ring-2 ring-primary ring-inset"
                   )}
@@ -2207,7 +2229,7 @@ export default function ConversationsPage() {
                         )}
                         <div
                           className={cn(
-                            "max-w-[75%] rounded-2xl px-4 py-2 shadow-sm transition-all relative",
+                            "max-w-[75%] min-w-[60px] rounded-2xl px-4 py-2 shadow-sm transition-all relative",
                             message.direction === 'OUTBOUND'
                               ? "bg-emerald-600 text-white rounded-br-md"
                               : "bg-slate-100 dark:bg-slate-800 text-foreground rounded-bl-md border border-slate-200 dark:border-slate-700",

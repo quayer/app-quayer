@@ -469,35 +469,47 @@ export class UAZClient {
     // Use withRetry for resilience
     return this.withRetry(async () => {
       // Try multiple endpoint formats for compatibility with different UAZapi versions
+      // Based on working patterns: /chat/find, /message/find → /message/send should work
+      const bodyVariants = [
+        // UAZapi standard format
+        { number: data.number, text: data.text, delay: data.delay },
+        // Alternative with chatId (WhatsApp format)
+        { chatId: data.number.includes('@') ? data.number : `${data.number}@s.whatsapp.net`, text: data.text },
+        // Alternative with 'to' field
+        { to: data.number, text: data.text },
+        // Alternative with 'phone' field
+        { phone: data.number, message: data.text },
+      ];
+
       const endpoints = [
-        `/message/sendText/${instanceId}`,  // Evolution API v2
-        `/send/text`,                         // Legacy format
-        `/sendText`,                          // Alternative
-        `/chat/sendText/${instanceId}`,      // Another common format
+        `/message/send`,          // Standard UAZapi format (like /chat/find, /message/find)
+        `/send/text`,             // Legacy format
+        `/message/text`,          // Alternative
+        `/sendText`,              // Simple format
+        `/chat/send`,             // Chat-based
       ];
 
       let lastError: any = null;
 
+      // Try each endpoint with the first body variant
       for (const endpoint of endpoints) {
-        try {
-          console.log(`[UAZClient] Trying endpoint: ${endpoint}`);
-          return await this.request('POST', endpoint, {
-            token,
-            body: {
-              number: data.number,
-              text: data.text,
-              delay: data.delay,
-            },
-          });
-        } catch (error: any) {
-          lastError = error;
-          // If 404/405, try next endpoint
-          if (error.message?.includes('404') || error.message?.includes('405')) {
-            console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
-            continue;
+        for (const body of bodyVariants) {
+          try {
+            console.log(`[UAZClient] Trying: POST ${endpoint} with body:`, JSON.stringify(body));
+            return await this.request('POST', endpoint, {
+              token,
+              body,
+            });
+          } catch (error: any) {
+            lastError = error;
+            // If 404/405/400, try next combination
+            if (error.message?.includes('404') || error.message?.includes('405') || error.message?.includes('400')) {
+              console.log(`[UAZClient] ${endpoint} with body variant failed: ${error.message}`);
+              continue;
+            }
+            // For other errors, throw immediately
+            throw error;
           }
-          // For other errors, throw immediately
-          throw error;
         }
       }
 
