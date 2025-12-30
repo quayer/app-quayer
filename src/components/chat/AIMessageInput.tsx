@@ -54,25 +54,38 @@ export function AIMessageInput({
   // Mutation para buscar sugestoes
   const suggestionsMutation = useMutation({
     mutationFn: async (input: string) => {
-      // Check if AI endpoint exists
-      if (!(api as any).ai?.suggestions?.query) {
+      try {
+        // Chamar API de sugestões de IA
+        const response = await api.ai.suggestions.query({
+          query: {
+            input,
+            context: conversationContext.slice(-5).join('\n'),
+          }
+        })
+
+        // Extrair dados da resposta (pode vir em diferentes formatos do Igniter)
+        // Formato 1: { data: { data: [...] } }
+        // Formato 2: { data: [...] }
+        // Formato 3: [...]
+        const rawResponse = response as any
+        const data = rawResponse?.data?.data ?? rawResponse?.data ?? rawResponse ?? []
+
+        console.log('[AIMessageInput] Response:', { rawResponse, extractedData: data })
+
+        return Array.isArray(data) ? data as AISuggestion[] : []
+      } catch (error) {
+        console.error('[AIMessageInput] Error fetching suggestions:', error)
         return []
       }
-      const response = await (api as any).ai.suggestions.query({
-        query: {
-          input,
-          context: conversationContext.slice(-5).join('\n'),
-        }
-      })
-      return (response.data || []) as AISuggestion[]
     },
     onSuccess: (data) => {
       setSuggestions(data)
       setSelectedIndex(-1)
       setIsOpen(data.length > 0)
     },
-    onError: () => {
-      // Silencioso - nao mostra erro ao usuario
+    onError: (error) => {
+      // Log error mas não mostra ao usuário
+      console.error('[AIMessageInput] Mutation error:', error)
       setSuggestions([])
       setIsOpen(false)
     },
@@ -163,16 +176,36 @@ export function AIMessageInput({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               disabled={disabled}
-              className="pr-10"
+              className={cn(
+                "pr-10",
+                aiEnabled && value.length >= MIN_CHARS && "pr-12"
+              )}
             />
+            {/* Indicador de loading */}
             {suggestionsMutation.isPending && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
               </div>
             )}
+            {/* Indicador de IA ativa (quando não está carregando e tem texto suficiente) */}
             {aiEnabled && !suggestionsMutation.isPending && value.length >= MIN_CHARS && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                <Sparkles className="h-4 w-4 text-muted-foreground/50" />
+              <div
+                className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 cursor-help"
+                title="Sugestões de IA ativas - digite para ver completações"
+              >
+                <Sparkles className={cn(
+                  "h-4 w-4 transition-colors",
+                  suggestions.length > 0 ? "text-purple-500" : "text-muted-foreground/50"
+                )} />
+              </div>
+            )}
+            {/* Indicador quando IA está desabilitada mas há texto */}
+            {!aiEnabled && value.length >= MIN_CHARS && (
+              <div
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                title="Sugestões de IA desabilitadas"
+              >
+                <Sparkles className="h-4 w-4 text-muted-foreground/20" />
               </div>
             )}
           </div>
