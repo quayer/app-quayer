@@ -461,106 +461,103 @@ export class UAZClient {
   }
 
   // ===== MESSAGES =====
+  /**
+   * POST /send/text - Enviar mensagem de texto
+   *
+   * TESTADO E FUNCIONANDO:
+   * - Endpoint: POST /send/text
+   * - Body: { number: "5512996269235", text: "mensagem" }
+   * - Requer: header 'token' com token da instância
+   */
   async sendText(instanceId: string, token: string, data: {
     number: string;
     text: string;
     delay?: number;
   }) {
-    // Use withRetry for resilience
+    // Normalizar número (remover sufixo @s.whatsapp.net se presente)
+    const number = data.number.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+
+    console.log(`[UAZClient] Sending text to ${number} via POST /send/text`);
+
     return this.withRetry(async () => {
-      // Try multiple endpoint formats for compatibility with different UAZapi versions
-      // Based on working patterns: /chat/find, /message/find → /message/send should work
-      const bodyVariants = [
-        // UAZapi standard format
-        { number: data.number, text: data.text, delay: data.delay },
-        // Alternative with chatId (WhatsApp format)
-        { chatId: data.number.includes('@') ? data.number : `${data.number}@s.whatsapp.net`, text: data.text },
-        // Alternative with 'to' field
-        { to: data.number, text: data.text },
-        // Alternative with 'phone' field
-        { phone: data.number, message: data.text },
-      ];
-
-      const endpoints = [
-        `/message/send`,          // Standard UAZapi format (like /chat/find, /message/find)
-        `/send/text`,             // Legacy format
-        `/message/text`,          // Alternative
-        `/sendText`,              // Simple format
-        `/chat/send`,             // Chat-based
-      ];
-
-      let lastError: any = null;
-
-      // Try each endpoint with the first body variant
-      for (const endpoint of endpoints) {
-        for (const body of bodyVariants) {
-          try {
-            console.log(`[UAZClient] Trying: POST ${endpoint} with body:`, JSON.stringify(body));
-            return await this.request('POST', endpoint, {
-              token,
-              body,
-            });
-          } catch (error: any) {
-            lastError = error;
-            // If 404/405/400, try next combination
-            if (error.message?.includes('404') || error.message?.includes('405') || error.message?.includes('400')) {
-              console.log(`[UAZClient] ${endpoint} with body variant failed: ${error.message}`);
-              continue;
-            }
-            // For other errors, throw immediately
-            throw error;
-          }
-        }
-      }
-
-      // If all endpoints failed, throw the last error
-      console.error('[UAZClient] All sendText endpoints failed');
-      throw lastError || new Error('All sendText endpoints failed');
+      return await this.request('POST', '/send/text', {
+        token,
+        body: {
+          number,
+          text: data.text,
+          ...(data.delay && { delay: data.delay }),
+        },
+      });
     });
   }
 
+  /**
+   * POST /send/media - Enviar mídia (imagem, documento, áudio, vídeo)
+   *
+   * FORMATO DESCOBERTO VIA TESTES:
+   * - Use 'type' (não 'mediatype')
+   * - Use 'file' (não 'media')
+   * - Para documentos, incluir 'filename'
+   * - Para áudio PTT, usar type: 'ptt' ou type: 'audio' com ptt: true
+   *
+   * Tipos suportados:
+   * - image: Envia como ImageMessage
+   * - document: Envia como DocumentMessage (requer filename)
+   * - audio: Envia como AudioMessage
+   * - ptt: Envia como mensagem de voz (push-to-talk)
+   * - video: Envia como VideoMessage (requer MP4 válido)
+   */
   async sendMedia(instanceId: string, token: string, data: {
     number: string;
     mediatype: 'image' | 'video' | 'audio' | 'myaudio' | 'document';
-    media: string; // URL ou base64
+    media: string; // URL ou base64 (data URI)
     caption?: string;
     filename?: string;
     mimetype?: string;
+    ptt?: boolean;
   }) {
-    // Use withRetry for resilience
+    // Normalizar número
+    const number = data.number.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+
+    // Mapear mediatype para type (formato esperado pela UAZapi)
+    const typeMap: Record<string, string> = {
+      'image': 'image',
+      'video': 'video',
+      'audio': 'audio',
+      'myaudio': 'ptt',  // myaudio = mensagem de voz
+      'document': 'document',
+    };
+    const type = typeMap[data.mediatype] || data.mediatype;
+
+    // Montar body no formato correto
+    const body: Record<string, any> = {
+      number,
+      type,
+      file: data.media, // UAZapi espera 'file', não 'media'
+    };
+
+    // Adicionar caption se fornecido
+    if (data.caption) {
+      body.caption = data.caption;
+    }
+
+    // Para documentos, filename é obrigatório
+    if (type === 'document' && data.filename) {
+      body.filename = data.filename;
+    }
+
+    // Para áudio PTT
+    if ((type === 'audio' || type === 'ptt') && data.ptt) {
+      body.ptt = true;
+    }
+
+    console.log(`[UAZClient] Sending ${type} to ${number} via POST /send/media`);
+
     return this.withRetry(async () => {
-      // Try multiple endpoint formats for compatibility with different UAZapi versions
-      const endpoints = [
-        `/message/sendMedia/${instanceId}`,  // Evolution API v2
-        `/send/media`,                        // Legacy format
-        `/sendMedia`,                         // Alternative
-        `/chat/sendMedia/${instanceId}`,     // Another common format
-      ];
-
-      let lastError: any = null;
-
-      for (const endpoint of endpoints) {
-        try {
-          console.log(`[UAZClient] Trying media endpoint: ${endpoint}`);
-          return await this.request('POST', endpoint, {
-            token,
-            body: data,
-          });
-        } catch (error: any) {
-          lastError = error;
-          // If 404/405, try next endpoint
-          if (error.message?.includes('404') || error.message?.includes('405')) {
-            console.log(`[UAZClient] Endpoint ${endpoint} returned 404/405, trying next...`);
-            continue;
-          }
-          // For other errors, throw immediately
-          throw error;
-        }
-      }
-
-      // If all endpoints failed, throw the last error
-      console.error('[UAZClient] All sendMedia endpoints failed');
-      throw lastError || new Error('All sendMedia endpoints failed');
+      return await this.request('POST', '/send/media', {
+        token,
+        body,
+      });
     });
   }
 

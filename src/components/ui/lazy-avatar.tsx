@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { User, Users } from 'lucide-react'
@@ -43,12 +43,125 @@ const fallbackTextSizes = {
   xl: 'text-lg',
 }
 
+// ==================== GLOBAL THROTTLED FETCH QUEUE ====================
+// Sistema de fila com throttle para evitar muitas requisições simultâneas
+// Máximo de 3 requisições paralelas com delay de 100ms entre elas
+
+type QueueItem = {
+  key: string
+  instanceId: string
+  phoneNumber: string
+  resolve: (url: string | null) => void
+}
+
+const MAX_CONCURRENT_REQUESTS = 3
+const REQUEST_DELAY_MS = 100
+
+// Cache em memória (mais rápido que sessionStorage)
+const memoryCache = new Map<string, { url: string | null; timestamp: number }>()
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutos
+
+// Fila de requisições pendentes
+const fetchQueue: QueueItem[] = []
+let activeRequests = 0
+let isProcessing = false
+
+const processQueue = async () => {
+  if (isProcessing) return
+  isProcessing = true
+
+  while (fetchQueue.length > 0 && activeRequests < MAX_CONCURRENT_REQUESTS) {
+    const item = fetchQueue.shift()
+    if (!item) continue
+
+    // Verificar cache novamente (pode ter sido preenchido enquanto na fila)
+    const cached = memoryCache.get(item.key)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      item.resolve(cached.url)
+      continue
+    }
+
+    activeRequests++
+
+    // Fazer requisição com delay para não sobrecarregar
+    setTimeout(async () => {
+      try {
+        const cleanNumber = item.phoneNumber.replace(/@.*$/, '')
+        const response = await fetch(
+          `/api/v1/contacts/profile-picture?instanceId=${item.instanceId}&phoneNumber=${cleanNumber}`
+        )
+
+        if (!response.ok) {
+          memoryCache.set(item.key, { url: null, timestamp: Date.now() })
+          item.resolve(null)
+          return
+        }
+
+        const data = await response.json()
+        const url = data.data?.url || data.url || null
+
+        memoryCache.set(item.key, { url, timestamp: Date.now() })
+        item.resolve(url)
+      } catch {
+        memoryCache.set(item.key, { url: null, timestamp: Date.now() })
+        item.resolve(null)
+      } finally {
+        activeRequests--
+        // Continuar processando a fila
+        if (fetchQueue.length > 0) {
+          processQueue()
+        }
+      }
+    }, REQUEST_DELAY_MS)
+  }
+
+  isProcessing = false
+}
+
+const fetchProfilePicThrottled = (instanceId: string, phoneNumber: string): Promise<string | null> => {
+  const key = `avatar:${instanceId}:${phoneNumber}`
+
+  // Verificar cache primeiro
+  const cached = memoryCache.get(key)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return Promise.resolve(cached.url)
+  }
+
+  // Verificar sessionStorage (fallback para erros persistentes)
+  if (typeof window !== 'undefined') {
+    const sessionCached = sessionStorage.getItem(key)
+    if (sessionCached === 'error') {
+      return Promise.resolve(null)
+    }
+  }
+
+  // Adicionar à fila
+  return new Promise((resolve) => {
+    // Verificar se já está na fila
+    const existing = fetchQueue.find(item => item.key === key)
+    if (existing) {
+      // Já está na fila, adicionar callback
+      const originalResolve = existing.resolve
+      existing.resolve = (url) => {
+        originalResolve(url)
+        resolve(url)
+      }
+      return
+    }
+
+    fetchQueue.push({ key, instanceId, phoneNumber, resolve })
+    processQueue()
+  })
+}
+
 /**
  * LazyAvatar - Avatar component with lazy loading for profile pictures
  *
- * If src is provided, uses it directly.
- * If only phoneNumber and instanceId are provided, fetches from API.
- * Falls back to initials or icons.
+ * Features:
+ * - Throttled fetch queue to prevent too many simultaneous requests
+ * - Memory cache with TTL for fast access
+ * - SessionStorage fallback for persistent error states
+ * - Graceful fallback to initials or icons
  */
 export function LazyAvatar({
   src,
@@ -62,6 +175,15 @@ export function LazyAvatar({
   const [profilePicUrl, setProfilePicUrl] = useState<string | null>(src || null)
   const [hasError, setHasError] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const mountedRef = useRef(true)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   // Lazy load profile picture when we don't have src but have phoneNumber
   useEffect(() => {
@@ -73,59 +195,46 @@ export function LazyAvatar({
 
     if (!phoneNumber || !instanceId) return
 
-    // Check if we already tried and failed
+    // Check memory cache first
     const cacheKey = `avatar:${instanceId}:${phoneNumber}`
-    const cachedError = sessionStorage.getItem(cacheKey)
-    if (cachedError === 'error') {
-      setHasError(true)
+    const cached = memoryCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      if (cached.url) {
+        setProfilePicUrl(cached.url)
+      } else {
+        setHasError(true)
+      }
       return
     }
 
-    const fetchProfilePic = async () => {
-      setIsLoading(true)
-      try {
-        const cleanNumber = phoneNumber.replace(/@.*$/, '')
-        const response = await fetch(
-          `/api/v1/contacts/profile-picture?instanceId=${instanceId}&phoneNumber=${cleanNumber}`
-        )
-
-        if (!response.ok) {
-          sessionStorage.setItem(cacheKey, 'error')
-          setHasError(true)
-          return
-        }
-
-        const data = await response.json()
-        const url = data.data?.url || data.url || null
+    // Fetch via throttled queue
+    setIsLoading(true)
+    fetchProfilePicThrottled(instanceId, phoneNumber)
+      .then((url) => {
+        if (!mountedRef.current) return
 
         if (url) {
           setProfilePicUrl(url)
           setHasError(false)
         } else {
-          sessionStorage.setItem(cacheKey, 'error')
           setHasError(true)
         }
-      } catch {
-        sessionStorage.setItem(cacheKey, 'error')
-        setHasError(true)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchProfilePic()
+      })
+      .finally(() => {
+        if (mountedRef.current) {
+          setIsLoading(false)
+        }
+      })
   }, [src, phoneNumber, instanceId])
 
-  // Generate initials from name
-  const getInitials = () => {
+  // Generate initials from name - memoized
+  const initials = useMemo(() => {
     if (!name) return null
     const parts = name.trim().split(' ').filter(Boolean)
     if (parts.length === 0) return null
     if (parts.length === 1) return parts[0][0]?.toUpperCase() || null
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-  }
-
-  const initials = getInitials()
+  }, [name])
 
   return (
     <Avatar className={cn(sizeClasses[size], className)}>

@@ -37,6 +37,11 @@ export const mediaController = igniter.controller({
      * @action sendImage
      * @description Envia uma imagem para um chat
      * @route POST /api/v1/messages/media/image
+     *
+     * FORMATO UAZapi DESCOBERTO:
+     * - Usar 'type: image' (não 'mediatype')
+     * - Usar 'file' (não 'media')
+     * - Usar 'number' (não 'chatId')
      */
     sendImage: igniter.mutation({
       path: '/image',
@@ -45,55 +50,75 @@ export const mediaController = igniter.controller({
       body: sendMediaSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, caption } = request.body
+          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, caption } = request.body
 
-          // Buscar instância
-          const instance = await database.instance.findUnique({
+          // Buscar conexão (instância WhatsApp)
+          const connection = await database.connection.findUnique({
             where: { id: instanceId },
             select: { id: true, uazapiToken: true, status: true, organizationId: true }
           })
 
-          if (!instance) {
-            return response.notFound('Instância não encontrada')
+          if (!connection) {
+            return response.notFound('Conexão não encontrada')
           }
 
           // Verificar permissão de organização
           const orgId = context.auth?.session?.user?.currentOrgId
-          if (instance.organizationId !== orgId) {
-            return response.forbidden('Sem permissão para acessar esta instância')
+          if (connection.organizationId !== orgId) {
+            return response.forbidden('Sem permissão para acessar esta conexão')
           }
 
-          if (instance.status !== ConnectionStatus.CONNECTED) {
-            return response.badRequest('Instância não está conectada')
+          if (connection.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Conexão não está conectada')
           }
 
-          if (!instance.uazapiToken) {
+          if (!connection.uazapiToken) {
             return response.badRequest('Token UAZ não configurado')
           }
 
-          // Preparar payload para UAZapi
-          const payload: any = {
-            chatId,
-            caption: caption || ''
+          // Extrair número do chatId (remover @s.whatsapp.net ou @g.us)
+          const number = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '')
+
+          // Preparar payload no formato correto para UAZapi
+          // FORMATO: { number, type: 'image', file: 'data:mime;base64,...' }
+          const payload: Record<string, any> = {
+            number,
+            type: 'image',
           }
 
-          // Se tiver URL, usar URL, senão usar base64
+          // Adicionar arquivo como data URI
           if (mediaUrl) {
-            payload.mediaUrl = mediaUrl
+            payload.file = mediaUrl
           } else if (mediaBase64) {
-            payload.media = mediaBase64
+            // Garantir que está no formato data URI
+            const dataUri = mediaBase64.startsWith('data:')
+              ? mediaBase64
+              : `data:${mimeType || 'image/jpeg'};base64,${mediaBase64}`
+            payload.file = dataUri
           } else {
             return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
+          }
+
+          // Adicionar caption se fornecido
+          if (caption) {
+            payload.caption = caption
           }
 
           // Enviar para UAZapi
           const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
 
+          console.log('[MediaController] Sending image to UAZapi:', {
+            endpoint: `${UAZAPI_URL}/send/media`,
+            number,
+            type: 'image',
+            hasCaption: !!caption
+          })
+
           const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazapiToken
+              'token': connection.uazapiToken
             },
             body: JSON.stringify(payload)
           })
@@ -101,13 +126,18 @@ export const mediaController = igniter.controller({
           const uazData = await uazResponse.json()
 
           if (!uazResponse.ok) {
-            return response.badRequest(uazData.message || 'Erro ao enviar imagem')
+            console.error('[MediaController] UAZapi image error:', {
+              status: uazResponse.status,
+              data: uazData
+            })
+            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar imagem')
           }
 
           return response.success({
             data: {
               success: true,
-              messageId: uazData.messageId || uazData.id,
+              messageId: uazData.messageid || uazData.messageId || uazData.id,
+              messageType: uazData.messageType,
               message: 'Imagem enviada com sucesso',
               ...uazData
             }
@@ -124,6 +154,12 @@ export const mediaController = igniter.controller({
      * @action sendDocument
      * @description Envia um documento para um chat
      * @route POST /api/v1/messages/media/document
+     *
+     * FORMATO UAZapi DESCOBERTO:
+     * - Usar 'type: document'
+     * - Usar 'file' (não 'media')
+     * - Usar 'number' (não 'chatId')
+     * - Incluir 'filename' obrigatoriamente
      */
     sendDocument: igniter.mutation({
       path: '/document',
@@ -132,55 +168,75 @@ export const mediaController = igniter.controller({
       body: sendMediaSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, fileName, caption } = request.body
+          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, fileName, caption } = request.body
 
-          // Buscar instância
-          const instance = await database.instance.findUnique({
+          // Buscar conexão (instância WhatsApp)
+          const connection = await database.connection.findUnique({
             where: { id: instanceId },
             select: { id: true, uazapiToken: true, status: true, organizationId: true }
           })
 
-          if (!instance) {
-            return response.notFound('Instância não encontrada')
+          if (!connection) {
+            return response.notFound('Conexão não encontrada')
           }
 
           // Verificar permissão
           const orgId = context.auth?.session?.user?.currentOrgId
-          if (instance.organizationId !== orgId) {
-            return response.forbidden('Sem permissão para acessar esta instância')
+          if (connection.organizationId !== orgId) {
+            return response.forbidden('Sem permissão para acessar esta conexão')
           }
 
-          if (instance.status !== ConnectionStatus.CONNECTED) {
-            return response.badRequest('Instância não está conectada')
+          if (connection.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Conexão não está conectada')
           }
 
-          if (!instance.uazapiToken) {
+          if (!connection.uazapiToken) {
             return response.badRequest('Token UAZ não configurado')
           }
 
-          // Preparar payload
-          const payload: any = {
-            chatId,
-            caption: caption || '',
-            fileName: fileName || 'document.pdf'
+          // Extrair número do chatId
+          const number = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '')
+
+          // Preparar payload no formato correto para UAZapi
+          // FORMATO: { number, type: 'document', file: '...', filename: 'name.ext' }
+          const payload: Record<string, any> = {
+            number,
+            type: 'document',
+            filename: fileName || 'document.pdf',
           }
 
+          // Adicionar arquivo
           if (mediaUrl) {
-            payload.mediaUrl = mediaUrl
+            payload.file = mediaUrl
           } else if (mediaBase64) {
-            payload.media = mediaBase64
+            const dataUri = mediaBase64.startsWith('data:')
+              ? mediaBase64
+              : `data:${mimeType || 'application/octet-stream'};base64,${mediaBase64}`
+            payload.file = dataUri
           } else {
             return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
+          }
+
+          // Adicionar caption se fornecido
+          if (caption) {
+            payload.caption = caption
           }
 
           // Enviar para UAZapi
           const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
 
+          console.log('[MediaController] Sending document to UAZapi:', {
+            endpoint: `${UAZAPI_URL}/send/media`,
+            number,
+            type: 'document',
+            filename: payload.filename
+          })
+
           const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazapiToken
+              'token': connection.uazapiToken
             },
             body: JSON.stringify(payload)
           })
@@ -188,13 +244,18 @@ export const mediaController = igniter.controller({
           const uazData = await uazResponse.json()
 
           if (!uazResponse.ok) {
-            return response.badRequest(uazData.message || 'Erro ao enviar documento')
+            console.error('[MediaController] UAZapi document error:', {
+              status: uazResponse.status,
+              data: uazData
+            })
+            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar documento')
           }
 
           return response.success({
             data: {
               success: true,
-              messageId: uazData.messageId || uazData.id,
+              messageId: uazData.messageid || uazData.messageId || uazData.id,
+              messageType: uazData.messageType,
               message: 'Documento enviado com sucesso',
               ...uazData
             }
@@ -209,8 +270,14 @@ export const mediaController = igniter.controller({
 
     /**
      * @action sendAudio
-     * @description Envia um audio para um chat (voice message)
+     * @description Envia um audio para um chat (voice message / PTT)
      * @route POST /api/v1/messages/media/audio
+     *
+     * FORMATO UAZapi DESCOBERTO:
+     * - Usar 'type: ptt' para mensagem de voz (push-to-talk)
+     * - Usar 'type: audio' para arquivo de áudio normal
+     * - Usar 'file' (não 'media')
+     * - Usar 'number' (não 'chatId')
      */
     sendAudio: igniter.mutation({
       path: '/audio',
@@ -221,14 +288,14 @@ export const mediaController = igniter.controller({
         try {
           const { instanceId, chatId, mediaBase64, mimeType } = request.body
 
-          // Buscar instância
-          const instance = await database.instance.findUnique({
+          // Buscar conexão (instância WhatsApp)
+          const connection = await database.connection.findUnique({
             where: { id: instanceId },
             select: { id: true, uazapiToken: true, status: true, organizationId: true }
           })
 
-          if (!instance) {
-            return response.notFound('Instância não encontrada')
+          if (!connection) {
+            return response.notFound('Conexão não encontrada')
           }
 
           // Verificar permissão de organização
@@ -236,33 +303,41 @@ export const mediaController = igniter.controller({
           const isAdmin = user?.role === 'admin'
           const orgId = user?.currentOrgId
 
-          if (!isAdmin && instance.organizationId !== orgId) {
-            return response.forbidden('Sem permissão para acessar esta instância')
+          if (!isAdmin && connection.organizationId !== orgId) {
+            return response.forbidden('Sem permissão para acessar esta conexão')
           }
 
-          if (instance.status !== ConnectionStatus.CONNECTED) {
-            return response.badRequest('Instância não está conectada')
+          if (connection.status !== ConnectionStatus.CONNECTED) {
+            return response.badRequest('Conexão não está conectada')
           }
 
-          if (!instance.uazapiToken) {
+          if (!connection.uazapiToken) {
             return response.badRequest('Token UAZ não configurado')
           }
 
-          // Preparar payload para UAZapi
-          // UAZapi expects 'myaudio' mediatype for voice messages (PTT - Push To Talk)
-          // Format: chatId as-is (with @s.whatsapp.net or @g.us suffix)
+          // Extrair número do chatId
+          const number = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '')
+
+          // Preparar payload no formato correto para UAZapi
+          // FORMATO: { number, type: 'ptt', file: 'data:audio/...;base64,...' }
+          // Usar 'ptt' para mensagem de voz (push-to-talk) no WhatsApp
+          const dataUri = mediaBase64.startsWith('data:')
+            ? mediaBase64
+            : `data:${mimeType};base64,${mediaBase64}`
+
           const payload = {
-            chatId: chatId, // Use chatId directly like sendImage does
-            mediatype: 'myaudio', // 'myaudio' for voice message (PTT)
-            media: `data:${mimeType};base64,${mediaBase64}`,
+            number,
+            type: 'ptt', // Push-to-talk = mensagem de voz do WhatsApp
+            file: dataUri,
           }
 
-          // Enviar para UAZapi usando /send/media (mesmo endpoint do sendImage)
+          // Enviar para UAZapi
           const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
 
           console.log('[MediaController] Sending audio to UAZapi:', {
             endpoint: `${UAZAPI_URL}/send/media`,
-            chatId,
+            number,
+            type: 'ptt',
             mimeType,
             mediaLength: mediaBase64.length
           })
@@ -271,7 +346,7 @@ export const mediaController = igniter.controller({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazapiToken
+              'token': connection.uazapiToken
             },
             body: JSON.stringify(payload)
           })
@@ -283,13 +358,14 @@ export const mediaController = igniter.controller({
               status: uazResponse.status,
               data: uazData
             })
-            return response.badRequest(uazData.message || 'Erro ao enviar audio')
+            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar audio')
           }
 
           return response.success({
             data: {
               success: true,
-              messageId: uazData.messageId || uazData.id || uazData.key?.id,
+              messageId: uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id,
+              messageType: uazData.messageType,
               message: 'Audio enviado com sucesso',
               ...uazData
             }

@@ -394,9 +394,18 @@ export const contactsController = igniter.controller({
         }
 
         // Check if we already have it in the database
-        const contact = await database.contact.findUnique({
-          where: { phoneNumber: phoneNumber.replace(/@.*$/, '') },
-          select: { profilePicUrl: true },
+        // CORREÇÃO: phoneNumber no banco inclui sufixo @s.whatsapp.net
+        // Buscar por ambos os formatos (com e sem sufixo)
+        const cleanNumber = phoneNumber.replace(/@.*$/, '');
+        const contact = await database.contact.findFirst({
+          where: {
+            OR: [
+              { phoneNumber: cleanNumber },
+              { phoneNumber: `${cleanNumber}@s.whatsapp.net` },
+              { phoneNumber: { startsWith: cleanNumber } },
+            ],
+          },
+          select: { profilePicUrl: true, phoneNumber: true },
         });
 
         if (contact?.profilePicUrl) {
@@ -409,7 +418,8 @@ export const contactsController = igniter.controller({
         }
 
         // Fetch from WhatsApp API
-        const instance = await database.instance.findFirst({
+        // CORREÇÃO: Usar 'connection' (não 'instance' que não existe no Prisma)
+        const connection = await database.connection.findFirst({
           where: {
             id: instanceId,
             organization: {
@@ -419,7 +429,7 @@ export const contactsController = igniter.controller({
           select: { uazapiToken: true, status: true },
         });
 
-        if (!instance || instance.status !== ConnectionStatus.CONNECTED || !instance.uazapiToken) {
+        if (!connection || connection.status !== ConnectionStatus.CONNECTED || !connection.uazapiToken) {
           // Cache null result to avoid repeated API calls
           profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
           return response.success({ url: null, source: 'unavailable' });
@@ -428,13 +438,13 @@ export const contactsController = igniter.controller({
         try {
           // Fetch from UAZapi
           const baseUrl = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
-          const cleanNumber = phoneNumber.replace(/@.*$/, '');
+          // cleanNumber já foi declarado acima
 
           const apiResponse = await fetch(`${baseUrl}/profile/image/${cleanNumber}`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',
-              'token': instance.uazapiToken,
+              'token': connection.uazapiToken,
             },
           });
 
@@ -446,10 +456,16 @@ export const contactsController = igniter.controller({
           const data = await apiResponse.json();
           const profilePicUrl = data.profilePicUrl || data.url || data.data?.url || null;
 
-          // Update database
+          // Update database - usar o phoneNumber encontrado ou tentar ambos formatos
           if (profilePicUrl) {
             await database.contact.updateMany({
-              where: { phoneNumber: cleanNumber },
+              where: {
+                OR: [
+                  { phoneNumber: cleanNumber },
+                  { phoneNumber: `${cleanNumber}@s.whatsapp.net` },
+                  { phoneNumber: { startsWith: cleanNumber } },
+                ],
+              },
               data: { profilePicUrl },
             });
           }

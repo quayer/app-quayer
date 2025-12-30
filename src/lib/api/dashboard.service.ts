@@ -11,11 +11,12 @@
 import { UAZClient, UAZConfig } from '@/lib/uaz/uaz.client';
 import { logger } from '@/services/logger';
 
-// Configuração de retry e cache
+// Configuração de retry, cache e timeout
 const RETRY_CONFIG = {
   maxRetries: 3,
   retryDelay: 1000, // ms
   backoffMultiplier: 2,
+  timeout: 15000, // 🚀 15s timeout para evitar loading infinito
 };
 
 const CACHE_CONFIG = {
@@ -206,19 +207,34 @@ export class DashboardService {
 
     try {
       const result = await withRetry(async () => {
-        const response = await fetch(`${this.baseUrl}/chat/count`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            token: token,
-          },
-        });
+        // 🚀 TIMEOUT: AbortController para evitar loading infinito
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RETRY_CONFIG.timeout);
 
-        if (!response.ok) {
-          throw new Error(`Failed to fetch chat counts: ${response.statusText}`);
+        try {
+          const response = await fetch(`${this.baseUrl}/chat/count`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              token: token,
+            },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch chat counts: ${response.statusText}`);
+          }
+
+          return await response.json();
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error(`Timeout após ${RETRY_CONFIG.timeout}ms`);
+          }
+          throw error;
         }
-
-        return await response.json();
       }, 'getChatCounts');
 
       setCache(cacheKey, result);
@@ -265,26 +281,41 @@ export class DashboardService {
 
     try {
       const result = await withRetry(async () => {
-        const response = await fetch(`${this.baseUrl}/chat/find`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            token: token,
-          },
-          body: JSON.stringify({
-            operator: filters?.operator || 'AND',
-            sort: filters?.sort || '-wa_lastMsgTimestamp',
-            limit: effectiveLimit,
-            offset: filters?.offset || 0,
-            ...filters,
-          }),
-        });
+        // 🚀 TIMEOUT: AbortController para evitar loading infinito
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RETRY_CONFIG.timeout);
 
-        if (!response.ok) {
-          throw new Error(`Failed to find chats: ${response.statusText}`);
+        try {
+          const response = await fetch(`${this.baseUrl}/chat/find`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              token: token,
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+              operator: filters?.operator || 'AND',
+              sort: filters?.sort || '-wa_lastMsgTimestamp',
+              limit: effectiveLimit,
+              offset: filters?.offset || 0,
+              ...filters,
+            }),
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error(`Failed to find chats: ${response.statusText}`);
+          }
+
+          return await response.json();
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error(`Timeout após ${RETRY_CONFIG.timeout}ms`);
+          }
+          throw error;
         }
-
-        return await response.json();
       }, 'findChats');
 
       setCache(cacheKey, result);
@@ -326,24 +357,39 @@ export class DashboardService {
 
     try {
       const result = await withRetry(async () => {
-        const response = await fetch(`${this.baseUrl}/message/find`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            token: token,
-          },
-          body: JSON.stringify({
-            limit: effectiveLimit,
-            offset: filters?.offset || 0,
-            ...filters,
-          }),
-        });
+        // 🚀 TIMEOUT: AbortController para evitar loading infinito
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RETRY_CONFIG.timeout);
 
-        if (!response.ok) {
-          throw new Error(`Failed to find messages: ${response.statusText}`);
+        try {
+          const response = await fetch(`${this.baseUrl}/message/find`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              token: token,
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+              limit: effectiveLimit,
+              offset: filters?.offset || 0,
+              ...filters,
+            }),
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            throw new Error(`Failed to find messages: ${response.statusText}`);
+          }
+
+          return await response.json();
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error(`Timeout após ${RETRY_CONFIG.timeout}ms`);
+          }
+          throw error;
         }
-
-        return await response.json();
       }, 'findMessages');
 
       setCache(cacheKey, result);
@@ -361,14 +407,22 @@ export class DashboardService {
    * @param endDate - Data final para filtro (opcional)
    */
   async getAggregatedMetrics(
-    connections: Array<{ id: string; uazapiToken: string | null; status: string }>,
+    connections: Array<{ id: string; uazapiToken: string | null; status: string; provider?: string }>,
     startDate?: Date,
     endDate?: Date
   ): Promise<DashboardMetrics> {
-    // Filtrar apenas conexões conectadas
+    // Filtrar apenas conexões UAZapi conectadas
+    // 🚀 PROVIDER FILTER: Apenas UAZapi suporta estas APIs
+    // Cloud API não tem endpoint de listagem de chats/mensagens
     const connectedInstances = connections.filter(
-      (i) => i.status === 'CONNECTED' && i.uazapiToken
+      (i) => i.status === 'CONNECTED' &&
+             i.uazapiToken &&
+             i.provider !== 'WHATSAPP_CLOUD_API'
     );
+
+    if (connections.some(i => i.provider === 'WHATSAPP_CLOUD_API')) {
+      logger.info('[DashboardService] Cloud API connections detected - using local database for these');
+    }
 
     if (connectedInstances.length === 0) {
       return this.getEmptyMetrics();

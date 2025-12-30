@@ -124,6 +124,7 @@ import {
   Command,
   Mic,
   Download,
+  ChevronDown,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -285,6 +286,8 @@ export default function ConversationsPage() {
   const previousScrollHeightRef = useRef<number>(0)
   const isNearBottomRef = useRef(true)
   const previousMessageCountRef = useRef<number>(0)
+  const isFetchingRef = useRef(false) // Protege contra race conditions
+  const [hasUnseenMessages, setHasUnseenMessages] = useState(false) // Indicador de novas mensagens
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -370,28 +373,32 @@ export default function ConversationsPage() {
     },
   })
 
-  // Fetch chats for selected instance(s)
-  // OTIMIZADO: Usa endpoint unificado /api/v1/chats/all
-  // Uma única requisição busca chats de todas as instâncias
+  // Fetch chats for selected instance(s) with infinite scroll
+  // OTIMIZADO: Usa endpoint unificado /api/v1/chats/all com cursor-based pagination
+  const CHATS_PER_PAGE = 50
   const {
-    data: chatsData,
+    data: chatsInfiniteData,
     isLoading: chatsLoading,
     error: chatsError,
     isFetching: chatsFetching,
     refetch: refetchChats,
-  } = useQuery({
+    fetchNextPage: fetchNextChatsPage,
+    hasNextPage: hasMoreChats,
+    isFetchingNextPage: isFetchingMoreChats,
+  } = useInfiniteQuery({
     queryKey: ['conversations', 'chats', 'all', instanceIdsToFetch],
-    queryFn: async () => {
+    queryFn: async ({ pageParam }) => {
       if (instanceIdsToFetch.length === 0) {
-        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 } }
+        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 }, pagination: { hasMore: false } }
       }
 
       try {
-        // Endpoint unificado - uma única requisição para todas as instâncias
+        // Endpoint unificado com cursor-based pagination
         const response = await api.chats.all.query({
           query: {
             instanceIds: instanceIdsToFetch,
-            limit: 100,
+            limit: CHATS_PER_PAGE,
+            cursor: pageParam || undefined,
           }
         })
 
@@ -400,12 +407,20 @@ export default function ConversationsPage() {
           chats: data?.chats ?? [],
           counts: data?.counts ?? { ai: 0, human: 0, archived: 0, groups: 0 },
           instances: data?.instances ?? [],
-          pagination: data?.pagination ?? { total: 0, limit: 100, hasMore: false },
+          pagination: data?.pagination ?? { total: 0, limit: CHATS_PER_PAGE, hasMore: false, cursor: null },
         }
       } catch (error) {
         console.error('[Conversations] Erro ao buscar chats:', error)
-        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 } }
+        return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 }, pagination: { hasMore: false } }
       }
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => {
+      // Usar cursor do backend para próxima página
+      if (lastPage.pagination?.hasMore && lastPage.pagination?.cursor) {
+        return lastPage.pagination.cursor
+      }
+      return undefined
     },
     enabled: instanceIdsToFetch.length > 0,
     // Reduce polling when SSE is connected (SSE handles real-time updates)
@@ -414,6 +429,26 @@ export default function ConversationsPage() {
     staleTime: 60000, // Cache for 60 seconds (SSE garante real-time)
     gcTime: 120000, // Manter em cache por 2 minutos
   })
+
+  // Flatten infinite query pages into single chatsData object
+  const chatsData = useMemo(() => {
+    if (!chatsInfiniteData?.pages?.length) {
+      return { chats: [], counts: { ai: 0, human: 0, archived: 0, groups: 0 } }
+    }
+
+    // Merge all pages - use first page counts (most accurate)
+    const allChats: UAZChat[] = []
+    for (const page of chatsInfiniteData.pages) {
+      allChats.push(...(page.chats || []))
+    }
+
+    return {
+      chats: allChats,
+      counts: chatsInfiniteData.pages[0]?.counts ?? { ai: 0, human: 0, archived: 0, groups: 0 },
+      instances: chatsInfiniteData.pages[0]?.instances ?? [],
+      pagination: chatsInfiniteData.pages[chatsInfiniteData.pages.length - 1]?.pagination,
+    }
+  }, [chatsInfiniteData])
 
   // Helper functions para categorizar chats
   const isAIActive = useCallback((chat: UAZChat) => {
@@ -524,6 +559,30 @@ export default function ConversationsPage() {
     getItemKey,
   })
 
+  // Infinite scroll para chats - carregar mais quando chegar perto do final
+  useEffect(() => {
+    const virtualItems = chatListVirtualizer.getVirtualItems()
+    if (virtualItems.length === 0) return
+
+    const lastItem = virtualItems[virtualItems.length - 1]
+    // Se o último item visível está próximo do fim da lista (últimos 5 items)
+    if (
+      lastItem &&
+      lastItem.index >= chats.length - 5 &&
+      hasMoreChats &&
+      !isFetchingMoreChats
+    ) {
+      console.log('[Conversations] Loading more chats...')
+      fetchNextChatsPage()
+    }
+  }, [
+    chatListVirtualizer.getVirtualItems(),
+    chats.length,
+    hasMoreChats,
+    isFetchingMoreChats,
+    fetchNextChatsPage,
+  ])
+
   // Format count for display (99+ for large numbers)
   const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
 
@@ -598,6 +657,7 @@ export default function ConversationsPage() {
   }, [messagesData, optimisticMessages, selectedChatId])
 
   // Handle scroll to load more messages (scroll to top = older messages)
+  // Debounced com proteção contra race conditions
   const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     // ScrollArea dispara eventos do viewport interno
     const target = e.target as HTMLDivElement
@@ -609,15 +669,23 @@ export default function ConversationsPage() {
 
     // Track if user is near bottom (within 150px) for smart auto-scroll
     const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+    const wasNearBottom = isNearBottomRef.current
     isNearBottomRef.current = distanceFromBottom < 150
 
+    // Se usuário voltou para o final, limpar indicador de novas mensagens
+    if (isNearBottomRef.current && hasUnseenMessages) {
+      setHasUnseenMessages(false)
+    }
+
     // Load more when scrolled near top (within 100px)
-    if (target.scrollTop < 100 && hasNextPage && !isFetchingNextPage) {
+    // Proteção: só carrega se não estiver já carregando (debounce implícito)
+    if (target.scrollTop < 100 && hasNextPage && !isFetchingNextPage && !isFetchingRef.current) {
       // Save current scroll position to restore after loading
       previousScrollHeightRef.current = target.scrollHeight
+      isFetchingRef.current = true // Marca como carregando
       fetchNextPage()
     }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, hasUnseenMessages])
 
   // Restore scroll position after loading more messages
   // Usa requestAnimationFrame para garantir que o DOM foi atualizado
@@ -644,9 +712,14 @@ export default function ConversationsPage() {
             if (checkContainer && checkContainer.scrollTop !== scrollDiff) {
               checkContainer.scrollTop = scrollDiff
             }
+            // Reset flag de fetching após restaurar posição
+            isFetchingRef.current = false
           })
         }
       })
+    } else if (!isFetchingNextPage) {
+      // Reset flag mesmo se não precisou restaurar posição
+      isFetchingRef.current = false
     }
   }, [isFetchingNextPage])
 
@@ -774,6 +847,13 @@ export default function ConversationsPage() {
     if (messageElements && messageElements[index]) {
       messageElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
+  }, [])
+
+  // Scroll para o final da lista de mensagens
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    setHasUnseenMessages(false)
+    isNearBottomRef.current = true
   }, [])
 
   // Close search
@@ -1312,6 +1392,7 @@ export default function ConversationsPage() {
       // Reset state for new chat
       isNearBottomRef.current = true
       previousMessageCountRef.current = 0
+      setHasUnseenMessages(false) // Reset indicador de novas mensagens
     }
   }, [selectedChatId])
 
@@ -1319,7 +1400,7 @@ export default function ConversationsPage() {
   useEffect(() => {
     const currentCount = messages.length
     const previousCount = previousMessageCountRef.current
-    const hasNewMessages = currentCount > previousCount
+    const hasNewMessages = currentCount > previousCount && previousCount > 0 // Não contar load inicial
 
     // Update previous count
     previousMessageCountRef.current = currentCount
@@ -1329,8 +1410,9 @@ export default function ConversationsPage() {
     // 2. OR there are new messages and optimistic messages exist (user sent a message)
     // 3. OR this is the initial load (previousCount was 0)
     const isInitialLoad = previousCount === 0 && currentCount > 0
+    const userSentMessage = optimisticMessages.length > 0
     const shouldScroll =
-      (hasNewMessages && (isNearBottomRef.current || optimisticMessages.length > 0)) ||
+      (hasNewMessages && (isNearBottomRef.current || userSentMessage)) ||
       isInitialLoad
 
     if (shouldScroll && messages.length > 0) {
@@ -1338,6 +1420,11 @@ export default function ConversationsPage() {
       messagesEndRef.current?.scrollIntoView({
         behavior: isInitialLoad ? 'instant' : 'smooth'
       })
+      setHasUnseenMessages(false)
+    } else if (hasNewMessages && !isNearBottomRef.current && !userSentMessage) {
+      // Usuário está lendo histórico e chegaram novas mensagens
+      // Mostrar indicador "Novas mensagens ↓"
+      setHasUnseenMessages(true)
     }
   }, [messages, optimisticMessages.length])
 
@@ -1380,7 +1467,8 @@ export default function ConversationsPage() {
       .replace(/\n{3,}/g, '\n\n')
   }
 
-  const formatTimestamp = (timestamp: number | string) => {
+  // Memoizado para evitar recriação em cada render
+  const formatTimestamp = useCallback((timestamp: number | string) => {
     const date = typeof timestamp === 'number'
       ? new Date(timestamp > 9999999999 ? timestamp : timestamp * 1000)
       : new Date(timestamp)
@@ -1396,7 +1484,7 @@ export default function ConversationsPage() {
       return format(date, 'EEEE', { locale: ptBR })
     }
     return format(date, 'dd/MM/yyyy', { locale: ptBR })
-  }
+  }, [])
 
   const getStatusIcon = (status: string, direction: string) => {
     if (direction === 'INBOUND') return null
@@ -1701,6 +1789,8 @@ export default function ConversationsPage() {
           >
             {chatListVirtualizer.getVirtualItems().map((virtualItem) => {
               const chat = chats[virtualItem.index] as UAZChat
+              if (!chat) return null // Proteção contra índice inválido
+
               // Determinar nome para exibição
               const displayName = chat.wa_name || 'Contato'
               // Usar helper functions para categorização
@@ -1817,6 +1907,41 @@ export default function ConversationsPage() {
                 </button>
               )
             })}
+
+            {/* Loading indicator para infinite scroll */}
+            {isFetchingMoreChats && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${chatListVirtualizer.getTotalSize()}px)`,
+                }}
+                className="flex items-center justify-center p-4 gap-2"
+              >
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Carregando mais...</span>
+              </div>
+            )}
+
+            {/* Indicator de "mais conversas disponíveis" */}
+            {hasMoreChats && !isFetchingMoreChats && chats.length >= CHATS_PER_PAGE && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${chatListVirtualizer.getTotalSize()}px)`,
+                }}
+                className="flex items-center justify-center p-3"
+              >
+                <span className="text-xs text-muted-foreground">
+                  Role para carregar mais conversas
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1881,6 +2006,47 @@ export default function ConversationsPage() {
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Session status badge (IA/Humano/Resolvido) */}
+              {selectedChat && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "gap-1 mr-2 text-xs",
+                        isResolved(selectedChat) && "text-green-600 border-green-200 bg-green-50",
+                        isAIActive(selectedChat) && "text-purple-600 border-purple-200 bg-purple-50",
+                        isHumanAttending(selectedChat) && "text-blue-600 border-blue-200 bg-blue-50"
+                      )}
+                    >
+                      {isResolved(selectedChat) ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3" />
+                          Resolvido
+                        </>
+                      ) : isAIActive(selectedChat) ? (
+                        <>
+                          <Bot className="h-3 w-3" />
+                          IA ativa
+                        </>
+                      ) : (
+                        <>
+                          <User className="h-3 w-3" />
+                          Atendente
+                        </>
+                      )}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isResolved(selectedChat)
+                      ? 'Conversa resolvida/arquivada'
+                      : isAIActive(selectedChat)
+                      ? 'Atendimento automatizado por IA'
+                      : 'Atendimento por humano'}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
               {/* SSE connection status */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2124,7 +2290,7 @@ export default function ConversationsPage() {
           {/* Messages */}
           <ScrollArea
             id="messages-area"
-            className="flex-1 min-h-0 p-4"
+            className="flex-1 min-h-0 p-4 relative"
             ref={messagesContainerRef}
             onScrollCapture={handleMessagesScroll}
             role="log"
@@ -2403,6 +2569,20 @@ export default function ConversationsPage() {
                   )
                 })}
                 <div ref={messagesEndRef} />
+              </div>
+            )}
+
+            {/* Indicador de novas mensagens quando usuário está lendo histórico */}
+            {hasUnseenMessages && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+                <Button
+                  onClick={scrollToBottom}
+                  size="sm"
+                  className="rounded-full shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground gap-1 px-4"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  Novas mensagens
+                </Button>
               </div>
             )}
           </ScrollArea>
@@ -2761,8 +2941,8 @@ export default function ConversationsPage() {
             </Sheet>
 
             {/* Main messages area */}
-            <Card className="flex-1 h-full min-h-0 overflow-hidden">
-              <CardContent className="p-0 h-full">
+            <Card className="flex-1 h-full min-h-0 overflow-hidden py-0 gap-0">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
                 {selectedChat ? (
                   <MessagesArea />
                 ) : (
@@ -2783,15 +2963,16 @@ export default function ConversationsPage() {
           /* Desktop Layout - 2 columns (chats + messages) */
           <>
             {/* Column 1: Chats with integrated instance filter */}
-            <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden">
-              <CardContent className="p-0 h-full">
+            {/* py-0 remove padding default do Card para permitir scroll correto */}
+            <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden py-0 gap-0">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
                 <ChatsList />
               </CardContent>
             </Card>
 
             {/* Column 2: Messages */}
-            <Card className="flex-1 min-w-0 h-full overflow-hidden">
-              <CardContent className="p-0 h-full">
+            <Card className="flex-1 min-w-0 h-full overflow-hidden py-0 gap-0">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
                 <MessagesArea />
               </CardContent>
             </Card>

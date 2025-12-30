@@ -402,10 +402,12 @@ export class UAZapiService {
    * @method findChats
    * @description Busca chats da instância
    * Tenta múltiplos endpoints para compatibilidade com diferentes versões da API
+   * IMPORTANTE: Inclui timeout de 15s para evitar loading infinito
    * @param {string} instanceToken - Token da instância
+   * @param {number} timeoutMs - Timeout em ms (default: 15000)
    * @returns {Promise<UAZapiResponse<any[]>>} Lista de chats
    */
-  async findChats(instanceToken: string): Promise<UAZapiResponse<any[]>> {
+  async findChats(instanceToken: string, timeoutMs: number = 15000): Promise<UAZapiResponse<any[]>> {
     // Lista de endpoints para tentar (ordem de prioridade)
     // IMPORTANT: POST /chat/find with empty body {} returns chats correctly
     // Using count/limit/page parameters returns empty chats array
@@ -422,48 +424,68 @@ export class UAZapiService {
       try {
         console.log(`[UAZapi.findChats] Trying ${endpoint.method} ${endpoint.path}...`);
 
-        const response = await fetch(`${this.baseURL}${endpoint.path}`, {
-          method: endpoint.method,
-          headers: {
-            'Content-Type': 'application/json',
-            'token': instanceToken,
-            'apikey': this.token, // Admin token também necessário para algumas APIs
-          },
-          ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
-        });
+        // 🚀 TIMEOUT: Usar AbortController para evitar loading infinito
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        console.log(`[UAZapi.findChats] ${endpoint.path} status: ${response.status}`);
+        try {
+          const response = await fetch(`${this.baseURL}${endpoint.path}`, {
+            method: endpoint.method,
+            headers: {
+              'Content-Type': 'application/json',
+              'token': instanceToken,
+              'apikey': this.token, // Admin token também necessário para algumas APIs
+            },
+            signal: controller.signal,
+            ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
+          });
 
-        if (response.ok) {
-          const result = await this.handleResponse<any[]>(response);
-          if (result.success) {
-            // Normalizar resposta - pode vir como array ou como { chats: [] }
-            let chats = result.data;
-            if (!Array.isArray(chats) && chats && Array.isArray((chats as any).chats)) {
-              chats = (chats as any).chats;
+          clearTimeout(timeoutId);
+
+          console.log(`[UAZapi.findChats] ${endpoint.path} status: ${response.status}`);
+
+          if (response.ok) {
+            const result = await this.handleResponse<any[]>(response);
+            if (result.success) {
+              // Normalizar resposta - pode vir como array ou como { chats: [] }
+              let chats = result.data;
+              if (!Array.isArray(chats) && chats && Array.isArray((chats as any).chats)) {
+                chats = (chats as any).chats;
+              }
+              if (!Array.isArray(chats)) {
+                chats = [];
+              }
+              console.log(`[UAZapi.findChats] Success! Found ${chats.length} chats via ${endpoint.path}`);
+              return {
+                success: true,
+                data: chats,
+                message: `Chats obtidos via ${endpoint.path}`
+              };
             }
-            if (!Array.isArray(chats)) {
-              chats = [];
-            }
-            console.log(`[UAZapi.findChats] Success! Found ${chats.length} chats via ${endpoint.path}`);
-            return {
-              success: true,
-              data: chats,
-              message: `Chats obtidos via ${endpoint.path}`
-            };
           }
-        }
 
-        // Se 404 ou 405, tentar próximo endpoint
-        if (response.status === 404 || response.status === 405) {
-          console.log(`[UAZapi.findChats] ${endpoint.path} returned ${response.status}, trying next...`);
-          continue;
-        }
+          // Se 404 ou 405, tentar próximo endpoint
+          if (response.status === 404 || response.status === 405) {
+            console.log(`[UAZapi.findChats] ${endpoint.path} returned ${response.status}, trying next...`);
+            continue;
+          }
 
-        // Outros erros - registrar mas continuar tentando
-        const errorData = await response.json().catch(() => ({}));
-        lastError = errorData.message || `HTTP ${response.status}`;
-        console.warn(`[UAZapi.findChats] ${endpoint.path} error: ${lastError}`);
+          // Outros erros - registrar mas continuar tentando
+          const errorData = await response.json().catch(() => ({}));
+          lastError = errorData.message || `HTTP ${response.status}`;
+          console.warn(`[UAZapi.findChats] ${endpoint.path} error: ${lastError}`);
+
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+
+          // Verificar se foi timeout (abort)
+          if (fetchError.name === 'AbortError') {
+            lastError = `Timeout após ${timeoutMs}ms`;
+            console.warn(`[UAZapi.findChats] ${endpoint.path} timeout after ${timeoutMs}ms`);
+            continue; // Tentar próximo endpoint
+          }
+          throw fetchError;
+        }
 
       } catch (error: any) {
         lastError = error.message || 'Erro desconhecido';
@@ -483,12 +505,14 @@ export class UAZapiService {
    * @method findMessages
    * @description Busca mensagens de um chat
    * Tenta múltiplos endpoints para compatibilidade com diferentes versões da API
+   * IMPORTANTE: Inclui timeout de 15s para evitar loading infinito
    * @param {string} instanceToken - Token da instância
    * @param {string} chatId - ID do chat (ex: 5511999999999@s.whatsapp.net)
    * @param {number} limit - Limite de mensagens
+   * @param {number} timeoutMs - Timeout em ms (default: 15000)
    * @returns {Promise<UAZapiResponse<any[]>>} Lista de mensagens
    */
-  async findMessages(instanceToken: string, chatId: string, limit: number = 50): Promise<UAZapiResponse<any[]>> {
+  async findMessages(instanceToken: string, chatId: string, limit: number = 50, timeoutMs: number = 15000): Promise<UAZapiResponse<any[]>> {
     // Lista de endpoints para tentar
     const endpoints = [
       { method: 'POST', path: '/message/find', body: { chatId, limit } },
@@ -502,47 +526,67 @@ export class UAZapiService {
       try {
         console.log(`[UAZapi.findMessages] Trying ${endpoint.method} ${endpoint.path}...`);
 
-        const response = await fetch(`${this.baseURL}${endpoint.path}`, {
-          method: endpoint.method,
-          headers: {
-            'Content-Type': 'application/json',
-            'token': instanceToken,
-            'apikey': this.token,
-          },
-          ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
-        });
+        // 🚀 TIMEOUT: Usar AbortController para evitar loading infinito
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        console.log(`[UAZapi.findMessages] ${endpoint.path} status: ${response.status}`);
+        try {
+          const response = await fetch(`${this.baseURL}${endpoint.path}`, {
+            method: endpoint.method,
+            headers: {
+              'Content-Type': 'application/json',
+              'token': instanceToken,
+              'apikey': this.token,
+            },
+            signal: controller.signal,
+            ...(endpoint.body && { body: JSON.stringify(endpoint.body) })
+          });
 
-        if (response.ok) {
-          const result = await this.handleResponse<any>(response);
-          if (result.success) {
-            // Normalizar resposta - pode vir como { messages: [] } ou array direto
-            let messages = result.data;
-            if (!Array.isArray(messages) && messages?.messages) {
-              messages = messages.messages;
+          clearTimeout(timeoutId);
+
+          console.log(`[UAZapi.findMessages] ${endpoint.path} status: ${response.status}`);
+
+          if (response.ok) {
+            const result = await this.handleResponse<any>(response);
+            if (result.success) {
+              // Normalizar resposta - pode vir como { messages: [] } ou array direto
+              let messages = result.data;
+              if (!Array.isArray(messages) && messages?.messages) {
+                messages = messages.messages;
+              }
+              if (!Array.isArray(messages)) {
+                messages = [];
+              }
+              console.log(`[UAZapi.findMessages] Success! Found ${messages.length} messages via ${endpoint.path}`);
+              return {
+                success: true,
+                data: messages,
+                message: `Mensagens obtidas via ${endpoint.path}`
+              };
             }
-            if (!Array.isArray(messages)) {
-              messages = [];
-            }
-            console.log(`[UAZapi.findMessages] Success! Found ${messages.length} messages via ${endpoint.path}`);
-            return {
-              success: true,
-              data: messages,
-              message: `Mensagens obtidas via ${endpoint.path}`
-            };
           }
-        }
 
-        // Se 404 ou 405, tentar próximo endpoint
-        if (response.status === 404 || response.status === 405) {
-          console.log(`[UAZapi.findMessages] ${endpoint.path} returned ${response.status}, trying next...`);
-          continue;
-        }
+          // Se 404 ou 405, tentar próximo endpoint
+          if (response.status === 404 || response.status === 405) {
+            console.log(`[UAZapi.findMessages] ${endpoint.path} returned ${response.status}, trying next...`);
+            continue;
+          }
 
-        const errorData = await response.json().catch(() => ({}));
-        lastError = errorData.message || `HTTP ${response.status}`;
-        console.warn(`[UAZapi.findMessages] ${endpoint.path} error: ${lastError}`);
+          const errorData = await response.json().catch(() => ({}));
+          lastError = errorData.message || `HTTP ${response.status}`;
+          console.warn(`[UAZapi.findMessages] ${endpoint.path} error: ${lastError}`);
+
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+
+          // Verificar se foi timeout (abort)
+          if (fetchError.name === 'AbortError') {
+            lastError = `Timeout após ${timeoutMs}ms`;
+            console.warn(`[UAZapi.findMessages] ${endpoint.path} timeout after ${timeoutMs}ms`);
+            continue; // Tentar próximo endpoint
+          }
+          throw fetchError;
+        }
 
       } catch (error: any) {
         lastError = error.message || 'Erro desconhecido';

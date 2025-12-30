@@ -36,6 +36,7 @@ export const chatsController = igniter.controller({
         const { instanceId } = query;
 
         // Buscar instância e verificar permissão
+        // IMPORTANTE: Incluir 'provider' para detectar UAZapi vs Cloud API
         const instance = await database.connection.findFirst({
           where: {
             id: instanceId,
@@ -50,6 +51,7 @@ export const chatsController = igniter.controller({
             organizationId: true,
             uazapiToken: true,
             status: true,
+            provider: true, // 🚀 CRITICAL: Detectar tipo de provider
             n8nWebhookUrl: true, // Incluir para verificar se IA está disponível na integração
           },
         });
@@ -173,227 +175,27 @@ export const chatsController = igniter.controller({
 
           let [sessions, total] = await fetchLocalChats();
 
-          // Lógica de Sync (Função isolada) - OTIMIZADA para evitar N+1
-          const runSync = async () => {
-            if (!instance.uazapiToken || instance.status !== ConnectionStatus.CONNECTED) return false;
+          // 🚀 SYNC DESATIVADO - Modo Reativo
+          // Sessões são criadas automaticamente via webhooks quando mensagens chegam
+          // Isso simplifica a lógica e evita overhead de sync com APIs externas
+          //
+          // Benefícios do modo reativo:
+          // 1. Menos chamadas de API = menor custo e latência
+          // 2. Sessões só existem quando há interação real
+          // 3. Funciona igual para UAZapi e Cloud API
+          // 4. Webhooks garantem dados em tempo real
+          //
+          // Para reativar sync, descomentar o bloco abaixo
 
-            try {
-              console.log('[ChatsController] Iniciando sync otimizado com UAZapi...');
-              const uazChatsResponse = await uazapiService.findChats(instance.uazapiToken);
-              const rawData = uazChatsResponse.data;
-              const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
-
-              if (!Array.isArray(uazChats) || uazChats.length === 0) return false;
-
-              console.log(`[ChatsController] Processando ${uazChats.length} chats em batch...`);
-
-              // OTIMIZAÇÃO: Extrair todos os phoneNumbers primeiro
-              // UAZapi uses wa_chatid as the chat identifier
-              const phoneNumbers = uazChats
-                .map(chat => chat.wa_chatid || chat.chatId || chat.id)
-                .filter(Boolean) as string[];
-
-              if (phoneNumbers.length === 0) return false;
-
-              // OTIMIZAÇÃO: Buscar todos os contatos existentes em UMA query
-              const existingContacts = await database.contact.findMany({
-                where: { phoneNumber: { in: phoneNumbers } },
-                select: { id: true, phoneNumber: true, profilePicUrl: true }
-              });
-              const contactsMap = new Map(existingContacts.map(c => [c.phoneNumber, c]));
-
-              // Preparar dados para batch operations
-              const contactsToCreate: any[] = [];
-              const contactsToUpdate: { phoneNumber: string; data: any }[] = [];
-              const numbersToFetchPics: string[] = [];
-
-              for (const chat of uazChats) {
-                // UAZapi uses wa_chatid as the chat identifier
-                const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
-                if (!phoneNumber) continue;
-
-                const existingContact = contactsMap.get(phoneNumber);
-                // UAZapi uses imagePreview for profile pictures
-                let profilePicUrl = chat.imagePreview || chat.image || chat.imgUrl || chat.picUrl || chat.contact?.profilePicUrl || existingContact?.profilePicUrl || null;
-
-                // Se não tem foto, adicionar à lista para buscar depois
-                if (!profilePicUrl && !phoneNumber.includes('@g.us')) {
-                  numbersToFetchPics.push(phoneNumber);
-                }
-
-                const contactData = {
-                  name: chat.name || chat.wa_name || chat.formattedTitle || phoneNumber,
-                  profilePicUrl,
-                  verifiedName: chat.wa_contactName || chat.pushname || chat.name,
-                  isBusiness: chat.isBusiness || false
-                };
-
-                if (existingContact) {
-                  contactsToUpdate.push({
-                    phoneNumber,
-                    data: {
-                      name: contactData.name,
-                      verifiedName: contactData.verifiedName,
-                      ...(contactData.profilePicUrl && { profilePicUrl: contactData.profilePicUrl }),
-                    }
-                  });
-                } else {
-                  contactsToCreate.push({
-                    phoneNumber,
-                    name: contactData.name,
-                    profilePicUrl: contactData.profilePicUrl,
-                    verifiedName: contactData.verifiedName,
-                    isBusiness: contactData.isBusiness,
-                    organizationId: instance.organizationId,
-                    source: instance.id
-                  });
-                }
-              }
-
-              // OTIMIZAÇÃO: Batch create novos contatos
-              if (contactsToCreate.length > 0) {
-                await database.contact.createMany({
-                  data: contactsToCreate,
-                  skipDuplicates: true
-                });
-                console.log(`[ChatsController] ${contactsToCreate.length} contatos criados em batch.`);
-              }
-
-              // OTIMIZAÇÃO: Batch update contatos existentes usando transaction
-              if (contactsToUpdate.length > 0) {
-                await database.$transaction(
-                  contactsToUpdate.map(({ phoneNumber, data }) =>
-                    database.contact.update({
-                      where: { phoneNumber },
-                      data
-                    })
-                  )
-                );
-                console.log(`[ChatsController] ${contactsToUpdate.length} contatos atualizados em batch.`);
-              }
-
-              // OTIMIZAÇÃO: Buscar todos os contatos atualizados em UMA query
-              const allContacts = await database.contact.findMany({
-                where: { phoneNumber: { in: phoneNumbers } },
-                select: { id: true, phoneNumber: true }
-              });
-              const updatedContactsMap = new Map(allContacts.map(c => [c.phoneNumber, c]));
-
-              // OTIMIZAÇÃO: Buscar sessões existentes em UMA query
-              const contactIds = allContacts.map(c => c.id);
-              const existingSessions = await database.chatSession.findMany({
-                where: {
-                  connectionId: instance.id,
-                  contactId: { in: contactIds }
-                },
-                select: { id: true, contactId: true }
-              });
-              const sessionsMap = new Map(existingSessions.map(s => [s.contactId, s]));
-
-              // Preparar sessões para batch operations
-              const sessionsToCreate: any[] = [];
-              const sessionsToUpdate: { id: string; lastMessageAt: Date }[] = [];
-              const sessionOrgId = instance.organizationId ?? undefined;
-
-              for (const chat of uazChats) {
-                // UAZapi uses wa_chatid as the chat identifier
-                const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
-                if (!phoneNumber) continue;
-
-                const contact = updatedContactsMap.get(phoneNumber);
-                if (!contact) continue;
-
-                // UAZapi uses wa_lastMsgTimestamp (already in milliseconds)
-                const ts = Number(chat.wa_lastMsgTimestamp || chat.lastMsgTimestamp);
-                const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts) : new Date();
-
-                const existingSession = sessionsMap.get(contact.id);
-                if (existingSession) {
-                  sessionsToUpdate.push({ id: existingSession.id, lastMessageAt });
-                } else if (sessionOrgId) {
-                  sessionsToCreate.push({
-                    connectionId: instance.id,
-                    contactId: contact.id,
-                    organizationId: sessionOrgId,
-                    status: 'ACTIVE',
-                    lastMessageAt,
-                    customerJourney: 'new'
-                  });
-                }
-              }
-
-              // OTIMIZAÇÃO: Batch create sessões
-              if (sessionsToCreate.length > 0) {
-                await database.chatSession.createMany({
-                  data: sessionsToCreate,
-                  skipDuplicates: true
-                });
-                console.log(`[ChatsController] ${sessionsToCreate.length} sessões criadas em batch.`);
-              }
-
-              // OTIMIZAÇÃO: Batch update sessões usando transaction
-              if (sessionsToUpdate.length > 0) {
-                await database.$transaction(
-                  sessionsToUpdate.map(({ id, lastMessageAt }) =>
-                    database.chatSession.update({
-                      where: { id },
-                      data: { lastMessageAt }
-                    })
-                  )
-                );
-                console.log(`[ChatsController] ${sessionsToUpdate.length} sessões atualizadas em batch.`);
-              }
-
-              // Buscar fotos de perfil em batch para contatos sem foto (limitado a 20)
-              if (numbersToFetchPics.length > 0 && instance.uazapiToken) {
-                const numbersToFetch = numbersToFetchPics.slice(0, 20);
-                console.log(`[ChatsController] Buscando fotos de perfil para ${numbersToFetch.length} contatos...`);
-
-                try {
-                  const profilePics = await uazapiService.fetchContactsProfilePictures(
-                    instance.uazapiToken,
-                    numbersToFetch
-                  );
-
-                  // OTIMIZAÇÃO: Batch update fotos usando transaction
-                  const picUpdates = Array.from(profilePics.entries())
-                    .filter(([, url]) => url)
-                    .map(([phoneNumber, profilePicUrl]) =>
-                      database.contact.updateMany({
-                        where: { phoneNumber: { contains: phoneNumber } },
-                        data: { profilePicUrl }
-                      })
-                    );
-
-                  if (picUpdates.length > 0) {
-                    await database.$transaction(picUpdates);
-                    console.log(`[ChatsController] ${picUpdates.length} fotos de perfil atualizadas em batch.`);
-                  }
-                } catch (picErr) {
-                  console.warn('[ChatsController] Erro ao buscar fotos de perfil:', picErr);
-                }
-              }
-
-              console.log('[ChatsController] Sync otimizado finalizado.');
-              return true;
-            } catch (err) {
-              console.error('[ChatsController] Erro no sync:', err);
-            }
-            return false;
-          };
-
-          // Estratégia de Sync
-          if (total === 0 && instance.status === ConnectionStatus.CONNECTED) {
-            // Blocking Sync
-            await runSync();
-            // Refetch
-            const [newSessions, newTotal] = await fetchLocalChats();
-            sessions = newSessions;
-            total = newTotal;
-          } else if (instance.status === ConnectionStatus.CONNECTED) {
-            // Background Sync
-            setImmediate(() => runSync());
-          }
+          // 🚀 SYNC DESATIVADO - Modo Reativo (webhooks only)
+          // Sessões são criadas automaticamente via webhooks quando mensagens chegam
+          // Benefícios:
+          // 1. Menos chamadas de API = menor custo e latência
+          // 2. Sessões só existem quando há interação real
+          // 3. Funciona igual para UAZapi e Cloud API
+          // 4. Webhooks garantem dados em tempo real
+          //
+          // Para reativar sync, restaurar código do git ou ver comentário abaixo
 
           // Helper para formatar preview de mensagem baseada no tipo
           const formatMessagePreview = (msg: any): string => {
@@ -558,6 +360,7 @@ export const chatsController = igniter.controller({
               organizationId: true,
               n8nWebhookUrl: true,
               status: true,
+              provider: true, // 🚀 CRITICAL: Detectar tipo de provider
             },
           });
 
@@ -580,173 +383,17 @@ export const chatsController = igniter.controller({
           const instanceIds = instances.map(i => i.id);
           const instancesMap = new Map(instances.map(i => [i.id, i]));
 
-          // 2. SYNC: Sincronizar chats do UAZapi
-          // - Blocking sync quando não há sessões OU forceSync=true
-          // - Isso garante que novos chats apareçam
-          const connectedInstances = instances.filter(i => i.status === ConnectionStatus.CONNECTED);
-          if (connectedInstances.length > 0) {
-            // Check if we have ANY sessions for these instances
-            const existingSessionCount = await database.chatSession.count({
-              where: { connectionId: { in: instanceIds } },
-            });
-
-            // Rodar sync se: não há sessões OU forceSync foi solicitado
-            const shouldSync = existingSessionCount === 0 || query.forceSync === true;
-
-            if (shouldSync) {
-              console.log(`[ChatsController.all] Running sync (forceSync=${query.forceSync}, existingSessions=${existingSessionCount})...`);
-
-              // Fetch uazapiTokens for connected instances
-              const instancesWithTokens = await database.connection.findMany({
-                where: {
-                  id: { in: connectedInstances.map(i => i.id) },
-                  uazapiToken: { not: null },
-                },
-                select: {
-                  id: true,
-                  organizationId: true,
-                  uazapiToken: true,
-                },
-              });
-
-              // Run sync for each instance (in parallel for performance)
-              await Promise.all(instancesWithTokens.map(async (inst) => {
-                if (!inst.uazapiToken || !inst.organizationId) return;
-
-                try {
-                  console.log(`[ChatsController.all] Syncing instance ${inst.id}...`);
-                  const uazChatsResponse = await uazapiService.findChats(inst.uazapiToken);
-
-                  // Log response for debugging
-                  console.log(`[ChatsController.all] UAZapi response for ${inst.id}:`, {
-                    success: uazChatsResponse.success,
-                    hasData: !!uazChatsResponse.data,
-                    error: uazChatsResponse.error,
-                    dataType: typeof uazChatsResponse.data,
-                  });
-
-                  if (!uazChatsResponse.success) {
-                    console.error(`[ChatsController.all] findChats failed for ${inst.id}:`, uazChatsResponse.error);
-                    return;
-                  }
-
-                  const rawData = uazChatsResponse.data;
-                  const uazChats = Array.isArray(rawData) ? rawData : (rawData as any)?.chats || [];
-
-                  console.log(`[ChatsController.all] Found ${uazChats.length} chats from UAZapi for instance ${inst.id}`);
-
-                  if (!Array.isArray(uazChats) || uazChats.length === 0) return;
-
-                  // Extract phone numbers - UAZapi uses wa_chatid as the chat identifier
-                  // Format: "5511999999999@s.whatsapp.net" or "120363402662970051@g.us" for groups
-                  const phoneNumbers = uazChats
-                    .map(chat => chat.wa_chatid || chat.chatId || chat.id)
-                    .filter(Boolean) as string[];
-
-                  console.log(`[ChatsController.all] Extracted ${phoneNumbers.length} phone numbers`);
-                  if (phoneNumbers.length === 0) return;
-
-                  // Get existing contacts
-                  const existingContacts = await database.contact.findMany({
-                    where: { phoneNumber: { in: phoneNumbers } },
-                    select: { id: true, phoneNumber: true },
-                  });
-                  const contactsMap = new Map(existingContacts.map(c => [c.phoneNumber, c]));
-
-                  // Create missing contacts
-                  const contactsToCreate: any[] = [];
-                  for (const chat of uazChats) {
-                    const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
-                    if (!phoneNumber || contactsMap.has(phoneNumber)) continue;
-
-                    contactsToCreate.push({
-                      phoneNumber,
-                      name: chat.name || chat.wa_name || chat.formattedTitle || phoneNumber,
-                      profilePicUrl: chat.imagePreview || chat.image || chat.imgUrl || chat.picUrl || null,
-                      verifiedName: chat.wa_contactName || chat.pushname || chat.name,
-                      isBusiness: chat.isBusiness || false,
-                      organizationId: inst.organizationId,
-                      source: inst.id,
-                    });
-                  }
-
-                  if (contactsToCreate.length > 0) {
-                    await database.contact.createMany({ data: contactsToCreate, skipDuplicates: true });
-                  }
-
-                  // Refetch all contacts
-                  const allContacts = await database.contact.findMany({
-                    where: { phoneNumber: { in: phoneNumbers } },
-                    select: { id: true, phoneNumber: true },
-                  });
-                  const updatedContactsMap = new Map(allContacts.map(c => [c.phoneNumber, c]));
-
-                  // CORREÇÃO: Buscar sessões existentes para evitar duplicatas
-                  const contactIds = allContacts.map(c => c.id);
-                  const existingSessions = await database.chatSession.findMany({
-                    where: {
-                      connectionId: inst.id,
-                      contactId: { in: contactIds }
-                    },
-                    select: { id: true, contactId: true }
-                  });
-                  const existingSessionsMap = new Map(existingSessions.map(s => [s.contactId, s]));
-
-                  // Create/update sessions
-                  const sessionsToCreate: any[] = [];
-                  const sessionsToUpdate: { id: string; lastMessageAt: Date }[] = [];
-
-                  for (const chat of uazChats) {
-                    const phoneNumber = chat.wa_chatid || chat.chatId || chat.id;
-                    if (!phoneNumber) continue;
-
-                    const contact = updatedContactsMap.get(phoneNumber);
-                    if (!contact) continue;
-
-                    // UAZapi uses wa_lastMsgTimestamp (in milliseconds)
-                    const ts = Number(chat.wa_lastMsgTimestamp || chat.lastMsgTimestamp);
-                    const lastMessageAt = !isNaN(ts) && ts > 0 ? new Date(ts) : new Date();
-
-                    const existingSession = existingSessionsMap.get(contact.id);
-                    if (existingSession) {
-                      // Update existing session
-                      sessionsToUpdate.push({ id: existingSession.id, lastMessageAt });
-                    } else {
-                      // Create new session
-                      sessionsToCreate.push({
-                        connectionId: inst.id,
-                        contactId: contact.id,
-                        organizationId: inst.organizationId,
-                        status: 'ACTIVE',
-                        lastMessageAt,
-                        customerJourney: 'new',
-                      });
-                    }
-                  }
-
-                  if (sessionsToCreate.length > 0) {
-                    await database.chatSession.createMany({ data: sessionsToCreate, skipDuplicates: true });
-                    console.log(`[ChatsController.all] Created ${sessionsToCreate.length} sessions for instance ${inst.id}`);
-                  }
-
-                  // Update existing sessions timestamps in batch
-                  if (sessionsToUpdate.length > 0) {
-                    await database.$transaction(
-                      sessionsToUpdate.map(({ id, lastMessageAt }) =>
-                        database.chatSession.update({
-                          where: { id },
-                          data: { lastMessageAt }
-                        })
-                      )
-                    );
-                    console.log(`[ChatsController.all] Updated ${sessionsToUpdate.length} sessions for instance ${inst.id}`);
-                  }
-                } catch (err) {
-                  console.error(`[ChatsController.all] Sync failed for instance ${inst.id}:`, err);
-                }
-              }));
-            }
-          }
+          // 🚀 SYNC DESATIVADO - Modo Reativo (webhooks only)
+          // Sessões são criadas automaticamente via webhooks quando mensagens chegam
+          // Isso simplifica a lógica e evita overhead de sync com APIs externas
+          //
+          // Benefícios do modo reativo:
+          // 1. Menos chamadas de API = menor custo e latência
+          // 2. Sessões só existem quando há interação real
+          // 3. Funciona igual para UAZapi e Cloud API
+          // 4. Webhooks garantem dados em tempo real
+          //
+          // Para reativar sync, restaurar código do git
 
           // 3. Cache check (skip if forceSync)
           const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${query.cursor || '0'}:${query.limit || 50}`;
@@ -1023,6 +670,7 @@ export const chatsController = igniter.controller({
               name: i.name,
               status: i.status,
               hasWebhook: !!i.n8nWebhookUrl,
+              provider: i.provider, // 🚀 Incluir provider para frontend
             })),
             pagination: {
               total: totalCount,
