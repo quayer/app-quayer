@@ -335,7 +335,11 @@ export default function ConversationsPage() {
   const instances = useMemo(() => {
     const response = instancesData as any
     const data = response?.data?.data ?? response?.data ?? []
-    return data.filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
+    console.log('[Conversations] Raw instances response:', response)
+    console.log('[Conversations] Extracted instances data:', data)
+    const connected = data.filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
+    console.log('[Conversations] Connected instances:', connected.length, connected.map((i: Instance) => ({ id: i.id, name: i.name, status: i.status })))
+    return connected
   }, [instancesData])
 
   // Determine which instance IDs to fetch chats for
@@ -393,6 +397,8 @@ export default function ConversationsPage() {
       }
 
       try {
+        console.log('[Conversations] Fetching chats for instances:', instanceIdsToFetch)
+
         // Endpoint unificado com cursor-based pagination
         const response = await api.chats.all.query({
           query: {
@@ -402,7 +408,16 @@ export default function ConversationsPage() {
           }
         })
 
+        console.log('[Conversations] Raw API response:', response)
+
         const data = (response as any)?.data ?? response
+        console.log('[Conversations] Extracted data:', {
+          chatsCount: data?.chats?.length ?? 0,
+          counts: data?.counts,
+          instancesCount: data?.instances?.length ?? 0,
+          pagination: data?.pagination,
+        })
+
         return {
           chats: data?.chats ?? [],
           counts: data?.counts ?? { ai: 0, human: 0, archived: 0, groups: 0 },
