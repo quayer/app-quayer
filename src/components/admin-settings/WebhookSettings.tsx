@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
+import { getAuthToken } from '@/igniter.client'
 
 // Eventos disponíveis para webhook global UAZapi (completo conforme docs)
 const WEBHOOK_EVENTS = [
@@ -75,11 +76,9 @@ export function WebhookSettings() {
   } = useQuery({
     queryKey: ['uazapi-global-webhook'],
     queryFn: async () => {
-      const token = localStorage.getItem('accessToken')
+      const token = getAuthToken()
       const response = await fetch('/api/v1/system-settings/webhook', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       })
 
@@ -112,12 +111,12 @@ export function WebhookSettings() {
   // Salvar webhook global
   const saveWebhookMutation = useMutation({
     mutationFn: async (config: WebhookConfig) => {
-      const token = localStorage.getItem('accessToken')
+      const token = getAuthToken()
       const response = await fetch('/api/v1/system-settings/webhook', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         credentials: 'include',
         body: JSON.stringify(config),

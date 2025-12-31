@@ -717,7 +717,7 @@ export default function AdminSessionsPage() {
               <div className="flex gap-2 pt-4 border-t">
                 <Button
                   variant="outline"
-                  onClick={() => window.open(`/conversas/${selectedSession.id}`, '_blank')}
+                  onClick={() => window.open(`/integracoes/conversations?sessionId=${selectedSession.id}`, '_blank')}
                 >
                   <MessageCircle className="h-4 w-4 mr-2" />
                   Abrir Conversa
