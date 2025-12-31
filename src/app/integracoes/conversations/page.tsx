@@ -335,10 +335,7 @@ export default function ConversationsPage() {
   const instances = useMemo(() => {
     const response = instancesData as any
     const data = response?.data?.data ?? response?.data ?? []
-    console.log('[Conversations] Raw instances response:', response)
-    console.log('[Conversations] Extracted instances data:', data)
     const connected = data.filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
-    console.log('[Conversations] Connected instances:', connected.length, connected.map((i: Instance) => ({ id: i.id, name: i.name, status: i.status })))
     return connected
   }, [instancesData])
 
@@ -397,8 +394,6 @@ export default function ConversationsPage() {
       }
 
       try {
-        console.log('[Conversations] Fetching chats for instances:', instanceIdsToFetch)
-
         // Endpoint unificado com cursor-based pagination
         const response = await api.chats.all.query({
           query: {
@@ -408,15 +403,7 @@ export default function ConversationsPage() {
           }
         })
 
-        console.log('[Conversations] Raw API response:', response)
-
         const data = (response as any)?.data ?? response
-        console.log('[Conversations] Extracted data:', {
-          chatsCount: data?.chats?.length ?? 0,
-          counts: data?.counts,
-          instancesCount: data?.instances?.length ?? 0,
-          pagination: data?.pagination,
-        })
 
         return {
           chats: data?.chats ?? [],
@@ -587,7 +574,6 @@ export default function ConversationsPage() {
       hasMoreChats &&
       !isFetchingMoreChats
     ) {
-      console.log('[Conversations] Loading more chats...')
       fetchNextChatsPage()
     }
   }, [
@@ -1166,10 +1152,22 @@ export default function ConversationsPage() {
   // Sync chats from UAZapi (manual import)
   const syncChatsMutation = useMutation({
     mutationFn: async (instanceId: string) => {
-      const response = await (api.chats as any).sync.mutate({
-        body: { instanceId }
+      // Direct fetch to sync endpoint (schema may not be regenerated yet)
+      const response = await fetch('/api/v1/chats/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ instanceId }),
       })
-      return response
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Erro ao sincronizar' }))
+        throw new Error(error.message || 'Erro ao sincronizar chats')
+      }
+
+      return response.json()
     },
     onSuccess: (data: any) => {
       const result = data?.data ?? data
@@ -1199,7 +1197,6 @@ export default function ConversationsPage() {
       return
     }
 
-    console.log('[Conversations] Selected chat session:', sessionId)
     setSelectedChatId(sessionId)
     setSelectedChatInstanceId(chat.instanceId || null)
 
@@ -1238,8 +1235,6 @@ export default function ConversationsPage() {
 
     // Clear input optimistically for better UX
     setMessageText('')
-
-    console.log('[Conversations] Sending message to session:', selectedChatId)
 
     sendMessageMutation.mutate({
       sessionId: selectedChatId,

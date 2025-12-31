@@ -345,17 +345,6 @@ export const instancesController = igniter.controller({
           // Cache miss ou erro - continuar sem cache
         }
 
-        console.log('[InstancesController.list] Request:', {
-          userId: user?.id,
-          userEmail: user?.email,
-          organizationId,
-          isAdmin,
-          page,
-          limit,
-          status,
-          search,
-        });
-
         try {
           const result = await repository.findAllPaginated({
             organizationId: organizationId ?? undefined,
@@ -363,16 +352,6 @@ export const instancesController = igniter.controller({
             limit,
             status: status === 'all' ? undefined : status,
             search,
-          });
-
-          console.log('[InstancesController.list] Result:', {
-            totalInstances: result.instances?.length ?? 0,
-            instances: result.instances?.map((i: any) => ({
-              id: i.id,
-              name: i.name,
-              status: i.status,
-              organizationId: i.organizationId,
-            })),
           });
 
           // 🔄 ASYNC: Verificar status real de instâncias em background

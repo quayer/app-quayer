@@ -327,14 +327,6 @@ export const chatsController = igniter.controller({
         const organizationId = user?.currentOrgId;
         const query = request.query as z.infer<typeof listAllChatsSchema>;
 
-        console.log('[ChatsController.all] Request:', {
-          userId,
-          organizationId,
-          instanceIds: query.instanceIds,
-          userEmail: user?.email,
-          userName: user?.name,
-        });
-
         try {
           // 1. Buscar todas as instâncias do usuário (usando organizationId como o endpoint de instances)
           // CORREÇÃO: Usar organizationId diretamente em vez de relação indireta
@@ -370,19 +362,7 @@ export const chatsController = igniter.controller({
             },
           });
 
-          console.log('[ChatsController.all] Found instances:', {
-            count: instances.length,
-            instances: instances.map(i => ({
-              id: i.id,
-              name: i.name,
-              status: i.status,
-              hasWebhook: !!i.n8nWebhookUrl,
-              provider: i.provider,
-            })),
-          });
-
           if (instances.length === 0) {
-            console.warn('[ChatsController.all] ⚠️ No instances found for organization:', organizationId);
             return response.success({
               chats: [],
               instances: [],
@@ -546,13 +526,6 @@ export const chatsController = igniter.controller({
             // Get total count for stats (without pagination)
             database.chatSession.count({ where }),
           ]);
-
-          console.log('[ChatsController.all] Sessions query result:', {
-            sessionsFound: sessions.length,
-            totalCount,
-            instanceIds,
-            whereFilter: JSON.stringify(where, null, 2).substring(0, 500),
-          });
 
           // Check if there's more data
           const hasMore = sessions.length > limit;
