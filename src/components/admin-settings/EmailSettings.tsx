@@ -41,7 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toast } from 'sonner'
-import { api, getAuthHeaders } from '@/igniter.client'
+import { api, getAuthHeaders, getAuthToken } from '@/igniter.client'
 import { getEnvDefaultsAction } from '@/app/admin/actions'
 
 interface EnvEmailDefaults {
@@ -126,23 +126,31 @@ export function EmailSettings() {
     },
   })
 
-  // Fetch templates
+  // Fetch templates - using fetch directly to ensure cookies are sent
   const { data: templates, isLoading: loadingTemplates, error: templatesError } = useQuery({
     queryKey: ['email-templates'],
     queryFn: async () => {
       try {
-        const result = await (api['system-settings'].getEmailTemplates.query as any)({
-          headers: getAuthHeaders(),
+        const token = getAuthToken()
+        const response = await fetch('/api/v1/system-settings/email-templates', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: 'include',
         })
+
+        if (!response.ok) {
+          if (response.status === 401) throw new Error('Não autorizado')
+          if (response.status === 403) throw new Error('Acesso negado: requer privilégios de administrador')
+          throw new Error('Falha ao carregar templates')
+        }
+
+        const result = await response.json()
         console.log('[EmailSettings] Templates result:', result)
 
-        // API returns { data: { success: true, data: [...] } }
-        const responseData = (result as any)?.data
-        if (responseData?.error) {
-          throw new Error(responseData.error)
+        // API returns { success: true, data: [...] }
+        if (result?.error) {
+          throw new Error(result.error)
         }
-        // Extract the actual templates array from nested structure
-        return (responseData?.data || []) as EmailTemplate[]
+        return (result?.data || []) as EmailTemplate[]
       } catch (error: any) {
         console.error('[EmailSettings] Error fetching templates:', error)
         throw error

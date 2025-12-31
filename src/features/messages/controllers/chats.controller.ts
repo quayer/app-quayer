@@ -976,6 +976,10 @@ export const chatsController = igniter.controller({
           return response.badRequest('Instância sem token UAZapi configurado');
         }
 
+        if (!instance.organizationId) {
+          return response.badRequest('Instância sem organização associada');
+        }
+
         if (instance.status !== ConnectionStatus.CONNECTED) {
           return response.badRequest('Instância não está conectada');
         }
@@ -1024,7 +1028,7 @@ export const chatsController = igniter.controller({
                     name: contactName,
                     verifiedName: chat.verifiedName || null,
                     profilePicUrl: chat.profilePicUrl || null,
-                    isGroup,
+                    // isGroup é indicado pelo formato do phoneNumber (termina em @g.us)
                   },
                 });
                 console.log(`[ChatsController.sync] Created contact: ${phoneNumber}`);
@@ -1059,6 +1063,7 @@ export const chatsController = igniter.controller({
                   data: {
                     connectionId: instanceId,
                     contactId: contact.id,
+                    organizationId: instance.organizationId,
                     status: chat.archived ? 'CLOSED' : 'ACTIVE',
                     aiEnabled: false, // Default: atendimento humano
                     lastMessageAt,

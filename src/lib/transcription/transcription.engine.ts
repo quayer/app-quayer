@@ -27,9 +27,11 @@ export interface TranscriptionResult {
 
 export class TranscriptionEngine {
   private openai: OpenAI;
+  private hasApiKey: boolean;
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
+    this.hasApiKey = !!apiKey;
 
     if (!apiKey) {
       console.warn('[Transcription] OPENAI_API_KEY not found - transcription will be disabled');
@@ -41,9 +43,22 @@ export class TranscriptionEngine {
   }
 
   /**
+   * Verificar se API key está configurada
+   */
+  private ensureApiKey(): void {
+    if (!this.hasApiKey) {
+      throw new Error(
+        'OPENAI_API_KEY não está configurada. ' +
+        'Configure a variável de ambiente ou acesse /admin/settings?tab=ai para configurar.'
+      );
+    }
+  }
+
+  /**
    * Transcrever áudio usando Whisper
    */
   async transcribeAudio(audioUrl: string): Promise<TranscriptionResult> {
+    this.ensureApiKey();
     console.log(`[Transcription] Transcribing audio: ${audioUrl}`);
 
     // 1. Baixar áudio
@@ -76,6 +91,7 @@ export class TranscriptionEngine {
    * Transcrever vídeo (extrai áudio primeiro)
    */
   async transcribeVideo(videoUrl: string): Promise<TranscriptionResult> {
+    this.ensureApiKey();
     console.log(`[Transcription] Transcribing video: ${videoUrl}`);
 
     // 1. Baixar vídeo
@@ -116,6 +132,7 @@ export class TranscriptionEngine {
    * Descrever imagem usando GPT-4 Vision
    */
   async describeImage(imageUrl: string): Promise<TranscriptionResult> {
+    this.ensureApiKey();
     console.log(`[Transcription] Describing image: ${imageUrl}`);
 
     const response = await this.openai.chat.completions.create({
@@ -181,21 +198,46 @@ export class TranscriptionEngine {
    * Baixar mídia de URL
    */
   private async downloadMedia(url: string): Promise<string> {
-    const response = await fetch(url);
+    if (!url) {
+      throw new Error('URL da mídia não fornecida');
+    }
+
+    console.log(`[Transcription] Downloading media from: ${url.substring(0, 100)}...`);
+
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (fetchError: any) {
+      throw new Error(`Falha ao conectar com URL da mídia: ${fetchError?.message || 'Erro de rede'}`);
+    }
 
     if (!response.ok) {
-      throw new Error(`Failed to download media: ${response.statusText}`);
+      throw new Error(`Falha ao baixar mídia: HTTP ${response.status} - ${response.statusText || 'Erro desconhecido'}`);
     }
 
     const buffer = await response.arrayBuffer();
-    const ext = path.extname(new URL(url).pathname) || '.tmp';
-    const tempPath = path.join('/tmp', `media_${Date.now()}${ext}`);
+
+    if (buffer.byteLength === 0) {
+      throw new Error('Mídia baixada está vazia (0 bytes)');
+    }
+
+    let ext = '.tmp';
+    try {
+      ext = path.extname(new URL(url).pathname) || '.tmp';
+    } catch {
+      // URL inválida, usar extensão padrão
+    }
+
+    // Use os.tmpdir() para compatibilidade cross-platform
+    const os = await import('os');
+    const tempDir = os.tmpdir();
+    const tempPath = path.join(tempDir, `media_${Date.now()}${ext}`);
 
     // Salvar arquivo
     const fs = await import('fs/promises');
     await fs.writeFile(tempPath, Buffer.from(buffer));
 
-    console.log(`[Transcription] Media downloaded to ${tempPath}`);
+    console.log(`[Transcription] Media downloaded to ${tempPath} (${buffer.byteLength} bytes)`);
 
     return tempPath;
   }
@@ -212,6 +254,16 @@ export class TranscriptionEngine {
 
     console.log(`[Transcription] Extracting audio from ${videoPath} to ${audioPath}`);
 
+    // Primeiro verificar se ffmpeg está disponível
+    try {
+      await execAsync('ffmpeg -version');
+    } catch {
+      throw new Error(
+        'ffmpeg não está instalado ou não está no PATH. ' +
+        'Instale ffmpeg: https://ffmpeg.org/download.html ou use: apt install ffmpeg (Linux) / brew install ffmpeg (Mac)'
+      );
+    }
+
     // Comando ffmpeg: -i video.mp4 -vn -acodec libmp3lame audio.mp3
     const command = `ffmpeg -i "${videoPath}" -vn -acodec libmp3lame "${audioPath}"`;
 
@@ -220,7 +272,9 @@ export class TranscriptionEngine {
       console.log(`[Transcription] Audio extracted successfully`);
       return audioPath;
     } catch (error: any) {
-      throw new Error(`Failed to extract audio from video: ${error.message}`);
+      const errorMessage = error?.message || error?.stderr || 'Erro desconhecido ao extrair áudio';
+      console.error('[Transcription] ffmpeg error:', error);
+      throw new Error(`Falha ao extrair áudio do vídeo: ${errorMessage}`);
     }
   }
 

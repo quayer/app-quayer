@@ -1814,7 +1814,7 @@ export default function ConversationsPage() {
                   size="sm"
                   onClick={() => {
                     // Sync all connected instances
-                    instanceIdsToFetch.forEach(instanceId => {
+                    instanceIdsToFetch.forEach((instanceId: string) => {
                       syncChatsMutation.mutate(instanceId)
                     })
                   }}
