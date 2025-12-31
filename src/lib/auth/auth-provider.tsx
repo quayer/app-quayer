@@ -29,7 +29,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Função para decodificar JWT (sem validação - já validado pelo middleware)
+// Função para decodificar JWT e verificar expiração
 function parseJwt(token: string): any {
   try {
     const base64Url = token.split('.')[1]
@@ -44,6 +44,16 @@ function parseJwt(token: string): any {
   } catch (e) {
     return null
   }
+}
+
+// Verificar se o token expirou
+function isTokenExpired(payload: any): boolean {
+  if (!payload || !payload.exp) return true
+  // exp é em segundos, Date.now() é em milissegundos
+  const expirationTime = payload.exp * 1000
+  const now = Date.now()
+  // Considerar expirado se faltar menos de 1 minuto
+  return now >= expirationTime - 60000
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -77,6 +87,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (token) {
           const payload = parseJwt(token)
           console.log('[AuthProvider] JWT Payload:', payload)
+
+          // Verificar se o token expirou
+          if (isTokenExpired(payload)) {
+            console.log('[AuthProvider] Token expired, clearing auth')
+            localStorage.removeItem('accessToken')
+            localStorage.removeItem('refreshToken')
+            document.cookie = 'accessToken=; path=/; max-age=0'
+            document.cookie = 'refreshToken=; path=/; max-age=0'
+            setUser(null)
+            // Redirecionar para login se não estiver em página pública
+            const publicPaths = ['/login', '/register', '/forgot-password', '/reset-password']
+            if (!publicPaths.some(p => window.location.pathname.startsWith(p))) {
+              window.location.href = '/login?expired=true'
+            }
+            return
+          }
+
           if (payload && payload.userId) {
             const userData = {
               id: payload.userId,
