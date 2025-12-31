@@ -961,6 +961,190 @@ export const chatsController = igniter.controller({
     }),
 
     /**
+     * POST /api/v1/chats/sync
+     * Sync manual - Importa chats existentes da UAZapi para o banco local
+     * Útil quando sync reativo está ativado mas não há chats no banco
+     */
+    sync: igniter.mutation({
+      path: '/sync',
+      method: 'POST',
+      body: z.object({
+        instanceId: z.string().uuid(),
+      }),
+      use: [authProcedure({ required: true })],
+      handler: async ({ request, response, context }) => {
+        const userId = context.auth?.session?.user?.id!;
+        const { instanceId } = request.body;
+
+        console.log('[ChatsController.sync] Starting sync for instance:', instanceId);
+
+        // 1. Verificar permissão
+        const instance = await database.connection.findFirst({
+          where: {
+            id: instanceId,
+            organization: {
+              users: { some: { userId } },
+            },
+          },
+          select: {
+            id: true,
+            organizationId: true,
+            uazapiToken: true,
+            status: true,
+            provider: true,
+          },
+        });
+
+        if (!instance) {
+          return response.notFound('Instância não encontrada');
+        }
+
+        if (!instance.uazapiToken) {
+          return response.badRequest('Instância sem token UAZapi configurado');
+        }
+
+        if (instance.status !== ConnectionStatus.CONNECTED) {
+          return response.badRequest('Instância não está conectada');
+        }
+
+        try {
+          // 2. Buscar chats da UAZapi
+          const chatsResult = await uazapiService.findChats(instance.uazapiToken);
+
+          if (!chatsResult.success) {
+            return response.badRequest(chatsResult.error || 'Erro ao buscar chats da UAZapi');
+          }
+
+          const uazapiChats = chatsResult.data || [];
+          console.log(`[ChatsController.sync] Found ${uazapiChats.length} chats from UAZapi`);
+
+          let created = 0;
+          let updated = 0;
+          let skipped = 0;
+
+          // 3. Processar cada chat
+          for (const chat of uazapiChats) {
+            try {
+              // Extrair dados do chat UAZapi
+              const chatId = chat.id || chat.chatid || chat.jid;
+              if (!chatId) {
+                skipped++;
+                continue;
+              }
+
+              // Extrair phoneNumber
+              const phoneNumber = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+              const isGroup = chatId.endsWith('@g.us') || phoneNumber.includes('-');
+
+              // Nome do contato
+              const contactName = chat.name || chat.pushName || chat.notify || (isGroup ? 'Grupo WhatsApp' : phoneNumber);
+
+              // 4. Criar/atualizar contato
+              let contact = await database.contact.findUnique({
+                where: { phoneNumber },
+              });
+
+              if (!contact) {
+                contact = await database.contact.create({
+                  data: {
+                    phoneNumber,
+                    name: contactName,
+                    verifiedName: chat.verifiedName || null,
+                    profilePicUrl: chat.profilePicUrl || null,
+                    isGroup,
+                  },
+                });
+                console.log(`[ChatsController.sync] Created contact: ${phoneNumber}`);
+              } else if (contactName && contact.name !== contactName) {
+                contact = await database.contact.update({
+                  where: { id: contact.id },
+                  data: {
+                    name: contactName,
+                    verifiedName: chat.verifiedName || contact.verifiedName,
+                    profilePicUrl: chat.profilePicUrl || contact.profilePicUrl,
+                  },
+                });
+              }
+
+              // 5. Criar/atualizar sessão de chat
+              const existingSession = await database.chatSession.findFirst({
+                where: {
+                  connectionId: instanceId,
+                  contactId: contact.id,
+                },
+              });
+
+              if (!existingSession) {
+                // Criar nova sessão
+                const lastMessageAt = chat.lastMessageAt
+                  ? new Date(chat.lastMessageAt)
+                  : chat.conversationTimestamp
+                  ? new Date(chat.conversationTimestamp * 1000)
+                  : new Date();
+
+                await database.chatSession.create({
+                  data: {
+                    connectionId: instanceId,
+                    contactId: contact.id,
+                    status: chat.archived ? 'CLOSED' : 'ACTIVE',
+                    aiEnabled: false, // Default: atendimento humano
+                    lastMessageAt,
+                    createdAt: lastMessageAt,
+                  },
+                });
+                created++;
+                console.log(`[ChatsController.sync] Created session for: ${phoneNumber}`);
+              } else {
+                // Atualizar timestamp se necessário
+                const newTimestamp = chat.lastMessageAt
+                  ? new Date(chat.lastMessageAt)
+                  : chat.conversationTimestamp
+                  ? new Date(chat.conversationTimestamp * 1000)
+                  : null;
+
+                if (newTimestamp && newTimestamp > existingSession.lastMessageAt) {
+                  await database.chatSession.update({
+                    where: { id: existingSession.id },
+                    data: { lastMessageAt: newTimestamp },
+                  });
+                }
+                updated++;
+              }
+            } catch (chatError: any) {
+              console.error(`[ChatsController.sync] Error processing chat:`, chatError.message);
+              skipped++;
+            }
+          }
+
+          // 6. Invalidar cache
+          try {
+            const cachePattern = `chats:*:${instanceId}:*`;
+            // Note: igniter.store may not support pattern deletion, clear specific keys
+            await igniter.store.delete(`chats:all:${userId}:${instanceId}:*`);
+          } catch {
+            // Cache clear error - non-critical
+          }
+
+          const result = {
+            success: true,
+            totalFromUazapi: uazapiChats.length,
+            created,
+            updated,
+            skipped,
+            message: `Sync completo: ${created} criados, ${updated} atualizados, ${skipped} ignorados`,
+          };
+
+          console.log('[ChatsController.sync] Sync complete:', result);
+
+          return response.success(result);
+        } catch (error: any) {
+          console.error('[ChatsController.sync] Sync error:', error);
+          return response.badRequest(`Erro no sync: ${error.message}`);
+        }
+      },
+    }),
+
+    /**
      * POST /api/v1/chats/:chatId/block
      */
     block: igniter.mutation({

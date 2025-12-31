@@ -1163,6 +1163,24 @@ export default function ConversationsPage() {
     }
   })
 
+  // Sync chats from UAZapi (manual import)
+  const syncChatsMutation = useMutation({
+    mutationFn: async (instanceId: string) => {
+      const response = await (api.chats as any).sync.mutate({
+        body: { instanceId }
+      })
+      return response
+    },
+    onSuccess: (data: any) => {
+      const result = data?.data ?? data
+      toast.success(result?.message || 'Chats sincronizados!')
+      refetchChats()
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Erro ao sincronizar chats')
+    }
+  })
+
   // ==================== HANDLERS ====================
 
   const handleSelectChat = useCallback((chat: UAZChat) => {
@@ -1790,9 +1808,36 @@ export default function ConversationsPage() {
           <div className="p-8 text-center">
             <MessageCircle className="h-12 w-12 mx-auto text-slate-400 dark:text-slate-500 mb-3" />
             <p className="text-slate-600 dark:text-slate-300">Nenhuma conversa encontrada</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-4">
               As conversas aparecerao aqui quando voce receber mensagens
             </p>
+            {/* Botao de sync para importar chats existentes */}
+            {instanceIdsToFetch.length > 0 && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // Sync all connected instances
+                    instanceIdsToFetch.forEach(instanceId => {
+                      syncChatsMutation.mutate(instanceId)
+                    })
+                  }}
+                  disabled={syncChatsMutation.isPending}
+                  className="gap-2"
+                >
+                  {syncChatsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Importar chats existentes
+                </Button>
+                <p className="text-xs text-slate-400">
+                  Clique para importar conversas existentes do WhatsApp
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div
