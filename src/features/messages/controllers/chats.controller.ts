@@ -659,6 +659,15 @@ export const chatsController = igniter.controller({
             };
           });
 
+          console.log('[ChatsController.all] Query result:', {
+            sessionsCount: sessions.length,
+            totalCount,
+            chatsReturned: chats.length,
+            instanceIds,
+            organizationId,
+            hasMore,
+          });
+
           const result = {
             chats,
             instances: instances.map(i => ({
