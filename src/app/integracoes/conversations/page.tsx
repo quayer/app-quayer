@@ -2448,7 +2448,10 @@ export default function ConversationsPage() {
                       role={isFailed ? "alert" : undefined}
                       aria-label={isFailed ? "Falha ao enviar mensagem" : undefined}
                     >
-                      <div className="flex flex-col items-end gap-1">
+                      <div className={cn(
+                        "flex flex-col gap-1",
+                        message.direction === 'OUTBOUND' ? "items-end" : "items-start"
+                      )}>
                         {/* Failed message indicator badge */}
                         {isFailed && (
                           <div className="flex items-center gap-1 text-destructive text-xs font-medium mb-1">
