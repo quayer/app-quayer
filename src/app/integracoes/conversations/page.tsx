@@ -638,9 +638,20 @@ export default function ConversationsPage() {
       allServerMessages.push(...pageData)
     }
 
+    // DEDUPE: Remove duplicates by id (can happen with pagination during updates)
+    const seenIds = new Set<string>()
+    const dedupedMessages = allServerMessages.filter((msg) => {
+      const msgId = msg.id || msg.waMessageId
+      if (seenIds.has(msgId)) {
+        return false
+      }
+      seenIds.add(msgId)
+      return true
+    })
+
     // Sort all messages by createdAt ascending (oldest first)
     // Backend returns desc order, but with pagination we need to re-sort
-    allServerMessages.sort((a, b) => {
+    dedupedMessages.sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime()
       const dateB = new Date(b.createdAt).getTime()
       return dateA - dateB // Ascending order (oldest to newest)
@@ -652,11 +663,11 @@ export default function ConversationsPage() {
     )
 
     // Merge: add optimistic messages that aren't yet in server response
-    const serverIds = new Set(allServerMessages.map((m: DBMessage) => m.waMessageId || m.id))
+    const serverIds = new Set(dedupedMessages.map((m: DBMessage) => m.waMessageId || m.id))
     const newOptimistic = sessionOptimistic.filter(m => !serverIds.has(m.id))
 
     // Return sorted messages with optimistic ones at the end (they are the newest)
-    return [...allServerMessages, ...newOptimistic]
+    return [...dedupedMessages, ...newOptimistic]
   }, [messagesData, optimisticMessages, selectedChatId])
 
   // Handle scroll to load more messages (scroll to top = older messages)
