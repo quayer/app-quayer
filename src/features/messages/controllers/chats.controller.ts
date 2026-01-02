@@ -391,8 +391,15 @@ export const chatsController = igniter.controller({
           //
           // Para reativar sync, restaurar código do git
 
+          // Helper para validar UUID
+          const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+          const isValidCursor = (cursor: string | undefined): cursor is string =>
+            !!cursor && cursor !== 'undefined' && cursor !== 'null' && isValidUUID(cursor);
+
           // 3. Cache check (skip if forceSync)
-          const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${query.cursor || '0'}:${query.limit || 50}`;
+          // Validar cursor antes de usar na cache key - evita strings inválidas como "undefined"
+          const cursorForCache = isValidCursor(query.cursor) ? query.cursor : '0';
+          const cacheKey = `chats:all:${userId}:${instanceIds.sort().join(',')}:${query.search || ''}:${query.attendanceType || ''}:${cursorForCache}:${query.limit || 50}`;
           if (!query.forceSync) {
             try {
               const cached = await igniter.store.get<any>(cacheKey);
@@ -493,7 +500,7 @@ export const chatsController = igniter.controller({
             orderBy: { lastMessageAt: 'desc' as const },
           };
 
-          if (query.cursor) {
+          if (isValidCursor(query.cursor)) {
             // Cursor-based: cursor is the ID of the last item
             paginationOptions.cursor = { id: query.cursor };
             paginationOptions.skip = 1; // Skip the cursor item itself
@@ -657,15 +664,6 @@ export const chatsController = igniter.controller({
               instanceId: session.connectionId,
               instanceName: instance?.name || 'Instância',
             };
-          });
-
-          console.log('[ChatsController.all] Query result:', {
-            sessionsCount: sessions.length,
-            totalCount,
-            chatsReturned: chats.length,
-            instanceIds,
-            organizationId,
-            hasMore,
           });
 
           const result = {
