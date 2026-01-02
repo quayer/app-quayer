@@ -396,23 +396,40 @@ export class UAZapiAdapter implements IWhatsAppProvider {
       const messageType = rawMessage.type || messageContent.type || 'text';
       const textContent = messageContent.text || messageContent.body || messageContent.caption || rawMessage.text || '';
 
-      // Check for media
-      const mediaUrl = messageContent.mediaUrl || rawMessage.mediaUrl || messageContent.url;
+      // Check for media URL in various possible locations
+      // UAZapi can send media URL in different fields depending on message type
+      const mediaUrl = messageContent.mediaUrl || rawMessage.mediaUrl || messageContent.url ||
+                       messageContent.base64 || rawMessage.base64 ||  // Sometimes sent as base64
+                       messageContent.filePath || rawMessage.filePath;  // Or as file path
+
+      // Determine if this is a media message even without URL
+      // (audio/video/image/document types should have media object)
+      const mappedType = this.mapMessageType(messageType);
+      const isMediaType = ['audio', 'voice', 'video', 'image', 'document', 'sticker'].includes(mappedType);
+
+      // Create media object for media types
+      let mediaObj = undefined;
+      if (mediaUrl || isMediaType) {
+        mediaObj = {
+          id: messageId,
+          type: mappedType,
+          mediaUrl: mediaUrl || '',  // May be empty if needs to be downloaded
+          caption: messageContent.caption || '',
+          fileName: messageContent.filename || messageContent.fileName || '',
+          mimeType: messageContent.mimetype || messageContent.mimeType ||
+                    (mappedType === 'audio' || mappedType === 'voice' ? 'audio/ogg' : ''),
+          size: messageContent.fileSize || messageContent.size,
+          duration: messageContent.seconds || messageContent.duration || messageContent.pttSeconds,
+          // Flag to indicate if media needs to be downloaded via API
+          needsDownload: !mediaUrl && isMediaType,
+        };
+      }
 
       message = {
         id: messageId,
-        type: this.mapMessageType(messageType),
+        type: mappedType,
         content: textContent,
-        media: mediaUrl ? {
-          id: messageId,
-          type: this.mapMessageType(messageType),
-          mediaUrl: mediaUrl,
-          caption: messageContent.caption || '',
-          fileName: messageContent.filename || messageContent.fileName || '',
-          mimeType: messageContent.mimetype || messageContent.mimeType || '',
-          size: messageContent.fileSize || messageContent.size,
-          duration: messageContent.seconds || messageContent.duration,
-        } : undefined,
+        media: mediaObj,
         timestamp: new Date(messageContent.senderTimestampMS || rawMessage.timestamp || Date.now()),
         // Location data
         latitude: messageContent.latitude || messageContent.lat,
