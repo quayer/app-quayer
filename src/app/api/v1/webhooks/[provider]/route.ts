@@ -709,11 +709,97 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
       }
     }
   } else {
-    console.log(`[Webhook] Message ${message.id} not found in database (may be external)`);
-
     // ⭐ Mensagem externa (não está no banco) - provavelmente enviada via app WhatsApp
-    // Isso pode indicar resposta manual de humano
-    // TODO: Implementar detecção de mensagens externas para auto-pause
+    // Salvar mensagem externa para manter histórico completo
+    console.log(`[Webhook] Message ${message.id} not found - saving external outbound message`);
+
+    try {
+      const { to } = data;
+      const instanceId = webhook.instanceId;
+
+      if (!instanceId || !to) {
+        console.log('[Webhook] Missing instanceId or to for external message');
+        return;
+      }
+
+      // Buscar instância
+      const instance = await database.connection.findUnique({
+        where: { id: instanceId },
+        select: { organizationId: true },
+      });
+
+      if (!instance?.organizationId) {
+        console.log(`[Webhook] Instance ${instanceId} not found for external message`);
+        return;
+      }
+
+      // Buscar ou criar contato (destinatário da mensagem)
+      const cleanTo = to.replace(/@.*$/, '');
+      let contact = await database.contact.findFirst({
+        where: {
+          OR: [
+            { phoneNumber: cleanTo },
+            { phoneNumber: to },
+            { phoneNumber: `${cleanTo}@s.whatsapp.net` },
+          ],
+        },
+      });
+
+      if (!contact) {
+        // Criar contato se não existir
+        contact = await database.contact.create({
+          data: {
+            phoneNumber: cleanTo,
+            name: data.pushName || cleanTo,
+            organizationId: instance.organizationId,
+          },
+        });
+        console.log(`[Webhook] Created contact for external message: ${contact.id}`);
+      }
+
+      // Buscar ou criar sessão
+      const session = await sessionsManager.getOrCreateSession({
+        contactId: contact.id,
+        connectionId: instanceId,
+        organizationId: instance.organizationId,
+      });
+
+      // Salvar mensagem externa
+      const savedMessage = await database.message.create({
+        data: {
+          sessionId: session.id,
+          contactId: contact.id,
+          connectionId: instanceId,
+          waMessageId: message.id,
+          direction: 'OUTBOUND',
+          type: message.type || 'text',
+          author: 'AGENT', // Mensagem enviada pelo telefone (humano), não pelo sistema
+          content: message.content || '',
+          status: 'sent',
+          mediaUrl: message.media?.mediaUrl || null,
+          fileName: message.media?.fileName || null,
+          sentAt: new Date(),
+        },
+      });
+
+      console.log(`[Webhook] ✅ External outbound message saved: ${savedMessage.id}`);
+
+      // Auto-pause IA quando humano responde pelo WhatsApp
+      try {
+        await sessionsManager.autoPauseOnHumanReply(session.id, undefined, 'WhatsApp');
+        console.log(`[Webhook] Session ${session.id} paused due to WhatsApp human reply`);
+      } catch (pauseError) {
+        console.error('[Webhook] Failed to auto-pause session:', pauseError);
+      }
+
+      // Atualizar lastMessageAt da sessão
+      await database.chatSession.update({
+        where: { id: session.id },
+        data: { lastMessageAt: new Date() },
+      });
+    } catch (saveError) {
+      console.error('[Webhook] Failed to save external outbound message:', saveError);
+    }
   }
 }
 
