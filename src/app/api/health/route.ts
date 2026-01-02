@@ -6,6 +6,7 @@ import { redis } from '@/services/redis'
  * @endpoint GET /api/health
  * @description Health check endpoint for Docker, Kubernetes, load balancers
  * @returns {object} Health status with service checks
+ * @updated 2026-01-02 - Deploy retry
  *
  * Response Example:
  * {
