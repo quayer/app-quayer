@@ -5,8 +5,9 @@ import { database } from '@/services/database';
 import { ConnectionStatus } from '@prisma/client';
 
 // Profile picture cache (in-memory for quick lookups)
+// WhatsApp URLs expire quickly, so we use a short TTL
 const profilePicCache = new Map<string, { url: string | null; expiresAt: number }>();
-const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 30; // 30 minutes
+const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 5; // 5 minutes (WhatsApp URLs expire fast)
 
 /**
  * Contacts Controller
@@ -386,39 +387,18 @@ export const contactsController = igniter.controller({
           return response.unauthorized('Autenticação necessária');
         }
 
-        // Check cache first
-        const cacheKey = `${instanceId}:${phoneNumber}`;
+        // Check cache first (short TTL because WhatsApp URLs expire fast)
+        const cleanNumber = phoneNumber.replace(/@.*$/, '');
+        const cacheKey = `${instanceId}:${cleanNumber}`;
         const cached = profilePicCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
           return response.success({ url: cached.url, source: 'cache' });
         }
 
-        // Check if we already have it in the database
-        // CORREÇÃO: phoneNumber no banco inclui sufixo @s.whatsapp.net
-        // Buscar por ambos os formatos (com e sem sufixo)
-        const cleanNumber = phoneNumber.replace(/@.*$/, '');
-        const contact = await database.contact.findFirst({
-          where: {
-            OR: [
-              { phoneNumber: cleanNumber },
-              { phoneNumber: `${cleanNumber}@s.whatsapp.net` },
-              { phoneNumber: { startsWith: cleanNumber } },
-            ],
-          },
-          select: { profilePicUrl: true, phoneNumber: true },
-        });
-
-        if (contact?.profilePicUrl) {
-          // Cache and return
-          profilePicCache.set(cacheKey, {
-            url: contact.profilePicUrl,
-            expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL,
-          });
-          return response.success({ url: contact.profilePicUrl, source: 'database' });
-        }
+        // NOTE: We don't use database-stored URLs because WhatsApp URLs expire quickly
+        // Always fetch fresh from the WhatsApp API
 
         // Fetch from WhatsApp API
-        // CORREÇÃO: Usar 'connection' (não 'instance' que não existe no Prisma)
         const connection = await database.connection.findFirst({
           where: {
             id: instanceId,
@@ -444,9 +424,7 @@ export const contactsController = igniter.controller({
         }
 
         try {
-          // Fetch from UAZapi
           const baseUrl = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
-          // cleanNumber já foi declarado acima
 
           const apiResponse = await fetch(`${baseUrl}/profile/image/${cleanNumber}`, {
             method: 'GET',
@@ -472,19 +450,8 @@ export const contactsController = igniter.controller({
           const data = await apiResponse.json();
           const profilePicUrl = data.profilePicUrl || data.url || data.data?.url || null;
 
-          // Update database - usar o phoneNumber encontrado ou tentar ambos formatos
-          if (profilePicUrl) {
-            await database.contact.updateMany({
-              where: {
-                OR: [
-                  { phoneNumber: cleanNumber },
-                  { phoneNumber: `${cleanNumber}@s.whatsapp.net` },
-                  { phoneNumber: { startsWith: cleanNumber } },
-                ],
-              },
-              data: { profilePicUrl },
-            });
-          }
+          // NOTE: We don't save to database because WhatsApp URLs expire quickly
+          // Just cache in memory with short TTL
 
           // Cache the result
           profilePicCache.set(cacheKey, {
