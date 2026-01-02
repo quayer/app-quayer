@@ -93,6 +93,11 @@ jobs:
             echo "📊 Espaço disponível:"
             df -h / | tail -1
 
+            # Remover containers órfãos antes de iniciar (evita conflito de nomes)
+            echo "🧹 Removendo containers antigos/órfãos..."
+            $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans 2>/dev/null || true
+            docker rm -f quayer-redis quayer-postgres quayer-app 2>/dev/null || true
+
             # Build (com ou sem cache) - usando BuildKit para cache otimizado
             echo "🏗️ Construindo imagem..."
             export DOCKER_BUILDKIT=1
@@ -106,9 +111,9 @@ jobs:
               $COMPOSE_CMD -f $COMPOSE_FILE build --parallel app
             fi
 
-            # Deploy
+            # Deploy - usando --remove-orphans para limpar containers antigos
             echo "🚀 Subindo aplicação..."
-            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate app
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
 
             # Aguardar health check (reduzido para deploy mais rápido)
             echo "⏳ Aguardando health check..."
