@@ -562,22 +562,24 @@ export default function ConversationsPage() {
   })
 
   // Infinite scroll para chats - carregar mais quando chegar perto do final
-  useEffect(() => {
-    const virtualItems = chatListVirtualizer.getVirtualItems()
-    if (virtualItems.length === 0) return
+  // NOTA: Usamos chatListVirtualizer como dependência estável ao invés de getVirtualItems()
+  // porque getVirtualItems() retorna novo array a cada chamada, causando loop infinito
+  const virtualItems = chatListVirtualizer.getVirtualItems()
+  const lastVirtualItem = virtualItems[virtualItems.length - 1]
+  const lastItemIndex = lastVirtualItem?.index ?? -1
 
-    const lastItem = virtualItems[virtualItems.length - 1]
+  useEffect(() => {
     // Se o último item visível está próximo do fim da lista (últimos 5 items)
     if (
-      lastItem &&
-      lastItem.index >= chats.length - 5 &&
+      lastItemIndex >= 0 &&
+      lastItemIndex >= chats.length - 5 &&
       hasMoreChats &&
       !isFetchingMoreChats
     ) {
       fetchNextChatsPage()
     }
   }, [
-    chatListVirtualizer.getVirtualItems(),
+    lastItemIndex,
     chats.length,
     hasMoreChats,
     isFetchingMoreChats,

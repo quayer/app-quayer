@@ -430,6 +430,14 @@ export const contactsController = igniter.controller({
         });
 
         if (!connection || connection.status !== ConnectionStatus.CONNECTED || !connection.uazapiToken) {
+          // Log detalhado para debugging
+          console.warn(`[ContactsController] Connection unavailable for profile pic:`, {
+            instanceId,
+            phoneNumber: cleanNumber,
+            found: !!connection,
+            status: connection?.status,
+            hasToken: !!connection?.uazapiToken,
+          });
           // Cache null result to avoid repeated API calls
           profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
           return response.success({ url: null, source: 'unavailable' });
@@ -449,6 +457,14 @@ export const contactsController = igniter.controller({
           });
 
           if (!apiResponse.ok) {
+            // Log detalhado para debugging
+            const errorText = await apiResponse.text().catch(() => 'Failed to read error body');
+            console.warn(`[ContactsController] Profile picture API error for ${cleanNumber}:`, {
+              status: apiResponse.status,
+              statusText: apiResponse.statusText,
+              body: errorText.substring(0, 200), // Limitar tamanho do log
+              instanceId,
+            });
             profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
             return response.success({ url: null, source: 'api_error' });
           }
