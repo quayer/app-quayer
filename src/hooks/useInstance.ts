@@ -257,57 +257,64 @@ export function useDeleteInstance() {
       return response
     },
     onMutate: async (id: string) => {
-      // Cancelar queries em andamento
+      // Cancelar TODAS as queries de instances para evitar race conditions
       await queryClient.cancelQueries({ queryKey: ['instances'] })
 
-      // Snapshot dos dados anteriores
-      const previousInstances = queryClient.getQueryData(['instances'])
+      // Snapshot de TODAS as queries de instances
+      const previousData = queryClient.getQueriesData({ queryKey: ['instances'] })
 
-      // Otimistic update - remover da lista imediatamente
-      // Usar setQueriesData para atingir todas as variações de chave (com/sem filtros)
-      queryClient.setQueriesData({ queryKey: ['instances'] }, (old: any) => {
-        if (!old) return old
+      // Função helper para filtrar instâncias de qualquer formato
+      const filterInstance = (data: any, instanceId: string): any => {
+        if (!data) return data
 
-        // Formato 1: { data: [...] } (objeto com array de data)
-        if (old.data && Array.isArray(old.data)) {
+        // Formato: { data: [...] } (array direto em data)
+        if (data.data && Array.isArray(data.data)) {
           return {
-            ...old,
-            data: old.data.filter((instance: any) => instance.id !== id)
+            ...data,
+            data: data.data.filter((instance: any) => instance.id !== instanceId)
           }
         }
 
-        // Formato 2: Array direto
-        if (Array.isArray(old)) {
-          return old.filter((instance: any) => instance.id !== id)
+        // Formato: Array direto
+        if (Array.isArray(data)) {
+          return data.filter((instance: any) => instance.id !== instanceId)
         }
 
-        // Formato 3: { data: { data: [...] } } (nested data)
-        if (old.data?.data && Array.isArray(old.data.data)) {
+        // Formato: { data: { data: [...] } } (nested data com pagination)
+        if (data.data?.data && Array.isArray(data.data.data)) {
           return {
-            ...old,
+            ...data,
             data: {
-              ...old.data,
-              data: old.data.data.filter((instance: any) => instance.id !== id)
+              ...data.data,
+              data: data.data.data.filter((instance: any) => instance.id !== instanceId)
             }
           }
         }
 
-        return old
-      })
+        return data
+      }
 
-      return { previousInstances }
+      // Aplicar optimistic update em TODAS as queries de instances
+      queryClient.setQueriesData({ queryKey: ['instances'] }, (old: any) => filterInstance(old, id))
+
+      return { previousData }
     },
     onError: (_error, _id, context) => {
-      // Reverter para dados anteriores em caso de erro
-      if (context?.previousInstances) {
-        queryClient.setQueryData(['instances'], context.previousInstances)
+      // Reverter TODAS as queries para dados anteriores em caso de erro
+      if (context?.previousData) {
+        context.previousData.forEach(([queryKey, data]: [any, any]) => {
+          queryClient.setQueryData(queryKey, data)
+        })
       }
     },
-    onSettled: () => {
-      // Sempre revalidar após mutação
-      queryClient.invalidateQueries({ queryKey: ['instances'] })
-      queryClient.invalidateQueries({ queryKey: ['all-instances'] })
-      queryClient.invalidateQueries({ queryKey: ['instances', 'stats'] })
+    onSuccess: () => {
+      // Invalidar após sucesso com delay para dar tempo do servidor processar
+      // Isso evita que o polling traga de volta dados desatualizados
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['instances'] })
+        queryClient.invalidateQueries({ queryKey: ['all-instances'] })
+        queryClient.invalidateQueries({ queryKey: ['instances', 'stats'] })
+      }, 500)
     },
   })
 }

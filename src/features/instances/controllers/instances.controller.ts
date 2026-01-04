@@ -386,16 +386,30 @@ export const instancesController = igniter.controller({
                     if (realStatus === 'connected' || realStatus === 'open') {
                       // ✅ Atualizar status no banco se diferente
                       if (instance.status !== 'CONNECTED') {
+                        // Buscar foto de perfil explicitamente (UAZapi nem sempre retorna no status)
+                        let profilePictureUrl = (statusResult.data as any)?.profilePicture || null;
+                        if (!profilePictureUrl && instance.uazapiToken) {
+                          try {
+                            const pictureResult = await uazapiService.getProfilePicture(instance.uazapiToken);
+                            if (pictureResult.success && pictureResult.data?.profilePictureUrl) {
+                              profilePictureUrl = pictureResult.data.profilePictureUrl;
+                            }
+                          } catch (picErr) {
+                            logger.warn('Failed to fetch profile picture during sync', { instanceId: instance.id, error: picErr });
+                          }
+                        }
+
                         await repository.updateStatus(
                           instance.id,
                           'CONNECTED',
                           statusResult.data?.phoneNumber || undefined,
-                          (statusResult.data as any)?.profilePicture || null
+                          profilePictureUrl
                         );
                         logger.info('Async status sync: instance updated to CONNECTED', {
                           instanceId: instance.id,
                           name: instance.name,
-                          previousStatus: instance.status
+                          previousStatus: instance.status,
+                          hasProfilePicture: !!profilePictureUrl
                         });
                       }
                     } else if (realStatus === 'disconnected' || realStatus === 'close') {
@@ -796,11 +810,24 @@ export const instancesController = igniter.controller({
           const rawStatus = statusResult.data.status?.toString() || 'DISCONNECTED';
           const normalizedStatus = rawStatus.toUpperCase() as ConnectionStatus;
           if (normalizedStatus !== instance.status) {
+            // Buscar foto de perfil explicitamente quando conectar
+            let profilePictureUrl = statusResult.data.profilePicture || null;
+            if (normalizedStatus === 'CONNECTED' && !profilePictureUrl && instance.uazapiToken) {
+              try {
+                const pictureResult = await uazapiService.getProfilePicture(instance.uazapiToken);
+                if (pictureResult.success && pictureResult.data?.profilePictureUrl) {
+                  profilePictureUrl = pictureResult.data.profilePictureUrl;
+                }
+              } catch (picErr) {
+                logger.warn('Failed to fetch profile picture', { instanceId: id, error: picErr });
+              }
+            }
+
             await repository.updateStatus(
               id,
               normalizedStatus,
               statusResult.data.phoneNumber,
-              statusResult.data.profilePicture || null
+              profilePictureUrl
             );
 
             // Invalidar cache da lista de instâncias para que o frontend pegue dados frescos
@@ -1485,15 +1512,28 @@ export const instancesController = igniter.controller({
             if (statusResult.success && (realStatus === 'connected' || realStatus === 'open')) {
               const phoneNumber = statusResult.data?.phoneNumber || instance.phoneNumber;
 
+              // Buscar foto de perfil explicitamente
+              let profilePictureUrl = (statusResult.data as any)?.profilePicture || null;
+              if (!profilePictureUrl && instance.uazapiToken) {
+                try {
+                  const pictureResult = await uazapiService.getProfilePicture(instance.uazapiToken);
+                  if (pictureResult.success && pictureResult.data?.profilePictureUrl) {
+                    profilePictureUrl = pictureResult.data.profilePictureUrl;
+                  }
+                } catch (picErr) {
+                  logger.warn('Failed to fetch profile picture in share endpoint', { instanceId: instance.id, error: picErr });
+                }
+              }
+
               // Atualizar status no banco
               await repository.updateStatus(
                 instance.id,
                 'CONNECTED',
                 phoneNumber || undefined,
-                (statusResult.data as any)?.profilePicture || null
+                profilePictureUrl
               );
 
-              logger.info('Instance already connected (Real Status), returning success', { instanceId: instance.id });
+              logger.info('Instance already connected (Real Status), returning success', { instanceId: instance.id, hasProfilePicture: !!profilePictureUrl });
               return response.success({
                 status: 'connected',
                 message: 'Instância já está conectada!',
