@@ -286,7 +286,7 @@ export const mediaController = igniter.controller({
       body: sendAudioSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaBase64, mimeType } = request.body
+          const { instanceId, chatId, mediaBase64, mimeType, duration } = request.body
 
           // Buscar conexão (instância WhatsApp)
           const connection = await database.connection.findUnique({
@@ -315,28 +315,95 @@ export const mediaController = igniter.controller({
             return response.badRequest('Token UAZ não configurado')
           }
 
-          // Extrair número do chatId
-          const number = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '')
+          // Extrair número do chatId (pode ter @s.whatsapp.net ou @g.us)
+          const phoneNumber = chatId.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '')
 
-          // Preparar payload no formato correto para UAZapi
-          // FORMATO: { number, type: 'ptt', file: 'data:audio/...;base64,...' }
-          // Usar 'ptt' para mensagem de voz (push-to-talk) no WhatsApp
+          // Preparar data URI do áudio para salvar e enviar
           const dataUri = mediaBase64.startsWith('data:')
             ? mediaBase64
             : `data:${mimeType};base64,${mediaBase64}`
 
+          // ========== SALVAR MENSAGEM NO BANCO ==========
+          // 1. Buscar ou criar contato pelo número
+          let contact = await database.contact.findUnique({
+            where: { phoneNumber: chatId } // chatId inclui @s.whatsapp.net
+          })
+
+          if (!contact) {
+            // Tentar sem sufixo
+            contact = await database.contact.findUnique({
+              where: { phoneNumber }
+            })
+          }
+
+          if (!contact) {
+            // Criar contato novo
+            contact = await database.contact.create({
+              data: {
+                phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
+                name: phoneNumber,
+              }
+            })
+            console.log(`[MediaController] Created new contact: ${contact.id}`)
+          }
+
+          // 2. Buscar sessão ativa para este contato/conexão
+          let session = await database.session.findFirst({
+            where: {
+              contactId: contact.id,
+              connectionId: instanceId,
+              status: { not: 'CLOSED' }
+            },
+            orderBy: { createdAt: 'desc' }
+          })
+
+          if (!session) {
+            // Criar nova sessão
+            session = await database.session.create({
+              data: {
+                contactId: contact.id,
+                connectionId: instanceId,
+                organizationId: connection.organizationId!,
+                status: 'OPEN',
+                attendanceStatus: 'WAITING',
+              }
+            })
+            console.log(`[MediaController] Created new session: ${session.id}`)
+          }
+
+          // 3. Criar mensagem de áudio no banco COM o mediaUrl (data URI)
+          const savedMessage = await database.message.create({
+            data: {
+              sessionId: session.id,
+              contactId: contact.id,
+              connectionId: instanceId,
+              waMessageId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // Será atualizado pelo webhook
+              direction: 'OUTBOUND',
+              type: 'ptt', // Push-to-talk (áudio de voz)
+              content: '🎵 Áudio',
+              mediaUrl: dataUri, // ⭐ SALVA O ÁUDIO COMO DATA URI
+              mediaType: 'audio',
+              mimeType: mimeType,
+              mediaDuration: duration,
+              status: 'pending',
+              author: 'AGENT',
+            }
+          })
+
+          console.log(`[MediaController] Audio message saved: ${savedMessage.id} (mediaUrl: ${dataUri.substring(0, 50)}...)`)
+
+          // ========== ENVIAR PARA UAZAPI ==========
           const payload = {
-            number,
-            type: 'ptt', // Push-to-talk = mensagem de voz do WhatsApp
+            number: phoneNumber,
+            type: 'ptt',
             file: dataUri,
           }
 
-          // Enviar para UAZapi
           const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
 
           console.log('[MediaController] Sending audio to UAZapi:', {
             endpoint: `${UAZAPI_URL}/send/media`,
-            number,
+            number: phoneNumber,
             type: 'ptt',
             mimeType,
             mediaLength: mediaBase64.length
@@ -358,16 +425,33 @@ export const mediaController = igniter.controller({
               status: uazResponse.status,
               data: uazData
             })
+            // Marcar mensagem como falha
+            await database.message.update({
+              where: { id: savedMessage.id },
+              data: { status: 'failed' }
+            })
             return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar audio')
+          }
+
+          // Atualizar mensagem com o waMessageId real da UAZapi
+          const waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
+          if (waMessageId) {
+            await database.message.update({
+              where: { id: savedMessage.id },
+              data: {
+                waMessageId,
+                status: 'sent'
+              }
+            })
           }
 
           return response.success({
             data: {
               success: true,
-              messageId: uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id,
-              messageType: uazData.messageType,
+              messageId: savedMessage.id,
+              waMessageId,
+              messageType: 'ptt',
               message: 'Audio enviado com sucesso',
-              ...uazData
             }
           })
 

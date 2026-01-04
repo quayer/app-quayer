@@ -701,6 +701,7 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
 
     // ⭐ MEDIA DOWNLOAD: If media needs to be downloaded, fetch from UAZapi
     // POST /message/download - retorna fileURL ou base64Data
+    // IMPORTANTE: Sempre tentar baixar para garantir que o áudio fique disponível
     let mediaUrl = message.media.mediaUrl;
     if ((!mediaUrl || (message.media as any).needsDownload) && message.id) {
       console.log(`[Webhook] Media needs download - fetching from UAZapi (id: ${message.id})`);
@@ -710,7 +711,8 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
           select: { uazapiToken: true },
         });
         if (instance?.uazapiToken) {
-          const downloadResponse = await fetch(
+          // Primeiro tentar com URL pública
+          let downloadResponse = await fetch(
             `${process.env.UAZAPI_URL || 'https://quayer.uazapi.com'}/message/download`,
             {
               method: 'POST',
@@ -720,22 +722,24 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
               },
               body: JSON.stringify({
                 id: message.id,
-                return_link: true,          // Retorna URL pública
+                return_link: true,          // Tenta URL pública primeiro
                 generate_mp3: true,         // Para áudios, converte para MP3
-                return_base64: false,       // Preferir URL ao invés de base64
+                return_base64: true,        // ⭐ TAMBÉM retorna base64 como fallback
               }),
             }
           );
+
           if (downloadResponse.ok) {
             const downloadData = await downloadResponse.json();
             // UAZapi returns fileURL (URL pública) ou base64Data
             if (downloadData.fileURL) {
               mediaUrl = downloadData.fileURL;
               console.log(`[Webhook] Media downloaded via URL: ${mediaUrl.substring(0, 60)}...`);
-            } else if (downloadData.base64Data) {
-              const mimeType = message.media.mimeType || downloadData.mimetype || 'application/octet-stream';
-              mediaUrl = `data:${mimeType};base64,${downloadData.base64Data}`;
-              console.log(`[Webhook] Media downloaded as base64 (${mimeType})`);
+            } else if (downloadData.base64Data || downloadData.base64) {
+              const base64 = downloadData.base64Data || downloadData.base64;
+              const mimeType = message.media.mimeType || downloadData.mimetype || downloadData.mimeType || 'audio/ogg';
+              mediaUrl = `data:${mimeType};base64,${base64}`;
+              console.log(`[Webhook] Media downloaded as base64 (${mimeType}, ${base64.length} chars)`);
             } else {
               console.warn(`[Webhook] No fileURL or base64Data in response:`, JSON.stringify(downloadData).substring(0, 200));
             }
