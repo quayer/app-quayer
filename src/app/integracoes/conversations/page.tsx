@@ -119,6 +119,7 @@ import {
   Mic,
   Download,
   ChevronDown,
+  VolumeX,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -1529,10 +1530,13 @@ export default function ConversationsPage() {
     }
   }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
 
+  // Cache de áudios que falharam ao carregar (não tentar novamente)
+  const [failedAudioIds, setFailedAudioIds] = useState<Set<string>>(new Set())
+
   // Handle loading audio from API when mediaUrl is not available
   const handleLoadAudio = useCallback(async (messageId: string) => {
-    // Already loading or already loaded
-    if (loadingAudioIds.has(messageId) || loadedAudioUrls.has(messageId)) {
+    // Already loading, loaded, or failed
+    if (loadingAudioIds.has(messageId) || loadedAudioUrls.has(messageId) || failedAudioIds.has(messageId)) {
       return
     }
 
@@ -1545,11 +1549,13 @@ export default function ConversationsPage() {
         credentials: 'include',
       })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+      const result = await response.json()
+
+      // Check for error in response
+      if (!response.ok || result?.error) {
+        throw new Error(result?.error?.message || `HTTP ${response.status}`)
       }
 
-      const result = await response.json()
       const data = result?.data
 
       if (data?.mediaUrl) {
@@ -1561,13 +1567,12 @@ export default function ConversationsPage() {
         const dataUrl = `data:${mimeType};base64,${data.data}`
         setLoadedAudioUrls(prev => new Map(prev).set(messageId, dataUrl))
       } else {
-        throw new Error('Formato de resposta inválido')
+        throw new Error('Áudio não disponível')
       }
     } catch (error: any) {
       console.error('[ConversationsPage] Error loading audio:', error)
-      toast.error('Erro ao carregar áudio', {
-        description: typeof error?.message === 'string' ? error.message : undefined
-      })
+      // Mark as failed so we don't retry automatically
+      setFailedAudioIds(prev => new Set(prev).add(messageId))
     } finally {
       setLoadingAudioIds(prev => {
         const next = new Set(prev)
@@ -1575,26 +1580,30 @@ export default function ConversationsPage() {
         return next
       })
     }
-  }, [loadingAudioIds, loadedAudioUrls])
+  }, [loadingAudioIds, loadedAudioUrls, failedAudioIds])
 
   // Auto-load audio messages that don't have mediaUrl
   // This provides better UX - audio is ready to play when user sees it
   useEffect(() => {
     if (!messages || messages.length === 0) return
 
-    // Find audio messages without mediaUrl that haven't been loaded yet
-    const audioMessagesToLoad = messages.filter((msg: DBMessage) => {
-      const isAudio = msg.type === 'audio' || msg.type === 'voice' || msg.type === 'ptt'
-      const needsLoad = !msg.mediaUrl && !loadedAudioUrls.has(msg.id) && !loadingAudioIds.has(msg.id)
+    // Find audio messages without mediaUrl that haven't been loaded or failed yet
+    // Only process DBMessage (not OptimisticMessage which doesn't have audio)
+    const audioMessagesToLoad = messages.filter((msg) => {
+      // Skip OptimisticMessage (only has type 'text')
+      if (!('mediaUrl' in msg)) return false
+      const dbMsg = msg as DBMessage
+      const isAudio = dbMsg.type === 'audio' || dbMsg.type === 'voice' || dbMsg.type === 'ptt'
+      const needsLoad = !dbMsg.mediaUrl && !loadedAudioUrls.has(dbMsg.id) && !loadingAudioIds.has(dbMsg.id) && !failedAudioIds.has(dbMsg.id)
       return isAudio && needsLoad
-    })
+    }) as DBMessage[]
 
     // Load up to 5 audio messages at a time to avoid overwhelming the API
     const toLoad = audioMessagesToLoad.slice(0, 5)
-    toLoad.forEach((msg: DBMessage) => {
+    toLoad.forEach((msg) => {
       handleLoadAudio(msg.id)
     })
-  }, [messages, loadedAudioUrls, loadingAudioIds, handleLoadAudio])
+  }, [messages, loadedAudioUrls, loadingAudioIds, failedAudioIds, handleLoadAudio])
 
   const handleManualRefresh = useCallback(async () => {
     // Fazer sync forçado com UAZapi para buscar novos chats
@@ -2910,6 +2919,7 @@ export default function ConversationsPage() {
                           {'mediaUrl' in message && !message.mediaUrl && (message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
                             const audioUrl = loadedAudioUrls.get(message.id)
                             const isLoading = loadingAudioIds.has(message.id)
+                            const hasFailed = failedAudioIds.has(message.id)
 
                             return (
                               <div className="flex items-center gap-2 mb-2" role="group" aria-label="Mensagem de áudio">
@@ -2936,25 +2946,26 @@ export default function ConversationsPage() {
                                       <Download className="h-4 w-4" aria-hidden="true" />
                                     </a>
                                   </>
-                                ) : (
-                                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
-                                    {isLoading ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span>Carregando áudio...</span>
-                                      </>
-                                    ) : (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 px-3"
-                                        onClick={() => handleLoadAudio(message.id)}
-                                      >
-                                        <Play className="h-4 w-4 mr-1" />
-                                        Carregar
-                                      </Button>
-                                    )}
+                                ) : hasFailed ? (
+                                  <div className="flex items-center gap-2 text-muted-foreground/70 text-sm py-2 px-3 bg-muted/50 rounded-lg">
+                                    <VolumeX className="h-4 w-4 flex-shrink-0" />
+                                    <span>Áudio indisponível</span>
                                   </div>
+                                ) : isLoading ? (
+                                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>Carregando áudio...</span>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-3"
+                                    onClick={() => handleLoadAudio(message.id)}
+                                  >
+                                    <Play className="h-4 w-4 mr-1" />
+                                    Carregar
+                                  </Button>
                                 )}
                               </div>
                             )
