@@ -773,10 +773,24 @@ export default function ConversationsPage() {
   } = useQuery({
     queryKey: ['quick-replies', quickReplySearch],
     queryFn: async () => {
-      const response = await (api['quick-replies'] as any).list.query({
-        query: { search: quickReplySearch || undefined, limit: 20 }
-      })
-      return (response as any)?.data ?? { quickReplies: [], categories: [] }
+      try {
+        const response = await (api['quick-replies'] as any).list.query({
+          query: { search: quickReplySearch || undefined, limit: 20 }
+        })
+        // Handle different response formats from Igniter
+        const raw = response as any
+        let result = raw
+        if (result?.data) result = result.data
+        if (result?.data) result = result.data
+
+        return {
+          quickReplies: Array.isArray(result?.quickReplies) ? result.quickReplies : [],
+          categories: Array.isArray(result?.categories) ? result.categories : [],
+        }
+      } catch (err) {
+        console.error('[Conversations] Quick replies fetch error:', err)
+        return { quickReplies: [], categories: [] }
+      }
     },
     enabled: showQuickReplies,
     staleTime: 60000, // Cache for 1 minute
@@ -892,7 +906,8 @@ export default function ConversationsPage() {
       toast.success('Nota adicionada!')
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao criar nota')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao criar nota'
+      toast.error(message)
     },
   })
 
@@ -983,9 +998,14 @@ export default function ConversationsPage() {
           errorMessage = 'Serviço temporariamente indisponível'
           errorDescription = 'Aguarde 30 segundos e tente novamente'
           break
-        default:
-          errorMessage = error?.message || error?.data?.message || 'Falha ao enviar mensagem'
-          errorDescription = error?.data?.error || error?.response?.data?.error || ''
+        default: {
+          // Safely extract error message as string
+          const msgCandidate = error?.message ?? error?.data?.message
+          errorMessage = typeof msgCandidate === 'string' ? msgCandidate : 'Falha ao enviar mensagem'
+          // Safely extract error description as string
+          const descCandidate = error?.data?.error ?? error?.response?.data?.error
+          errorDescription = typeof descCandidate === 'string' ? descCandidate : ''
+        }
       }
 
       toast.error(errorMessage, { description: errorDescription || undefined })
@@ -1040,7 +1060,7 @@ export default function ConversationsPage() {
           errorMessage = 'Serviço indisponível - aguarde 30s'
           break
         default:
-          errorMessage = error?.message || 'Erro ao reenviar mensagem'
+          errorMessage = typeof error?.message === 'string' ? error.message : 'Erro ao reenviar mensagem'
       }
 
       toast.error(errorMessage)
@@ -1084,7 +1104,8 @@ export default function ConversationsPage() {
       if (selectedChatId) setSelectedChatId(null)
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao arquivar chat')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao arquivar chat'
+      toast.error(message)
     }
   })
 
@@ -1103,7 +1124,8 @@ export default function ConversationsPage() {
       refetchChats()
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao bloquear contato')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao bloquear contato'
+      toast.error(message)
     }
   })
 
@@ -1122,7 +1144,8 @@ export default function ConversationsPage() {
       setSelectedChatId(null)
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao encerrar conversa')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao encerrar conversa'
+      toast.error(message)
     }
   })
 
@@ -1140,7 +1163,8 @@ export default function ConversationsPage() {
       refetchChats()
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao reabrir conversa')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao reabrir conversa'
+      toast.error(message)
     }
   })
 
@@ -1158,7 +1182,8 @@ export default function ConversationsPage() {
       setSelectedChatId(null)
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao apagar conversa')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao apagar conversa'
+      toast.error(message)
     }
   })
 
@@ -1188,7 +1213,8 @@ export default function ConversationsPage() {
       refetchChats()
     },
     onError: (error: any) => {
-      toast.error(error.message || 'Erro ao sincronizar chats')
+      const message = typeof error?.message === 'string' ? error.message : 'Erro ao sincronizar chats'
+      toast.error(message)
     }
   })
 
@@ -1319,7 +1345,8 @@ export default function ConversationsPage() {
       reader.onerror = () => toast.error('Erro ao ler arquivo')
       reader.readAsDataURL(selectedFile)
     } catch (error: any) {
-      toast.error('Erro ao enviar arquivo', { description: error.message })
+      const description = typeof error?.message === 'string' ? error.message : undefined
+      toast.error('Erro ao enviar arquivo', { description })
     } finally {
       setIsUploading(false)
     }
@@ -1352,7 +1379,8 @@ export default function ConversationsPage() {
       toast.success('Audio enviado!')
     } catch (error: any) {
       console.error('[ConversationsPage] Error sending audio:', error)
-      toast.error('Erro ao enviar audio', { description: error.message })
+      const description = typeof error?.message === 'string' ? error.message : undefined
+      toast.error('Erro ao enviar audio', { description })
       throw error // Re-throw so AudioRecorder knows it failed
     }
   }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
@@ -1381,7 +1409,8 @@ export default function ConversationsPage() {
       toast.success('Sincronizado com sucesso!', { id: 'sync' })
     } catch (error: any) {
       console.error('[Conversations] Force sync error:', error)
-      toast.error('Erro ao sincronizar', { id: 'sync', description: error.message })
+      const description = typeof error?.message === 'string' ? error.message : undefined
+      toast.error('Erro ao sincronizar', { id: 'sync', description })
     }
   }, [refetchInstances, refetchChats, refetchMessages, instanceIdsToFetch])
 
