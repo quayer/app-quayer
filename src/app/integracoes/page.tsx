@@ -156,6 +156,28 @@ export default function IntegrationsPage() {
     instanceName: null,
   });
 
+  // Normalizar status verificando se está REALMENTE conectado
+  // Uma instância só está "connected" se tiver status connected E phoneNumber
+  const normalizeInstanceStatus = (rawStatus: string | undefined, phoneNumber: string | undefined, provider: string | undefined): 'connected' | 'disconnected' | 'connecting' => {
+    const status = rawStatus?.toLowerCase() || 'disconnected';
+
+    // Cloud API não precisa de phoneNumber para estar conectado (usa token)
+    if (provider === 'WHATSAPP_CLOUD_API') {
+      if (status === 'connected') return 'connected';
+      if (status === 'connecting') return 'connecting';
+      return 'disconnected';
+    }
+
+    // Para WhatsApp Web, precisa de phoneNumber para confirmar conexão
+    if (status === 'connected' && phoneNumber) {
+      return 'connected';
+    }
+    if (status === 'connecting' || (status === 'connected' && !phoneNumber)) {
+      return 'connecting';
+    }
+    return 'disconnected';
+  };
+
   // Mapear instâncias para o formato do frontend
   // API returns { data: { data: [...], pagination: {...} } }
   const instances: Instance[] = useMemo(() => {
@@ -165,7 +187,7 @@ export default function IntegrationsPage() {
       id: instance.id,
       name: instance.name,
       description: instance.description,
-      status: instance.status?.toLowerCase() || 'disconnected',
+      status: normalizeInstanceStatus(instance.status, instance.phoneNumber, instance.provider),
       phoneNumber: instance.phoneNumber,
       profileName: instance.cloudApiVerifiedName || instance.profileName || instance.name,
       profilePictureUrl: instance.profilePictureUrl,
