@@ -149,6 +149,26 @@ const QUICK_EMOJIS = ['thumbsup', 'heart', 'joy', 'pray', 'wave', 'tada', 'check
 const CHAT_REFRESH_INTERVAL = 30 * 1000 // 30 segundos (fallback)
 const MESSAGE_REFRESH_INTERVAL = 15 * 1000 // 15 segundos (fallback)
 
+/**
+ * Helper para renderizar conteúdo de forma segura
+ * Previne React Error #310 (Objects are not valid as React child)
+ * ao garantir que o valor sempre seja uma string
+ */
+function safeRenderContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content
+  }
+  if (content === null || content === undefined) {
+    return ''
+  }
+  if (typeof content === 'object') {
+    // Extrair texto de objetos comuns (template messages, etc)
+    const obj = content as any
+    return obj?.text ?? obj?.body ?? obj?.caption ?? obj?.title ?? ''
+  }
+  return String(content)
+}
+
 // Nova arquitetura: 3 tabs principais por responsabilidade
 type MainTab = 'ia' | 'atendente' | 'resolvidos'
 type ChatTypeFilter = 'all' | 'direct' | 'groups'
@@ -1985,7 +2005,7 @@ export default function ConversationsPage() {
 
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs text-slate-600 dark:text-slate-400 truncate flex-1">
-                          {chat.wa_lastMsgBody || 'Sem mensagens'}
+                          {safeRenderContent(chat.wa_lastMsgBody) || 'Sem mensagens'}
                         </p>
                         {chat.wa_unreadCount > 0 && (
                           <Badge className="h-5 min-w-5 flex items-center justify-center text-xs flex-shrink-0">
@@ -2799,7 +2819,7 @@ export default function ConversationsPage() {
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <p className="flex-1 whitespace-pre-wrap">{note.content}</p>
+                        <p className="flex-1 whitespace-pre-wrap">{safeRenderContent(note.content)}</p>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <Button
                             variant="ghost"
@@ -2945,13 +2965,13 @@ export default function ConversationsPage() {
                             className="w-full text-left p-2 rounded-md hover:bg-muted transition-colors"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-medium text-sm">{qr.title}</span>
+                              <span className="font-medium text-sm">{safeRenderContent(qr.title)}</span>
                               <Badge variant="outline" className="text-xs font-mono">
-                                {qr.shortcut}
+                                {safeRenderContent(qr.shortcut)}
                               </Badge>
                             </div>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                              {qr.content}
+                              {safeRenderContent(qr.content)}
                             </p>
                           </button>
                         ))}
@@ -2986,7 +3006,7 @@ export default function ConversationsPage() {
                   placeholder={selectedFile ? "Legenda (opcional)..." : "Digite / para atalhos ou mensagem..."}
                   disabled={isUploading || sendMessageMutation.isPending}
                   aiEnabled={!messageText.startsWith('/') && !selectedFile} // Desabilitar IA quando usando quick replies ou com arquivo
-                  conversationContext={messages.slice(-5).map((m: any) => m.content || '').filter(Boolean)}
+                  conversationContext={messages.slice(-5).map((m: any) => safeRenderContent(m.content)).filter(Boolean)}
                   className="w-full"
                 />
                 {/* Quick reply suggestions dropdown - sobrepõe sugestões de IA */}
@@ -3001,8 +3021,8 @@ export default function ConversationsPage() {
                           idx === 0 && "bg-muted/50"
                         )}
                       >
-                        <span className="truncate">{qr.title}</span>
-                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 ml-2">{qr.shortcut}</span>
+                        <span className="truncate">{safeRenderContent(qr.title)}</span>
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 ml-2">{safeRenderContent(qr.shortcut)}</span>
                       </button>
                     ))}
                   </div>
