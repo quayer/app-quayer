@@ -2654,7 +2654,7 @@ export default function ConversationsPage() {
                                 <div className="relative rounded-lg overflow-hidden bg-muted animate-pulse min-h-[100px] min-w-[100px]">
                                   <img
                                     src={message.mediaUrl}
-                                    alt={`Imagem ${message.direction === 'OUTBOUND' ? 'enviada' : 'recebida'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
+                                    alt={`Imagem ${message.direction === 'OUTBOUND' ? 'enviada' : 'recebida'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
                                     className="rounded-lg max-w-full cursor-pointer hover:opacity-90 transition-all duration-300"
                                     loading="lazy"
                                     onLoad={(e) => {
@@ -2680,7 +2680,7 @@ export default function ConversationsPage() {
                                   controls
                                   preload="metadata"
                                   className="rounded-lg max-w-full max-h-64"
-                                  aria-label={`Vídeo ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
+                                  aria-label={`Vídeo ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
                                 >
                                   Seu navegador não suporta vídeo.
                                 </video>
@@ -2694,7 +2694,7 @@ export default function ConversationsPage() {
                                     controls
                                     preload="metadata"
                                     className="w-full max-w-[280px] h-12"
-                                    aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${format(new Date(message.createdAt), "HH:mm", { locale: ptBR })}`}
+                                    aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
                                   >
                                     Seu navegador não suporta áudio.
                                   </audio>
