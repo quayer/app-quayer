@@ -97,7 +97,6 @@ import {
   Loader2,
   ArrowLeft,
   RefreshCw,
-  Radio,
   Smile,
   FileText,
   Archive,
@@ -114,11 +113,6 @@ import {
   User,
   CheckCircle2,
   RotateCcw,
-  Wifi,
-  WifiOff,
-  StickyNote,
-  PinOff,
-  Plus,
   Play,
   Zap,
   Command,
@@ -128,7 +122,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
-import { format } from 'date-fns'
+import { format, isSameDay, isToday, isYesterday } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { useQuery, useMutation, useInfiniteQuery } from '@tanstack/react-query'
 import { cn } from '@/lib/utils'
@@ -209,6 +203,34 @@ function safeFormatDate(dateValue: unknown, formatStr: string): string {
     return format(date, formatStr, { locale: ptBR })
   } catch {
     return ''
+  }
+}
+
+// Format date for date separator between messages
+function formatDateSeparator(dateValue: unknown): string {
+  try {
+    if (dateValue === null || dateValue === undefined) return ''
+    const date = dateValue instanceof Date ? dateValue : new Date(String(dateValue))
+    if (isNaN(date.getTime())) return ''
+
+    if (isToday(date)) return 'Hoje'
+    if (isYesterday(date)) return 'Ontem'
+    return format(date, "EEEE, d 'de' MMMM", { locale: ptBR })
+  } catch {
+    return ''
+  }
+}
+
+// Check if two dates are on different days
+function shouldShowDateSeparator(currentDate: unknown, previousDate: unknown): boolean {
+  try {
+    if (!previousDate) return true // First message always shows date
+    const current = currentDate instanceof Date ? currentDate : new Date(String(currentDate))
+    const previous = previousDate instanceof Date ? previousDate : new Date(String(previousDate))
+    if (isNaN(current.getTime()) || isNaN(previous.getTime())) return false
+    return !isSameDay(current, previous)
+  } catch {
+    return false
   }
 }
 
@@ -321,8 +343,6 @@ export default function ConversationsPage() {
   const [isMobile, setIsMobile] = useState(false)
   const [isChatsDrawerOpen, setIsChatsDrawerOpen] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const [showNotesPanel, setShowNotesPanel] = useState(false)
-  const [newNoteText, setNewNoteText] = useState('')
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [quickReplySearch, setQuickReplySearch] = useState('')
   const [showMessageSearch, setShowMessageSearch] = useState(false)
@@ -374,6 +394,72 @@ export default function ConversationsPage() {
     // Only restore focus on initial mount
     restoreFocus()
   }, [])
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input
+      const target = e.target as HTMLElement
+      const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+
+      // Ctrl+K or Cmd+K to focus search (works even when typing)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        const searchInput = document.querySelector('input[placeholder*="Buscar conversas"]') as HTMLInputElement
+        searchInput?.focus()
+        return
+      }
+
+      // Escape to close search/deselect
+      if (e.key === 'Escape') {
+        if (showMessageSearch) {
+          setShowMessageSearch(false)
+          setMessageSearchText('')
+          setMessageSearchResults([])
+          return
+        }
+        if (searchText) {
+          setSearchText('')
+          return
+        }
+      }
+
+      // Skip shortcuts if user is typing in input
+      if (isInInput) return
+
+      // / to focus search
+      if (e.key === '/') {
+        e.preventDefault()
+        const searchInput = document.querySelector('input[placeholder*="Buscar conversas"]') as HTMLInputElement
+        searchInput?.focus()
+        return
+      }
+
+      // 1, 2, 3 to switch tabs
+      if (e.key === '1') {
+        setMainTab('ia')
+        return
+      }
+      if (e.key === '2') {
+        setMainTab('atendente')
+        return
+      }
+      if (e.key === '3') {
+        setMainTab('resolvidos')
+        return
+      }
+
+      // Ctrl+F or Cmd+F to search in messages (when chat selected)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && selectedChatId) {
+        e.preventDefault()
+        setShowMessageSearch(true)
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [searchText, showMessageSearch, selectedChatId, setMainTab, setSearchText, setShowMessageSearch, setMessageSearchText, setMessageSearchResults])
 
   // ==================== QUERIES ====================
 
@@ -639,7 +725,7 @@ export default function ConversationsPage() {
 
   // Virtualização da lista de chats para performance
   // Aumentamos a altura para acomodar casos onde há nome de instância mostrado
-  const CHAT_ITEM_HEIGHT = 96 // altura estimada de cada item de chat em pixels (aumentado)
+  const CHAT_ITEM_HEIGHT = 80 // altura otimizada de cada item de chat em pixels
 
   // Memoize getItemKey to prevent infinite re-renders
   const getItemKey = useCallback((index: number) => {
@@ -846,27 +932,6 @@ export default function ConversationsPage() {
     : null
   const selectedChat = chats.find((c: UAZChat) => c.id === selectedChatId || c.wa_chatid === selectedChatId)
 
-  // ==================== SESSION NOTES ====================
-
-  // Fetch notes for selected session
-  const {
-    data: notesData,
-    isLoading: notesLoading,
-    refetch: refetchNotes,
-  } = useQuery({
-    queryKey: ['session-notes', selectedChatId],
-    queryFn: async () => {
-      if (!selectedChatId) return []
-      const response = await api.notes.list.query({
-        query: { sessionId: selectedChatId }
-      })
-      return (response as any)?.data ?? []
-    },
-    enabled: !!selectedChatId && showNotesPanel,
-  })
-
-  const notes = notesData ?? []
-
   // ==================== QUICK REPLIES ====================
 
   // Fetch quick replies
@@ -996,46 +1061,6 @@ export default function ConversationsPage() {
     setMessageSearchResults([])
     setCurrentSearchIndex(0)
   }, [])
-
-  // Create note mutation
-  const createNoteMutation = useMutation({
-    mutationFn: async (content: string) => {
-      if (!selectedChatId) throw new Error('Sessão não selecionada')
-      return api.notes.create.mutate({
-        body: { sessionId: selectedChatId, content }
-      })
-    },
-    onSuccess: () => {
-      setNewNoteText('')
-      refetchNotes()
-      toast.success('Nota adicionada!')
-    },
-    onError: (error: any) => {
-      const message = typeof error?.message === 'string' ? error.message : 'Erro ao criar nota'
-      toast.error(message)
-    },
-  })
-
-  // Delete note mutation
-  const deleteNoteMutation = useMutation({
-    mutationFn: async (noteId: string) => {
-      return (api.notes.delete as any).mutate({ params: { id: noteId } })
-    },
-    onSuccess: () => {
-      refetchNotes()
-      toast.success('Nota removida')
-    },
-  })
-
-  // Toggle pin mutation
-  const togglePinMutation = useMutation({
-    mutationFn: async (noteId: string) => {
-      return (api.notes.togglePin as any).mutate({ params: { id: noteId } })
-    },
-    onSuccess: () => {
-      refetchNotes()
-    },
-  })
 
   // ==================== MUTATIONS ====================
 
@@ -1762,11 +1787,11 @@ export default function ConversationsPage() {
     </Select>
   )
 
-  // Chats List Component - Memoized to prevent re-creation on every render
-  // This fixes scroll freeze issues caused by component re-mounting
-  const ChatsList = useMemo(() => {
-    const ChatsListInner = ({ className }: { className?: string }) => (
-    <div className={cn("flex flex-col h-full overflow-hidden", className)}>
+  // Chats List Content - Memoized JSX (NOT a component function)
+  // IMPORTANT: Return JSX directly, not a component function, to prevent DOM remounting
+  // which would reset scroll position every time dependencies change
+  const chatsListContent = useMemo(() => (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Header with total count and instance filter */}
       <div className="p-4 space-y-3 border-b flex-shrink-0">
         {/* Total conversations header */}
@@ -1780,20 +1805,23 @@ export default function ConversationsPage() {
         {/* Instance filter */}
         <InstanceFilter />
 
-        {/* Search */}
+        {/* Search with keyboard hint */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar conversas..."
-            className="pl-10"
+            className="pl-10 pr-12"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
+          <kbd className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+            /
+          </kbd>
         </div>
 
         {/* Main tabs: IA | Atendente | Resolvidos - WCAG 2.1 compliant */}
         <div
-          className="flex gap-1 p-1 bg-muted/50 rounded-lg"
+          className="flex gap-1.5 p-1.5 bg-muted/40 rounded-xl border border-border/50"
           role="tablist"
           aria-label="Filtrar conversas por status"
           onKeyDown={(e) => {
@@ -1831,16 +1859,19 @@ export default function ConversationsPage() {
                     aria-controls={`tabpanel-${tab.value}`}
                     aria-label={`${tab.label}: ${count} conversas. ${tab.description}`}
                     className={cn(
-                      // Flex-1 para distribuir espaço igualmente
-                      "flex-1 flex items-center justify-center gap-1 px-2 py-2.5 min-h-[44px] transition-all",
+                      // Base styles with smooth transitions
+                      "flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 min-h-[42px] rounded-lg",
+                      "transition-all duration-200 ease-out",
                       // Focus ring for keyboard navigation (WCAG 2.1)
                       "focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring",
-                      // Active state styling
+                      // Inactive state - subtle hover
+                      !isActive && "hover:bg-muted/80 text-muted-foreground hover:text-foreground",
+                      // Active state styling with elevation
                       isActive && [
-                        "shadow-sm",
-                        tab.value === 'ia' && "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300",
-                        tab.value === 'atendente' && "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300",
-                        tab.value === 'resolvidos' && "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300",
+                        "shadow-sm bg-background",
+                        tab.value === 'ia' && "ring-1 ring-purple-200 dark:ring-purple-800 text-purple-700 dark:text-purple-300",
+                        tab.value === 'atendente' && "ring-1 ring-blue-200 dark:ring-blue-800 text-blue-700 dark:text-blue-300",
+                        tab.value === 'resolvidos' && "ring-1 ring-green-200 dark:ring-green-800 text-green-700 dark:text-green-300",
                       ]
                     )}
                     onClick={() => setMainTab(tab.value)}
@@ -1939,20 +1970,79 @@ export default function ConversationsPage() {
             </Button>
           </div>
         ) : chats.length === 0 ? (
-          <div className="p-8 text-center">
-            <MessageCircle className="h-12 w-12 mx-auto text-slate-400 dark:text-slate-500 mb-3" />
-            <p className="text-slate-600 dark:text-slate-300">Nenhuma conversa encontrada</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-4">
-              As conversas aparecerao aqui quando voce receber mensagens
-            </p>
-            {/* Botao de sync para importar chats existentes */}
-            {instanceIdsToFetch.length > 0 && (
-              <div className="space-y-2">
+          <div className="p-8 text-center flex flex-col items-center justify-center h-full min-h-[200px]">
+            {/* Contextual empty state based on active tab and search */}
+            {debouncedSearchText ? (
+              // Search found no results
+              <>
+                <div className="rounded-full bg-muted p-4 mb-4">
+                  <Search className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <p className="font-medium text-foreground mb-1">Nenhum resultado encontrado</p>
+                <p className="text-sm text-muted-foreground max-w-[240px]">
+                  Nenhuma conversa corresponde a "{debouncedSearchText}"
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setSearchText('')}
+                >
+                  Limpar busca
+                </Button>
+              </>
+            ) : mainTab === 'ia' ? (
+              // No conversations in IA tab
+              <>
+                <div className="rounded-full bg-purple-100 dark:bg-purple-900/30 p-4 mb-4">
+                  <Bot className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+                </div>
+                <p className="font-medium text-foreground mb-1">Nenhuma conversa com IA ativa</p>
+                <p className="text-sm text-muted-foreground max-w-[280px]">
+                  Conversas atendidas automaticamente pela IA aparecerão aqui
+                </p>
+              </>
+            ) : mainTab === 'atendente' ? (
+              // No conversations in Atendente tab
+              <>
+                <div className="rounded-full bg-blue-100 dark:bg-blue-900/30 p-4 mb-4">
+                  <User className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                </div>
+                <p className="font-medium text-foreground mb-1">Nenhuma conversa aguardando</p>
+                <p className="text-sm text-muted-foreground max-w-[280px]">
+                  Conversas que precisam de atendimento humano aparecerão aqui
+                </p>
+              </>
+            ) : mainTab === 'resolvidos' ? (
+              // No conversations in Resolvidos tab
+              <>
+                <div className="rounded-full bg-green-100 dark:bg-green-900/30 p-4 mb-4">
+                  <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
+                </div>
+                <p className="font-medium text-foreground mb-1">Nenhuma conversa resolvida</p>
+                <p className="text-sm text-muted-foreground max-w-[280px]">
+                  Conversas finalizadas aparecerão aqui para consulta
+                </p>
+              </>
+            ) : (
+              // Default empty state
+              <>
+                <div className="rounded-full bg-muted p-4 mb-4">
+                  <MessageCircle className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <p className="font-medium text-foreground mb-1">Nenhuma conversa encontrada</p>
+                <p className="text-sm text-muted-foreground max-w-[280px] mb-4">
+                  As conversas aparecerão aqui quando você receber mensagens
+                </p>
+              </>
+            )}
+            {/* Sync button - only show when not searching and has instances */}
+            {!debouncedSearchText && instanceIdsToFetch.length > 0 && (
+              <div className="space-y-2 mt-4">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    // Sync all connected instances
                     instanceIdsToFetch.forEach((instanceId: string) => {
                       syncChatsMutation.mutate(instanceId)
                     })
@@ -1967,7 +2057,7 @@ export default function ConversationsPage() {
                   )}
                   Importar chats existentes
                 </Button>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Clique para importar conversas existentes do WhatsApp
                 </p>
               </div>
@@ -2009,24 +2099,24 @@ export default function ConversationsPage() {
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                   className={cn(
-                    "w-full p-3 text-left transition-colors hover:bg-muted/50 border-b overflow-hidden",
-                    isSelected && "bg-muted",
+                    "w-full py-2.5 px-3 text-left transition-all duration-150 hover:bg-muted/60 border-b border-border/50 overflow-hidden",
+                    isSelected && "bg-muted/80 border-l-2 border-l-primary",
                     isFocused && "ring-2 ring-primary ring-inset"
                   )}
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-2.5">
                     <LazyAvatar
                       src={chat.wa_profilePicUrl}
                       phoneNumber={chat.wa_chatid}
                       instanceId={chat.instanceId}
                       name={displayName}
                       isGroup={chat.wa_isGroup}
-                      size="lg"
+                      size="md"
                       className="flex-shrink-0"
                     />
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <div className="flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 min-w-0 flex-1">
                           <p className="font-medium truncate text-sm">
                             {displayName}
@@ -2140,9 +2230,7 @@ export default function ConversationsPage() {
         )}
       </div>
     </div>
-  )
-    return ChatsListInner
-  }, [
+  ), [
     chats,
     chatsLoading,
     chatsError,
@@ -2170,12 +2258,12 @@ export default function ConversationsPage() {
     setSelectedInstanceFilter,
   ])
 
-  // Messages Area Component - Memoized to prevent re-creation on every render
-  // This fixes scroll freeze issues caused by component re-mounting
-  const MessagesArea = useMemo(() => {
-    const MessagesAreaInner = () => (
+  // Messages Area Content - Memoized JSX (NOT a component function)
+  // IMPORTANT: Return JSX directly, not a component function, to prevent DOM remounting
+  // which would reset scroll position every time dependencies change
+  const messagesAreaContent = useMemo(() => (
     <div
-      className="flex flex-col h-full overflow-hidden"
+      className="flex flex-col flex-1 min-h-0 overflow-hidden"
       role="region"
       aria-label={selectedChat ? `Conversa com ${safeRenderContent(selectedChat.wa_name) || 'Contato'}` : 'Selecione uma conversa'}
     >
@@ -2271,42 +2359,6 @@ export default function ConversationsPage() {
                 </Tooltip>
               )}
 
-              {/* SSE connection status */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "gap-1 mr-2 text-xs cursor-pointer",
-                      sseConnected ? "text-green-600 border-green-200" : "text-slate-500 dark:text-slate-400"
-                    )}
-                    onClick={() => !sseConnected && sseReconnect()}
-                  >
-                    {sseConnected ? (
-                      <>
-                        <Wifi className="h-3 w-3" />
-                        Ao vivo
-                      </>
-                    ) : messagesFetching ? (
-                      <>
-                        <Radio className="h-3 w-3 animate-pulse" />
-                        Sincronizando
-                      </>
-                    ) : (
-                      <>
-                        <WifiOff className="h-3 w-3" />
-                        Offline
-                      </>
-                    )}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {sseConnected
-                    ? 'Recebendo atualizacoes em tempo real'
-                    : 'Clique para reconectar'}
-                </TooltipContent>
-              </Tooltip>
-
               {/* Search button */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2322,29 +2374,6 @@ export default function ConversationsPage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Buscar na conversa</TooltipContent>
-              </Tooltip>
-
-              {/* Notes button */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={showNotesPanel ? "secondary" : "outline"}
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => setShowNotesPanel(!showNotesPanel)}
-                    aria-label={`Notas internas${notes.length > 0 ? ` (${notes.length})` : ''}`}
-                    aria-pressed={showNotesPanel}
-                  >
-                    <StickyNote className="h-4 w-4" />
-                    <span className="hidden sm:inline">Notas</span>
-                    {notes.length > 0 && (
-                      <Badge variant="secondary" className="ml-1 h-5 px-1.5">
-                        {notes.length}
-                      </Badge>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Notas internas do atendente</TooltipContent>
               </Tooltip>
 
               {/* Resolve/Close session button OR Reopen button */}
@@ -2569,15 +2598,17 @@ export default function ConversationsPage() {
                 })}
               </div>
             ) : messages.length === 0 ? (
-              <div className="h-full flex items-center justify-center">
-                <div className="text-center">
-                  <MessageSquare className="h-12 w-12 mx-auto text-slate-400 dark:text-slate-500 mb-3" />
-                  <p className="text-slate-600 dark:text-slate-300">Nenhuma mensagem ainda</p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Envie a primeira mensagem!</p>
+              <div className="h-full flex flex-col items-center justify-center p-8">
+                <div className="rounded-full bg-muted p-4 mb-4">
+                  <MessageSquare className="h-8 w-8 text-muted-foreground" />
                 </div>
+                <p className="font-medium text-foreground mb-1">Nenhuma mensagem ainda</p>
+                <p className="text-sm text-muted-foreground text-center max-w-[240px]">
+                  Envie uma mensagem para iniciar a conversa com este contato
+                </p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {/* Messages already sorted ascending by createdAt (oldest to newest) */}
                 {messages.map((message: DBMessage | OptimisticMessage, msgIndex: number) => {
                   const isOptimistic = message.id.startsWith('optimistic-')
@@ -2585,6 +2616,14 @@ export default function ConversationsPage() {
                   const isPending = message.status === 'pending'
                   const isSearchMatch = messageSearchResults.includes(msgIndex)
                   const isCurrentMatch = messageSearchResults[currentSearchIndex] === msgIndex
+
+                  // Check if we need a date separator
+                  const previousMessage = msgIndex > 0 ? messages[msgIndex - 1] : null
+                  const showDateSeparator = shouldShowDateSeparator(
+                    message.createdAt,
+                    previousMessage?.createdAt
+                  )
+                  const dateSeparatorLabel = showDateSeparator ? formatDateSeparator(message.createdAt) : null
 
                   // Highlight search matches in content (after normalizing)
                   const highlightContent = (content: unknown) => {
@@ -2618,36 +2657,47 @@ export default function ConversationsPage() {
                   }
 
                   return (
-                    <div
-                      key={message.id}
-                      data-message-index={msgIndex}
-                      className={cn(
-                        "flex transition-all duration-300",
-                        message.direction === 'OUTBOUND' ? "justify-end" : "justify-start",
-                        isCurrentMatch && "scale-[1.02]"
-                      )}
-                      role={isFailed ? "alert" : undefined}
-                      aria-label={isFailed ? "Falha ao enviar mensagem" : undefined}
-                    >
-                      <div className={cn(
-                        "flex flex-col gap-1",
-                        message.direction === 'OUTBOUND' ? "items-end" : "items-start"
-                      )}>
-                        {/* Failed message indicator badge */}
-                        {isFailed && (
-                          <div className="flex items-center gap-1 text-destructive text-xs font-medium mb-1">
-                            <AlertCircle className="h-3.5 w-3.5" />
-                            <span>Falha no envio</span>
+                    <div key={message.id}>
+                      {/* Date separator */}
+                      {dateSeparatorLabel && (
+                        <div className="flex items-center justify-center my-4">
+                          <div className="flex items-center gap-3 px-4 py-1.5 bg-muted/60 rounded-full">
+                            <span className="text-xs font-medium text-muted-foreground capitalize">
+                              {dateSeparatorLabel}
+                            </span>
                           </div>
+                        </div>
+                      )}
+
+                      <div
+                        data-message-index={msgIndex}
+                        className={cn(
+                          "flex transition-all duration-200",
+                          message.direction === 'OUTBOUND' ? "justify-end" : "justify-start",
+                          isCurrentMatch && "scale-[1.02]"
                         )}
-                        <div
-                          className={cn(
-                            "max-w-[75%] min-w-[60px] rounded-2xl px-4 py-2 shadow-sm transition-all relative",
-                            message.direction === 'OUTBOUND'
-                              ? "bg-emerald-600 text-white rounded-br-md"
-                              : "bg-slate-100 dark:bg-slate-800 text-foreground rounded-bl-md border border-slate-200 dark:border-slate-700",
-                            // Failed messages get error styling
-                            isFailed && "bg-destructive/10 border-2 border-destructive text-destructive-foreground",
+                        role={isFailed ? "alert" : undefined}
+                        aria-label={isFailed ? "Falha ao enviar mensagem" : undefined}
+                      >
+                        <div className={cn(
+                          "flex flex-col gap-0.5",
+                          message.direction === 'OUTBOUND' ? "items-end" : "items-start"
+                        )}>
+                          {/* Failed message indicator badge */}
+                          {isFailed && (
+                            <div className="flex items-center gap-1 text-destructive text-xs font-medium mb-1">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              <span>Falha no envio</span>
+                            </div>
+                          )}
+                          <div
+                            className={cn(
+                              "max-w-[80%] min-w-[80px] rounded-2xl px-3 py-2 transition-all relative",
+                              message.direction === 'OUTBOUND'
+                                ? "bg-emerald-500 dark:bg-emerald-600 text-white rounded-br-sm"
+                                : "bg-white dark:bg-slate-800 text-foreground rounded-bl-sm shadow-sm border border-slate-100 dark:border-slate-700",
+                              // Failed messages get error styling
+                              isFailed && "bg-destructive/10 border-2 border-destructive text-destructive-foreground",
                             // Search highlight
                             isCurrentMatch && "ring-2 ring-yellow-400 ring-offset-2"
                           )}
@@ -2805,6 +2855,7 @@ export default function ConversationsPage() {
                             </Tooltip>
                           </div>
                         )}
+                        </div>
                       </div>
                     </div>
                   )
@@ -2827,110 +2878,6 @@ export default function ConversationsPage() {
               </div>
             )}
           </ScrollArea>
-
-          {/* Notes Panel (Collapsible) */}
-          {showNotesPanel && (
-            <div className="border-t bg-amber-50/50 dark:bg-amber-900/10 p-4 max-h-64 overflow-auto">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-medium flex items-center gap-2">
-                  <StickyNote className="h-4 w-4 text-amber-600" />
-                  Notas internas
-                </h4>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowNotesPanel(false)}
-                  className="h-6 w-6 p-0"
-                  aria-label="Fechar painel de notas"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {/* Add note form */}
-              <div className="flex gap-2 mb-3">
-                <Input
-                  placeholder="Adicionar nota..."
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newNoteText.trim()) {
-                      createNoteMutation.mutate(newNoteText.trim())
-                    }
-                  }}
-                  className="text-sm"
-                />
-                <Button
-                  size="sm"
-                  onClick={() => newNoteText.trim() && createNoteMutation.mutate(newNoteText.trim())}
-                  disabled={!newNoteText.trim() || createNoteMutation.isPending}
-                  aria-label={createNoteMutation.isPending ? "Adicionando nota..." : "Adicionar nota"}
-                >
-                  {createNoteMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-
-              {/* Notes list */}
-              {notesLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
-                </div>
-              ) : notes.length === 0 ? (
-                <p className="text-sm text-slate-600 dark:text-slate-300 text-center py-4">
-                  Nenhuma nota adicionada
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {notes.map((note: any) => (
-                    <div
-                      key={note.id}
-                      className={cn(
-                        "p-2 rounded-lg text-sm bg-white dark:bg-neutral-800 border",
-                        note.isPinned && "border-amber-400 bg-amber-50 dark:bg-amber-900/20"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="flex-1 whitespace-pre-wrap">{safeRenderContent(note.content)}</p>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            onClick={() => togglePinMutation.mutate(note.id)}
-                            aria-label={note.isPinned ? "Desafixar nota" : "Fixar nota"}
-                          >
-                            {note.isPinned ? (
-                              <PinOff className="h-3 w-3 text-amber-600" />
-                            ) : (
-                              <Pin className="h-3 w-3" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                            onClick={() => deleteNoteMutation.mutate(note.id)}
-                            aria-label="Excluir nota"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        <span>{safeRenderContent(note.author?.name) || 'Agente'}</span>
-                        <span>•</span>
-                        <span>{safeFormatDate(note.createdAt, "dd/MM HH:mm")}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Input Area */}
           <div className="p-4 border-t space-y-3 bg-card flex-shrink-0">
@@ -3146,9 +3093,7 @@ export default function ConversationsPage() {
         </div>
       )}
     </div>
-  )
-    return MessagesAreaInner
-  }, [
+  ), [
     selectedChat,
     selectedInstance,
     messages,
@@ -3165,14 +3110,10 @@ export default function ConversationsPage() {
     messageSearchText,
     messageSearchResults,
     currentSearchIndex,
-    showNotesPanel,
     showQuickReplies,
     quickReplies,
     quickRepliesLoading,
     quickReplySearch,
-    notes,
-    notesLoading,
-    newNoteText,
     hasUnseenMessages,
     optimisticMessages,
     // Callbacks - must be included to avoid stale closures
@@ -3255,7 +3196,7 @@ export default function ConversationsPage() {
                   <SheetTitle>Conversas</SheetTitle>
                 </SheetHeader>
                 <div className="flex-1 min-h-0 overflow-hidden">
-                  <ChatsList />
+                  {chatsListContent}
                 </div>
               </SheetContent>
             </Sheet>
@@ -3264,7 +3205,7 @@ export default function ConversationsPage() {
             <Card className="flex-1 h-full min-h-0 overflow-hidden py-0 gap-0">
               <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
                 {selectedChat ? (
-                  <MessagesArea />
+                  messagesAreaContent
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center p-8">
                     <Button
@@ -3286,14 +3227,14 @@ export default function ConversationsPage() {
             {/* py-0 remove padding default do Card para permitir scroll correto */}
             <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden py-0 gap-0">
               <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
-                <ChatsList />
+                {chatsListContent}
               </CardContent>
             </Card>
 
             {/* Column 2: Messages */}
             <Card className="flex-1 min-w-0 h-full overflow-hidden py-0 gap-0">
               <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
-                <MessagesArea />
+                {messagesAreaContent}
               </CardContent>
             </Card>
           </>
