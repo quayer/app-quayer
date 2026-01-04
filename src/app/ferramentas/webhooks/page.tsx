@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
@@ -383,27 +384,49 @@ export default function WebhooksPage() {
   if (!currentOrgId && !isAdmin) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Webhooks</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
+        <header className="flex h-16 shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Webhooks</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
         </header>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <Webhook className="h-16 w-16 text-muted-foreground" />
-          <h1 className="text-2xl font-bold">Sem Organizacao</h1>
-          <p className="text-muted-foreground text-center max-w-md">
-            Voce precisa estar associado a uma organizacao para gerenciar webhooks.
-          </p>
+        <div className="flex flex-1 flex-col gap-6 p-4 pt-0">
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="icon" asChild>
+              <Link href="/ferramentas">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                <Webhook className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold">Webhooks</h1>
+                <p className="text-sm text-muted-foreground">
+                  Configure webhooks para receber notificacoes
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+            <Webhook className="h-16 w-16 text-muted-foreground" />
+            <h2 className="text-xl font-semibold">Sem Organizacao</h2>
+            <p className="text-muted-foreground text-center max-w-md">
+              Voce precisa estar associado a uma organizacao para gerenciar webhooks.
+            </p>
+          </div>
         </div>
       </>
     )
@@ -413,32 +436,51 @@ export default function WebhooksPage() {
   if (!canManageWebhooks) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Webhooks</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center">
-            <ShieldAlert className="h-10 w-10 text-destructive" />
+        <header className="flex h-16 shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Webhooks</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
-          <h1 className="text-2xl font-bold">Acesso Negado</h1>
-          <p className="text-muted-foreground text-center max-w-md">
-            Apenas administradores, masters ou gerentes podem gerenciar webhooks.
-          </p>
-          <Button variant="outline" onClick={() => window.history.back()}>
-            Voltar
-          </Button>
+        </header>
+        <div className="flex flex-1 flex-col gap-6 p-4 pt-0">
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="icon" asChild>
+              <Link href="/ferramentas">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                <Webhook className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold">Webhooks</h1>
+                <p className="text-sm text-muted-foreground">
+                  Configure webhooks para receber notificacoes
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
+            <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center">
+              <ShieldAlert className="h-10 w-10 text-destructive" />
+            </div>
+            <h2 className="text-xl font-semibold">Acesso Negado</h2>
+            <p className="text-muted-foreground text-center max-w-md">
+              Apenas administradores, masters ou gerentes podem gerenciar webhooks.
+            </p>
+          </div>
         </div>
       </>
     )
@@ -448,22 +490,42 @@ export default function WebhooksPage() {
   if (error) {
     return (
       <>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Webhooks</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
+        <header className="flex h-16 shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Webhooks</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
         </header>
-        <div className="p-8">
+        <div className="flex flex-1 flex-col gap-6 p-4 pt-0">
+          <div className="flex items-center gap-4">
+            <Button variant="outline" size="icon" asChild>
+              <Link href="/ferramentas">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                <Webhook className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold">Webhooks</h1>
+                <p className="text-sm text-muted-foreground">
+                  Configure webhooks para receber notificacoes
+                </p>
+              </div>
+            </div>
+          </div>
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Erro ao carregar webhooks</AlertTitle>
@@ -471,7 +533,7 @@ export default function WebhooksPage() {
               {(error as any)?.message || 'Erro desconhecido. Tente novamente.'}
             </AlertDescription>
           </Alert>
-          <Button onClick={() => refetch()} className="mt-4">
+          <Button onClick={() => refetch()} className="w-fit">
             <RefreshCw className="h-4 w-4 mr-2" />
             Tentar novamente
           </Button>
@@ -482,46 +544,57 @@ export default function WebhooksPage() {
 
   return (
     <>
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="mr-2 h-4" />
-        <Button variant="ghost" size="sm" onClick={() => window.history.back()} className="gap-1">
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Button>
-        <Separator orientation="vertical" className="mr-2 h-4" />
-        <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>Webhooks</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
+      {/* Header */}
+      <header className="flex h-16 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink href="/ferramentas">Ferramentas</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>Webhooks</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </div>
       </header>
 
-      <div className="flex-1 space-y-6 p-8 pt-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Webhooks</h1>
-            <p className="text-muted-foreground">
-              Configure webhooks para receber notificacoes de eventos em tempo real
-            </p>
+      {/* Main Content */}
+      <div className="flex flex-1 flex-col gap-6 p-4 pt-0 max-w-6xl">
+        {/* Back button and title */}
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" asChild>
+            <Link href="/ferramentas">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+              <Webhook className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">Webhooks</h1>
+              <p className="text-sm text-muted-foreground">
+                Configure webhooks para receber notificacoes de eventos em tempo real
+              </p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Atualizar
-            </Button>
-            <Button onClick={() => setCreateModalOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Novo Webhook
-            </Button>
-          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Atualizar
+          </Button>
+          <Button onClick={() => setCreateModalOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Webhook
+          </Button>
         </div>
 
         {/* Stats */}

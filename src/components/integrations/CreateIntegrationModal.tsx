@@ -747,48 +747,50 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                 <CardContent className="p-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                      <Smartphone className="h-5 w-5 text-green-600" />
+                      {formData.provider === 'WHATSAPP_CLOUD_API' ? (
+                        <Cloud className="h-5 w-5 text-green-600" />
+                      ) : (
+                        <Smartphone className="h-5 w-5 text-green-600" />
+                      )}
                     </div>
                     <div className="text-left">
                       <p className="font-medium">{formData.name}</p>
                       <p className="text-sm text-muted-foreground">
-                        +55 11 99999-9999 • Conectado
+                        {cloudApiValidation.phoneNumber || '+55 11 99999-9999'} • Conectado
                       </p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="flex space-x-2 justify-center">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (shareLink) {
-                      window.open(shareLink, '_blank');
-                    } else {
-                      toast.error('Link de compartilhamento não disponível');
-                    }
-                  }}
-                  disabled={!shareLink}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Abrir Link de Compartilhamento
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (shareLink) {
-                      handleCopyLink();
-                    } else {
-                      toast.error('Link de compartilhamento não disponível');
-                    }
-                  }}
-                  disabled={!shareLink}
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copiar Link
-                </Button>
-              </div>
+              {/* Informação sobre tipo de conexão */}
+              {formData.provider === 'WHATSAPP_CLOUD_API' ? (
+                <Alert className="bg-blue-50 border-blue-200 text-left">
+                  <Cloud className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-blue-700 text-sm">
+                    <strong>WhatsApp Cloud API</strong><br />
+                    API Oficial da Meta. Alta estabilidade e escala.
+                  </AlertDescription>
+                </Alert>
+              ) : shareLink ? (
+                /* Só mostra botões de compartilhamento para WhatsApp Web quando há link gerado */
+                <div className="flex space-x-2 justify-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => window.open(shareLink, '_blank')}
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Abrir Link de Compartilhamento
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleCopyLink}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copiar Link
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
