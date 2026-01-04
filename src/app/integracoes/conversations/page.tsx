@@ -155,17 +155,36 @@ const MESSAGE_REFRESH_INTERVAL = 15 * 1000 // 15 segundos (fallback)
  * ao garantir que o valor sempre seja uma string
  */
 function safeRenderContent(content: unknown): string {
+  // Fast path for strings
   if (typeof content === 'string') {
     return content
   }
+  // Handle null/undefined
   if (content === null || content === undefined) {
     return ''
   }
-  if (typeof content === 'object') {
-    // Extrair texto de objetos comuns (template messages, etc)
-    const obj = content as any
-    return obj?.text ?? obj?.body ?? obj?.caption ?? obj?.title ?? ''
+  // Handle numbers and booleans
+  if (typeof content === 'number' || typeof content === 'boolean') {
+    return String(content)
   }
+  // Handle arrays - join elements
+  if (Array.isArray(content)) {
+    return content.map(safeRenderContent).filter(Boolean).join(', ')
+  }
+  // Handle objects - try to extract text from known properties
+  if (typeof content === 'object') {
+    const obj = content as Record<string, unknown>
+    // Try common text properties in order of priority
+    const textValue = obj?.text ?? obj?.body ?? obj?.caption ?? obj?.title ??
+                      obj?.name ?? obj?.message ?? obj?.content ?? obj?.value ??
+                      obj?.label ?? obj?.description
+    if (textValue !== undefined && textValue !== null) {
+      return safeRenderContent(textValue) // Recursively ensure it's safe
+    }
+    // Last resort: empty string (don't JSON.stringify to avoid exposing data)
+    return ''
+  }
+  // Fallback for any other type
   return String(content)
 }
 
