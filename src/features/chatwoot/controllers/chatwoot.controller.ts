@@ -160,11 +160,46 @@ export const chatwootController = igniter.controller({
           connectionId
         );
 
+        // ⭐ AUTO-CONFIGURE WEBHOOK: Try to set webhook URL in Chatwoot automatically
+        let webhookAutoConfigured = false;
+        let webhookAutoConfigError: string | undefined;
+
+        if (updateData.enabled && updatedConfig.inboxId) {
+          try {
+            // Get full config with token for client creation
+            const fullConfig = await context.features.chatwoot.repository.getConfig(
+              connectionId,
+              organizationId
+            );
+
+            if (fullConfig?.url && fullConfig?.accessToken && fullConfig?.accountId && fullConfig?.inboxId) {
+              const client = new ChatwootClient({
+                url: fullConfig.url,
+                accessToken: fullConfig.accessToken,
+                accountId: fullConfig.accountId,
+                inboxId: fullConfig.inboxId,
+              });
+
+              await client.updateInboxWebhook(fullConfig.inboxId, webhookUrl);
+              webhookAutoConfigured = true;
+              console.log(`[Chatwoot] ✅ Webhook auto-configured for inbox ${fullConfig.inboxId}`);
+            }
+          } catch (webhookError: any) {
+            webhookAutoConfigError = webhookError.message;
+            console.warn(`[Chatwoot] ⚠️ Failed to auto-configure webhook:`, webhookError.message);
+            // Non-blocking - continue with success response
+          }
+        }
+
         const updateResponse: ChatwootUpdateResponse = {
-          message: updateData.enabled 
-            ? 'Chatwoot config updated successfully, put this URL in Chatwoot inbox webhook settings:'
+          message: updateData.enabled
+            ? webhookAutoConfigured
+              ? 'Chatwoot configurado com sucesso! Webhook configurado automaticamente.'
+              : 'Chatwoot config updated successfully, put this URL in Chatwoot inbox webhook settings:'
             : 'Chatwoot integration disabled',
           chatwoot_inbox_webhook_url: webhookUrl,
+          webhook_auto_configured: webhookAutoConfigured,
+          webhook_auto_config_error: webhookAutoConfigError,
           config: {
             chatwoot_enabled: updatedConfig.enabled,
             chatwoot_url: updatedConfig.url,
@@ -183,6 +218,7 @@ export const chatwootController = igniter.controller({
         console.log(`[Chatwoot] Config updated for connection ${connectionId}:`, {
           enabled: updatedConfig.enabled,
           url: updatedConfig.url,
+          webhookAutoConfigured,
         });
 
         return response.success(updateResponse);

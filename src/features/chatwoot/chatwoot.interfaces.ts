@@ -424,6 +424,8 @@ export interface ChatwootConfigResponse {
 export interface ChatwootUpdateResponse {
   message: string;
   chatwoot_inbox_webhook_url: string;
+  webhook_auto_configured?: boolean;
+  webhook_auto_config_error?: string;
   config: ChatwootConfigResponse;
 }
 

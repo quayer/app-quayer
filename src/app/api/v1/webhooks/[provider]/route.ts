@@ -499,6 +499,17 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   if (message.type === 'text') {
     console.log('[Webhook] Text message received');
 
+    // ⭐ DEDUPLICATION: Check if message already exists (prevent duplicate processing)
+    if (message.id) {
+      const existingMessage = await database.message.findFirst({
+        where: { waMessageId: message.id },
+      });
+      if (existingMessage) {
+        console.log(`[Webhook] Text message ${message.id} already exists - skipping duplicate`);
+        return;
+      }
+    }
+
     // Limpar assinatura do bot se presente (caso tenha passado pelo check inicial)
     const cleanContent = message.content ? stripBotSignature(message.content) : '';
 
@@ -543,6 +554,17 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   // 5. LOCALIZAÇÃO - GEOCODING AUTOMÁTICO
   if (message.type === 'location' && message.latitude && message.longitude) {
     console.log(`[Webhook] 📍 Location message received: ${message.latitude}, ${message.longitude}`);
+
+    // ⭐ DEDUPLICATION: Check if message already exists
+    if (message.id) {
+      const existingMessage = await database.message.findFirst({
+        where: { waMessageId: message.id },
+      });
+      if (existingMessage) {
+        console.log(`[Webhook] Location message ${message.id} already exists - skipping duplicate`);
+        return;
+      }
+    }
 
     // Resolver endereço via Google Maps API
     let geoData: any = {};
@@ -617,6 +639,52 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   if (message.media) {
     console.log(`[Webhook] Media message (${message.media.type}) - saving and queuing transcription`);
 
+    // ⭐ DEDUPLICATION: Check if message already exists
+    if (message.id) {
+      const existingMessage = await database.message.findFirst({
+        where: { waMessageId: message.id },
+      });
+      if (existingMessage) {
+        console.log(`[Webhook] Media message ${message.id} already exists - skipping duplicate`);
+        return;
+      }
+    }
+
+    // ⭐ MEDIA DOWNLOAD: If media needs to be downloaded, fetch from UAZapi
+    let mediaUrl = message.media.mediaUrl;
+    if ((message.media as any).needsDownload && message.id) {
+      console.log(`[Webhook] Media needs download - fetching from UAZapi`);
+      try {
+        const instance = await database.connection.findUnique({
+          where: { id: instanceId },
+          select: { uazapiToken: true },
+        });
+        if (instance?.uazapiToken) {
+          const downloadResponse = await fetch(
+            `${process.env.UAZAPI_URL || 'https://quayer.uazapi.com'}/message/download?id=${message.id}`,
+            {
+              method: 'GET',
+              headers: { 'token': instance.uazapiToken },
+            }
+          );
+          if (downloadResponse.ok) {
+            const downloadData = await downloadResponse.json();
+            // UAZapi returns base64 data
+            if (downloadData.data) {
+              const mimeType = message.media.mimeType || downloadData.mimetype || 'application/octet-stream';
+              mediaUrl = `data:${mimeType};base64,${downloadData.data}`;
+              console.log(`[Webhook] Media downloaded successfully (${mimeType})`);
+            }
+          } else {
+            console.warn(`[Webhook] Failed to download media: ${downloadResponse.status}`);
+          }
+        }
+      } catch (downloadError) {
+        console.error('[Webhook] Media download failed:', downloadError);
+        // Continue with empty URL - message will be saved but media won't be playable
+      }
+    }
+
     // Salvar mensagem de mídia
     const savedMessage = await database.message.create({
       data: {
@@ -627,18 +695,18 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
         direction: 'INBOUND',
         type: message.type,
         content: message.content || '',
-        mediaUrl: message.media.mediaUrl,
+        mediaUrl: mediaUrl || null,
         mediaType: message.media.type,
         mimeType: message.media.mimeType,
         fileName: message.media.fileName,
         mediaDuration: message.media.duration,
         mediaSize: message.media.size,
-        transcriptionStatus: 'pending',
+        transcriptionStatus: mediaUrl ? 'pending' : 'failed',
         status: 'delivered',
       },
     });
 
-    console.log(`[Webhook] Media message saved: ${savedMessage.id}`);
+    console.log(`[Webhook] Media message saved: ${savedMessage.id} (hasMedia: ${!!mediaUrl})`);
 
     // Enfileirar transcrição
     await transcriptionQueue.add('transcribe-media', {

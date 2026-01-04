@@ -531,16 +531,47 @@ export class UAZapiAdapter implements IWhatsAppProvider {
 
   private mapMessageType(uazType: string): any {
     const mapping: Record<string, string> = {
+      // Text messages
       'conversation': 'text',
       'extendedTextMessage': 'text',
+      'text': 'text',
+      // Image messages
       'imageMessage': 'image',
+      'image': 'image',
+      // Video messages
       'videoMessage': 'video',
+      'video': 'video',
+      // Audio messages (various formats UAZapi might send)
       'audioMessage': 'audio',
-      'ptt': 'voice',
+      'audio': 'audio',
+      'ptt': 'voice',           // Push-to-talk voice messages
+      'pttMessage': 'voice',
+      'voice': 'voice',
+      'voiceMessage': 'voice',
+      // Document messages
       'documentMessage': 'document',
+      'document': 'document',
+      // Location messages
       'locationMessage': 'location',
+      'location': 'location',
+      // Contact messages
       'contactMessage': 'contact',
+      'contact': 'contact',
+      // Sticker messages
+      'stickerMessage': 'sticker',
+      'sticker': 'sticker',
     };
-    return mapping[uazType] || 'text';
+    // Return mapped type, or keep original if it's a valid media type
+    const result = mapping[uazType];
+    if (result) return result;
+
+    // If not in mapping, check if it's already a valid type
+    const validTypes = ['text', 'image', 'video', 'audio', 'voice', 'document', 'location', 'contact', 'sticker'];
+    if (validTypes.includes(uazType?.toLowerCase())) {
+      return uazType.toLowerCase();
+    }
+
+    console.warn(`[UAZapi] Unknown message type: ${uazType}, defaulting to text`);
+    return 'text';
   }
 }

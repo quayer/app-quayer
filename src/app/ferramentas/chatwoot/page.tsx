@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -140,69 +140,71 @@ export default function ChatwootConfigPage() {
   });
 
   // Load config when connection is selected
-  const loadConfig = useCallback(async () => {
+  // Note: Using useEffect with selectedConnection as dependency to avoid infinite loops
+  useEffect(() => {
     if (!selectedConnection) return;
 
-    setIsLoadingConfig(true);
-    setTestResult(null); // Reset test result on connection change
+    const loadConfig = async () => {
+      setIsLoadingConfig(true);
+      setTestResult(null); // Reset test result on connection change
 
-    // Default values for new connections or when API fails
-    const defaultValues = {
-      enabled: false,
-      url: '',
-      accessToken: '',
-      accountId: 0,
-      inboxId: 0,
-      ignoreGroups: false,
-      signMessages: true,
-      createNewConversation: false,
-      typingIndicator: true,
-      typingDelayMs: 1500,
+      // Default values for new connections or when API fails
+      const defaultValues = {
+        enabled: false,
+        url: '',
+        accessToken: '',
+        accountId: 0,
+        inboxId: 0,
+        ignoreGroups: false,
+        signMessages: true,
+        createNewConversation: false,
+        typingIndicator: true,
+        typingDelayMs: 1500,
+      };
+
+      try {
+        const response = await fetch(`/api/v1/chatwoot/config/${selectedConnection}`, {
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const config = data.data || data;
+
+          form.reset({
+            enabled: config.chatwoot_enabled || false,
+            url: config.chatwoot_url || '',
+            accessToken: '', // Never pre-fill token for security
+            accountId: config.chatwoot_account_id || 0,
+            inboxId: config.chatwoot_inbox_id || 0,
+            ignoreGroups: config.chatwoot_ignore_groups || false,
+            signMessages: config.chatwoot_sign_messages ?? true,
+            createNewConversation: config.chatwoot_create_new_conversation || false,
+            typingIndicator: config.chatwoot_typing_indicator ?? true,
+            typingDelayMs: config.chatwoot_typing_delay_ms || 1500,
+          });
+        } else {
+          // No config yet (404) or other error - use default values
+          console.log('[Chatwoot] No existing config, using defaults');
+          form.reset(defaultValues);
+        }
+      } catch (error) {
+        console.error('Error loading config:', error);
+        // On network error, still show form with defaults
+        form.reset(defaultValues);
+        toast({
+          title: 'Aviso',
+          description: 'Não foi possível carregar a configuração existente. Usando valores padrão.',
+          variant: 'default',
+        });
+      } finally {
+        setIsLoadingConfig(false);
+      }
     };
 
-    try {
-      const response = await fetch(`/api/v1/chatwoot/config/${selectedConnection}`, {
-        credentials: 'include',
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const config = data.data || data;
-
-        form.reset({
-          enabled: config.chatwoot_enabled || false,
-          url: config.chatwoot_url || '',
-          accessToken: '', // Never pre-fill token for security
-          accountId: config.chatwoot_account_id || 0,
-          inboxId: config.chatwoot_inbox_id || 0,
-          ignoreGroups: config.chatwoot_ignore_groups || false,
-          signMessages: config.chatwoot_sign_messages ?? true,
-          createNewConversation: config.chatwoot_create_new_conversation || false,
-          typingIndicator: config.chatwoot_typing_indicator ?? true,
-          typingDelayMs: config.chatwoot_typing_delay_ms || 1500,
-        });
-      } else {
-        // No config yet (404) or other error - use default values
-        console.log('[Chatwoot] No existing config, using defaults');
-        form.reset(defaultValues);
-      }
-    } catch (error) {
-      console.error('Error loading config:', error);
-      // On network error, still show form with defaults
-      form.reset(defaultValues);
-      toast({
-        title: 'Aviso',
-        description: 'Não foi possível carregar a configuração existente. Usando valores padrão.',
-        variant: 'default',
-      });
-    } finally {
-      setIsLoadingConfig(false);
-    }
-  }, [selectedConnection, form, toast]);
-
-  useEffect(() => {
     loadConfig();
-  }, [loadConfig]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConnection]); // Only re-run when connection changes
 
   // Test connection
   const handleTestConnection = async () => {
@@ -311,11 +313,24 @@ export default function ChatwootConfigPage() {
       const result = data.data || data;
 
       if (response.ok) {
-        // webhookUrl is generated dynamically from selectedConnection
-        toast({
-          title: 'Salvo!',
-          description: result.message || 'Configuração atualizada com sucesso.',
-        });
+        // Show appropriate feedback based on webhook auto-configuration
+        if (result.webhook_auto_configured) {
+          toast({
+            title: '✅ Configuração completa!',
+            description: 'Webhook configurado automaticamente no Chatwoot. Integração pronta para uso!',
+          });
+        } else if (result.webhook_auto_config_error) {
+          toast({
+            title: 'Salvo com aviso',
+            description: `Configuração salva, mas não foi possível configurar o webhook automaticamente: ${result.webhook_auto_config_error}. Configure manualmente.`,
+            variant: 'default',
+          });
+        } else {
+          toast({
+            title: 'Salvo!',
+            description: result.message || 'Configuração atualizada com sucesso.',
+          });
+        }
       } else {
         throw new Error(result.error || data.error || 'Falha ao salvar');
       }
