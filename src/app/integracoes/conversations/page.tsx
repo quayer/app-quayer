@@ -394,11 +394,19 @@ export default function ConversationsPage() {
     staleTime: 60000, // Cache for 60 seconds
   })
 
-  // Extract connected instances
+  // Extract connected instances with sanitized data
   const instances = useMemo(() => {
     const response = instancesData as any
     const data = response?.data?.data ?? response?.data ?? []
-    const connected = data.filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
+    const connected = data
+      .filter((i: Instance) => i.status === 'CONNECTED' || i.status === 'connected')
+      .map((i: any) => ({
+        ...i,
+        // Ensure all potentially rendered fields are strings
+        name: safeRenderContent(i.name),
+        phoneNumber: safeRenderContent(i.phoneNumber),
+        profilePictureUrl: typeof i.profilePictureUrl === 'string' ? i.profilePictureUrl : '',
+      }))
     return connected
   }, [instancesData])
 
@@ -584,7 +592,16 @@ export default function ConversationsPage() {
 
   // Extract and filter chats based on mainTab, chatTypeFilter and search
   const chats = useMemo(() => {
-    const data: UAZChat[] = (chatsData as any)?.chats ?? []
+    const rawData: UAZChat[] = (chatsData as any)?.chats ?? []
+
+    // Sanitize all chat fields that might be rendered
+    const data = rawData.map(chat => ({
+      ...chat,
+      wa_name: safeRenderContent(chat.wa_name),
+      wa_lastMsgBody: safeRenderContent(chat.wa_lastMsgBody),
+      wa_phoneNumber: safeRenderContent((chat as any).wa_phoneNumber),
+      instanceName: safeRenderContent((chat as any).instanceName),
+    }))
 
     // 1. Filtrar por tab principal (IA / Atendente / Resolvidos)
     let filtered = data.filter(chat => {
@@ -714,10 +731,15 @@ export default function ConversationsPage() {
     const pages = messagesData?.pages ?? []
     const allServerMessages: DBMessage[] = []
 
-    // Flatten all pages into single array
+    // Flatten all pages into single array and sanitize content
     for (const page of pages) {
       const pageData = (page as any)?.data?.data ?? (page as any)?.data ?? []
-      allServerMessages.push(...pageData)
+      // Sanitize each message's content field
+      const sanitizedMessages = pageData.map((msg: any) => ({
+        ...msg,
+        content: safeRenderContent(msg.content),
+      }))
+      allServerMessages.push(...sanitizedMessages)
     }
 
     // DEDUPE: Remove duplicates by id (can happen with pagination during updates)
@@ -844,35 +866,6 @@ export default function ConversationsPage() {
   })
 
   const notes = notesData ?? []
-
-  // DEBUG: Log any object fields that could cause React Error #310
-  // Remove this after identifying the problematic field
-  useEffect(() => {
-    const logObjectFields = (data: any, prefix: string) => {
-      if (!data || typeof data !== 'object') return
-      Object.entries(data).forEach(([key, value]) => {
-        if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Array.isArray(value)) {
-          console.warn(`[DEBUG React#310] ${prefix}.${key} is object:`, value)
-        }
-      })
-    }
-
-    // Check chats data
-    const chatsArray = chats ?? []
-    chatsArray.slice(0, 3).forEach((chat: any, i: number) => {
-      logObjectFields(chat, `chat[${i}]`)
-    })
-
-    // Check messages data
-    messages.slice(0, 3).forEach((msg: any, i: number) => {
-      logObjectFields(msg, `message[${i}]`)
-    })
-
-    // Check notes data
-    notes.slice(0, 3).forEach((note: any, i: number) => {
-      logObjectFields(note, `note[${i}]`)
-    })
-  }, [chats, messages, notes])
 
   // ==================== QUICK REPLIES ====================
 
