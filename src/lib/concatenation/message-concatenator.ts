@@ -9,12 +9,6 @@ import { redis } from '@/services/redis';
 import { database } from '@/services/database';
 import type { MessageDirection, MessageType } from '@prisma/client';
 
-// Lazy import to avoid circular dependency
-async function getChatwootSyncService() {
-  const { getChatwootSyncService: getService } = await import('@/features/chatwoot');
-  return getService();
-}
-
 export interface IncomingMessage {
   connectionId: string;
   waMessageId: string;
@@ -137,7 +131,8 @@ export class MessageConcatenator {
       // Processar mensagem final (IA, etc)
       await this.processMessage(finalMessage);
 
-      // ⭐ CHATWOOT SYNC: Sincronizar mensagem concatenada com Chatwoot
+      // ⭐ WEBHOOKS EXTERNOS: Disparar para n8n, Make, etc. com mensagem concatenada
+      // Nota: Chatwoot JÁ recebeu cada mensagem em tempo real no webhook principal
       try {
         const contact = await database.contact.findUnique({
           where: { id: contactId },
@@ -149,19 +144,27 @@ export class MessageConcatenator {
         });
 
         if (contact && connection?.organizationId) {
-          const chatwootSync = await getChatwootSyncService();
-          await chatwootSync.syncIncomingMessage({
+          // Importar webhooksService dinamicamente para evitar dependência circular
+          const { webhooksService } = await import('@/features/webhooks');
+
+          // Disparar evento para webhooks externos configurados pela organização
+          await webhooksService.trigger(connection.organizationId, 'message.received', {
             instanceId: messages[0].connectionId,
-            organizationId: connection.organizationId,
+            sessionId,
+            contactId,
             phoneNumber: contact.phoneNumber,
             contactName: contact.name || contact.phoneNumber,
             messageContent: concatenatedText,
             messageType: 'text',
-            isFromGroup: contact.phoneNumber.includes('@g.us'),
+            isConcatenated: true,
+            originalMessagesCount: textMessages.length,
+            concatGroupId,
+            timestamp: new Date().toISOString(),
           });
+          console.log(`[Concat] ✅ External webhooks triggered for org ${connection.organizationId}`);
         }
-      } catch (chatwootError) {
-        console.error('[Concat] Chatwoot sync failed (non-blocking):', chatwootError);
+      } catch (webhookError) {
+        console.error('[Concat] External webhooks failed (non-blocking):', webhookError);
       }
     }
 

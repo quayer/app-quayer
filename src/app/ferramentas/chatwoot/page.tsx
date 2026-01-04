@@ -96,7 +96,6 @@ type ChatwootFormValues = z.infer<typeof chatwootFormSchema>;
 export default function ChatwootConfigPage() {
   const { toast } = useToast();
   const [selectedConnection, setSelectedConnection] = useState<string>('');
-  const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
@@ -105,6 +104,14 @@ export default function ChatwootConfigPage() {
     message: string;
     inboxes?: Array<{ id: number; name: string }>;
   } | null>(null);
+
+  // Generate webhook URL dynamically based on selected connection
+  // This shows the URL immediately, even before saving
+  const webhookUrl = useMemo(() => {
+    if (!selectedConnection) return '';
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    return `${baseUrl}/api/v1/webhooks/chatwoot/${selectedConnection}`;
+  }, [selectedConnection]);
 
   // Get connections list
   // API returns { data: { data: [...], pagination: {...} } }
@@ -160,8 +167,7 @@ export default function ChatwootConfigPage() {
           typingIndicator: config.chatwoot_typing_indicator ?? true,
           typingDelayMs: config.chatwoot_typing_delay_ms || 1500,
         });
-
-        setWebhookUrl(config.chatwoot_inbox_webhook_url || '');
+        // webhookUrl is now generated dynamically from selectedConnection
       }
     } catch (error) {
       console.error('Error loading config:', error);
@@ -286,7 +292,7 @@ export default function ChatwootConfigPage() {
       const result = data.data || data;
 
       if (response.ok) {
-        setWebhookUrl(result.chatwoot_inbox_webhook_url || result.config?.chatwoot_inbox_webhook_url || '');
+        // webhookUrl is generated dynamically from selectedConnection
         toast({
           title: 'Salvo!',
           description: result.message || 'Configuração atualizada com sucesso.',

@@ -495,22 +495,48 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     }
   }
 
-  // 4. CONCATENAÇÃO DE MENSAGENS DE TEXTO
+  // 4. MENSAGENS DE TEXTO
   if (message.type === 'text') {
-    console.log('[Webhook] Text message - adding to concatenation queue');
+    console.log('[Webhook] Text message received');
 
     // Limpar assinatura do bot se presente (caso tenha passado pelo check inicial)
     const cleanContent = message.content ? stripBotSignature(message.content) : '';
 
+    // ⭐ CHATWOOT SYNC: Sincronizar IMEDIATAMENTE com Chatwoot (real-time para agentes)
+    // Chatwoot é uma ferramenta de chat ao vivo - agentes precisam ver mensagens em tempo real
+    try {
+      const chatwootSync = await getChatwootSyncService();
+      await chatwootSync.syncIncomingMessage({
+        instanceId,
+        organizationId: instance.organizationId,
+        phoneNumber: from,
+        contactName: contact.name || from,
+        messageContent: cleanContent,
+        messageType: 'text',
+        isFromGroup: from.includes('@g.us'),
+      });
+      console.log('[Webhook] ✅ Chatwoot sync completed (real-time)');
+    } catch (chatwootError) {
+      console.error('[Webhook] Chatwoot sync failed (non-blocking):', chatwootError);
+    }
+
+    // ⭐ CONCATENAÇÃO: Adicionar ao concatenador para webhooks externos e IA
+    // Webhooks externos (n8n, Make) e IA devem receber mensagens agrupadas
+    console.log('[Webhook] Text message - adding to concatenation queue for webhooks/AI');
     await messageConcatenator.addMessage(session.id, contact.id, {
-      connectionId: instanceId, // Map instanceId to connectionId
+      connectionId: instanceId,
       waMessageId: message.id,
       type: message.type,
       content: cleanContent,
       direction: 'INBOUND',
     });
 
-    // ⚠️ NÃO processar imediatamente, aguardar concatenação
+    // Atualizar lastMessageAt da sessão
+    await database.chatSession.update({
+      where: { id: session.id },
+      data: { lastMessageAt: new Date() },
+    });
+
     return;
   }
 
