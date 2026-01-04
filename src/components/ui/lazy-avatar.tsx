@@ -276,9 +276,13 @@ export function LazyAvatar({
   }, [src, phoneNumber, instanceId, fetchFromApi])
 
   // Generate initials from name - memoized
+  // Ensure name is a string to prevent React Error #310
   const initials = useMemo(() => {
     if (!name) return null
-    const parts = name.trim().split(' ').filter(Boolean)
+    // Safety: ensure name is a string before processing
+    const safeName = typeof name === 'string' ? name : String(name ?? '')
+    if (!safeName) return null
+    const parts = safeName.trim().split(' ').filter(Boolean)
     if (parts.length === 0) return null
     if (parts.length === 1) return parts[0][0]?.toUpperCase() || null
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
@@ -289,7 +293,7 @@ export function LazyAvatar({
       {profilePicUrl && !hasError && (
         <AvatarImage
           src={profilePicUrl}
-          alt={name || 'Profile'}
+          alt={typeof name === 'string' ? name : 'Profile'}
           onError={handleImageError}
         />
       )}

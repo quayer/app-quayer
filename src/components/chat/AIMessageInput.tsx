@@ -14,6 +14,20 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { useMutation } from '@tanstack/react-query'
 import { api } from '@/igniter.client'
 
+/**
+ * Helper para garantir que valores sejam strings
+ * Previne React Error #310 (Objects are not valid as React child)
+ */
+function safeString(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return String(obj?.text ?? obj?.body ?? obj?.content ?? '')
+  }
+  return String(value)
+}
+
 interface AISuggestion {
   id: string
   text: string
@@ -157,7 +171,7 @@ export function AIMessageInput({
   }, [isOpen, suggestions, selectedIndex, onSend])
 
   const acceptSuggestion = (suggestion: AISuggestion) => {
-    onChange(suggestion.text)
+    onChange(safeString(suggestion.text))
     setIsOpen(false)
     setSuggestions([])
     setSelectedIndex(-1)
@@ -232,8 +246,8 @@ export function AIMessageInput({
                 onClick={() => acceptSuggestion(suggestion)}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
-                <span className="text-muted-foreground">{value}</span>
-                <span className="text-foreground font-medium">{suggestion.completion}</span>
+                <span className="text-muted-foreground">{safeString(value)}</span>
+                <span className="text-foreground font-medium">{safeString(suggestion.completion)}</span>
               </button>
             ))}
           </div>
