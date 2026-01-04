@@ -270,10 +270,10 @@ export function LazyAvatar({
       return
     }
 
-    // No src provided, fetch from API
-    if (!phoneNumber || !instanceId) return
-
-    fetchFromApi()
+    // TEMPORARILY DISABLED: Don't auto-fetch to debug scroll issue
+    // If scroll works without this, the problem is profile pic fetching
+    // if (!phoneNumber || !instanceId) return
+    // fetchFromApi()
   }, [src, phoneNumber, instanceId, fetchFromApi])
 
   // Generate initials from name - memoized
