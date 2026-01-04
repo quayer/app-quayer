@@ -5,9 +5,36 @@ import { database } from '@/services/database';
 import { ConnectionStatus } from '@prisma/client';
 
 // Profile picture cache (in-memory for quick lookups)
-// WhatsApp URLs expire quickly, so we use a short TTL
+// We download and cache as base64 so they don't expire
 const profilePicCache = new Map<string, { url: string | null; expiresAt: number }>();
-const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 5; // 5 minutes (WhatsApp URLs expire fast)
+const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 60; // 1 hour (cached as base64, doesn't expire)
+
+/**
+ * Download image from URL and convert to base64 data URL
+ */
+async function downloadAsBase64(imageUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`[ProfilePic] Failed to download image: ${response.status}`);
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+    return `data:${contentType};base64,${base64}`;
+  } catch (error) {
+    console.error('[ProfilePic] Error downloading image:', error);
+    return null;
+  }
+}
 
 /**
  * Contacts Controller
@@ -450,16 +477,21 @@ export const contactsController = igniter.controller({
           const data = await apiResponse.json();
           const profilePicUrl = data.profilePicUrl || data.url || data.data?.url || null;
 
-          // NOTE: We don't save to database because WhatsApp URLs expire quickly
-          // Just cache in memory with short TTL
+          if (!profilePicUrl) {
+            profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
+            return response.success({ url: null, source: 'no_url' });
+          }
 
-          // Cache the result
+          // Download image and convert to base64 (so it doesn't expire)
+          const base64Url = await downloadAsBase64(profilePicUrl);
+
+          // Cache the result (base64 or null)
           profilePicCache.set(cacheKey, {
-            url: profilePicUrl,
+            url: base64Url,
             expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL,
           });
 
-          return response.success({ url: profilePicUrl, source: 'api' });
+          return response.success({ url: base64Url, source: 'api' });
         } catch (error) {
           console.error('[ContactsController] Error fetching profile picture:', error);
           profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });
