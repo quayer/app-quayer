@@ -2035,6 +2035,15 @@ export default function ConversationsPage() {
     tabCounts,
     instancesLoading,
     syncChatsMutation.isPending,
+    // Callbacks - must be included to avoid stale closures
+    handleSelectChat,
+    handleManualRefresh,
+    handleChatListKeyDown,
+    refetchChats,
+    setMainTab,
+    setChatTypeFilter,
+    setSearchText,
+    setSelectedInstanceFilter,
   ])
 
   // Messages Area Component - Memoized to prevent re-creation on every render
@@ -3028,6 +3037,14 @@ export default function ConversationsPage() {
     newNoteText,
     hasUnseenMessages,
     optimisticMessages,
+    // Callbacks - must be included to avoid stale closures
+    handleMessageChange,
+    handleSendMessage,
+    handleSendFile,
+    handleSelectQuickReply,
+    handleMessagesScroll,
+    scrollToBottom,
+    fetchNextPage,
   ])
 
   // ==================== MAIN RENDER ====================
