@@ -146,15 +146,29 @@ export default function ChatwootConfigPage() {
     setIsLoadingConfig(true);
     setTestResult(null); // Reset test result on connection change
 
+    // Default values for new connections or when API fails
+    const defaultValues = {
+      enabled: false,
+      url: '',
+      accessToken: '',
+      accountId: 0,
+      inboxId: 0,
+      ignoreGroups: false,
+      signMessages: true,
+      createNewConversation: false,
+      typingIndicator: true,
+      typingDelayMs: 1500,
+    };
+
     try {
       const response = await fetch(`/api/v1/chatwoot/config/${selectedConnection}`, {
         credentials: 'include',
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const config = data.data || data;
-        
+
         form.reset({
           enabled: config.chatwoot_enabled || false,
           url: config.chatwoot_url || '',
@@ -167,14 +181,19 @@ export default function ChatwootConfigPage() {
           typingIndicator: config.chatwoot_typing_indicator ?? true,
           typingDelayMs: config.chatwoot_typing_delay_ms || 1500,
         });
-        // webhookUrl is now generated dynamically from selectedConnection
+      } else {
+        // No config yet (404) or other error - use default values
+        console.log('[Chatwoot] No existing config, using defaults');
+        form.reset(defaultValues);
       }
     } catch (error) {
       console.error('Error loading config:', error);
+      // On network error, still show form with defaults
+      form.reset(defaultValues);
       toast({
-        title: 'Erro ao carregar',
-        description: 'Não foi possível carregar a configuração.',
-        variant: 'destructive',
+        title: 'Aviso',
+        description: 'Não foi possível carregar a configuração existente. Usando valores padrão.',
+        variant: 'default',
       });
     } finally {
       setIsLoadingConfig(false);
