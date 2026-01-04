@@ -352,7 +352,6 @@ function SharePageContent({ token }: SharePageProps) {
             'Já existe uma conexão em andamento. Aguarde 30 segundos ou use o QR Code.',
             { duration: 6000 }
           );
-          setConnectionMode('qr');
           announce('Conexão em andamento, use o QR Code');
           return;
         }
@@ -403,10 +402,8 @@ function SharePageContent({ token }: SharePageProps) {
 
       if (message.toLowerCase().includes('conflict') || message.toLowerCase().includes('em andamento')) {
         toast.error('Aguarde alguns segundos e tente novamente, ou use o QR Code.', { duration: 5000 });
-        setConnectionMode('qr');
       } else if (message.toLowerCase().includes('não disponível') || message.toLowerCase().includes('unavailable')) {
         toast.error('Código de pareamento não disponível no momento. Use o QR Code.', { duration: 5000 });
-        setConnectionMode('qr');
       } else {
         toast.error(message);
       }
