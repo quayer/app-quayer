@@ -169,6 +169,30 @@ function safeRenderContent(content: unknown): string {
   return String(content)
 }
 
+/**
+ * Helper para formatar datas de forma segura
+ * Previne erros quando createdAt é um objeto ao invés de string
+ */
+function safeFormatDate(dateValue: unknown, formatStr: string): string {
+  try {
+    if (dateValue === null || dateValue === undefined) {
+      return ''
+    }
+    // Handle objects - try to extract date value
+    if (typeof dateValue === 'object' && !(dateValue instanceof Date)) {
+      const obj = dateValue as Record<string, unknown>
+      dateValue = obj?.createdAt ?? obj?.date ?? obj?.timestamp ?? ''
+    }
+    const date = dateValue instanceof Date ? dateValue : new Date(String(dateValue))
+    if (isNaN(date.getTime())) {
+      return ''
+    }
+    return format(date, formatStr, { locale: ptBR })
+  } catch {
+    return ''
+  }
+}
+
 // Nova arquitetura: 3 tabs principais por responsabilidade
 type MainTab = 'ia' | 'atendente' | 'resolvidos'
 type ChatTypeFilter = 'all' | 'direct' | 'groups'
@@ -500,18 +524,32 @@ export default function ConversationsPage() {
 
   // Calculate tab counts
   // OTIMIZADO: Usa contagens do servidor quando disponíveis
+  // Safety: ensure all counts are valid numbers to prevent React Error #310
+  const toNumber = (value: unknown): number => {
+    if (typeof value === 'number' && !isNaN(value)) return value
+    if (typeof value === 'string') {
+      const parsed = parseInt(value, 10)
+      return isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }
+
   const tabCounts = useMemo(() => {
     const serverCounts = (chatsData as any)?.counts
     const data: UAZChat[] = (chatsData as any)?.chats ?? []
 
     // Usar contagens do servidor se disponíveis (mais eficiente)
     if (serverCounts) {
+      const ai = toNumber(serverCounts.ai)
+      const human = toNumber(serverCounts.human)
+      const archived = toNumber(serverCounts.archived)
+      const groups = toNumber(serverCounts.groups)
       return {
-        ia: serverCounts.ai ?? 0,
-        atendente: serverCounts.human ?? 0,
-        resolvidos: serverCounts.archived ?? 0,
-        groups: serverCounts.groups ?? 0,
-        direct: (serverCounts.human + serverCounts.ai) - (serverCounts.groups ?? 0),
+        ia: ai,
+        atendente: human,
+        resolvidos: archived,
+        groups: groups,
+        direct: (human + ai) - groups,
       }
     }
 
@@ -607,7 +645,12 @@ export default function ConversationsPage() {
   ])
 
   // Format count for display (99+ for large numbers)
-  const formatCount = (count: number) => count > 99 ? '99+' : count.toString()
+  // Safety: ensure count is a valid number to prevent React Error #310
+  const formatCount = (count: unknown): string => {
+    const num = typeof count === 'number' ? count : (typeof count === 'string' ? parseInt(count, 10) : 0)
+    if (isNaN(num)) return '0'
+    return num > 99 ? '99+' : String(num)
+  }
 
   // Fetch messages for selected chat with infinite scroll
   const MESSAGES_PER_PAGE = 50
@@ -703,7 +746,6 @@ export default function ConversationsPage() {
 
     // Track if user is near bottom (within 150px) for smart auto-scroll
     const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight
-    const wasNearBottom = isNearBottomRef.current
     isNearBottomRef.current = distanceFromBottom < 150
 
     // Se usuário voltou para o final, limpar indicador de novas mensagens
@@ -1561,22 +1603,46 @@ export default function ConversationsPage() {
   }
 
   // Memoizado para evitar recriação em cada render
-  const formatTimestamp = useCallback((timestamp: number | string) => {
-    const date = typeof timestamp === 'number'
-      ? new Date(timestamp > 9999999999 ? timestamp : timestamp * 1000)
-      : new Date(timestamp)
+  // Safety: handle potential object values to prevent React Error #310
+  const formatTimestamp = useCallback((timestamp: unknown): string => {
+    try {
+      // Handle null/undefined
+      if (timestamp === null || timestamp === undefined) {
+        return ''
+      }
 
-    const now = new Date()
-    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+      // Handle objects - try to extract timestamp value
+      if (typeof timestamp === 'object') {
+        const obj = timestamp as Record<string, unknown>
+        const extracted = obj?.timestamp ?? obj?.date ?? obj?.time ?? obj?.createdAt
+        if (extracted === undefined) return ''
+        timestamp = extracted
+      }
 
-    if (diffDays === 0) {
-      return format(date, 'HH:mm', { locale: ptBR })
-    } else if (diffDays === 1) {
-      return 'Ontem'
-    } else if (diffDays < 7) {
-      return format(date, 'EEEE', { locale: ptBR })
+      // Now handle number or string
+      const date = typeof timestamp === 'number'
+        ? new Date(timestamp > 9999999999 ? timestamp : timestamp * 1000)
+        : new Date(String(timestamp))
+
+      // Check for invalid date
+      if (isNaN(date.getTime())) {
+        return ''
+      }
+
+      const now = new Date()
+      const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+
+      if (diffDays === 0) {
+        return format(date, 'HH:mm', { locale: ptBR })
+      } else if (diffDays === 1) {
+        return 'Ontem'
+      } else if (diffDays < 7) {
+        return format(date, 'EEEE', { locale: ptBR })
+      }
+      return format(date, 'dd/MM/yyyy', { locale: ptBR })
+    } catch {
+      return ''
     }
-    return format(date, 'dd/MM/yyyy', { locale: ptBR })
   }, [])
 
   const getStatusIcon = (status: string, direction: string) => {
@@ -2010,9 +2076,9 @@ export default function ConversationsPage() {
                         <p className="text-xs text-slate-600 dark:text-slate-400 truncate flex-1">
                           {safeRenderContent(chat.wa_lastMsgBody) || 'Sem mensagens'}
                         </p>
-                        {chat.wa_unreadCount > 0 && (
+                        {toNumber(chat.wa_unreadCount) > 0 && (
                           <Badge className="h-5 min-w-5 flex items-center justify-center text-xs flex-shrink-0">
-                            {chat.wa_unreadCount > 99 ? '99+' : chat.wa_unreadCount}
+                            {formatCount(chat.wa_unreadCount)}
                           </Badge>
                         )}
                       </div>
@@ -2851,7 +2917,7 @@ export default function ConversationsPage() {
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                         <span>{safeRenderContent(note.author?.name) || 'Agente'}</span>
                         <span>•</span>
-                        <span>{format(new Date(note.createdAt), "dd/MM HH:mm")}</span>
+                        <span>{safeFormatDate(note.createdAt, "dd/MM HH:mm")}</span>
                       </div>
                     </div>
                   ))}
