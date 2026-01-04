@@ -47,7 +47,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const orgRole = (user as any)?.organizationRole || 'user'
 
   // ✅ CORREÇÃO BRUTAL: Buscar nome da organização atual via getCurrent
-  const selectedOrgName = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name || null
+  // Safety: ensure name is always a string to prevent React Error #310
+  const rawOrgName = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name
+  const selectedOrgName = typeof rawOrgName === 'string' ? rawOrgName : (rawOrgName?.name || rawOrgName?.title || null)
 
   const data = React.useMemo(() => {
     const adminMenu = isSystemAdmin ? [{
