@@ -54,7 +54,7 @@ interface CreateIntegrationData {
   cloudApiWabaId?: string;
 }
 
-type Step = 'channel' | 'config' | 'method' | 'connect' | 'share' | 'success';
+type Step = 'channel' | 'config' | 'credentials' | 'method' | 'connect' | 'share' | 'success';
 type ConnectionMethod = 'qrcode' | 'share' | null;
 
 interface CloudApiValidation {
@@ -82,15 +82,36 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     cloudApiWabaId: ''
   });
 
-  const steps = [
-    { id: 'channel', title: 'Canal', icon: Smartphone },
-    { id: 'config', title: 'Configurar', icon: Settings },
-    { id: 'method', title: 'Método', icon: Wifi },
-    { id: 'success', title: 'Concluído', icon: CheckCircle }
-  ];
+  // Steps dinâmicos baseados no provider selecionado
+  const getSteps = () => {
+    if (formData.provider === 'WHATSAPP_CLOUD_API') {
+      return [
+        { id: 'channel', title: 'Canal', icon: MessageSquare },
+        { id: 'config', title: 'Nome', icon: Settings },
+        { id: 'credentials', title: 'Credenciais', icon: Shield },
+        { id: 'success', title: 'Concluído', icon: CheckCircle }
+      ];
+    }
+    return [
+      { id: 'channel', title: 'Canal', icon: MessageSquare },
+      { id: 'config', title: 'Configurar', icon: Settings },
+      { id: 'method', title: 'Conectar', icon: Wifi },
+      { id: 'success', title: 'Concluído', icon: CheckCircle }
+    ];
+  };
+
+  const steps = getSteps();
+
+  // Ordem dos steps baseada no provider
+  const getStepOrder = (): Step[] => {
+    if (formData.provider === 'WHATSAPP_CLOUD_API') {
+      return ['channel', 'config', 'credentials', 'success'];
+    }
+    return ['channel', 'config', 'method', 'success'];
+  };
 
   const handleNext = () => {
-    const stepOrder: Step[] = ['channel', 'config', 'method', 'success'];
+    const stepOrder = getStepOrder();
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex < stepOrder.length - 1) {
       setCurrentStep(stepOrder[currentIndex + 1]);
@@ -98,7 +119,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
   };
 
   const handlePrev = () => {
-    const stepOrder: Step[] = ['channel', 'config', 'method', 'success'];
+    const stepOrder = getStepOrder();
     const currentIndex = stepOrder.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(stepOrder[currentIndex - 1]);
@@ -276,10 +297,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center space-x-2">
-            <Smartphone className="h-6 w-6 text-green-600" />
-            <span>Conectar Novo WhatsApp</span>
-          </DialogTitle>
+          <DialogTitle>Nova Integração</DialogTitle>
         </DialogHeader>
 
         {/* Progress bar */}
@@ -398,15 +416,15 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
           {currentStep === 'config' && (
             <div className="space-y-6">
               <div>
-                <h3 className="text-lg font-semibold mb-2">Como você quer chamar este WhatsApp?</h3>
+                <h3 className="text-lg font-semibold mb-2">Como você quer chamar esta integração?</h3>
                 <p className="text-muted-foreground">
-                  Dê um nome para identificar facilmente este número
+                  Dê um nome para identificar facilmente este canal
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="name">Nome do WhatsApp *</Label>
+                  <Label htmlFor="name">Nome da Integração *</Label>
                   <Input
                     id="name"
                     value={formData.name}
@@ -422,7 +440,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                     id="description"
                     value={formData.description}
                     onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Breve descrição da instância..."
+                    placeholder="Breve descrição da integração..."
                     className="mt-1"
                     rows={3}
                   />
@@ -449,130 +467,136 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                     </p>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
 
+          {/* Step de Credenciais Cloud API */}
+          {currentStep === 'credentials' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Credenciais da Meta</h3>
+                <p className="text-muted-foreground">
+                  Insira as credenciais do WhatsApp Business Platform
+                </p>
+              </div>
 
-                {formData.provider === 'WHATSAPP_CLOUD_API' && (
-                  <div className="space-y-4 pt-4 border-t">
-                    <h4 className="font-medium text-sm">Credenciais da Meta (Cloud API)</h4>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="cloudApiAccessToken">Access Token *</Label>
+                  <Input
+                    id="cloudApiAccessToken"
+                    type="password"
+                    value={formData.cloudApiAccessToken}
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, cloudApiAccessToken: e.target.value }));
+                      setCloudApiValidation({ status: 'idle' });
+                    }}
+                    placeholder="EAAB..."
+                    className="mt-1 font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Token de usuário do sistema ou temporário.</p>
+                </div>
 
-                    <div>
-                      <Label htmlFor="cloudApiAccessToken">Access Token *</Label>
-                      <Input
-                        id="cloudApiAccessToken"
-                        type="password"
-                        value={formData.cloudApiAccessToken}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, cloudApiAccessToken: e.target.value }));
-                          setCloudApiValidation({ status: 'idle' });
-                        }}
-                        placeholder="EAAB..."
-                        className="mt-1 font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">Token de usuário do sistema ou temporário.</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="cloudApiPhoneNumberId">Phone Number ID *</Label>
-                        <Input
-                          id="cloudApiPhoneNumberId"
-                          value={formData.cloudApiPhoneNumberId}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, cloudApiPhoneNumberId: e.target.value }));
-                            setCloudApiValidation({ status: 'idle' });
-                          }}
-                          placeholder="123456789..."
-                          className="mt-1 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="cloudApiWabaId">WABA ID *</Label>
-                        <Input
-                          id="cloudApiWabaId"
-                          value={formData.cloudApiWabaId}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, cloudApiWabaId: e.target.value }));
-                            setCloudApiValidation({ status: 'idle' });
-                          }}
-                          placeholder="987654321..."
-                          className="mt-1 font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Botão de Testar Credenciais */}
-                    <div className="flex items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleValidateCloudApi}
-                        disabled={
-                          cloudApiValidation.status === 'validating' ||
-                          !formData.cloudApiAccessToken ||
-                          !formData.cloudApiPhoneNumberId ||
-                          !formData.cloudApiWabaId
-                        }
-                        className="flex items-center gap-2"
-                      >
-                        {cloudApiValidation.status === 'validating' ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Validando...
-                          </>
-                        ) : (
-                          <>
-                            <Shield className="h-4 w-4" />
-                            Testar Credenciais
-                          </>
-                        )}
-                      </Button>
-
-                      {cloudApiValidation.status === 'valid' && (
-                        <div className="flex items-center gap-2 text-green-600">
-                          <CheckCircle className="h-5 w-5" />
-                          <span className="text-sm font-medium">Válido</span>
-                        </div>
-                      )}
-
-                      {cloudApiValidation.status === 'invalid' && (
-                        <div className="flex items-center gap-2 text-red-600">
-                          <XCircle className="h-5 w-5" />
-                          <span className="text-sm font-medium">Inválido</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Feedback visual de validação */}
-                    {cloudApiValidation.status === 'valid' && cloudApiValidation.verifiedName && (
-                      <Alert className="bg-green-50 border-green-200">
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                        <AlertDescription className="text-green-700 text-sm">
-                          <strong>Conexão verificada!</strong><br />
-                          Nome: {cloudApiValidation.verifiedName}<br />
-                          Telefone: {cloudApiValidation.phoneNumber}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-
-                    {cloudApiValidation.status === 'invalid' && (
-                      <Alert className="bg-red-50 border-red-200">
-                        <XCircle className="h-4 w-4 text-red-600" />
-                        <AlertDescription className="text-red-700 text-sm">
-                          <strong>Falha na validação</strong><br />
-                          {cloudApiValidation.error || 'Verifique as credenciais e tente novamente.'}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-
-                    <Alert className="bg-blue-50 border-blue-200">
-                      <Info className="h-4 w-4 text-blue-600" />
-                      <AlertDescription className="text-blue-700 text-xs">
-                        Certifique-se de que o token tem permissões `whatsapp_business_messaging` e `whatsapp_business_management`.
-                      </AlertDescription>
-                    </Alert>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="cloudApiPhoneNumberId">Phone Number ID *</Label>
+                    <Input
+                      id="cloudApiPhoneNumberId"
+                      value={formData.cloudApiPhoneNumberId}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, cloudApiPhoneNumberId: e.target.value }));
+                        setCloudApiValidation({ status: 'idle' });
+                      }}
+                      placeholder="123456789..."
+                      className="mt-1 font-mono"
+                    />
                   </div>
+                  <div>
+                    <Label htmlFor="cloudApiWabaId">WABA ID *</Label>
+                    <Input
+                      id="cloudApiWabaId"
+                      value={formData.cloudApiWabaId}
+                      onChange={(e) => {
+                        setFormData(prev => ({ ...prev, cloudApiWabaId: e.target.value }));
+                        setCloudApiValidation({ status: 'idle' });
+                      }}
+                      placeholder="987654321..."
+                      className="mt-1 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Botão de Testar Credenciais */}
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleValidateCloudApi}
+                    disabled={
+                      cloudApiValidation.status === 'validating' ||
+                      !formData.cloudApiAccessToken ||
+                      !formData.cloudApiPhoneNumberId ||
+                      !formData.cloudApiWabaId
+                    }
+                    className="flex items-center gap-2"
+                  >
+                    {cloudApiValidation.status === 'validating' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Validando...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="h-4 w-4" />
+                        Testar Credenciais
+                      </>
+                    )}
+                  </Button>
+
+                  {cloudApiValidation.status === 'valid' && (
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-5 w-5" />
+                      <span className="text-sm font-medium">Válido</span>
+                    </div>
+                  )}
+
+                  {cloudApiValidation.status === 'invalid' && (
+                    <div className="flex items-center gap-2 text-red-600">
+                      <XCircle className="h-5 w-5" />
+                      <span className="text-sm font-medium">Inválido</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Feedback visual de validação */}
+                {cloudApiValidation.status === 'valid' && cloudApiValidation.verifiedName && (
+                  <Alert className="bg-green-50 border-green-200">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <AlertDescription className="text-green-700 text-sm">
+                      <strong>Conexão verificada!</strong><br />
+                      Nome: {cloudApiValidation.verifiedName}<br />
+                      Telefone: {cloudApiValidation.phoneNumber}
+                    </AlertDescription>
+                  </Alert>
                 )}
 
+                {cloudApiValidation.status === 'invalid' && (
+                  <Alert className="bg-red-50 border-red-200">
+                    <XCircle className="h-4 w-4 text-red-600" />
+                    <AlertDescription className="text-red-700 text-sm">
+                      <strong>Falha na validação</strong><br />
+                      {cloudApiValidation.error || 'Verifique as credenciais e tente novamente.'}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <Alert className="bg-blue-50 border-blue-200">
+                  <Info className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-blue-700 text-xs">
+                    Certifique-se de que o token tem permissões `whatsapp_business_messaging` e `whatsapp_business_management`.
+                  </AlertDescription>
+                </Alert>
               </div>
             </div>
           )}
@@ -797,7 +821,8 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
 
         {/* Footer buttons */}
         <div className="flex justify-between pt-6 border-t">
-          {currentStep !== 'channel' && currentStep !== 'success' && currentStep !== 'method' && (
+          {/* Botão Voltar - aparece em config, credentials */}
+          {(currentStep === 'config' || currentStep === 'credentials') && (
             <Button variant="outline" onClick={handlePrev}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Voltar
@@ -817,13 +842,16 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
               <Button variant="ghost" onClick={handleClose}>
                 Fechar e conectar depois
               </Button>
-            ) : currentStep === 'config' ? (
+            ) : currentStep === 'credentials' ? (
+              /* Step Credentials - Botão Criar (Cloud API) */
               <Button
                 onClick={handleSubmit}
                 disabled={
                   !formData.name ||
                   loading ||
-                  (formData.provider === 'WHATSAPP_CLOUD_API' && (!formData.cloudApiAccessToken || !formData.cloudApiPhoneNumberId || !formData.cloudApiWabaId))
+                  !formData.cloudApiAccessToken ||
+                  !formData.cloudApiPhoneNumberId ||
+                  !formData.cloudApiWabaId
                 }
               >
                 {loading ? (
@@ -833,11 +861,36 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                   </>
                 ) : (
                   <>
-                    Criar Instância
+                    Criar Integração
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </>
                 )}
               </Button>
+            ) : currentStep === 'config' ? (
+              /* Step Config - Próximo ou Criar dependendo do provider */
+              formData.provider === 'WHATSAPP_CLOUD_API' ? (
+                <Button onClick={handleNext} disabled={!formData.name}>
+                  Próximo
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={!formData.name || loading}
+                >
+                  {loading ? (
+                    <>
+                      <Clock className="h-4 w-4 mr-2 animate-spin" />
+                      Criando...
+                    </>
+                  ) : (
+                    <>
+                      Criar Integração
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </>
+                  )}
+                </Button>
+              )
             ) : (
               <Button onClick={handleNext}>
                 Próximo
