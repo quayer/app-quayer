@@ -14,12 +14,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { database } from '@/services/database';
 import { orchestrator } from '@/lib/providers';
+import { sessionsManager } from '@/lib/sessions/sessions.manager';
 // Import directly from source files to avoid circular dependency
 import {
   normalizeChatwootWebhook,
   shouldSendToWhatsApp,
 } from '@/features/chatwoot/services/chatwoot.normalizer';
-import type { ChatwootWebhookPayload } from '@/features/chatwoot/chatwoot.interfaces';
+import type { ChatwootWebhookPayload, NormalizedChatwootEvent } from '@/features/chatwoot/chatwoot.interfaces';
 import { ChatwootRepository } from '@/features/chatwoot/repositories/chatwoot.repository';
 import type { BrokerType } from '@/lib/providers/core/provider.types';
 
@@ -70,13 +71,31 @@ export async function POST(
     // =========================================================================
     const normalized = normalizeChatwootWebhook(rawPayload);
 
-    // Business Rule: Ignore bot echo and non-message events
+    // Business Rule: Ignore bot echo and other ignorable events
     if (normalized.ignore) {
       console.log(`[Chatwoot Webhook] Ignoring: ${normalized.ignoreReason}`);
-      return NextResponse.json({ 
-        success: true, 
-        ignored: true, 
-        reason: normalized.ignoreReason 
+      return NextResponse.json({
+        success: true,
+        ignored: true,
+        reason: normalized.ignoreReason
+      });
+    }
+
+    // =========================================================================
+    // STEP 2b: Handle Conversation Status Events
+    // =========================================================================
+    if (normalized.chatwoot.conversationStatus) {
+      console.log(`[Chatwoot Webhook] Conversation status change: ${normalized.chatwoot.conversationStatus}`);
+
+      const result = await handleConversationStatusChange(
+        connectionId,
+        normalized
+      );
+
+      return NextResponse.json({
+        success: true,
+        action: 'status_synced',
+        ...result,
       });
     }
 
@@ -168,7 +187,67 @@ export async function POST(
     }
 
     // =========================================================================
-    // STEP 7: Send message to WhatsApp
+    // STEP 7: Save OUTBOUND message to database BEFORE sending
+    // =========================================================================
+    let savedMessageId: string | null = null;
+    try {
+      // Find or create contact and session for this phone number
+      let contact = await database.contact.findFirst({
+        where: { phoneNumber },
+      });
+
+      if (!contact) {
+        contact = await database.contact.create({
+          data: {
+            phoneNumber,
+            name: normalized.contact.name || phoneNumber,
+          },
+        });
+        console.log(`[Chatwoot Webhook] Created contact: ${contact.id}`);
+      }
+
+      // Get or create session
+      const session = await sessionsManager.getOrCreateSession({
+        contactId: contact.id,
+        connectionId,
+        organizationId: connection.organizationId!,
+      });
+
+      // Save outbound message
+      // Generate a unique waMessageId for Chatwoot-originated messages
+      const waMessageId = `cw_${normalized.chatwoot.messageId || Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      const savedMessage = await database.message.create({
+        data: {
+          sessionId: session.id,
+          contactId: contact.id,
+          connectionId,
+          waMessageId,
+          direction: 'OUTBOUND',
+          type: normalized.message.type,
+          content: finalContent,
+          author: normalized.author === 'AI' ? 'AI' : 'AGENT',
+          aiAgentName: normalized.agent?.name,
+          status: 'pending',
+          mediaUrl: normalized.message.attachments?.[0]?.data_url,
+        },
+      });
+
+      savedMessageId = savedMessage.id;
+      console.log(`[Chatwoot Webhook] Saved OUTBOUND message: ${savedMessageId}`);
+
+      // Update session lastMessageAt
+      await database.chatSession.update({
+        where: { id: session.id },
+        data: { lastMessageAt: new Date() },
+      });
+    } catch (dbError: any) {
+      console.error('[Chatwoot Webhook] Failed to save message to database:', dbError);
+      // Continue anyway - sending to WhatsApp is more important
+    }
+
+    // =========================================================================
+    // STEP 8: Send message to WhatsApp
     // =========================================================================
     try {
       // Check message type
@@ -195,8 +274,25 @@ export async function POST(
       }
 
       console.log('[Chatwoot Webhook] Message sent to WhatsApp successfully');
+
+      // Update message status to sent
+      if (savedMessageId) {
+        await database.message.update({
+          where: { id: savedMessageId },
+          data: { status: 'sent', sentAt: new Date() },
+        });
+      }
     } catch (error: any) {
       console.error('[Chatwoot Webhook] Failed to send to WhatsApp:', error);
+
+      // Update message status to failed
+      if (savedMessageId) {
+        await database.message.update({
+          where: { id: savedMessageId },
+          data: { status: 'failed' },
+        });
+      }
+
       return NextResponse.json({
         success: false,
         error: `Failed to send message: ${error.message}`,
@@ -204,7 +300,7 @@ export async function POST(
     }
 
     // =========================================================================
-    // STEP 8: Stop typing indicator
+    // STEP 9: Stop typing indicator
     // =========================================================================
     if (config.typingIndicator) {
       try {
@@ -215,7 +311,7 @@ export async function POST(
     }
 
     // =========================================================================
-    // STEP 9: Return success
+    // STEP 10: Return success
     // =========================================================================
     return NextResponse.json({
       success: true,
@@ -262,4 +358,90 @@ export async function GET(
     message: 'Chatwoot webhook endpoint is ready',
     timestamp: new Date().toISOString(),
   });
+}
+
+/**
+ * Handle conversation status changes from Chatwoot
+ * Maps Chatwoot conversation status to Quayer session status
+ */
+async function handleConversationStatusChange(
+  connectionId: string,
+  normalized: NormalizedChatwootEvent
+): Promise<{ sessionUpdated: boolean; newStatus?: string; reason?: string }> {
+  const phoneNumber = normalized.contact.phoneNumber;
+  const chatwootStatus = normalized.chatwoot.conversationStatus;
+
+  if (!phoneNumber) {
+    console.log('[Chatwoot Webhook] No phone number for status change');
+    return { sessionUpdated: false, reason: 'no_phone_number' };
+  }
+
+  // Find contact by phone number
+  const contact = await database.contact.findFirst({
+    where: { phoneNumber },
+  });
+
+  if (!contact) {
+    console.log(`[Chatwoot Webhook] Contact not found for ${phoneNumber}`);
+    return { sessionUpdated: false, reason: 'contact_not_found' };
+  }
+
+  // Find active session for this contact and connection
+  const session = await database.chatSession.findFirst({
+    where: {
+      contactId: contact.id,
+      connectionId,
+      status: { not: 'CLOSED' },
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (!session) {
+    console.log(`[Chatwoot Webhook] No active session for contact ${contact.id}`);
+    return { sessionUpdated: false, reason: 'no_active_session' };
+  }
+
+  // Map Chatwoot status to session action
+  let newSessionStatus: 'ACTIVE' | 'PAUSED' | 'CLOSED' | null = null;
+
+  switch (chatwootStatus) {
+    case 'resolved':
+      // Chatwoot conversation resolved = close session in Quayer
+      newSessionStatus = 'CLOSED';
+      break;
+    case 'open':
+      // Chatwoot conversation opened/reopened = activate session
+      newSessionStatus = 'ACTIVE';
+      break;
+    case 'pending':
+      // Chatwoot pending = keep as is or pause
+      // Don't change status for pending
+      break;
+    case 'snoozed':
+      // Chatwoot snoozed = pause session
+      newSessionStatus = 'PAUSED';
+      break;
+  }
+
+  if (!newSessionStatus) {
+    console.log(`[Chatwoot Webhook] No status change needed for ${chatwootStatus}`);
+    return { sessionUpdated: false, reason: 'no_status_change_needed' };
+  }
+
+  // Update session status
+  if (newSessionStatus === 'CLOSED') {
+    await sessionsManager.closeSession(session.id);
+    console.log(`[Chatwoot Webhook] Session ${session.id} closed (Chatwoot resolved)`);
+  } else if (newSessionStatus === 'PAUSED') {
+    await sessionsManager.pauseSession(session.id, 24); // Pause for 24 hours
+    console.log(`[Chatwoot Webhook] Session ${session.id} paused (Chatwoot snoozed)`);
+  } else if (newSessionStatus === 'ACTIVE') {
+    await sessionsManager.resumeSession(session.id);
+    console.log(`[Chatwoot Webhook] Session ${session.id} resumed (Chatwoot opened)`);
+  }
+
+  return {
+    sessionUpdated: true,
+    newStatus: newSessionStatus,
+  };
 }

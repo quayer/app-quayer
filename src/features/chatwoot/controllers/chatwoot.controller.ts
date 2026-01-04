@@ -278,15 +278,33 @@ export const chatwootController = igniter.controller({
             // Business Rule: Also try to list inboxes to validate permissions
             const inboxes = await client.listInboxes();
 
+            // Business Rule: Validate inbox type if inboxId is provided
+            let inboxValidation: { valid: boolean; channelType?: string; warning?: string } = { valid: true };
+            if (inboxId) {
+              const validation = await client.validateInboxType(inboxId);
+              if (!validation.valid) {
+                inboxValidation = {
+                  valid: false,
+                  channelType: validation.channelType,
+                  warning: validation.error,
+                };
+              } else {
+                inboxValidation.channelType = validation.channelType;
+              }
+            }
+
             return response.success({
               success: true,
-              message: 'Conexão com Chatwoot estabelecida com sucesso!',
+              message: inboxValidation.valid
+                ? 'Conexão com Chatwoot estabelecida com sucesso!'
+                : 'Conexão estabelecida, mas o tipo de inbox pode não ser compatível.',
               account: result.account,
               inboxes: inboxes.map(inbox => ({
                 id: inbox.id,
                 name: inbox.name,
                 channel_type: inbox.channel_type,
               })),
+              inbox_validation: inboxValidation,
             });
           } else {
             return response.badRequest(result.error || 'Falha ao conectar com Chatwoot');

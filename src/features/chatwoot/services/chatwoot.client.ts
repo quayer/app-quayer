@@ -526,6 +526,51 @@ export class ChatwootClient {
     });
   }
 
+  /**
+   * Validate inbox type is API channel
+   * @param inboxId Inbox ID to validate
+   * @returns Validation result with inbox info
+   */
+  async validateInboxType(inboxId?: number): Promise<{
+    valid: boolean;
+    inbox?: ChatwootInbox;
+    channelType?: string;
+    error?: string;
+  }> {
+    try {
+      const id = inboxId || this.inboxId;
+      if (!id) {
+        return { valid: false, error: 'Inbox ID is required' };
+      }
+
+      const inbox = await this.getInbox(id);
+
+      // Valid channel types for WhatsApp integration:
+      // - Channel::Api (API channel - recommended)
+      // - Channel::Whatsapp (native WhatsApp channel)
+      const validChannelTypes = ['Channel::Api', 'Channel::Whatsapp', 'api', 'whatsapp'];
+      const channelType = inbox.channel_type || '';
+      const isValid = validChannelTypes.some(type =>
+        channelType.toLowerCase().includes(type.toLowerCase())
+      );
+
+      if (!isValid) {
+        console.warn(`[ChatwootClient] Invalid inbox type: ${channelType}. Expected API or WhatsApp channel.`);
+        return {
+          valid: false,
+          inbox,
+          channelType,
+          error: `Tipo de inbox inválido: "${channelType}". Use um inbox do tipo "API" para integração com WhatsApp.`,
+        };
+      }
+
+      console.log(`[ChatwootClient] Inbox ${id} validated: ${channelType}`);
+      return { valid: true, inbox, channelType };
+    } catch (error: any) {
+      return { valid: false, error: error.message };
+    }
+  }
+
   // ============================================
   // High-Level Operations
   // ============================================

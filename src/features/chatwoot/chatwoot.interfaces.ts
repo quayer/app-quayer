@@ -351,6 +351,8 @@ export interface NormalizedChatwootEvent {
     conversationId?: number;
     messageId?: number;
     contactId?: number;
+    /** Conversation status for status change events */
+    conversationStatus?: 'open' | 'resolved' | 'pending' | 'snoozed';
   };
   
   /** Raw payload for debugging */

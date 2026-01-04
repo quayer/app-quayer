@@ -214,14 +214,51 @@ export function normalizeChatwootWebhook(
   }
 
   // =========================================================================
-  // STEP 2: Handle Non-Message Events
+  // STEP 2: Handle Conversation Status Events
+  // =========================================================================
+  const conversationStatusEvents = [
+    'conversation_status_changed',
+    'conversation_resolved',
+    'conversation_opened',
+    'conversation_updated',
+  ];
+
+  if (conversationStatusEvents.includes(event)) {
+    console.log('[ChatwootNormalizer] Conversation status event:', event);
+
+    const contact = extractContact(payload);
+    const conversationStatus = payload.conversation?.status || (payload as any).status;
+
+    return {
+      ignore: false, // Don't ignore - we want to sync status changes
+      event,
+      direction: 'IN',
+      author: 'SYSTEM',
+      contact,
+      message: {
+        content: '',
+        type: 'text',
+      },
+      chatwoot: {
+        accountId: payload.account?.id,
+        inboxId: payload.inbox?.id,
+        conversationId: payload.conversation?.id,
+        contactId: payload.contact?.id,
+        conversationStatus,
+      },
+      raw: payload,
+    };
+  }
+
+  // =========================================================================
+  // STEP 2b: Handle Other Non-Message Events
   // =========================================================================
   if (event !== 'message_created' && event !== 'message_updated') {
     console.log('[ChatwootNormalizer] Non-message event:', event);
-    
+
     // For conversation/contact events, still extract basic info
     const contact = extractContact(payload);
-    
+
     return {
       ignore: true,
       ignoreReason: `non_message_event:${event}`,
