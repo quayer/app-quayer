@@ -12,10 +12,35 @@ import { storeCircuitBreaker, getCachedOrFetch } from '@/services/circuit-breake
  * @remarks
  * Provides a unified interface for data storage operations using Redis.
  * Includes circuit breaker protection and automatic fallback.
+ * Uses lazy initialization to avoid connection errors during build time.
  *
  * @see https://github.com/felipebarcelospro/igniter-js/tree/main/packages/adapter-redis
  */
-export const store = createRedisStoreAdapter(redis)
+
+// Check if we're in a build environment (Next.js build phase)
+const isBuildTime = process.env.NEXT_PHASE === 'phase-production-build'
+
+// Lazy store initialization
+let _store: ReturnType<typeof createRedisStoreAdapter> | null = null
+
+function getStore() {
+  if (!_store && !isBuildTime) {
+    _store = createRedisStoreAdapter(redis)
+  }
+  return _store
+}
+
+// Export a proxy that lazily initializes the store
+export const store = new Proxy({} as ReturnType<typeof createRedisStoreAdapter>, {
+  get(_, prop) {
+    const s = getStore()
+    if (!s) {
+      // During build, return no-op functions
+      return () => Promise.resolve(null)
+    }
+    return Reflect.get(s, prop)
+  },
+})
 
 /**
  * Resilient cache get with circuit breaker and metrics
