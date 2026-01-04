@@ -54,8 +54,8 @@ type QueueItem = {
   resolve: (url: string | null) => void
 }
 
-const MAX_CONCURRENT_REQUESTS = 1  // Reduced to prevent UI blocking
-const REQUEST_DELAY_MS = 500       // Increased delay between requests
+const MAX_CONCURRENT_REQUESTS = 3  // Allow 3 parallel requests
+const REQUEST_DELAY_MS = 100       // 100ms delay between requests
 
 // Cache em memória (mais rápido que sessionStorage)
 const memoryCache = new Map<string, { url: string | null; timestamp: number }>()
@@ -270,10 +270,9 @@ export function LazyAvatar({
       return
     }
 
-    // TEMPORARILY DISABLED: Don't auto-fetch to debug scroll issue
-    // If scroll works without this, the problem is profile pic fetching
-    // if (!phoneNumber || !instanceId) return
-    // fetchFromApi()
+    // Auto-fetch profile picture if not available and we have the required data
+    if (!phoneNumber || !instanceId) return
+    fetchFromApi()
   }, [src, phoneNumber, instanceId, fetchFromApi])
 
   // Generate initials from name - memoized

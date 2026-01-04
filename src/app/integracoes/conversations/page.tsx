@@ -1638,8 +1638,10 @@ export default function ConversationsPage() {
     </Select>
   )
 
-  // Chats List Component
-  const ChatsList = ({ className }: { className?: string }) => (
+  // Chats List Component - Memoized to prevent re-creation on every render
+  // This fixes scroll freeze issues caused by component re-mounting
+  const ChatsList = useMemo(() => {
+    const ChatsListInner = ({ className }: { className?: string }) => (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
       {/* Header with total count and instance filter */}
       <div className="p-4 space-y-3 border-b flex-shrink-0">
@@ -2015,9 +2017,30 @@ export default function ConversationsPage() {
       </div>
     </div>
   )
+    return ChatsListInner
+  }, [
+    chats,
+    chatsLoading,
+    chatsError,
+    chatsFetching,
+    isFetchingMoreChats,
+    hasMoreChats,
+    mainTab,
+    chatTypeFilter,
+    searchText,
+    selectedInstanceFilter,
+    instances,
+    selectedChatId,
+    focusedChatIndex,
+    tabCounts,
+    instancesLoading,
+    syncChatsMutation.isPending,
+  ])
 
-  // Messages Area Component
-  const MessagesArea = () => (
+  // Messages Area Component - Memoized to prevent re-creation on every render
+  // This fixes scroll freeze issues caused by component re-mounting
+  const MessagesArea = useMemo(() => {
+    const MessagesAreaInner = () => (
     <div
       className="flex flex-col h-full overflow-hidden"
       role="region"
@@ -2977,6 +3000,35 @@ export default function ConversationsPage() {
       )}
     </div>
   )
+    return MessagesAreaInner
+  }, [
+    selectedChat,
+    selectedInstance,
+    messages,
+    messagesLoading,
+    messagesFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    messageText,
+    selectedFile,
+    filePreview,
+    isUploading,
+    sseConnected,
+    showMessageSearch,
+    messageSearchText,
+    messageSearchResults,
+    currentSearchIndex,
+    showNotesPanel,
+    showQuickReplies,
+    quickReplies,
+    quickRepliesLoading,
+    quickReplySearch,
+    notes,
+    notesLoading,
+    newNoteText,
+    hasUnseenMessages,
+    optimisticMessages,
+  ])
 
   // ==================== MAIN RENDER ====================
   return (
