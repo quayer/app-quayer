@@ -39,7 +39,10 @@ export type ChatwootContext = {
  */
 export const chatwootProcedure = igniter.procedure({
   name: 'chatwootProcedure',
-  handler: ({ context }) => {
+  handler: (_options: Record<string, never>, ctx) => {
+    // Igniter.js pattern: (options, ctx) where ctx contains { request, response, context }
+    const { context } = ctx;
+
     // Context Extension: Instantiate ChatwootRepository with database client
     const chatwootRepository = new ChatwootRepository(context.services.database);
 
