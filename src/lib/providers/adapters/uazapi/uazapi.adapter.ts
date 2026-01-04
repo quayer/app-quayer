@@ -368,7 +368,19 @@ export class UAZapiAdapter implements IWhatsAppProvider {
 
     // Map event type - UAZapi uses "EventType" or "type"
     const eventType = rawWebhook.EventType || rawWebhook.event || rawWebhook.type || 'messages';
-    const event = this.mapEvent(eventType);
+    let event = this.mapEvent(eventType);
+
+    // ⭐ IMPORTANTE: Verificar se é mensagem enviada pelo próprio telefone (fromMe=true)
+    // UAZapi envia "messages" tanto para recebidas quanto enviadas
+    // Precisamos verificar fromMe para determinar a direção correta
+    const rawMessage = rawWebhook.message || rawWebhook.data?.message;
+    const messageContent = rawMessage?.content || rawMessage;
+    const isFromMe = messageContent?.key?.fromMe || rawMessage?.fromMe || rawWebhook.fromMe;
+
+    if (isFromMe && event === 'message.received') {
+      event = 'message.sent';
+      console.log('[UAZapiAdapter] Message fromMe=true, changing event to message.sent');
+    }
 
     // Instance ID will be resolved by token in the webhook handler
     // We pass the token here for lookup
@@ -389,22 +401,45 @@ export class UAZapiAdapter implements IWhatsAppProvider {
     // Extract "from" - for incoming messages, it's the chat ID (phone@s.whatsapp.net or group@g.us)
     const from = chatId || rawWebhook.from || rawWebhook.data?.from || '';
 
-    // Extract message content - UAZapi uses "message" object with "content" inside
-    const rawMessage = rawWebhook.message || rawWebhook.data?.message;
-    const messageContent = rawMessage?.content || rawMessage;
-
+    // rawMessage e messageContent já extraídos acima para verificar fromMe
     let message: NormalizedWebhook['data']['message'] = undefined;
 
     if (rawMessage && messageContent) {
-      const messageId = messageContent.key?.ID || messageContent.key?.id || rawMessage.id || '';
-      const messageType = rawMessage.type || messageContent.type || 'text';
-      const textContent = messageContent.text || messageContent.body || messageContent.caption || rawMessage.text || '';
+      const messageId = messageContent.key?.ID || messageContent.key?.id ||
+                        rawMessage.id || rawMessage.messageid || '';
+
+      // UAZapi uses 'messageType' field (not 'type') per OpenAPI spec
+      // Also check for specific message type keys like 'audioMessage', 'imageMessage', etc.
+      const messageType = rawMessage.messageType || rawMessage.type ||
+                          messageContent.messageType || messageContent.type ||
+                          // Check for WhatsApp message type fields
+                          (messageContent.audioMessage ? 'audio' :
+                           messageContent.pttMessage ? 'ptt' :
+                           messageContent.imageMessage ? 'image' :
+                           messageContent.videoMessage ? 'video' :
+                           messageContent.documentMessage ? 'document' :
+                           messageContent.stickerMessage ? 'sticker' :
+                           messageContent.locationMessage ? 'location' : 'text');
+
+      const textContent = messageContent.text || messageContent.body ||
+                          messageContent.caption || rawMessage.text || '';
 
       // Check for media URL in various possible locations
-      // UAZapi can send media URL in different fields depending on message type
-      const mediaUrl = messageContent.mediaUrl || rawMessage.mediaUrl || messageContent.url ||
-                       messageContent.base64 || rawMessage.base64 ||  // Sometimes sent as base64
-                       messageContent.filePath || rawMessage.filePath;  // Or as file path
+      // UAZapi uses 'fileURL' field (not 'mediaUrl') per OpenAPI spec
+      const mediaUrl = messageContent.fileURL || rawMessage.fileURL ||
+                       messageContent.mediaUrl || rawMessage.mediaUrl ||
+                       messageContent.url || rawMessage.url ||
+                       // Check for base64 data
+                       messageContent.base64 || rawMessage.base64 ||
+                       messageContent.base64Data || rawMessage.base64Data ||
+                       // Or as file path
+                       messageContent.filePath || rawMessage.filePath ||
+                       // For specific message types, extract media URL
+                       messageContent.audioMessage?.url ||
+                       messageContent.imageMessage?.url ||
+                       messageContent.videoMessage?.url ||
+                       messageContent.documentMessage?.url ||
+                       messageContent.stickerMessage?.url;
 
       // Determine if this is a media message even without URL
       // (audio/video/image/document types should have media object)
@@ -449,7 +484,10 @@ export class UAZapiAdapter implements IWhatsAppProvider {
       data: {
         chatId,
         from,
-        to: rawWebhook.to || rawWebhook.data?.to,
+        // Para mensagens enviadas (fromMe=true), o "to" é o chatId (destinatário)
+        // Para mensagens recebidas, o "to" geralmente não existe
+        to: rawWebhook.to || rawWebhook.data?.to ||
+            (messageContent?.key?.fromMe || rawMessage?.fromMe ? chatId : undefined),
         contactName,  // Nome do contato ou grupo
         pushName,     // Nome do contato no WhatsApp
         message,
@@ -464,9 +502,20 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   async getProfilePicture(instanceId: string, number: string): Promise<string | null> {
     const token = await this.getInstanceToken(instanceId);
     try {
-      const response = await this.client.getProfilePicture(instanceId, token, number);
-      return response.data.profilePicUrl || response.data.url || null;
-    } catch {
+      // Usar /chat/details que retorna image e imagePreview (mais confiável)
+      // /profile/image/:number retorna 404 em alguns casos
+      const response = await this.client.getChatDetails(instanceId, token, number);
+      // Response pode ter image/imagePreview no nível raiz ou dentro de data
+      const data = response.data || response as any;
+      const url = data?.image || data?.imagePreview || null;
+      if (!url) {
+        console.log(`[UAZapiAdapter] No profile picture in /chat/details for ${number}`);
+      } else {
+        console.log(`[UAZapiAdapter] Profile picture found for ${number}: ${url.substring(0, 60)}...`);
+      }
+      return url;
+    } catch (error: any) {
+      console.error(`[UAZapiAdapter] Failed to get profile picture for ${number}:`, error.message || error);
       return null;
     }
   }
@@ -530,39 +579,43 @@ export class UAZapiAdapter implements IWhatsAppProvider {
   }
 
   private mapMessageType(uazType: string): any {
+    // Normalizar para lowercase para comparação (UZAPI pode enviar AudioMessage, audioMessage, etc.)
+    const normalizedType = (uazType || '').toLowerCase();
+
     const mapping: Record<string, string> = {
       // Text messages
       'conversation': 'text',
-      'extendedTextMessage': 'text',
+      'extendedtextmessage': 'text',
       'text': 'text',
       // Image messages
-      'imageMessage': 'image',
+      'imagemessage': 'image',
       'image': 'image',
       // Video messages
-      'videoMessage': 'video',
+      'videomessage': 'video',
       'video': 'video',
       // Audio messages (various formats UAZapi might send)
-      'audioMessage': 'audio',
+      'audiomessage': 'audio',
       'audio': 'audio',
+      'myaudio': 'voice',       // Alternative voice message format (per OpenAPI spec)
       'ptt': 'voice',           // Push-to-talk voice messages
-      'pttMessage': 'voice',
+      'pttmessage': 'voice',
       'voice': 'voice',
-      'voiceMessage': 'voice',
+      'voicemessage': 'voice',
       // Document messages
-      'documentMessage': 'document',
+      'documentmessage': 'document',
       'document': 'document',
       // Location messages
-      'locationMessage': 'location',
+      'locationmessage': 'location',
       'location': 'location',
       // Contact messages
-      'contactMessage': 'contact',
+      'contactmessage': 'contact',
       'contact': 'contact',
       // Sticker messages
-      'stickerMessage': 'sticker',
+      'stickermessage': 'sticker',
       'sticker': 'sticker',
     };
     // Return mapped type, or keep original if it's a valid media type
-    const result = mapping[uazType];
+    const result = mapping[normalizedType];
     if (result) return result;
 
     // If not in mapping, check if it's already a valid type

@@ -374,6 +374,30 @@ export async function POST(
 }
 
 /**
+ * ⭐ VERIFICAR WEBHOOKS EXTERNOS
+ * Verifica se a organização/conexão tem webhooks externos configurados
+ * para decidir se deve usar concatenação ou salvar direto
+ */
+async function checkExternalWebhooks(organizationId: string, connectionId: string): Promise<boolean> {
+  // Buscar webhooks ativos com evento message.received para esta org/conexão
+  const webhooks = await database.webhook.findMany({
+    where: {
+      isActive: true,
+      events: { hasSome: ['message.received', 'message.*', '*'] },
+      OR: [
+        { organizationId, connectionId: null }, // Webhook da org (todas conexões)
+        { connectionId },                        // Webhook específico da conexão
+      ],
+    },
+    select: { id: true },
+  });
+
+  const hasWebhooks = webhooks.length > 0;
+  console.log(`[Webhook] External webhooks check: ${hasWebhooks ? webhooks.length + ' found' : 'none'}`);
+  return hasWebhooks;
+}
+
+/**
  * Processar mensagem recebida (INBOUND)
  */
 async function processIncomingMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
@@ -431,18 +455,22 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
   // 1.5. Buscar foto de perfil do contato (se novo ou não tem foto)
   // Cloud API não tem método de profile picture fácil, pular para cloudapi
   if ((isNewContact || !contact.profilePicUrl) && provider !== 'cloudapi') {
-    console.log(`[Webhook] Fetching profile picture for ${from}`);
+    // Normalizar número para API UZAPI (remover @s.whatsapp.net se presente)
+    const cleanNumber = from.replace(/@.*$/, '');
+    console.log(`[Webhook] Fetching profile picture for ${cleanNumber} (original: ${from})`);
     try {
-      const profilePicUrl = await orchestrator.getProfilePicture(instanceId, provider, from);
+      const profilePicUrl = await orchestrator.getProfilePicture(instanceId, provider, cleanNumber);
       if (profilePicUrl) {
         contact = await database.contact.update({
           where: { id: contact.id },
           data: { profilePicUrl },
         });
-        console.log(`[Webhook] Profile picture updated for ${from}: ${profilePicUrl}`);
+        console.log(`[Webhook] Profile picture updated for ${cleanNumber}: ${profilePicUrl}`);
+      } else {
+        console.log(`[Webhook] No profile picture returned for ${cleanNumber}`);
       }
     } catch (error) {
-      console.error(`[Webhook] Failed to fetch profile picture for ${from}:`, error);
+      console.error(`[Webhook] Failed to fetch profile picture for ${cleanNumber}:`, error);
       // Continuar mesmo se falhar - a foto não é crítica
     }
   }
@@ -531,16 +559,37 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
       console.error('[Webhook] Chatwoot sync failed (non-blocking):', chatwootError);
     }
 
-    // ⭐ CONCATENAÇÃO: Adicionar ao concatenador para webhooks externos e IA
-    // Webhooks externos (n8n, Make) e IA devem receber mensagens agrupadas
-    console.log('[Webhook] Text message - adding to concatenation queue for webhooks/AI');
-    await messageConcatenator.addMessage(session.id, contact.id, {
-      connectionId: instanceId,
-      waMessageId: message.id,
-      type: message.type,
-      content: cleanContent,
-      direction: 'INBOUND',
-    });
+    // ⭐ VERIFICAR WEBHOOKS EXTERNOS: Só concatenar se houver webhooks configurados
+    // Se não houver webhooks externos, salvar mensagem direto (sem duplicação)
+    const hasExternalWebhooks = await checkExternalWebhooks(instance.organizationId, instanceId);
+
+    if (hasExternalWebhooks) {
+      // ⭐ CONCATENAÇÃO: Adicionar ao concatenador para webhooks externos e IA
+      // Webhooks externos (n8n, Make) e IA devem receber mensagens agrupadas
+      console.log('[Webhook] Text message - adding to concatenation queue (has external webhooks)');
+      await messageConcatenator.addMessage(session.id, contact.id, {
+        connectionId: instanceId,
+        waMessageId: message.id,
+        type: message.type,
+        content: cleanContent,
+        direction: 'INBOUND',
+      });
+    } else {
+      // ⭐ SEM CONCATENAÇÃO: Salvar mensagem direto no banco (sem duplicatas)
+      console.log('[Webhook] Text message - saving directly (no external webhooks)');
+      await database.message.create({
+        data: {
+          sessionId: session.id,
+          contactId: contact.id,
+          connectionId: instanceId,
+          waMessageId: message.id,
+          direction: 'INBOUND',
+          type: 'text',
+          content: cleanContent,
+          status: 'delivered',
+        },
+      });
+    }
 
     // Atualizar lastMessageAt da sessão
     await database.chatSession.update({
@@ -651,9 +700,10 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     }
 
     // ⭐ MEDIA DOWNLOAD: If media needs to be downloaded, fetch from UAZapi
+    // POST /message/download - retorna fileURL ou base64Data
     let mediaUrl = message.media.mediaUrl;
-    if ((message.media as any).needsDownload && message.id) {
-      console.log(`[Webhook] Media needs download - fetching from UAZapi`);
+    if ((!mediaUrl || (message.media as any).needsDownload) && message.id) {
+      console.log(`[Webhook] Media needs download - fetching from UAZapi (id: ${message.id})`);
       try {
         const instance = await database.connection.findUnique({
           where: { id: instanceId },
@@ -661,22 +711,37 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
         });
         if (instance?.uazapiToken) {
           const downloadResponse = await fetch(
-            `${process.env.UAZAPI_URL || 'https://quayer.uazapi.com'}/message/download?id=${message.id}`,
+            `${process.env.UAZAPI_URL || 'https://quayer.uazapi.com'}/message/download`,
             {
-              method: 'GET',
-              headers: { 'token': instance.uazapiToken },
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': instance.uazapiToken,
+              },
+              body: JSON.stringify({
+                id: message.id,
+                return_link: true,          // Retorna URL pública
+                generate_mp3: true,         // Para áudios, converte para MP3
+                return_base64: false,       // Preferir URL ao invés de base64
+              }),
             }
           );
           if (downloadResponse.ok) {
             const downloadData = await downloadResponse.json();
-            // UAZapi returns base64 data
-            if (downloadData.data) {
+            // UAZapi returns fileURL (URL pública) ou base64Data
+            if (downloadData.fileURL) {
+              mediaUrl = downloadData.fileURL;
+              console.log(`[Webhook] Media downloaded via URL: ${mediaUrl.substring(0, 60)}...`);
+            } else if (downloadData.base64Data) {
               const mimeType = message.media.mimeType || downloadData.mimetype || 'application/octet-stream';
-              mediaUrl = `data:${mimeType};base64,${downloadData.data}`;
-              console.log(`[Webhook] Media downloaded successfully (${mimeType})`);
+              mediaUrl = `data:${mimeType};base64,${downloadData.base64Data}`;
+              console.log(`[Webhook] Media downloaded as base64 (${mimeType})`);
+            } else {
+              console.warn(`[Webhook] No fileURL or base64Data in response:`, JSON.stringify(downloadData).substring(0, 200));
             }
           } else {
-            console.warn(`[Webhook] Failed to download media: ${downloadResponse.status}`);
+            const errorText = await downloadResponse.text();
+            console.warn(`[Webhook] Failed to download media: ${downloadResponse.status} - ${errorText}`);
           }
         }
       } catch (downloadError) {

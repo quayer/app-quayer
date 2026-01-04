@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { User, Users } from 'lucide-react'
@@ -175,6 +175,7 @@ export function LazyAvatar({
   const [profilePicUrl, setProfilePicUrl] = useState<string | null>(src || null)
   const [hasError, setHasError] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [triedRefetch, setTriedRefetch] = useState(false)
   const mountedRef = useRef(true)
 
   // Cleanup on unmount
@@ -185,29 +186,26 @@ export function LazyAvatar({
     }
   }, [])
 
-  // Lazy load profile picture when we don't have src but have phoneNumber
-  useEffect(() => {
-    if (src) {
-      setProfilePicUrl(src)
-      setHasError(false)
-      return
-    }
+  // Track if a fetch is in progress to prevent double-fetching
+  const fetchingRef = useRef(false)
 
-    if (!phoneNumber || !instanceId) return
+  // Function to fetch profile picture from API
+  const fetchFromApi = useCallback(() => {
+    if (!phoneNumber || !instanceId || fetchingRef.current) return
 
-    // Check memory cache first
     const cacheKey = `avatar:${instanceId}:${phoneNumber}`
     const cached = memoryCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       if (cached.url) {
         setProfilePicUrl(cached.url)
+        setHasError(false)
       } else {
         setHasError(true)
       }
       return
     }
 
-    // Fetch via throttled queue
+    fetchingRef.current = true
     setIsLoading(true)
     fetchProfilePicThrottled(instanceId, phoneNumber)
       .then((url) => {
@@ -221,11 +219,62 @@ export function LazyAvatar({
         }
       })
       .finally(() => {
+        fetchingRef.current = false
         if (mountedRef.current) {
           setIsLoading(false)
         }
       })
-  }, [src, phoneNumber, instanceId])
+  }, [phoneNumber, instanceId])
+
+  // Handle image load error - try to fetch fresh URL from API
+  const handleImageError = useCallback(() => {
+    // If we have a src that's a WhatsApp CDN URL (not base64), try to fetch fresh
+    if (src && !src.startsWith('data:') && !triedRefetch && phoneNumber && instanceId) {
+      setTriedRefetch(true)
+      // Clear the invalid src and fetch fresh from API
+      setProfilePicUrl(null)
+      fetchFromApi()
+    } else {
+      setHasError(true)
+    }
+  }, [src, triedRefetch, phoneNumber, instanceId, fetchFromApi])
+
+  // Initial load: use src if available, otherwise fetch from API
+  useEffect(() => {
+    // Reset state when src changes
+    setTriedRefetch(false)
+
+    if (src) {
+      // If it's base64, use directly (won't expire)
+      if (src.startsWith('data:')) {
+        setProfilePicUrl(src)
+        setHasError(false)
+        return
+      }
+
+      // It's a CDN URL - check cache first for base64 version
+      if (phoneNumber && instanceId) {
+        const cacheKey = `avatar:${instanceId}:${phoneNumber}`
+        const cached = memoryCache.get(cacheKey)
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS && cached.url?.startsWith('data:')) {
+          // We have a cached base64 version, use it instead of CDN URL
+          setProfilePicUrl(cached.url)
+          setHasError(false)
+          return
+        }
+      }
+
+      // Use the CDN URL (might be expired, will retry on error)
+      setProfilePicUrl(src)
+      setHasError(false)
+      return
+    }
+
+    // No src provided, fetch from API
+    if (!phoneNumber || !instanceId) return
+
+    fetchFromApi()
+  }, [src, phoneNumber, instanceId, fetchFromApi])
 
   // Generate initials from name - memoized
   const initials = useMemo(() => {
@@ -242,7 +291,7 @@ export function LazyAvatar({
         <AvatarImage
           src={profilePicUrl}
           alt={name || 'Profile'}
-          onError={() => setHasError(true)}
+          onError={handleImageError}
         />
       )}
       <AvatarFallback

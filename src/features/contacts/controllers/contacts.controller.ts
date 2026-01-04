@@ -11,27 +11,58 @@ const PROFILE_PIC_CACHE_TTL = 1000 * 60 * 60; // 1 hour (cached as base64, doesn
 
 /**
  * Download image from URL and convert to base64 data URL
+ * Handles WhatsApp CDN URL expiration gracefully
  */
 async function downloadAsBase64(imageUrl: string): Promise<string | null> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     const response = await fetch(imageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'image/*',
       },
+      signal: controller.signal,
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      console.warn(`[ProfilePic] Failed to download image: ${response.status}`);
+      // 403 = URL expired, 404 = no image, both are expected
+      if (response.status === 403 || response.status === 404) {
+        console.debug(`[ProfilePic] Image unavailable (${response.status}): URL expired or not found`);
+      } else {
+        console.warn(`[ProfilePic] Failed to download image: ${response.status}`);
+      }
       return null;
     }
 
     const contentType = response.headers.get('content-type') || 'image/jpeg';
+
+    // Validate it's actually an image
+    if (!contentType.startsWith('image/')) {
+      console.warn(`[ProfilePic] Unexpected content type: ${contentType}`);
+      return null;
+    }
+
     const arrayBuffer = await response.arrayBuffer();
+
+    // Skip if too small (likely an error response)
+    if (arrayBuffer.byteLength < 100) {
+      console.debug('[ProfilePic] Image too small, likely error response');
+      return null;
+    }
+
     const base64 = Buffer.from(arrayBuffer).toString('base64');
 
     return `data:${contentType};base64,${base64}`;
   } catch (error) {
-    console.error('[ProfilePic] Error downloading image:', error);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn('[ProfilePic] Request timeout');
+    } else {
+      console.error('[ProfilePic] Error downloading image:', error);
+    }
     return null;
   }
 }
@@ -453,12 +484,16 @@ export const contactsController = igniter.controller({
         try {
           const baseUrl = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
 
-          const apiResponse = await fetch(`${baseUrl}/profile/image/${cleanNumber}`, {
-            method: 'GET',
+          // Use POST /chat/details endpoint (more reliable than GET /profile/image)
+          const apiResponse = await fetch(`${baseUrl}/chat/details`, {
+            method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'token': connection.uazapiToken,
             },
+            body: JSON.stringify({
+              number: cleanNumber,
+            }),
           });
 
           if (!apiResponse.ok) {
@@ -475,7 +510,8 @@ export const contactsController = igniter.controller({
           }
 
           const data = await apiResponse.json();
-          const profilePicUrl = data.profilePicUrl || data.url || data.data?.url || null;
+          // /chat/details returns { image, imagePreview, ... }
+          const profilePicUrl = data.image || data.imagePreview || data.profilePicUrl || data.url || null;
 
           if (!profilePicUrl) {
             profilePicCache.set(cacheKey, { url: null, expiresAt: Date.now() + PROFILE_PIC_CACHE_TTL });

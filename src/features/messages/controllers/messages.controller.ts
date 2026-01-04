@@ -383,7 +383,14 @@ export const messagesController = igniter.controller({
         const { sessionId, contactId, direction, author, page, limit } = request.query;
 
         // Construir filtros
-        const where: any = {};
+        const where: any = {
+          // Excluir mensagens originais de grupos de concatenação (apenas a concatenada é exibida)
+          // Mensagens com concatGroupId != null E isConcatenated = false são as originais
+          OR: [
+            { concatGroupId: null },  // Mensagens não concatenadas
+            { isConcatenated: true }, // Mensagem concatenada (a que deve ser exibida)
+          ],
+        };
 
         if (sessionId) where.sessionId = sessionId;
         if (contactId) where.contactId = contactId;

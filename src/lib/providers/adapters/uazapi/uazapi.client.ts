@@ -684,6 +684,23 @@ export class UAZClient {
     return this.request('GET', `/contacts/all`, { token });
   }
 
+  /**
+   * POST /chat/details - Obter detalhes completos de um chat
+   * Retorna informações completas incluindo image e imagePreview
+   *
+   * @param instanceId - ID da instância
+   * @param token - Token da instância
+   * @param number - Número do telefone ou ID do grupo
+   * @param preview - Se true, retorna imagem menor (default: false)
+   * @returns Detalhes completos do chat incluindo foto de perfil
+   */
+  async getChatDetails(instanceId: string, token: string, number: string, preview: boolean = false) {
+    return this.request('POST', '/chat/details', {
+      token,
+      body: { number, preview },
+    });
+  }
+
   // ===== MESSAGES =====
   /**
    * POST /message/find - Buscar mensagens
@@ -730,6 +747,41 @@ export class UAZClient {
         ...(params?.chatid && { chatid: params.chatid }),
         ...(params?.track_source && { track_source: params.track_source }),
         ...(params?.track_id && { track_id: params.track_id }),
+      },
+    });
+  }
+
+  /**
+   * POST /message/download - Baixar arquivo de uma mensagem de mídia
+   *
+   * @param token - Token da instância
+   * @param messageId - ID da mensagem contendo a mídia
+   * @param options - Opções de download
+   * @returns URL do arquivo e opcionalmente dados em base64
+   */
+  async downloadMedia(token: string, messageId: string, options?: {
+    return_base64?: boolean;
+    generate_mp3?: boolean;     // Para áudios: true = MP3, false = OGG
+    return_link?: boolean;      // Retorna URL pública do arquivo
+    transcribe?: boolean;       // Transcreve áudios para texto
+    openai_apikey?: string;     // Chave OpenAI para transcrição
+    download_quoted?: boolean;  // Baixa mídia da mensagem citada
+  }) {
+    return this.request<{
+      fileURL?: string;
+      mimetype?: string;
+      base64Data?: string;
+      transcription?: string;
+    }>('POST', '/message/download', {
+      token,
+      body: {
+        id: messageId,
+        return_base64: options?.return_base64 ?? false,
+        generate_mp3: options?.generate_mp3 ?? true,
+        return_link: options?.return_link ?? true,
+        transcribe: options?.transcribe ?? false,
+        ...(options?.openai_apikey && { openai_apikey: options.openai_apikey }),
+        ...(options?.download_quoted && { download_quoted: options.download_quoted }),
       },
     });
   }
