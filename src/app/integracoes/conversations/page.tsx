@@ -1673,12 +1673,12 @@ export default function ConversationsPage() {
               <Avatar className="h-5 w-5">
                 <AvatarImage src={instance.profilePictureUrl || ''} />
                 <AvatarFallback className="text-[10px]">
-                  {instance.name[0]?.toUpperCase()}
+                  {safeRenderContent(instance.name)?.[0]?.toUpperCase() || '?'}
                 </AvatarFallback>
               </Avatar>
-              <span className="truncate">{instance.name}</span>
+              <span className="truncate">{safeRenderContent(instance.name)}</span>
               <span className="text-xs text-muted-foreground">
-                {instance.phoneNumber || ''}
+                {safeRenderContent(instance.phoneNumber)}
               </span>
             </div>
           </SelectItem>
@@ -1910,8 +1910,8 @@ export default function ConversationsPage() {
               const chat = chats[virtualItem.index] as UAZChat
               if (!chat) return null // Proteção contra índice inválido
 
-              // Determinar nome para exibição
-              const displayName = chat.wa_name || 'Contato'
+              // Determinar nome para exibição (usar safeRenderContent para evitar objetos)
+              const displayName = safeRenderContent(chat.wa_name) || 'Contato'
               // Usar helper functions para categorização
               const chatIsAIActive = isAIActive(chat)
               const chatIsResolved = isResolved(chat)
@@ -1993,7 +1993,7 @@ export default function ConversationsPage() {
                       {/* Número de telefone ou indicador de grupo */}
                       {!chat.wa_isGroup && chat.wa_phoneNumber && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5 truncate">
-                          {chat.wa_phoneNumber}
+                          {safeRenderContent(chat.wa_phoneNumber)}
                         </p>
                       )}
                       {chat.wa_isGroup && (
@@ -2018,7 +2018,7 @@ export default function ConversationsPage() {
                       {selectedInstanceFilter === 'all' && chat.instanceName && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 truncate">
                           <Smartphone className="h-3 w-3 flex-shrink-0" />
-                          {chat.instanceName}
+                          {safeRenderContent(chat.instanceName)}
                         </p>
                       )}
                     </div>
@@ -2102,7 +2102,7 @@ export default function ConversationsPage() {
     <div
       className="flex flex-col h-full overflow-hidden"
       role="region"
-      aria-label={selectedChat ? `Conversa com ${selectedChat.wa_name || 'Contato'}` : 'Selecione uma conversa'}
+      aria-label={selectedChat ? `Conversa com ${safeRenderContent(selectedChat.wa_name) || 'Contato'}` : 'Selecione uma conversa'}
     >
       {selectedChat ? (
         <>
@@ -2125,14 +2125,14 @@ export default function ConversationsPage() {
                 src={selectedChat.wa_profilePicUrl}
                 phoneNumber={selectedChat.wa_chatid}
                 instanceId={selectedChat.instanceId}
-                name={selectedChat.wa_name}
+                name={safeRenderContent(selectedChat.wa_name)}
                 isGroup={selectedChat.wa_isGroup}
                 size="md"
               />
 
               <div className="min-w-0 flex-1">
                 <p className="font-medium truncate">
-                  {selectedChat.wa_name || 'Contato'}
+                  {safeRenderContent(selectedChat.wa_name) || 'Contato'}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 truncate">
                   {selectedChat.wa_isGroup ? (
@@ -2141,13 +2141,13 @@ export default function ConversationsPage() {
                       <span>Grupo</span>
                     </>
                   ) : selectedChat.wa_phoneNumber ? (
-                    <span>{selectedChat.wa_phoneNumber}</span>
+                    <span>{safeRenderContent(selectedChat.wa_phoneNumber)}</span>
                   ) : null}
                   {selectedInstance && (
                     <>
                       <span className="mx-1">•</span>
                       <Smartphone className="h-3 w-3 flex-shrink-0" />
-                      <span className="truncate">{selectedInstance.name}</span>
+                      <span className="truncate">{safeRenderContent(selectedInstance.name)}</span>
                     </>
                   )}
                 </p>
@@ -2647,10 +2647,10 @@ export default function ConversationsPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-2 p-2 bg-background/20 rounded hover:bg-background/30 transition-colors"
-                                  aria-label={`Abrir documento: ${message.fileName || 'Documento'}`}
+                                  aria-label={`Abrir documento: ${safeRenderContent(message.fileName) || 'Documento'}`}
                                 >
                                   <FileText className="h-8 w-8 flex-shrink-0" aria-hidden="true" />
-                                  <span className="text-sm truncate">{message.fileName || 'Documento'}</span>
+                                  <span className="text-sm truncate">{safeRenderContent(message.fileName) || 'Documento'}</span>
                                 </a>
                               )}
                               {/* Sticker (treated as image) */}
