@@ -845,6 +845,35 @@ export default function ConversationsPage() {
 
   const notes = notesData ?? []
 
+  // DEBUG: Log any object fields that could cause React Error #310
+  // Remove this after identifying the problematic field
+  useEffect(() => {
+    const logObjectFields = (data: any, prefix: string) => {
+      if (!data || typeof data !== 'object') return
+      Object.entries(data).forEach(([key, value]) => {
+        if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Array.isArray(value)) {
+          console.warn(`[DEBUG React#310] ${prefix}.${key} is object:`, value)
+        }
+      })
+    }
+
+    // Check chats data
+    const chatsArray = chats ?? []
+    chatsArray.slice(0, 3).forEach((chat: any, i: number) => {
+      logObjectFields(chat, `chat[${i}]`)
+    })
+
+    // Check messages data
+    messages.slice(0, 3).forEach((msg: any, i: number) => {
+      logObjectFields(msg, `message[${i}]`)
+    })
+
+    // Check notes data
+    notes.slice(0, 3).forEach((note: any, i: number) => {
+      logObjectFields(note, `note[${i}]`)
+    })
+  }, [chats, messages, notes])
+
   // ==================== QUICK REPLIES ====================
 
   // Fetch quick replies
