@@ -54,8 +54,8 @@ type QueueItem = {
   resolve: (url: string | null) => void
 }
 
-const MAX_CONCURRENT_REQUESTS = 3
-const REQUEST_DELAY_MS = 100
+const MAX_CONCURRENT_REQUESTS = 1  // Reduced to prevent UI blocking
+const REQUEST_DELAY_MS = 500       // Increased delay between requests
 
 // Cache em memória (mais rápido que sessionStorage)
 const memoryCache = new Map<string, { url: string | null; timestamp: number }>()
