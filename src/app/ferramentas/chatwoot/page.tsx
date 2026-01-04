@@ -17,6 +17,8 @@ import {
   Info,
   HelpCircle,
   Shield,
+  Cloud,
+  Smartphone,
 } from 'lucide-react';
 import {
   Breadcrumb,
@@ -415,13 +417,23 @@ export default function ChatwootConfigPage() {
                   {connectedInstances.map((instance: any) => (
                     <SelectItem key={instance.id} value={instance.id}>
                       <div className="flex items-center gap-2">
+                        {instance.provider === 'WHATSAPP_CLOUD_API' ? (
+                          <Cloud className="w-4 h-4 text-blue-500" />
+                        ) : (
+                          <Smartphone className="w-4 h-4 text-green-500" />
+                        )}
                         <span className="font-medium">{instance.name}</span>
                         <span className="text-muted-foreground text-xs">
                           ({instance.phoneNumber || 'Sem número'})
                         </span>
-                        <Badge variant="outline" className="text-green-600 text-xs">
-                          <CheckCircle2 className="w-3 h-3 mr-1" />
-                          Conectado
+                        <Badge
+                          variant="outline"
+                          className={instance.provider === 'WHATSAPP_CLOUD_API'
+                            ? "text-blue-600 text-xs"
+                            : "text-green-600 text-xs"
+                          }
+                        >
+                          {instance.provider === 'WHATSAPP_CLOUD_API' ? 'Cloud API' : 'WhatsApp Web'}
                         </Badge>
                       </div>
                     </SelectItem>
