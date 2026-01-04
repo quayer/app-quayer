@@ -359,6 +359,10 @@ export default function ConversationsPage() {
   // Optimistic messages for immediate UI feedback
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([])
 
+  // Cache de URLs de áudio carregados via API (para áudios que não têm mediaUrl direto)
+  const [loadedAudioUrls, setLoadedAudioUrls] = useState<Map<string, string>>(new Map())
+  const [loadingAudioIds, setLoadingAudioIds] = useState<Set<string>>(new Set())
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -1524,6 +1528,54 @@ export default function ConversationsPage() {
       throw error // Re-throw so AudioRecorder knows it failed
     }
   }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
+
+  // Handle loading audio from API when mediaUrl is not available
+  const handleLoadAudio = useCallback(async (messageId: string) => {
+    // Already loading or already loaded
+    if (loadingAudioIds.has(messageId) || loadedAudioUrls.has(messageId)) {
+      return
+    }
+
+    setLoadingAudioIds(prev => new Set(prev).add(messageId))
+
+    try {
+      // Use fetch directly for path param endpoint
+      const response = await fetch(`/api/v1/messages/${messageId}/download`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      const data = result?.data
+
+      if (data?.mediaUrl) {
+        // API returned a direct URL
+        setLoadedAudioUrls(prev => new Map(prev).set(messageId, data.mediaUrl))
+      } else if (data?.data) {
+        // API returned base64 data - convert to data URL
+        const mimeType = data.mimeType || 'audio/ogg'
+        const dataUrl = `data:${mimeType};base64,${data.data}`
+        setLoadedAudioUrls(prev => new Map(prev).set(messageId, dataUrl))
+      } else {
+        throw new Error('Formato de resposta inválido')
+      }
+    } catch (error: any) {
+      console.error('[ConversationsPage] Error loading audio:', error)
+      toast.error('Erro ao carregar áudio', {
+        description: typeof error?.message === 'string' ? error.message : undefined
+      })
+    } finally {
+      setLoadingAudioIds(prev => {
+        const next = new Set(prev)
+        next.delete(messageId)
+        return next
+      })
+    }
+  }, [loadingAudioIds, loadedAudioUrls])
 
   const handleManualRefresh = useCallback(async () => {
     // Fazer sync forçado com UAZapi para buscar novos chats
@@ -2756,30 +2808,60 @@ export default function ConversationsPage() {
                                   Seu navegador não suporta vídeo.
                                 </video>
                               )}
-                              {/* Audio & Voice (PTT) */}
-                              {(message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (
-                                <div className="flex items-center gap-2" role="group" aria-label="Mensagem de áudio">
-                                  <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
-                                  <audio
-                                    src={message.mediaUrl}
-                                    controls
-                                    preload="metadata"
-                                    className="w-full max-w-[280px] h-12"
-                                    aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
-                                  >
-                                    Seu navegador não suporta áudio.
-                                  </audio>
-                                  <a
-                                    href={message.mediaUrl}
-                                    download
-                                    className="p-1.5 hover:bg-background/20 rounded transition-colors"
-                                    title="Baixar áudio"
-                                    aria-label="Baixar áudio"
-                                  >
-                                    <Download className="h-4 w-4" aria-hidden="true" />
-                                  </a>
-                                </div>
-                              )}
+                              {/* Audio & Voice (PTT) - com suporte a carregamento lazy */}
+                              {(message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
+                                const audioUrl = loadedAudioUrls.get(message.id) || message.mediaUrl
+                                const isLoading = loadingAudioIds.has(message.id)
+
+                                return (
+                                  <div className="flex items-center gap-2" role="group" aria-label="Mensagem de áudio">
+                                    <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+
+                                    {audioUrl ? (
+                                      <>
+                                        <audio
+                                          src={audioUrl}
+                                          controls
+                                          preload="metadata"
+                                          className="w-full max-w-[280px] h-12"
+                                          aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
+                                        >
+                                          Seu navegador não suporta áudio.
+                                        </audio>
+                                        <a
+                                          href={audioUrl}
+                                          download
+                                          className="p-1.5 hover:bg-background/20 rounded transition-colors"
+                                          title="Baixar áudio"
+                                          aria-label="Baixar áudio"
+                                        >
+                                          <Download className="h-4 w-4" aria-hidden="true" />
+                                        </a>
+                                      </>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-10 px-4"
+                                        onClick={() => handleLoadAudio(message.id)}
+                                        disabled={isLoading}
+                                      >
+                                        {isLoading ? (
+                                          <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Carregando...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Play className="h-4 w-4 mr-2" />
+                                            Carregar áudio
+                                          </>
+                                        )}
+                                      </Button>
+                                    )}
+                                  </div>
+                                )
+                              })()}
                               {/* Document */}
                               {message.type === 'document' && (
                                 <a
@@ -2804,6 +2886,61 @@ export default function ConversationsPage() {
                               )}
                             </div>
                           )}
+
+                          {/* Audio sem mediaUrl - precisa carregar via API */}
+                          {'mediaUrl' in message && !message.mediaUrl && (message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
+                            const audioUrl = loadedAudioUrls.get(message.id)
+                            const isLoading = loadingAudioIds.has(message.id)
+
+                            return (
+                              <div className="flex items-center gap-2 mb-2" role="group" aria-label="Mensagem de áudio">
+                                <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+
+                                {audioUrl ? (
+                                  <>
+                                    <audio
+                                      src={audioUrl}
+                                      controls
+                                      preload="metadata"
+                                      className="w-full max-w-[280px] h-12"
+                                      aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
+                                    >
+                                      Seu navegador não suporta áudio.
+                                    </audio>
+                                    <a
+                                      href={audioUrl}
+                                      download
+                                      className="p-1.5 hover:bg-background/20 rounded transition-colors"
+                                      title="Baixar áudio"
+                                      aria-label="Baixar áudio"
+                                    >
+                                      <Download className="h-4 w-4" aria-hidden="true" />
+                                    </a>
+                                  </>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-10 px-4"
+                                    onClick={() => handleLoadAudio(message.id)}
+                                    disabled={isLoading}
+                                  >
+                                    {isLoading ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Carregando...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Play className="h-4 w-4 mr-2" />
+                                        Carregar áudio
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            )
+                          })()}
 
                           {/* Text content with search highlighting */}
                           <p className="text-sm whitespace-pre-wrap break-words">
