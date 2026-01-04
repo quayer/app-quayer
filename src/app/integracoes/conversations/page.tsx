@@ -734,7 +734,7 @@ export default function ConversationsPage() {
 
   // Virtualização da lista de chats para performance
   // Aumentamos a altura para acomodar casos onde há nome de instância mostrado
-  const CHAT_ITEM_HEIGHT = 80 // altura otimizada de cada item de chat em pixels
+  const CHAT_ITEM_HEIGHT = 105 // altura para acomodar: avatar, nome/hora, telefone, preview, instância
 
   // Memoize getItemKey to prevent infinite re-renders
   const getItemKey = useCallback((index: number) => {

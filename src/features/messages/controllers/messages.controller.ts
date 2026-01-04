@@ -9,7 +9,7 @@ import { igniter } from '@/igniter';
 import { z } from 'zod';
 import { database } from '@/services/database';
 import { authProcedure } from '@/features/auth/procedures/auth.procedure';
-import { orchestrator } from '@/lib/providers/core/orchestrator';
+import { orchestrator } from '@/lib/providers';
 import { sessionsManager } from '@/lib/sessions/sessions.manager';
 import { sessionRateLimiter } from '@/lib/rate-limit/rate-limiter';
 import { retryWithBackoff } from '@/services/circuit-breaker';
