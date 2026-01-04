@@ -714,8 +714,8 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
                       <Button variant="outline" onClick={handleCopyLink}>
                         <Copy className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" onClick={handleShare}>
-                        <Share2 className="h-4 w-4" />
+                      <Button variant="outline" onClick={() => window.open(shareLink, '_blank')}>
+                        <ExternalLink className="h-4 w-4" />
                       </Button>
                     </div>
 

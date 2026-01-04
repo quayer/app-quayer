@@ -7,12 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import {
-  Smartphone,
   Clock,
   RefreshCw,
   CheckCircle,
@@ -22,12 +20,7 @@ import {
   Loader2,
   PartyPopper,
   KeyRound,
-  Phone,
   ArrowRight,
-  MoreVertical,
-  Settings,
-  Link2,
-  ScanLine,
   AlertTriangle,
   CheckCircle2,
   Shield,
@@ -35,32 +28,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-
-// Ícone Android SVG - acessível
-const AndroidIcon = ({ className }: { className?: string }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-    role="img"
-  >
-    <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4043-6.1603l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5765-6.1187-9.5765" />
-  </svg>
-);
-
-// Ícone Apple SVG - acessível
-const AppleIcon = ({ className }: { className?: string }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden="true"
-    role="img"
-  >
-    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-  </svg>
-);
 
 interface SharePageProps {
   token: string;
@@ -135,35 +102,6 @@ function SharePageSkeleton() {
 }
 
 /**
- * Componente de passo das instruções
- * Acessível com hierarquia visual clara
- */
-function StepItem({
-  number,
-  text,
-  icon
-}: {
-  number: number;
-  text: string;
-  icon?: React.ReactNode
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <div
-        className="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-semibold shrink-0"
-        aria-hidden="true"
-      >
-        {number}
-      </div>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        {icon && <span className="text-muted-foreground/60" aria-hidden="true">{icon}</span>}
-        <span>{text}</span>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Componente principal de conteúdo da página de compartilhamento
  * Implementa todas as melhores práticas de UX, UI, usabilidade e WCAG 2.1
  */
@@ -174,7 +112,6 @@ function SharePageContent({ token }: SharePageProps) {
   const [timeLeft, setTimeLeft] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState<'waiting' | 'connecting' | 'connected' | 'expired'>('waiting');
   const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
-  const [connectionMode, setConnectionMode] = useState<'qr' | 'code'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [generatingCode, setGeneratingCode] = useState(false);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -247,7 +184,11 @@ function SharePageContent({ token }: SharePageProps) {
         const remaining = Math.max(0, Math.floor((instanceData.expiresAt.getTime() - Date.now()) / 1000));
         setTimeLeft(remaining);
 
-        if (normalizeStatus(data.status) === 'connected') {
+        // Só considera conectado se tiver status connected E phoneNumber
+        // Isso evita mostrar "conectado" quando a instância existe mas o usuário não escaneou
+        const isReallyConnected = normalizeStatus(data.status) === 'connected' && data.phoneNumber;
+
+        if (isReallyConnected) {
           setConnectionStatus('connected');
           announce('WhatsApp conectado com sucesso!');
           if (pollInterval) {
@@ -677,450 +618,217 @@ function SharePageContent({ token }: SharePageProps) {
           />
         </div>
 
-        {/* Connection Card */}
-        <Card className="border-border shadow-lg overflow-hidden mb-8">
-          <Tabs
-            value={connectionMode}
-            onValueChange={(v) => setConnectionMode(v as 'qr' | 'code')}
-            className="w-full"
-          >
-            <TabsList className="w-full grid grid-cols-2 bg-muted/50 rounded-none h-14 p-0">
-              <TabsTrigger
-                value="qr"
-                className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary rounded-none h-full gap-2 text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                aria-label="Conectar via QR Code"
-              >
-                <QrCode className="h-4 w-4" aria-hidden="true" />
-                QR Code
-              </TabsTrigger>
-              <TabsTrigger
-                value="code"
-                className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary rounded-none h-full gap-2 text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                aria-label="Conectar via Código de Pareamento"
-              >
-                <KeyRound className="h-4 w-4" aria-hidden="true" />
-                Código de Pareamento
-              </TabsTrigger>
-            </TabsList>
-
-            {/* QR Code Tab */}
-            <TabsContent value="qr" className="m-0" role="tabpanel">
-              <CardContent className="p-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* QR Code Column */}
-                  <div className="space-y-4">
-                    <div className="flex justify-center">
-                      <div className="bg-white p-4 rounded-2xl shadow-lg border">
-                        {instance.qrCode ? (
-                          <img
-                            src={instance.qrCode.startsWith('data:') ? instance.qrCode : `data:image/png;base64,${instance.qrCode}`}
-                            alt={`QR Code para conectar ${instance.name} ao WhatsApp. Escaneie este código com seu celular.`}
-                            className="w-56 h-56 object-contain"
-                          />
-                        ) : (
-                          <div
-                            className="w-56 h-56 bg-muted rounded-xl flex flex-col items-center justify-center text-muted-foreground"
-                            role="status"
-                            aria-label="QR Code ainda não disponível"
-                          >
-                            <QrCode className="h-16 w-16 mb-3 opacity-50" aria-hidden="true" />
-                            <span className="text-sm mb-2">QR Code indisponível</span>
-                            <Button
-                              variant="link"
-                              size="sm"
-                              onClick={handleRefreshQR}
-                              className="text-primary"
-                              aria-label="Gerar QR Code"
-                            >
-                              Clique para gerar
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <Button
-                      onClick={handleRefreshQR}
-                      disabled={refreshing}
-                      variant="outline"
-                      className="w-full h-12 focus-visible:ring-2 focus-visible:ring-ring"
-                      aria-label={refreshing ? 'Gerando novo QR Code...' : 'Gerar novo QR Code'}
-                    >
-                      {refreshing ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" aria-hidden="true" />
-                      )}
-                      {refreshing ? 'Gerando...' : 'Gerar novo QR Code'}
-                    </Button>
-
-                    {/* Status de aguardando */}
-                    <div
-                      className="flex items-center justify-center gap-3 p-4 bg-primary/10 rounded-xl border border-primary/20"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <div
-                        className="w-3 h-3 bg-primary rounded-full animate-pulse"
-                        aria-hidden="true"
-                      />
-                      <span className="text-sm text-primary font-medium">
-                        Aguardando escaneamento...
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Instructions Column - Desktop */}
-                  <div className="hidden lg:flex flex-col gap-4">
-                    <h2 className="font-semibold text-foreground text-lg">
-                      Como escanear
-                    </h2>
-
-                    {/* Android Card */}
-                    <Card className="bg-muted/30 border-border">
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="w-8 h-8 bg-green-500/20 rounded-lg flex items-center justify-center">
-                            <AndroidIcon className="h-4 w-4 text-green-600 dark:text-green-400" />
-                          </div>
-                          <h3 className="font-semibold text-foreground">Android</h3>
-                        </div>
-                        <ol className="space-y-1.5 text-sm text-muted-foreground list-decimal list-inside">
-                          <li>Abra o WhatsApp</li>
-                          <li>Toque nos 3 pontinhos (⋮)</li>
-                          <li>Selecione &quot;Dispositivos conectados&quot;</li>
-                          <li>Toque em &quot;Conectar dispositivo&quot;</li>
-                          <li>Aponte a câmera para o QR Code</li>
-                        </ol>
-                      </CardContent>
-                    </Card>
-
-                    {/* iPhone Card */}
-                    <Card className="bg-muted/30 border-border">
-                      <CardContent className="p-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="w-8 h-8 bg-muted rounded-lg flex items-center justify-center">
-                            <AppleIcon className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                          <h3 className="font-semibold text-foreground">iPhone</h3>
-                        </div>
-                        <ol className="space-y-1.5 text-sm text-muted-foreground list-decimal list-inside">
-                          <li>Abra o WhatsApp</li>
-                          <li>Vá em &quot;Configurações&quot;</li>
-                          <li>Toque em &quot;Dispositivos conectados&quot;</li>
-                          <li>Toque em &quot;Conectar dispositivo&quot;</li>
-                          <li>Aponte a câmera para o QR Code</li>
-                        </ol>
-                      </CardContent>
-                    </Card>
-                  </div>
+        {/* Connection Options - Side by Side Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* QR Code Card */}
+          <Card className="border-border shadow-lg overflow-hidden">
+            <CardHeader className="bg-muted/30 border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <QrCode className="h-5 w-5 text-primary" aria-hidden="true" />
                 </div>
-              </CardContent>
-            </TabsContent>
-
-            {/* Pairing Code Tab */}
-            <TabsContent value="code" className="m-0" role="tabpanel">
-              <CardContent className="p-6 space-y-6">
-                {!pairingCode ? (
-                  <>
-                    <div className="text-center mb-4">
-                      <div
-                        className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4"
-                        aria-hidden="true"
+                <div>
+                  <CardTitle className="text-lg">Escanear QR Code</CardTitle>
+                  <CardDescription>Aponte a câmera do celular</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* QR Code */}
+              <div className="flex justify-center">
+                <div className="bg-white p-4 rounded-2xl shadow-lg border">
+                  {instance.qrCode ? (
+                    <img
+                      src={instance.qrCode.startsWith('data:') ? instance.qrCode : `data:image/png;base64,${instance.qrCode}`}
+                      alt={`QR Code para conectar ${instance.name} ao WhatsApp. Escaneie este código com seu celular.`}
+                      className="w-48 h-48 object-contain"
+                    />
+                  ) : (
+                    <div
+                      className="w-48 h-48 bg-muted rounded-xl flex flex-col items-center justify-center text-muted-foreground"
+                      role="status"
+                      aria-label="QR Code ainda não disponível"
+                    >
+                      <QrCode className="h-12 w-12 mb-3 opacity-50" aria-hidden="true" />
+                      <span className="text-sm mb-2">QR Code indisponível</span>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={handleRefreshQR}
+                        className="text-primary"
+                        aria-label="Gerar QR Code"
                       >
-                        <Phone className="h-8 w-8 text-primary" />
-                      </div>
-                      <h2 className="font-semibold text-lg text-foreground mb-2">
-                        Digite seu número do WhatsApp
-                      </h2>
-                      <p className="text-sm text-muted-foreground">
-                        Enviaremos um código de 8 dígitos para parear seu dispositivo
-                      </p>
+                        Clique para gerar
+                      </Button>
                     </div>
+                  )}
+                </div>
+              </div>
 
-                    <div className="space-y-3">
-                      <Label htmlFor="phone" className="text-foreground">
-                        Número de telefone (com DDD)
-                      </Label>
-                      <div className="flex gap-2">
-                        <div
-                          className="flex items-center px-4 bg-muted rounded-lg border border-input text-sm font-medium text-muted-foreground"
-                          aria-hidden="true"
-                        >
-                          +55
-                        </div>
-                        <Input
-                          id="phone"
-                          type="tel"
-                          placeholder="11 99999-9999"
-                          value={phoneNumber}
-                          onChange={handlePhoneChange}
-                          className="flex-1 h-12"
-                          aria-describedby="phone-help"
-                          autoComplete="tel-national"
-                        />
+              <Button
+                onClick={handleRefreshQR}
+                disabled={refreshing}
+                variant="outline"
+                className="w-full"
+                aria-label={refreshing ? 'Gerando novo QR Code...' : 'Atualizar QR Code'}
+              >
+                {refreshing ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" aria-hidden="true" />
+                )}
+                {refreshing ? 'Gerando...' : 'Atualizar QR Code'}
+              </Button>
+
+              {/* Instruções compactas */}
+              <div className="text-xs text-muted-foreground space-y-1 p-3 bg-muted/30 rounded-lg">
+                <p className="font-medium text-foreground mb-2">Como escanear:</p>
+                <p>1. Abra o WhatsApp no celular</p>
+                <p>2. Menu → Dispositivos conectados</p>
+                <p>3. Conectar dispositivo → Escanear</p>
+              </div>
+
+              {/* Status */}
+              <div
+                className="flex items-center justify-center gap-2 p-3 bg-primary/10 rounded-lg border border-primary/20"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="w-2 h-2 bg-primary rounded-full animate-pulse" aria-hidden="true" />
+                <span className="text-xs text-primary font-medium">Aguardando escaneamento...</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Pairing Code Card */}
+          <Card className="border-border shadow-lg overflow-hidden">
+            <CardHeader className="bg-muted/30 border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <KeyRound className="h-5 w-5 text-primary" aria-hidden="true" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Código de Pareamento</CardTitle>
+                  <CardDescription>Digite o código no WhatsApp</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {!pairingCode ? (
+                <>
+                  {/* Input de telefone */}
+                  <div className="space-y-3">
+                    <Label htmlFor="phone" className="text-sm text-foreground">
+                      Número do WhatsApp (com DDD)
+                    </Label>
+                    <div className="flex gap-2">
+                      <div className="flex items-center px-3 bg-muted rounded-lg border border-input text-sm font-medium text-muted-foreground">
+                        +55
                       </div>
-                      <p id="phone-help" className="text-xs text-muted-foreground">
-                        Digite seu número com DDD (exemplo: 11 99999-9999)
-                      </p>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder="11 99999-9999"
+                        value={phoneNumber}
+                        onChange={handlePhoneChange}
+                        className="flex-1"
+                        aria-describedby="phone-help"
+                        autoComplete="tel-national"
+                      />
                     </div>
+                  </div>
 
+                  <Button
+                    onClick={handleGeneratePairingCode}
+                    disabled={generatingCode || phoneNumber.replace(/\D/g, '').length < 10}
+                    className="w-full"
+                  >
+                    {generatingCode ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4 mr-2" aria-hidden="true" />
+                    )}
+                    Gerar Código
+                  </Button>
+
+                  {/* Instruções compactas */}
+                  <div className="text-xs text-muted-foreground space-y-1 p-3 bg-muted/30 rounded-lg">
+                    <p className="font-medium text-foreground mb-2">Como usar:</p>
+                    <p>1. Gere o código acima</p>
+                    <p>2. Menu → Dispositivos conectados</p>
+                    <p>3. Conectar com número → Digite o código</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Código gerado */}
+                  <button
+                    type="button"
+                    className={cn(
+                      "w-full bg-primary/10 border-2 border-primary/30 rounded-xl p-4 text-center cursor-pointer transition-all duration-200",
+                      "hover:border-primary/50 hover:bg-primary/15",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      copied && "bg-green-500/10 border-green-500/50"
+                    )}
+                    onClick={handleCopyCode}
+                    aria-label={`Código de pareamento: ${pairingCode}. Clique para copiar.`}
+                  >
+                    <p className="text-3xl font-mono font-bold tracking-[0.25em] text-primary" aria-hidden="true">
+                      {pairingCode}
+                    </p>
+                    <p className="text-xs text-primary/70 mt-2 flex items-center justify-center gap-1">
+                      {copied ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                          Copiado!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" aria-hidden="true" />
+                          Clique para copiar
+                        </>
+                      )}
+                    </p>
+                  </button>
+
+                  <div className="flex gap-2">
                     <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => { setPairingCode(null); setPhoneNumber(''); }}
+                    >
+                      Outro número
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
                       onClick={handleGeneratePairingCode}
-                      disabled={generatingCode || phoneNumber.replace(/\D/g, '').length < 10}
-                      className="w-full h-12"
-                      aria-describedby="pairing-help"
+                      disabled={generatingCode}
                     >
                       {generatingCode ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                       ) : (
-                        <ArrowRight className="h-4 w-4 mr-2" aria-hidden="true" />
+                        'Novo código'
                       )}
-                      Gerar Código de Pareamento
                     </Button>
-                    <p id="pairing-help" className="sr-only">
-                      Após gerar o código, você deverá digitá-lo no seu WhatsApp
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <div className="text-center">
-                      <div
-                        className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4"
-                        aria-hidden="true"
-                      >
-                        <KeyRound className="h-8 w-8 text-primary" />
-                      </div>
-                      <h2 className="font-semibold text-lg text-foreground mb-2">
-                        Seu código de pareamento
-                      </h2>
-                      <p className="text-sm text-muted-foreground mb-6">
-                        Digite este código no seu WhatsApp
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      className={cn(
-                        "w-full bg-primary/10 border-2 border-primary/30 rounded-2xl p-6 text-center cursor-pointer transition-all duration-200",
-                        "hover:border-primary/50 hover:bg-primary/15",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                        copied && "bg-green-500/10 border-green-500/50"
-                      )}
-                      onClick={handleCopyCode}
-                      aria-label={`Código de pareamento: ${pairingCode}. Clique para copiar.`}
-                    >
-                      <p
-                        className="text-4xl font-mono font-bold tracking-[0.3em] text-primary"
-                        aria-hidden="true"
-                      >
-                        {pairingCode}
-                      </p>
-                      <p className="text-xs text-primary/70 mt-3 flex items-center justify-center gap-1">
-                        {copied ? (
-                          <>
-                            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                            Copiado!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3 w-3" aria-hidden="true" />
-                            Clique para copiar
-                          </>
-                        )}
-                      </p>
-                    </button>
-
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => { setPairingCode(null); setPhoneNumber(''); }}
-                      >
-                        Usar outro número
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={handleGeneratePairingCode}
-                        disabled={generatingCode}
-                      >
-                        {generatingCode ? (
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                        ) : (
-                          'Novo código'
-                        )}
-                      </Button>
-                    </div>
-
-                    {/* Status de aguardando */}
-                    <div
-                      className="flex items-center justify-center gap-3 p-4 bg-primary/10 rounded-xl border border-primary/20"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <div
-                        className="w-3 h-3 bg-primary rounded-full animate-pulse"
-                        aria-hidden="true"
-                      />
-                      <span className="text-sm text-primary font-medium">
-                        Aguardando pareamento...
-                      </span>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </TabsContent>
-          </Tabs>
-        </Card>
-
-        {/* Instructions Section - Mobile (QR Code) ou ambos (Pairing Code) */}
-        <section
-          className={cn(
-            "space-y-6",
-            connectionMode === 'qr' && 'lg:hidden'
-          )}
-          aria-labelledby="instructions-title"
-        >
-          <h2
-            id="instructions-title"
-            className="text-lg font-semibold text-foreground text-center mb-6"
-          >
-            {connectionMode === 'qr'
-              ? 'Como escanear o QR Code'
-              : 'Como usar o código de pareamento'}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Android Instructions */}
-            <Card className="border-border">
-              <CardContent className="p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <div
-                    className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center"
-                    aria-hidden="true"
-                  >
-                    <AndroidIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
                   </div>
-                  <h3 className="font-semibold text-foreground">Android</h3>
-                </div>
-                <div className="space-y-3" role="list">
-                  {connectionMode === 'qr' ? (
-                    <>
-                      <StepItem number={1} text="Abra o WhatsApp" />
-                      <StepItem
-                        number={2}
-                        text="Toque nos 3 pontinhos no canto superior direito"
-                        icon={<MoreVertical className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={3}
-                        text="Selecione 'Dispositivos conectados'"
-                        icon={<Link2 className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={4}
-                        text="Toque em 'Conectar dispositivo'"
-                      />
-                      <StepItem
-                        number={5}
-                        text="Aponte a câmera para o QR Code acima"
-                        icon={<ScanLine className="h-3 w-3" />}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <StepItem number={1} text="Abra o WhatsApp" />
-                      <StepItem
-                        number={2}
-                        text="Toque nos 3 pontinhos no canto superior direito"
-                        icon={<MoreVertical className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={3}
-                        text="Selecione 'Dispositivos conectados'"
-                        icon={<Link2 className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={4}
-                        text="Toque em 'Conectar com número de telefone'"
-                      />
-                      <StepItem
-                        number={5}
-                        text="Digite o código de 8 dígitos acima"
-                        icon={<KeyRound className="h-3 w-3" />}
-                      />
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* iPhone Instructions */}
-            <Card className="border-border">
-              <CardContent className="p-5">
-                <div className="flex items-center gap-3 mb-4">
+                  {/* Status */}
                   <div
-                    className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center"
-                    aria-hidden="true"
+                    className="flex items-center justify-center gap-2 p-3 bg-primary/10 rounded-lg border border-primary/20"
+                    role="status"
+                    aria-live="polite"
                   >
-                    <AppleIcon className="h-5 w-5 text-muted-foreground" />
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" aria-hidden="true" />
+                    <span className="text-xs text-primary font-medium">Aguardando pareamento...</span>
                   </div>
-                  <h3 className="font-semibold text-foreground">iPhone</h3>
-                </div>
-                <div className="space-y-3" role="list">
-                  {connectionMode === 'qr' ? (
-                    <>
-                      <StepItem number={1} text="Abra o WhatsApp" />
-                      <StepItem
-                        number={2}
-                        text="Vá em 'Configurações' (canto inferior direito)"
-                        icon={<Settings className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={3}
-                        text="Toque em 'Dispositivos conectados'"
-                        icon={<Link2 className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={4}
-                        text="Toque em 'Conectar dispositivo'"
-                      />
-                      <StepItem
-                        number={5}
-                        text="Aponte a câmera para o QR Code acima"
-                        icon={<ScanLine className="h-3 w-3" />}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <StepItem number={1} text="Abra o WhatsApp" />
-                      <StepItem
-                        number={2}
-                        text="Vá em 'Configurações' (canto inferior direito)"
-                        icon={<Settings className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={3}
-                        text="Toque em 'Dispositivos conectados'"
-                        icon={<Link2 className="h-3 w-3" />}
-                      />
-                      <StepItem
-                        number={4}
-                        text="Toque em 'Conectar com número de telefone'"
-                      />
-                      <StepItem
-                        number={5}
-                        text="Digite o código de 8 dígitos acima"
-                        icon={<KeyRound className="h-3 w-3" />}
-                      />
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Security Notice */}
         <div className="mt-8 flex items-center justify-center gap-2 text-xs text-muted-foreground">
