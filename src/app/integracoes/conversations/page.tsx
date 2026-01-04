@@ -1705,48 +1705,13 @@ export default function ConversationsPage() {
     }
   }
 
-  // ==================== RENDER STATES ====================
+  // ==================== RENDER STATES (computed, not early returns) ====================
+  // Note: We use conditional rendering instead of early returns to ensure all hooks are called
+  // This prevents "Rendered more hooks than during the previous render" errors
 
-  if (!isHydrated || instancesLoading) {
-    return (
-      <div className="h-[calc(100vh-4rem)] flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-          <p className="text-muted-foreground">Carregando conversas...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (instancesError) {
-    return (
-      <div className="pt-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between">
-            <span>Erro ao carregar instancias</span>
-            <Button variant="outline" size="sm" onClick={() => refetchInstances()}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Tentar novamente
-            </Button>
-          </AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
-
-  if (instances.length === 0) {
-    return (
-      <div className="pt-6">
-        <Alert>
-          <MessageSquare className="h-4 w-4" />
-          <AlertDescription>
-            Nenhuma instancia WhatsApp conectada. Conecte pelo menos uma instancia para acessar as conversas.
-          </AlertDescription>
-        </Alert>
-      </div>
-    )
-  }
+  const isLoading = !isHydrated || instancesLoading
+  const hasError = !!instancesError
+  const hasNoInstances = instances.length === 0
 
   // ==================== RENDER COMPONENTS ====================
 
@@ -3221,6 +3186,48 @@ export default function ConversationsPage() {
   ])
 
   // ==================== MAIN RENDER ====================
+  // Conditional rendering for loading, error, and empty states (instead of early returns)
+  if (isLoading) {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Carregando conversas...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (hasError) {
+    return (
+      <div className="pt-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>Erro ao carregar instancias</span>
+            <Button variant="outline" size="sm" onClick={() => refetchInstances()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Tentar novamente
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  if (hasNoInstances) {
+    return (
+      <div className="pt-6">
+        <Alert>
+          <MessageSquare className="h-4 w-4" />
+          <AlertDescription>
+            Nenhuma instancia WhatsApp conectada. Conecte pelo menos uma instancia para acessar as conversas.
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
   return (
     <TooltipProvider>
       {/* Skip links para acessibilidade */}
