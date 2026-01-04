@@ -667,12 +667,14 @@ export default function ConversationsPage() {
     }
 
     // Fallback para cálculo no cliente (compatibilidade)
+    // Helper para verificar se é grupo (pode vir como boolean ou string)
+    const checkIsGroup = (chat: any) => chat.wa_isGroup === true || chat.wa_isGroup === 'true'
     return {
       ia: data.filter(isAIActive).length,
       atendente: data.filter(isHumanAttending).length,
       resolvidos: data.filter(isResolved).length,
-      groups: data.filter(chat => chat.wa_isGroup && !isResolved(chat)).length,
-      direct: data.filter(chat => !chat.wa_isGroup && !isResolved(chat)).length,
+      groups: data.filter(chat => checkIsGroup(chat) && !isResolved(chat)).length,
+      direct: data.filter(chat => !checkIsGroup(chat) && !isResolved(chat)).length,
     }
   }, [chatsData, isAIActive, isHumanAttending, isResolved])
 
@@ -704,10 +706,17 @@ export default function ConversationsPage() {
     })
 
     // 2. Filtrar por tipo de chat (Todos / Diretos / Grupos)
+    // Nota: wa_isGroup pode vir como string "true"/"false" ou boolean
     if (chatTypeFilter === 'direct') {
-      filtered = filtered.filter(chat => !chat.wa_isGroup)
+      filtered = filtered.filter(chat => {
+        const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+        return !isGroup
+      })
     } else if (chatTypeFilter === 'groups') {
-      filtered = filtered.filter(chat => chat.wa_isGroup)
+      filtered = filtered.filter(chat => {
+        const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+        return isGroup
+      })
     }
 
     // 3. Filtrar por busca (usando valor debounced para evitar re-renders excessivos)
@@ -2076,7 +2085,13 @@ export default function ConversationsPage() {
               if (!chat) return null // Proteção contra índice inválido
 
               // Determinar nome para exibição (usar safeRenderContent para evitar objetos)
-              const displayName = safeRenderContent(chat.wa_name) || 'Contato'
+              // Para grupos, se o nome parece ser um ID (sem espaços, parece hash), mostrar "Grupo"
+              const rawName = safeRenderContent(chat.wa_name)
+              const looksLikeId = rawName && /^[a-z0-9]{10,}$/i.test(rawName) && !rawName.includes(' ')
+              const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+              const displayName = isGroup && (!rawName || looksLikeId)
+                ? 'Grupo'
+                : rawName || 'Contato'
               // Usar helper functions para categorização
               const chatIsAIActive = isAIActive(chat)
               const chatIsResolved = isResolved(chat)
@@ -3225,7 +3240,7 @@ export default function ConversationsPage() {
           <>
             {/* Column 1: Chats with integrated instance filter */}
             {/* py-0 remove padding default do Card para permitir scroll correto */}
-            <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden py-0 gap-0">
+            <Card className="w-[480px] flex-shrink-0 h-full overflow-hidden py-0 gap-0">
               <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
                 {chatsListContent}
               </CardContent>
