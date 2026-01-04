@@ -119,10 +119,33 @@ export default function RespostasRapidasPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['quick-replies-management'],
     queryFn: async () => {
-      const response = await (api['quick-replies'] as any).list.query({
-        query: { limit: 100 }
-      })
-      return response?.data ?? { quickReplies: [], categories: [] }
+      try {
+        const response = await (api['quick-replies'] as any).list.query({
+          query: { limit: 100 }
+        })
+
+        // Handle different response formats from Igniter
+        // Format 1: { data: { data: { quickReplies, categories } } }
+        // Format 2: { data: { quickReplies, categories } }
+        // Format 3: { quickReplies, categories }
+        const raw = response as any
+        let result = raw
+
+        // Unwrap nested data
+        if (result?.data) result = result.data
+        if (result?.data) result = result.data
+
+        // Validate and extract
+        const quickReplies = Array.isArray(result?.quickReplies) ? result.quickReplies : []
+        const categories = Array.isArray(result?.categories) ? result.categories : []
+
+        console.log('[QuickReplies] Loaded:', { count: quickReplies.length, categories: categories.length })
+
+        return { quickReplies, categories }
+      } catch (err: any) {
+        console.error('[QuickReplies] Error fetching:', err?.message || err)
+        return { quickReplies: [], categories: [] }
+      }
     },
   })
 
@@ -147,6 +170,20 @@ export default function RespostasRapidasPage() {
     })
   }, [quickReplies, searchText, categoryFilter])
 
+  // Helper to extract error message safely
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (typeof error === 'string') return error
+    if (error instanceof Error) return error.message
+    if (error && typeof error === 'object') {
+      const err = error as any
+      // Handle Igniter error format
+      if (typeof err.message === 'string') return err.message
+      if (err.data && typeof err.data.message === 'string') return err.data.message
+      if (err.error && typeof err.error === 'string') return err.error
+    }
+    return fallback
+  }
+
   // Create mutation
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -168,8 +205,8 @@ export default function RespostasRapidasPage() {
       resetForm()
       toast.success('Resposta rápida criada com sucesso!')
     },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Erro ao criar resposta rápida')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Erro ao criar resposta rápida'))
     },
   })
 
@@ -195,8 +232,8 @@ export default function RespostasRapidasPage() {
       resetForm()
       toast.success('Resposta rápida atualizada!')
     },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Erro ao atualizar resposta rápida')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Erro ao atualizar resposta rápida'))
     },
   })
 
@@ -213,8 +250,8 @@ export default function RespostasRapidasPage() {
       setDeleteReply(null)
       toast.success('Resposta rápida excluída!')
     },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Erro ao excluir resposta rápida')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Erro ao excluir resposta rápida'))
     },
   })
 
