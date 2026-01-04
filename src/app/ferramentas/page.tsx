@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
 import {
   MessageSquare,
@@ -11,14 +10,13 @@ import {
   AlertCircle,
   Clock,
   Webhook,
+  Zap,
 } from 'lucide-react';
 import {
   Breadcrumb,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
-  BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { Separator } from '@/components/ui/separator';
 import { SidebarTrigger } from '@/components/ui/sidebar';
@@ -34,6 +32,21 @@ import { Button } from '@/components/ui/button';
 
 // Tool cards data
 const tools = [
+  {
+    id: 'respostas-rapidas',
+    name: 'Respostas Rápidas',
+    description: 'Crie atalhos para enviar mensagens rapidamente. Digite /atalho no chat para usar.',
+    icon: Zap,
+    href: '/ferramentas/respostas-rapidas',
+    status: 'active' as const,
+    features: [
+      'Atalhos personalizados',
+      'Compartilhar com equipe',
+      'Categorias',
+      'Contagem de uso',
+    ],
+    docUrl: null,
+  },
   {
     id: 'webhooks',
     name: 'Webhooks',
@@ -64,7 +77,6 @@ const tools = [
     ],
     docUrl: 'https://www.chatwoot.com/docs',
   },
-  // Future tools can be added here
 ];
 
 type ToolStatus = 'active' | 'inactive' | 'beta' | 'coming_soon';
