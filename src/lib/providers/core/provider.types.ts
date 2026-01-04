@@ -177,13 +177,14 @@ export interface MessageResult {
 // ===== MEDIA MESSAGE =====
 export interface MediaMessage {
   id: string;
-  type: 'image' | 'video' | 'audio' | 'voice' | 'document';
-  mediaUrl: string;         // URL para download
+  type: 'image' | 'video' | 'audio' | 'voice' | 'document' | 'sticker';
+  mediaUrl: string;         // URL para download (pode estar vazio se needsDownload=true)
   caption?: string;
   fileName?: string;
   mimeType?: string;
   size?: number;            // Bytes
   duration?: number;        // Segundos (áudio/vídeo)
+  needsDownload?: boolean;  // Flag: mídia precisa ser baixada via API
 
   // Transcrição (será preenchido pelo sistema)
   transcription?: {
@@ -219,9 +220,10 @@ export interface WebhookData {
   from?: string;
   to?: string;
   contactName?: string;  // Nome do contato ou grupo (wa_name no UAZapi)
+  pushName?: string;     // Nome do contato no WhatsApp (pushName)
   message?: {
     id: string;
-    type: 'text' | 'image' | 'video' | 'audio' | 'voice' | 'document' | 'location' | 'contact';
+    type: 'text' | 'image' | 'video' | 'audio' | 'voice' | 'document' | 'location' | 'contact' | 'sticker';
     content: string;
     media?: MediaMessage;
     timestamp: Date;

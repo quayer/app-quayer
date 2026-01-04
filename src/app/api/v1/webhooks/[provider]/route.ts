@@ -750,7 +750,7 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
         contact = await database.contact.create({
           data: {
             phoneNumber: cleanTo,
-            name: data.pushName || cleanTo,
+            name: data.pushName || data.contactName || cleanTo,
             organizationId: instance.organizationId,
           },
         });

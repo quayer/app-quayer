@@ -57,7 +57,7 @@ async function main() {
   // Estatísticas
   const inbound = messages.filter(m => m.direction === 'INBOUND').length;
   const outbound = messages.filter(m => m.direction === 'OUTBOUND').length;
-  const audios = messages.filter(m => m.type === 'audio' || m.type === 'voice' || m.type === 'ptt').length;
+  const audios = messages.filter(m => m.type === 'audio' || m.type === 'voice' || (m.type as string) === 'ptt').length;
   const images = messages.filter(m => m.type === 'image').length;
 
   console.log('📊 Estatísticas:');

@@ -212,6 +212,12 @@ export default function IntegrationsPage() {
         name: data.name,
         provider: data.provider || 'WHATSAPP_WEB',
         channel: 'WHATSAPP',
+        // Cloud API fields - required when provider is WHATSAPP_CLOUD_API
+        ...(data.provider === 'WHATSAPP_CLOUD_API' && {
+          cloudApiAccessToken: data.cloudApiAccessToken,
+          cloudApiPhoneNumberId: data.cloudApiPhoneNumberId,
+          cloudApiWabaId: data.cloudApiWabaId,
+        }),
       });
 
       if (result) {
