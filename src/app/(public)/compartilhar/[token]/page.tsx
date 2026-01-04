@@ -547,19 +547,21 @@ function SharePageContent({ token }: SharePageProps) {
       const data = result.data || result;
 
       if (data && (data.id || data.name)) {
-        const instanceData: InstanceData = {
-          id: data.id,
-          name: data.name,
-          status: normalizeStatus(data.status || 'connecting'),
-          phoneNumber: data.phoneNumber,
-          profileName: data.profileName || data.name,
-          qrCode: data.qrCode,
-          pairingCode: data.pairingCode,
-          expiresAt: new Date(data.expiresAt || Date.now() + 3600000),
-          organizationName: data.organizationName || 'Organização'
-        };
-
-        setInstance(instanceData);
+        setInstance(prev => {
+          const instanceData: InstanceData = {
+            id: data.id,
+            name: data.name,
+            status: normalizeStatus(data.status || 'connecting'),
+            phoneNumber: data.phoneNumber,
+            profileName: data.profileName || data.name,
+            // Preservar QR Code existente se a API não retornar um novo
+            qrCode: data.qrCode || prev?.qrCode,
+            pairingCode: data.pairingCode || prev?.pairingCode,
+            expiresAt: new Date(data.expiresAt || Date.now() + 3600000),
+            organizationName: data.organizationName || 'Organização'
+          };
+          return instanceData;
+        });
 
         const isReallyConnected = normalizeStatus(data.status) === 'connected' && data.phoneNumber;
 
