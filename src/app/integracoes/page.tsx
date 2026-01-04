@@ -171,7 +171,7 @@ export default function IntegrationsPage() {
       profilePictureUrl: instance.profilePictureUrl,
       webhookUrl: instance.webhookUrl,
       createdAt: instance.createdAt || instance.created_at,
-      messageCount: instance.messageCount || 0,
+      messageCount: instance._count?.messages || instance.messageCount || 0,
       unreadCount: instance.unreadCount || 0,
       provider: instance.provider,
       cloudApiVerifiedName: instance.cloudApiVerifiedName,

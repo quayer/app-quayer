@@ -182,6 +182,7 @@ export const InstanceStatusResponseDTO = z.object({
   status: z.enum(['connected', 'disconnected', 'connecting', 'error']),
   phoneNumber: z.string().optional(),
   name: z.string().optional(),
+  profilePicture: z.string().nullable().optional(),
   lastSeen: z.date().optional(),
 });
 

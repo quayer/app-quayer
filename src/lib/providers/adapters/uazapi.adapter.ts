@@ -113,7 +113,7 @@ class UAZapiLegacyAdapter implements IProviderAdapter {
     token: string;
   }): Promise<ProviderResponse<NormalizedInstance>> {
     try {
-      const result = await uazServiceAny.getStatus(params.token);
+      const result = await uazServiceAny.getInstanceStatus(params.token);
 
       const status = this.mapStatus(result?.status || result?.state || 'disconnected');
 

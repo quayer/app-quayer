@@ -224,6 +224,7 @@ export class UAZapiService {
             status: instanceData.status || 'disconnected',
             phoneNumber: instanceData.phoneNumber,
             name: instanceData.name || instanceData.profileName,
+            profilePicture: instanceData.profilePicUrl || instanceData.profilePicture,
             lastSeen: instanceData.lastDisconnect ? new Date(instanceData.lastDisconnect) : undefined
           },
           message: 'Status obtido com sucesso'

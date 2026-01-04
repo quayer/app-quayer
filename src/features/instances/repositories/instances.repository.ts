@@ -117,6 +117,11 @@ export class InstancesRepository {
               name: true,
               slug: true,
             }
+          },
+          _count: {
+            select: {
+              messages: true,
+            }
           }
         }
       }),
