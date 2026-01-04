@@ -820,7 +820,9 @@ export default function ConversationsPage() {
 
   // Handle quick reply selection
   const handleSelectQuickReply = useCallback((qr: any) => {
-    setMessageText(qr.content)
+    // Safely extract content as string
+    const content = safeRenderContent(qr.content)
+    setMessageText(content)
     setShowQuickReplies(false)
     setQuickReplySearch('')
     messageInputRef.current?.focus()
@@ -1229,7 +1231,8 @@ export default function ConversationsPage() {
     },
     onSuccess: (data: any) => {
       const result = data?.data ?? data
-      toast.success(result?.message || 'Chats sincronizados!')
+      const message = typeof result?.message === 'string' ? result.message : 'Chats sincronizados!'
+      toast.success(message)
       refetchChats()
     },
     onError: (error: any) => {
@@ -1654,7 +1657,7 @@ export default function ConversationsPage() {
             <>
               <Smartphone className="h-4 w-4" />
               <span className="truncate">
-                {instances.find((i: Instance) => i.id === selectedInstanceFilter)?.name || 'Selecionar'}
+                {safeRenderContent(instances.find((i: Instance) => i.id === selectedInstanceFilter)?.name) || 'Selecionar'}
               </span>
             </>
           )}
@@ -2846,7 +2849,7 @@ export default function ConversationsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        <span>{note.author?.name || 'Agente'}</span>
+                        <span>{safeRenderContent(note.author?.name) || 'Agente'}</span>
                         <span>•</span>
                         <span>{format(new Date(note.createdAt), "dd/MM HH:mm")}</span>
                       </div>
