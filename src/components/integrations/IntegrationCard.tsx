@@ -72,6 +72,7 @@ interface IntegrationCardProps {
     createdAt: Date;
     messageCount?: number;
     unreadCount?: number;
+    provider?: 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API' | 'WHATSAPP_BUSINESS_API' | 'INSTAGRAM_META' | 'TELEGRAM_BOT' | 'EMAIL_SMTP';
   };
   onConfigure?: (id: string) => void;
   onDelete: (id: string) => void;
@@ -274,7 +275,8 @@ export function IntegrationCard({
                   </DropdownMenuItem>
                 )}
 
-                {onShare && (
+                {/* Share Link só aparece para WhatsApp Web (não Cloud API) e quando desconectado */}
+                {onShare && instance.provider !== 'WHATSAPP_CLOUD_API' && instance.status === 'disconnected' && (
                   <DropdownMenuItem onClick={() => onShare(instance.id)}>
                     <Share2 className="h-4 w-4 mr-2" aria-hidden="true" />
                     Compartilhar Link
@@ -376,23 +378,7 @@ export function IntegrationCard({
                     Configurar
                   </Button>
                 )}
-                {onShare && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="shrink-0"
-                        onClick={() => onShare(instance.id)}
-                      >
-                        <Share2 className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Compartilhar link de conexão</p>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+                {/* Botão de Share removido quando conectado - não faz sentido compartilhar link de conexão para instância já conectada */}
               </>
             ) : instance.status === 'connecting' ? (
               <Button
@@ -473,8 +459,8 @@ export function IntegrationCard({
               </div>
             </Button>
 
-            {/* Opção Compartilhar Link */}
-            {onShare && (
+            {/* Opção Compartilhar Link - só para WhatsApp Web (não Cloud API) */}
+            {onShare && instance.provider !== 'WHATSAPP_CLOUD_API' && (
               <Button
                 variant="outline"
                 className="h-auto py-4 px-4 justify-start gap-4 hover:bg-green-500/5 hover:border-green-500/50"
