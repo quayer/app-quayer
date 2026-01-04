@@ -73,6 +73,8 @@ interface Instance {
   createdAt: string;
   messageCount?: number;
   unreadCount?: number;
+  provider?: 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API' | 'WHATSAPP_BUSINESS_API' | 'INSTAGRAM_META' | 'TELEGRAM_BOT' | 'EMAIL_SMTP';
+  cloudApiVerifiedName?: string;
 }
 
 // Chave para localStorage das preferências
@@ -165,12 +167,14 @@ export default function IntegrationsPage() {
       description: instance.description,
       status: instance.status?.toLowerCase() || 'disconnected',
       phoneNumber: instance.phoneNumber,
-      profileName: instance.profileName || instance.name,
+      profileName: instance.cloudApiVerifiedName || instance.profileName || instance.name,
       profilePictureUrl: instance.profilePictureUrl,
       webhookUrl: instance.webhookUrl,
       createdAt: instance.createdAt || instance.created_at,
       messageCount: instance.messageCount || 0,
       unreadCount: instance.unreadCount || 0,
+      provider: instance.provider,
+      cloudApiVerifiedName: instance.cloudApiVerifiedName,
     }));
   }, [instancesData]);
 

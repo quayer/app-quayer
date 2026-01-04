@@ -44,6 +44,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Cloud,
+  Smartphone,
+  BadgeCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
@@ -73,6 +76,7 @@ interface IntegrationCardProps {
     messageCount?: number;
     unreadCount?: number;
     provider?: 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API' | 'WHATSAPP_BUSINESS_API' | 'INSTAGRAM_META' | 'TELEGRAM_BOT' | 'EMAIL_SMTP';
+    cloudApiVerifiedName?: string;
   };
   onConfigure?: (id: string) => void;
   onDelete: (id: string) => void;
@@ -160,6 +164,32 @@ export function IntegrationCard({
     return phone;
   };
 
+  // Verificar se é Cloud API (API Oficial da Meta)
+  const isCloudApi = instance.provider === 'WHATSAPP_CLOUD_API';
+
+  // Configuração visual baseada no provider
+  const getProviderConfig = () => {
+    if (isCloudApi) {
+      return {
+        label: 'Cloud API',
+        sublabel: instance.cloudApiVerifiedName || 'API Oficial da Meta',
+        icon: Cloud,
+        badgeColor: 'bg-blue-100 text-blue-700 border-blue-200',
+        avatarFallbackBg: 'bg-blue-600',
+      };
+    }
+    return {
+      label: 'WhatsApp Web',
+      sublabel: instance.profileName || 'WhatsApp Business',
+      icon: Smartphone,
+      badgeColor: 'bg-green-100 text-green-700 border-green-200',
+      avatarFallbackBg: 'bg-primary',
+    };
+  };
+
+  const providerConfig = getProviderConfig();
+  const ProviderIcon = providerConfig.icon;
+
   return (
     <TooltipProvider>
       <Card
@@ -204,8 +234,12 @@ export function IntegrationCard({
                     src={instance.profilePictureUrl}
                     alt={instance.profileName || instance.name}
                   />
-                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
-                    {getInitials(instance.name)}
+                  <AvatarFallback className={cn("text-primary-foreground font-semibold", providerConfig.avatarFallbackBg)}>
+                    {instance.profilePictureUrl ? (
+                      getInitials(instance.name)
+                    ) : (
+                      <ProviderIcon className="h-6 w-6" />
+                    )}
                   </AvatarFallback>
                 </Avatar>
                 {/* Pulse indicator */}
@@ -222,9 +256,28 @@ export function IntegrationCard({
               </div>
 
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-lg truncate">{instance.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-lg truncate">{instance.name}</h3>
+                  {/* Badge Oficial para Cloud API */}
+                  {isCloudApi && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge
+                          variant="outline"
+                          className="gap-1 px-1.5 py-0 text-xs bg-blue-50 text-blue-700 border-blue-200 shrink-0"
+                        >
+                          <BadgeCheck className="h-3 w-3" />
+                          Oficial
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>API Oficial da Meta - Alta estabilidade</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground truncate">
-                  {instance.profileName || 'WhatsApp Business'}
+                  {providerConfig.sublabel}
                 </p>
               </div>
             </div>
@@ -298,23 +351,37 @@ export function IntegrationCard({
         </CardHeader>
 
         <CardContent className="relative pt-0">
-          {/* Status badge */}
+          {/* Status badge and Provider badge */}
           <div className="flex items-center justify-between mb-4">
-            <Badge
-              variant={statusConfig.variant}
-              className={cn(
-                'gap-1.5 py-1 px-2.5 font-medium transition-all duration-300',
-                statusConfig.color,
-                statusConfig.bgColor
-              )}
-            >
-              {instance.status === 'connecting' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <AnimatedIcon className="h-3.5 w-3.5" />
-              )}
-              <span>{statusConfig.label}</span>
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={statusConfig.variant}
+                className={cn(
+                  'gap-1.5 py-1 px-2.5 font-medium transition-all duration-300',
+                  statusConfig.color,
+                  statusConfig.bgColor
+                )}
+              >
+                {instance.status === 'connecting' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <AnimatedIcon className="h-3.5 w-3.5" />
+                )}
+                <span>{statusConfig.label}</span>
+              </Badge>
+
+              {/* Provider badge */}
+              <Badge
+                variant="outline"
+                className={cn(
+                  'gap-1 py-0.5 px-2 text-xs font-normal',
+                  providerConfig.badgeColor
+                )}
+              >
+                <ProviderIcon className="h-3 w-3" />
+                <span>{providerConfig.label}</span>
+              </Badge>
+            </div>
 
             {/* Métricas */}
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
