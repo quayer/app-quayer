@@ -545,7 +545,13 @@ export const instancesController = igniter.controller({
             return response.forbidden("Você não tem permissão para conectar esta instância");
           }
 
-          if (instance.status === 'CONNECTED') {
+          // Verificar se está REALMENTE conectada
+          // WhatsApp Web: precisa ter status CONNECTED E phoneNumber
+          // Cloud API: precisa ter status CONNECTED (usa token, não phoneNumber)
+          const isReallyConnected = instance.status === 'CONNECTED' &&
+            (instance.provider === 'WHATSAPP_CLOUD_API' || !!instance.phoneNumber);
+
+          if (isReallyConnected) {
             return response.badRequest("Instância já está conectada");
           }
 
@@ -1458,9 +1464,11 @@ export const instancesController = igniter.controller({
             return response.badRequest("Instância não possui token de conexão");
           }
 
-          // Verificar se a instância já está conectada (Status Local)
-          if (instance.status === 'CONNECTED') {
-            logger.info('Instance already connected (Local DB), returning success', { instanceId: instance.id });
+          // Verificar se a instância já está REALMENTE conectada (Status Local + phoneNumber)
+          // WhatsApp Web só está conectado se tiver phoneNumber confirmado
+          const isLocallyConnected = instance.status === 'CONNECTED' && !!instance.phoneNumber;
+          if (isLocallyConnected) {
+            logger.info('Instance already connected (Local DB)', { instanceId: instance.id, phoneNumber: instance.phoneNumber });
             return response.success({
               status: 'connected',
               message: 'Instância já está conectada!',
