@@ -18,6 +18,20 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 
+/**
+ * Helper para garantir que valores sejam strings
+ * Previne React Error #310 (Objects are not valid as React child)
+ */
+function safeString(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return String(obj?.text ?? obj?.message ?? obj?.title ?? '')
+  }
+  return String(value)
+}
+
 export type NotificationType = 'MESSAGE' | 'USER' | 'WARNING' | 'INFO' | 'SUCCESS' | 'ERROR' | 'SYSTEM' | 'CONNECTION'
 
 export interface Notification {
@@ -272,11 +286,11 @@ export function NotificationCenter({ className }: NotificationCenterProps) {
                               "text-sm truncate",
                               !notification.read && "font-medium"
                             )}>
-                              {notification.title}
+                              {safeString(notification.title)}
                             </p>
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                            {notification.description}
+                            {safeString(notification.description)}
                           </p>
                           <p className="text-[10px] text-muted-foreground/70 mt-1">
                             {formatRelativeTime(notification.createdAt)}
