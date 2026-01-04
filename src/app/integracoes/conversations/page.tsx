@@ -3262,7 +3262,7 @@ export default function ConversationsPage() {
 
             {/* Main messages area */}
             <Card className="flex-1 h-full min-h-0 overflow-hidden py-0 gap-0">
-              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
                 {selectedChat ? (
                   <MessagesArea />
                 ) : (
@@ -3285,14 +3285,14 @@ export default function ConversationsPage() {
             {/* Column 1: Chats with integrated instance filter */}
             {/* py-0 remove padding default do Card para permitir scroll correto */}
             <Card className="w-[420px] flex-shrink-0 h-full overflow-hidden py-0 gap-0">
-              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
                 <ChatsList />
               </CardContent>
             </Card>
 
             {/* Column 2: Messages */}
             <Card className="flex-1 min-w-0 h-full overflow-hidden py-0 gap-0">
-              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="p-0 flex-1 min-h-0 overflow-hidden flex flex-col">
                 <MessagesArea />
               </CardContent>
             </Card>
