@@ -1577,6 +1577,25 @@ export default function ConversationsPage() {
     }
   }, [loadingAudioIds, loadedAudioUrls])
 
+  // Auto-load audio messages that don't have mediaUrl
+  // This provides better UX - audio is ready to play when user sees it
+  useEffect(() => {
+    if (!messages || messages.length === 0) return
+
+    // Find audio messages without mediaUrl that haven't been loaded yet
+    const audioMessagesToLoad = messages.filter((msg: DBMessage) => {
+      const isAudio = msg.type === 'audio' || msg.type === 'voice' || msg.type === 'ptt'
+      const needsLoad = !msg.mediaUrl && !loadedAudioUrls.has(msg.id) && !loadingAudioIds.has(msg.id)
+      return isAudio && needsLoad
+    })
+
+    // Load up to 5 audio messages at a time to avoid overwhelming the API
+    const toLoad = audioMessagesToLoad.slice(0, 5)
+    toLoad.forEach((msg: DBMessage) => {
+      handleLoadAudio(msg.id)
+    })
+  }, [messages, loadedAudioUrls, loadingAudioIds, handleLoadAudio])
+
   const handleManualRefresh = useCallback(async () => {
     // Fazer sync forçado com UAZapi para buscar novos chats
     try {
@@ -2887,7 +2906,7 @@ export default function ConversationsPage() {
                             </div>
                           )}
 
-                          {/* Audio sem mediaUrl - precisa carregar via API */}
+                          {/* Audio sem mediaUrl - carrega automaticamente via API */}
                           {'mediaUrl' in message && !message.mediaUrl && (message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
                             const audioUrl = loadedAudioUrls.get(message.id)
                             const isLoading = loadingAudioIds.has(message.id)
@@ -2918,25 +2937,24 @@ export default function ConversationsPage() {
                                     </a>
                                   </>
                                 ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-10 px-4"
-                                    onClick={() => handleLoadAudio(message.id)}
-                                    disabled={isLoading}
-                                  >
+                                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
                                     {isLoading ? (
                                       <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Carregando...
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Carregando áudio...</span>
                                       </>
                                     ) : (
-                                      <>
-                                        <Play className="h-4 w-4 mr-2" />
-                                        Carregar áudio
-                                      </>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-3"
+                                        onClick={() => handleLoadAudio(message.id)}
+                                      >
+                                        <Play className="h-4 w-4 mr-1" />
+                                        Carregar
+                                      </Button>
                                     )}
-                                  </Button>
+                                  </div>
                                 )}
                               </div>
                             )
