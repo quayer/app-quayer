@@ -2492,9 +2492,23 @@ export default function ConversationsPage() {
                   const isCurrentMatch = messageSearchResults[currentSearchIndex] === msgIndex
 
                   // Highlight search matches in content (after normalizing)
-                  const highlightContent = (content: string) => {
+                  const highlightContent = (content: unknown) => {
+                    // Ensure content is a string - handle objects/arrays from template/interactive messages
+                    let textContent: string
+                    if (typeof content === 'string') {
+                      textContent = content
+                    } else if (content === null || content === undefined) {
+                      textContent = ''
+                    } else if (typeof content === 'object') {
+                      // Try to extract text from object (template messages, etc)
+                      const obj = content as any
+                      textContent = obj?.text ?? obj?.body ?? obj?.caption ?? JSON.stringify(content)
+                    } else {
+                      textContent = String(content)
+                    }
+
                     // Primeiro normaliza o texto para remover caracteres problemáticos
-                    const normalizedContent = normalizeTextContent(content)
+                    const normalizedContent = normalizeTextContent(textContent)
 
                     if (!messageSearchText || !isSearchMatch) return normalizedContent
                     const regex = new RegExp(`(${messageSearchText})`, 'gi')
