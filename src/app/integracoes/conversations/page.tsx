@@ -1624,7 +1624,14 @@ export default function ConversationsPage() {
 
   // Handle audio transcription using AI
   const handleTranscribeAudio = useCallback(async (messageId: string) => {
-    if (transcribingIds.has(messageId) || transcriptions.has(messageId)) {
+    // Skip if already transcribing
+    if (transcribingIds.has(messageId)) {
+      return
+    }
+
+    // If already has transcription in local state, skip
+    const existingLocal = transcriptions.get(messageId)
+    if (existingLocal) {
       return
     }
 
@@ -1640,14 +1647,29 @@ export default function ConversationsPage() {
       })
 
       const result = await response.json()
+      console.log('[Transcription] API Response:', result)
 
       if (!response.ok) {
-        throw new Error(result.error?.message || 'Erro ao transcrever')
+        throw new Error(result.error?.message || result.message || 'Erro ao transcrever')
       }
 
-      const transcription = result.data?.transcription || ''
-      setTranscriptions(prev => new Map(prev).set(messageId, transcription))
-      toast.success('Áudio transcrito com sucesso!')
+      // Handle both direct data and nested data structure
+      const transcriptionText = result.data?.transcription || result.transcription || ''
+
+      console.log('[Transcription] Extracted text:', transcriptionText)
+
+      if (transcriptionText) {
+        // Update local state immediately
+        setTranscriptions(prev => {
+          const newMap = new Map(prev)
+          newMap.set(messageId, transcriptionText)
+          console.log('[Transcription] Updated state for message:', messageId)
+          return newMap
+        })
+        toast.success('Áudio transcrito!')
+      } else {
+        toast.warning('Transcrição vazia retornada')
+      }
     } catch (error: any) {
       console.error('[Transcription] Error:', error)
       toast.error(error.message || 'Erro ao transcrever áudio')
