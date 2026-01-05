@@ -2914,7 +2914,7 @@ export default function ConversationsPage() {
                                   Seu navegador não suporta vídeo.
                                 </video>
                               )}
-                              {/* Audio & Voice (PTT) - com suporte a carregamento lazy e transcrição */}
+                              {/* Audio & Voice (PTT) - Redesigned UI/UX */}
                               {(message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
                                 const audioUrl = loadedAudioUrls.get(message.id) || message.mediaUrl
                                 const isLoading = loadingAudioIds.has(message.id)
@@ -2922,80 +2922,107 @@ export default function ConversationsPage() {
                                 const existingTranscription = transcriptions.get(message.id) || ('transcription' in message ? message.transcription : null)
 
                                 return (
-                                  <div className="flex flex-col gap-1" role="group" aria-label="Mensagem de áudio">
-                                    <div className="flex items-center gap-2">
-                                      <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                  <div className="flex flex-col gap-2 min-w-[280px] max-w-[320px]" role="group" aria-label="Mensagem de áudio">
+                                    {/* Audio Player Container */}
+                                    <div className={cn(
+                                      "flex items-center gap-3 p-3 rounded-xl",
+                                      message.direction === 'OUTBOUND'
+                                        ? "bg-emerald-600/20"
+                                        : "bg-slate-200/50 dark:bg-slate-700/50"
+                                    )}>
+                                      {/* Mic Icon */}
+                                      <div className={cn(
+                                        "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
+                                        message.direction === 'OUTBOUND'
+                                          ? "bg-emerald-500/30"
+                                          : "bg-slate-300/50 dark:bg-slate-600/50"
+                                      )}>
+                                        <Mic className="h-5 w-5 text-current" aria-hidden="true" />
+                                      </div>
 
-                                      {audioUrl ? (
-                                        <>
+                                      {/* Audio Content */}
+                                      <div className="flex-1 min-w-0">
+                                        {audioUrl ? (
                                           <audio
                                             src={audioUrl}
                                             controls
                                             preload="metadata"
-                                            className="w-full max-w-[250px] h-10"
-                                            aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
+                                            className="w-full h-8"
+                                            style={{
+                                              filter: 'hue-rotate(0deg)',
+                                              maxWidth: '200px'
+                                            }}
+                                            aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'}`}
                                           >
                                             Seu navegador não suporta áudio.
                                           </audio>
+                                        ) : isLoading ? (
+                                          <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                            <span>Carregando...</span>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleLoadAudio(message.id)}
+                                            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
+                                          >
+                                            <Play className="h-4 w-4" />
+                                            <span>Carregar áudio</span>
+                                          </button>
+                                        )}
+                                      </div>
 
-                                          {/* Transcription button */}
+                                      {/* Action Buttons */}
+                                      {audioUrl && (
+                                        <div className="flex items-center gap-1 flex-shrink-0">
+                                          {/* Transcribe Button */}
                                           <button
                                             onClick={() => handleTranscribeAudio(message.id)}
                                             disabled={isTranscribing || !!existingTranscription}
                                             className={cn(
-                                              "p-1.5 rounded transition-colors",
+                                              "p-2 rounded-lg transition-all",
                                               existingTranscription
-                                                ? "text-emerald-500 cursor-default"
-                                                : "hover:bg-background/20"
+                                                ? "text-emerald-500 bg-emerald-500/10"
+                                                : isTranscribing
+                                                  ? "text-muted-foreground"
+                                                  : "hover:bg-black/10 dark:hover:bg-white/10"
                                             )}
-                                            title={existingTranscription ? "Já transcrito" : "Transcrever com IA"}
+                                            title={existingTranscription ? "Transcrito" : isTranscribing ? "Transcrevendo..." : "Transcrever"}
                                             aria-label="Transcrever áudio"
                                           >
                                             {isTranscribing ? (
-                                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                              <Loader2 className="h-4 w-4 animate-spin" />
                                             ) : (
-                                              <Languages className="h-4 w-4" aria-hidden="true" />
+                                              <Languages className="h-4 w-4" />
                                             )}
                                           </button>
 
-                                          {/* Download button */}
+                                          {/* Download Button */}
                                           <a
                                             href={audioUrl}
                                             download
-                                            className="p-1.5 hover:bg-background/20 rounded transition-colors"
-                                            title="Baixar áudio"
+                                            className="p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-all"
+                                            title="Baixar"
                                             aria-label="Baixar áudio"
                                           >
-                                            <Download className="h-4 w-4" aria-hidden="true" />
+                                            <Download className="h-4 w-4" />
                                           </a>
-                                        </>
-                                      ) : (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-10 px-4"
-                                          onClick={() => handleLoadAudio(message.id)}
-                                          disabled={isLoading}
-                                        >
-                                          {isLoading ? (
-                                            <>
-                                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                              Carregando...
-                                            </>
-                                          ) : (
-                                            <>
-                                              <Play className="h-4 w-4 mr-2" />
-                                              Carregar áudio
-                                            </>
-                                          )}
-                                        </Button>
+                                        </div>
                                       )}
                                     </div>
 
-                                    {/* Show transcription if available */}
+                                    {/* Transcription Display */}
                                     {existingTranscription && (
-                                      <div className="text-xs text-muted-foreground bg-background/30 rounded px-2 py-1 italic">
-                                        📝 {existingTranscription}
+                                      <div className={cn(
+                                        "text-xs px-3 py-2 rounded-lg border-l-2",
+                                        message.direction === 'OUTBOUND'
+                                          ? "bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-200"
+                                          : "bg-slate-100 dark:bg-slate-800 border-slate-400 text-slate-700 dark:text-slate-300"
+                                      )}>
+                                        <div className="flex items-start gap-2">
+                                          <Languages className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 opacity-60" />
+                                          <p className="leading-relaxed">{existingTranscription}</p>
+                                        </div>
                                       </div>
                                     )}
                                   </div>
@@ -3100,52 +3127,134 @@ export default function ConversationsPage() {
                             const audioUrl = loadedAudioUrls.get(message.id)
                             const isLoading = loadingAudioIds.has(message.id)
                             const hasFailed = failedAudioIds.has(message.id)
+                            const isTranscribing = transcribingIds.has(message.id)
+                            const existingTranscription = transcriptions.get(message.id) || ('transcription' in message ? message.transcription : null)
 
                             return (
-                              <div className="flex items-center gap-2 mb-2" role="group" aria-label="Mensagem de áudio">
-                                <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                              <div className="flex flex-col gap-2 min-w-[280px] max-w-[320px]" role="group" aria-label="Mensagem de áudio">
+                                {/* Audio Player Container */}
+                                <div className={cn(
+                                  "flex items-center gap-3 p-3 rounded-xl",
+                                  message.direction === 'OUTBOUND'
+                                    ? "bg-emerald-600/20"
+                                    : "bg-slate-200/50 dark:bg-slate-700/50"
+                                )}>
+                                  {/* Mic Icon */}
+                                  <div className={cn(
+                                    "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
+                                    hasFailed
+                                      ? "bg-red-500/20"
+                                      : message.direction === 'OUTBOUND'
+                                        ? "bg-emerald-500/30"
+                                        : "bg-slate-300/50 dark:bg-slate-600/50"
+                                  )}>
+                                    {hasFailed ? (
+                                      <VolumeX className="h-5 w-5 text-red-500" aria-hidden="true" />
+                                    ) : (
+                                      <Mic className="h-5 w-5 text-current" aria-hidden="true" />
+                                    )}
+                                  </div>
 
-                                {audioUrl ? (
-                                  <>
-                                    <audio
-                                      src={audioUrl}
-                                      controls
-                                      preload="metadata"
-                                      className="w-full max-w-[280px] h-12"
-                                      aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
-                                    >
-                                      Seu navegador não suporta áudio.
-                                    </audio>
-                                    <a
-                                      href={audioUrl}
-                                      download
-                                      className="p-1.5 hover:bg-background/20 rounded transition-colors"
-                                      title="Baixar áudio"
-                                      aria-label="Baixar áudio"
-                                    >
-                                      <Download className="h-4 w-4" aria-hidden="true" />
-                                    </a>
-                                  </>
-                                ) : hasFailed ? (
-                                  <div className="flex items-center gap-2 text-muted-foreground/70 text-sm py-2 px-3 bg-muted/50 rounded-lg">
-                                    <VolumeX className="h-4 w-4 flex-shrink-0" />
-                                    <span>Áudio indisponível</span>
+                                  {/* Audio Content */}
+                                  <div className="flex-1 min-w-0">
+                                    {audioUrl ? (
+                                      <audio
+                                        src={audioUrl}
+                                        controls
+                                        preload="metadata"
+                                        className="w-full h-8"
+                                        style={{ maxWidth: '200px' }}
+                                        aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'}`}
+                                      >
+                                        Seu navegador não suporta áudio.
+                                      </audio>
+                                    ) : hasFailed ? (
+                                      <div className="flex flex-col gap-1">
+                                        <span className="text-sm text-red-500 dark:text-red-400">Áudio indisponível</span>
+                                        <button
+                                          onClick={() => {
+                                            // Remove from failed and retry
+                                            setFailedAudioIds(prev => {
+                                              const next = new Set(prev)
+                                              next.delete(message.id)
+                                              return next
+                                            })
+                                            handleLoadAudio(message.id)
+                                          }}
+                                          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                                        >
+                                          <RefreshCw className="h-3 w-3" />
+                                          Tentar novamente
+                                        </button>
+                                      </div>
+                                    ) : isLoading ? (
+                                      <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Carregando...</span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleLoadAudio(message.id)}
+                                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
+                                      >
+                                        <Play className="h-4 w-4" />
+                                        <span>Carregar áudio</span>
+                                      </button>
+                                    )}
                                   </div>
-                                ) : isLoading ? (
-                                  <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span>Carregando áudio...</span>
+
+                                  {/* Action Buttons */}
+                                  {audioUrl && (
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      {/* Transcribe Button */}
+                                      <button
+                                        onClick={() => handleTranscribeAudio(message.id)}
+                                        disabled={isTranscribing || !!existingTranscription}
+                                        className={cn(
+                                          "p-2 rounded-lg transition-all",
+                                          existingTranscription
+                                            ? "text-emerald-500 bg-emerald-500/10"
+                                            : isTranscribing
+                                              ? "text-muted-foreground"
+                                              : "hover:bg-black/10 dark:hover:bg-white/10"
+                                        )}
+                                        title={existingTranscription ? "Transcrito" : isTranscribing ? "Transcrevendo..." : "Transcrever"}
+                                        aria-label="Transcrever áudio"
+                                      >
+                                        {isTranscribing ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Languages className="h-4 w-4" />
+                                        )}
+                                      </button>
+
+                                      {/* Download Button */}
+                                      <a
+                                        href={audioUrl}
+                                        download
+                                        className="p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-all"
+                                        title="Baixar"
+                                        aria-label="Baixar áudio"
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Transcription Display */}
+                                {existingTranscription && (
+                                  <div className={cn(
+                                    "text-xs px-3 py-2 rounded-lg border-l-2",
+                                    message.direction === 'OUTBOUND'
+                                      ? "bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-200"
+                                      : "bg-slate-100 dark:bg-slate-800 border-slate-400 text-slate-700 dark:text-slate-300"
+                                  )}>
+                                    <div className="flex items-start gap-2">
+                                      <Languages className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 opacity-60" />
+                                      <p className="leading-relaxed">{existingTranscription}</p>
+                                    </div>
                                   </div>
-                                ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 px-3"
-                                    onClick={() => handleLoadAudio(message.id)}
-                                  >
-                                    <Play className="h-4 w-4 mr-1" />
-                                    Carregar
-                                  </Button>
                                 )}
                               </div>
                             )
