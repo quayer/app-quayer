@@ -939,6 +939,60 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
         organizationId: instance.organizationId,
       });
 
+      // ⭐ DOWNLOAD MEDIA FOR OUTBOUND MESSAGES (same as INBOUND)
+      // UAZapi doesn't always include full media in webhook payload
+      let mediaUrl: string | null = message.media?.mediaUrl || null;
+      const hasMedia = message.media && ['image', 'video', 'audio', 'voice', 'ptt', 'document', 'sticker'].includes(message.type);
+
+      if (hasMedia && message.media?.messageId) {
+        console.log(`[Webhook] 📥 Downloading OUTBOUND media for message ${message.media.messageId}`);
+
+        try {
+          // Buscar token da conexão
+          const connectionWithToken = await database.connection.findUnique({
+            where: { id: instanceId },
+            select: { uazapiToken: true },
+          });
+
+          if (connectionWithToken?.uazapiToken) {
+            const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
+            const downloadResponse = await fetch(`${UAZAPI_URL}/chat/downloadBase64/${message.media.messageId}`, {
+              method: 'GET',
+              headers: {
+                'token': connectionWithToken.uazapiToken,
+              },
+            });
+
+            if (downloadResponse.ok) {
+              const downloadData = await downloadResponse.json();
+              const hasFileUrl = downloadData.fileURL || downloadData.fileUrl;
+              const hasBase64 = downloadData.base64Data || downloadData.base64;
+              const isAudio = ['audio', 'voice', 'ptt'].includes(message.type);
+
+              // Preferir base64 para áudios (evita CORS), senão usar URL
+              if (hasBase64 && isAudio) {
+                const base64 = downloadData.base64Data || downloadData.base64;
+                const mimeType = message.media.mimeType || downloadData.mimetype || 'audio/ogg';
+                mediaUrl = `data:${mimeType};base64,${base64}`;
+                console.log(`[Webhook] OUTBOUND media downloaded as base64 (${mimeType})`);
+              } else if (hasFileUrl) {
+                mediaUrl = downloadData.fileURL || downloadData.fileUrl;
+                console.log(`[Webhook] OUTBOUND media URL obtained: ${mediaUrl?.substring(0, 50)}...`);
+              } else if (hasBase64) {
+                const base64 = downloadData.base64Data || downloadData.base64;
+                const mimeType = message.media.mimeType || downloadData.mimetype || 'application/octet-stream';
+                mediaUrl = `data:${mimeType};base64,${base64}`;
+                console.log(`[Webhook] OUTBOUND media downloaded as base64 (${mimeType})`);
+              }
+            } else {
+              console.warn(`[Webhook] Failed to download OUTBOUND media: ${downloadResponse.status}`);
+            }
+          }
+        } catch (downloadError) {
+          console.error('[Webhook] OUTBOUND media download failed:', downloadError);
+        }
+      }
+
       // Salvar mensagem externa
       const savedMessage = await database.message.create({
         data: {
@@ -951,13 +1005,16 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
           author: 'AGENT', // Mensagem enviada pelo telefone (humano), não pelo sistema
           content: message.content || '',
           status: 'sent',
-          mediaUrl: message.media?.mediaUrl || null,
+          mediaUrl: mediaUrl,
+          mediaType: message.media?.type || null,
+          mimeType: message.media?.mimeType || null,
           fileName: message.media?.fileName || null,
+          mediaDuration: message.media?.duration || null,
           sentAt: new Date(),
         },
       });
 
-      console.log(`[Webhook] ✅ External outbound message saved: ${savedMessage.id}`);
+      console.log(`[Webhook] ✅ External outbound message saved: ${savedMessage.id} (hasMedia: ${!!mediaUrl})`);
 
       // Auto-pause IA quando humano responde pelo WhatsApp
       try {
