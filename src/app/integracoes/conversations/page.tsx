@@ -61,6 +61,12 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -122,6 +128,10 @@ import {
   VolumeX,
   ExternalLink,
   Languages,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -1540,6 +1550,28 @@ export default function ConversationsPage() {
   // Transcrição de áudio
   const [transcribingIds, setTranscribingIds] = useState<Set<string>>(new Set())
   const [transcriptions, setTranscriptions] = useState<Map<string, string>>(new Map())
+
+  // PDF Fullscreen Modal
+  const [pdfModalOpen, setPdfModalOpen] = useState(false)
+  const [pdfModalUrl, setPdfModalUrl] = useState<string | null>(null)
+  const [pdfModalFileName, setPdfModalFileName] = useState<string>('Documento')
+  const [pdfZoom, setPdfZoom] = useState(100)
+
+  // Handle opening PDF in fullscreen modal
+  const handleOpenPdfModal = useCallback((url: string, fileName: string) => {
+    setPdfModalUrl(url)
+    setPdfModalFileName(fileName)
+    setPdfZoom(100)
+    setPdfModalOpen(true)
+  }, [])
+
+  // Handle closing PDF modal
+  const handleClosePdfModal = useCallback(() => {
+    setPdfModalOpen(false)
+    setPdfModalUrl(null)
+    setPdfModalFileName('Documento')
+    setPdfZoom(100)
+  }, [])
 
   // Handle loading audio from API when mediaUrl is not available
   const handleLoadAudio = useCallback(async (messageId: string) => {
@@ -2978,15 +3010,33 @@ export default function ConversationsPage() {
 
                                 return (
                                   <div className="flex flex-col gap-2">
-                                    {/* PDF Preview */}
+                                    {/* PDF Preview - Clickable to open fullscreen */}
                                     {isPdf && message.mediaUrl && (
-                                      <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white">
+                                      <div
+                                        className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white cursor-pointer group"
+                                        onClick={() => handleOpenPdfModal(message.mediaUrl!, fileName)}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault()
+                                            handleOpenPdfModal(message.mediaUrl!, fileName)
+                                          }
+                                        }}
+                                        aria-label="Clique para abrir PDF em tela cheia"
+                                      >
                                         <embed
                                           src={message.mediaUrl}
                                           type="application/pdf"
-                                          className="w-full h-[300px] min-w-[250px]"
+                                          className="w-full h-[300px] min-w-[250px] pointer-events-none"
                                           title={fileName}
                                         />
+                                        {/* Fullscreen overlay on hover */}
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                          <div className="bg-white/90 dark:bg-slate-800/90 rounded-full p-3 shadow-lg">
+                                            <Maximize2 className="h-6 w-6 text-slate-700 dark:text-slate-200" />
+                                          </div>
+                                        </div>
                                       </div>
                                     )}
 
@@ -2994,6 +3044,18 @@ export default function ConversationsPage() {
                                     <div className="flex items-center gap-2 p-2 bg-background/20 rounded">
                                       <FileText className="h-6 w-6 flex-shrink-0 text-red-500" aria-hidden="true" />
                                       <span className="text-sm truncate flex-1">{fileName}</span>
+
+                                      {/* Fullscreen button for PDF */}
+                                      {isPdf && message.mediaUrl && (
+                                        <button
+                                          onClick={() => handleOpenPdfModal(message.mediaUrl!, fileName)}
+                                          className="p-1.5 hover:bg-background/30 rounded transition-colors"
+                                          title="Abrir em tela cheia"
+                                          aria-label="Abrir PDF em tela cheia"
+                                        >
+                                          <Maximize2 className="h-4 w-4" aria-hidden="true" />
+                                        </button>
+                                      )}
 
                                       {/* Download button */}
                                       <a
@@ -3619,6 +3681,106 @@ export default function ConversationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* PDF Fullscreen Modal */}
+      <Dialog open={pdfModalOpen} onOpenChange={(open) => !open && handleClosePdfModal()}>
+        <DialogContent
+          className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 gap-0"
+          showCloseButton={false}
+        >
+          <DialogHeader className="p-4 border-b flex-row items-center justify-between space-y-0">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-red-500" />
+              <span className="truncate max-w-[300px] sm:max-w-[500px]">{pdfModalFileName}</span>
+            </DialogTitle>
+            <div className="flex items-center gap-2">
+              {/* Zoom controls */}
+              <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                <button
+                  onClick={() => setPdfZoom(prev => Math.max(25, prev - 25))}
+                  className="p-1.5 hover:bg-background rounded transition-colors disabled:opacity-50"
+                  disabled={pdfZoom <= 25}
+                  title="Diminuir zoom"
+                  aria-label="Diminuir zoom"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </button>
+                <span className="text-sm font-medium min-w-[50px] text-center">{pdfZoom}%</span>
+                <button
+                  onClick={() => setPdfZoom(prev => Math.min(200, prev + 25))}
+                  className="p-1.5 hover:bg-background rounded transition-colors disabled:opacity-50"
+                  disabled={pdfZoom >= 200}
+                  title="Aumentar zoom"
+                  aria-label="Aumentar zoom"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setPdfZoom(100)}
+                  className="p-1.5 hover:bg-background rounded transition-colors"
+                  title="Resetar zoom"
+                  aria-label="Resetar zoom para 100%"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* External actions */}
+              {pdfModalUrl && (
+                <>
+                  <a
+                    href={pdfModalUrl}
+                    download={pdfModalFileName}
+                    className="p-2 hover:bg-muted rounded transition-colors"
+                    title="Baixar PDF"
+                    aria-label="Baixar PDF"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                  <a
+                    href={pdfModalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 hover:bg-muted rounded transition-colors"
+                    title="Abrir em nova aba"
+                    aria-label="Abrir PDF em nova aba"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </>
+              )}
+
+              {/* Close button */}
+              <button
+                onClick={handleClosePdfModal}
+                className="p-2 hover:bg-muted rounded transition-colors"
+                title="Fechar"
+                aria-label="Fechar visualizador de PDF"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </DialogHeader>
+
+          {/* PDF Content */}
+          <div className="flex-1 overflow-auto bg-slate-100 dark:bg-slate-900 p-4">
+            <div
+              className="flex items-center justify-center min-h-full"
+              style={{ transform: `scale(${pdfZoom / 100})`, transformOrigin: 'top center' }}
+            >
+              {pdfModalUrl && (
+                <embed
+                  src={pdfModalUrl}
+                  type="application/pdf"
+                  className="w-full bg-white shadow-lg rounded"
+                  style={{ height: 'calc(90vh - 80px)', minWidth: '600px' }}
+                  title={pdfModalFileName}
+                />
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   )
 }
