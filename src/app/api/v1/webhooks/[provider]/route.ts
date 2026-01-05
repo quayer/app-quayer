@@ -731,11 +731,23 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
 
           if (downloadResponse.ok) {
             const downloadData = await downloadResponse.json();
-            // UAZapi returns fileURL (URL pública) ou base64Data
-            if (downloadData.fileURL) {
+            const hasBase64 = downloadData.base64Data || downloadData.base64;
+            const hasFileUrl = downloadData.fileURL;
+            const isAudio = ['audio', 'voice', 'ptt'].includes(message.type) ||
+                           message.media.mimeType?.startsWith('audio/');
+
+            // ⭐ CRITICAL FIX: For audio, ALWAYS prefer base64 to avoid CORS/redirect issues
+            // External URLs often redirect or require auth, breaking inline playback
+            if (hasBase64 && isAudio) {
+              const base64 = downloadData.base64Data || downloadData.base64;
+              const mimeType = message.media.mimeType || downloadData.mimetype || downloadData.mimeType || 'audio/ogg';
+              mediaUrl = `data:${mimeType};base64,${base64}`;
+              console.log(`[Webhook] Audio saved as base64 (${mimeType}, ${base64.length} chars) - ensures inline playback`);
+            } else if (hasFileUrl) {
+              // For non-audio (images, documents, videos), external URLs are fine
               mediaUrl = downloadData.fileURL;
               console.log(`[Webhook] Media downloaded via URL: ${mediaUrl.substring(0, 60)}...`);
-            } else if (downloadData.base64Data || downloadData.base64) {
+            } else if (hasBase64) {
               const base64 = downloadData.base64Data || downloadData.base64;
               const mimeType = message.media.mimeType || downloadData.mimetype || downloadData.mimeType || 'audio/ogg';
               mediaUrl = `data:${mimeType};base64,${base64}`;

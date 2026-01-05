@@ -120,6 +120,8 @@ import {
   Download,
   ChevronDown,
   VolumeX,
+  ExternalLink,
+  Languages,
 } from 'lucide-react'
 import { api } from '@/igniter.client'
 import { toast } from 'sonner'
@@ -287,6 +289,8 @@ interface DBMessage {
   status: string
   mediaUrl: string | null
   fileName: string | null
+  mimeType: string | null
+  transcription: string | null
   createdAt: string
   contact: {
     id: string
@@ -1533,6 +1537,10 @@ export default function ConversationsPage() {
   // Cache de áudios que falharam ao carregar (não tentar novamente)
   const [failedAudioIds, setFailedAudioIds] = useState<Set<string>>(new Set())
 
+  // Transcrição de áudio
+  const [transcribingIds, setTranscribingIds] = useState<Set<string>>(new Set())
+  const [transcriptions, setTranscriptions] = useState<Map<string, string>>(new Map())
+
   // Handle loading audio from API when mediaUrl is not available
   const handleLoadAudio = useCallback(async (messageId: string) => {
     // Already loading, loaded, or failed
@@ -1581,6 +1589,44 @@ export default function ConversationsPage() {
       })
     }
   }, [loadingAudioIds, loadedAudioUrls, failedAudioIds])
+
+  // Handle audio transcription using AI
+  const handleTranscribeAudio = useCallback(async (messageId: string) => {
+    if (transcribingIds.has(messageId) || transcriptions.has(messageId)) {
+      return
+    }
+
+    setTranscribingIds(prev => new Set(prev).add(messageId))
+
+    try {
+      const response = await fetch(`/api/v1/messages/media/transcribe/${messageId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error?.message || 'Erro ao transcrever')
+      }
+
+      const transcription = result.data?.transcription || ''
+      setTranscriptions(prev => new Map(prev).set(messageId, transcription))
+      toast.success('Áudio transcrito com sucesso!')
+    } catch (error: any) {
+      console.error('[Transcription] Error:', error)
+      toast.error(error.message || 'Erro ao transcrever áudio')
+    } finally {
+      setTranscribingIds(prev => {
+        const next = new Set(prev)
+        next.delete(messageId)
+        return next
+      })
+    }
+  }, [transcribingIds, transcriptions])
 
   // Auto-load audio messages that don't have mediaUrl
   // This provides better UX - audio is ready to play when user sees it
@@ -2836,73 +2882,145 @@ export default function ConversationsPage() {
                                   Seu navegador não suporta vídeo.
                                 </video>
                               )}
-                              {/* Audio & Voice (PTT) - com suporte a carregamento lazy */}
+                              {/* Audio & Voice (PTT) - com suporte a carregamento lazy e transcrição */}
                               {(message.type === 'audio' || message.type === 'voice' || message.type === 'ptt') && (() => {
                                 const audioUrl = loadedAudioUrls.get(message.id) || message.mediaUrl
                                 const isLoading = loadingAudioIds.has(message.id)
+                                const isTranscribing = transcribingIds.has(message.id)
+                                const existingTranscription = transcriptions.get(message.id) || ('transcription' in message ? message.transcription : null)
 
                                 return (
-                                  <div className="flex items-center gap-2" role="group" aria-label="Mensagem de áudio">
-                                    <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                  <div className="flex flex-col gap-1" role="group" aria-label="Mensagem de áudio">
+                                    <div className="flex items-center gap-2">
+                                      <Mic className="h-5 w-5 text-muted-foreground flex-shrink-0" aria-hidden="true" />
 
-                                    {audioUrl ? (
-                                      <>
-                                        <audio
-                                          src={audioUrl}
-                                          controls
-                                          preload="metadata"
-                                          className="w-full max-w-[280px] h-12"
-                                          aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
+                                      {audioUrl ? (
+                                        <>
+                                          <audio
+                                            src={audioUrl}
+                                            controls
+                                            preload="metadata"
+                                            className="w-full max-w-[250px] h-10"
+                                            aria-label={`Áudio ${message.direction === 'OUTBOUND' ? 'enviado' : 'recebido'} às ${safeFormatDate(message.createdAt, "HH:mm")}`}
+                                          >
+                                            Seu navegador não suporta áudio.
+                                          </audio>
+
+                                          {/* Transcription button */}
+                                          <button
+                                            onClick={() => handleTranscribeAudio(message.id)}
+                                            disabled={isTranscribing || !!existingTranscription}
+                                            className={cn(
+                                              "p-1.5 rounded transition-colors",
+                                              existingTranscription
+                                                ? "text-emerald-500 cursor-default"
+                                                : "hover:bg-background/20"
+                                            )}
+                                            title={existingTranscription ? "Já transcrito" : "Transcrever com IA"}
+                                            aria-label="Transcrever áudio"
+                                          >
+                                            {isTranscribing ? (
+                                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                            ) : (
+                                              <Languages className="h-4 w-4" aria-hidden="true" />
+                                            )}
+                                          </button>
+
+                                          {/* Download button */}
+                                          <a
+                                            href={audioUrl}
+                                            download
+                                            className="p-1.5 hover:bg-background/20 rounded transition-colors"
+                                            title="Baixar áudio"
+                                            aria-label="Baixar áudio"
+                                          >
+                                            <Download className="h-4 w-4" aria-hidden="true" />
+                                          </a>
+                                        </>
+                                      ) : (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-10 px-4"
+                                          onClick={() => handleLoadAudio(message.id)}
+                                          disabled={isLoading}
                                         >
-                                          Seu navegador não suporta áudio.
-                                        </audio>
-                                        <a
-                                          href={audioUrl}
-                                          download
-                                          className="p-1.5 hover:bg-background/20 rounded transition-colors"
-                                          title="Baixar áudio"
-                                          aria-label="Baixar áudio"
-                                        >
-                                          <Download className="h-4 w-4" aria-hidden="true" />
-                                        </a>
-                                      </>
-                                    ) : (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-10 px-4"
-                                        onClick={() => handleLoadAudio(message.id)}
-                                        disabled={isLoading}
-                                      >
-                                        {isLoading ? (
-                                          <>
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                            Carregando...
-                                          </>
-                                        ) : (
-                                          <>
-                                            <Play className="h-4 w-4 mr-2" />
-                                            Carregar áudio
-                                          </>
-                                        )}
-                                      </Button>
+                                          {isLoading ? (
+                                            <>
+                                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                              Carregando...
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Play className="h-4 w-4 mr-2" />
+                                              Carregar áudio
+                                            </>
+                                          )}
+                                        </Button>
+                                      )}
+                                    </div>
+
+                                    {/* Show transcription if available */}
+                                    {existingTranscription && (
+                                      <div className="text-xs text-muted-foreground bg-background/30 rounded px-2 py-1 italic">
+                                        📝 {existingTranscription}
+                                      </div>
                                     )}
                                   </div>
                                 )
                               })()}
-                              {/* Document */}
-                              {message.type === 'document' && (
-                                <a
-                                  href={message.mediaUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-2 p-2 bg-background/20 rounded hover:bg-background/30 transition-colors"
-                                  aria-label={`Abrir documento: ${safeRenderContent(message.fileName) || 'Documento'}`}
-                                >
-                                  <FileText className="h-8 w-8 flex-shrink-0" aria-hidden="true" />
-                                  <span className="text-sm truncate">{safeRenderContent(message.fileName) || 'Documento'}</span>
-                                </a>
-                              )}
+                              {/* Document - with inline PDF preview */}
+                              {message.type === 'document' && (() => {
+                                const fileName = safeRenderContent(message.fileName) || 'Documento'
+                                const isPdf = message.mimeType?.includes('pdf') ||
+                                             fileName.toLowerCase().endsWith('.pdf') ||
+                                             message.mediaUrl?.includes('application/pdf')
+
+                                return (
+                                  <div className="flex flex-col gap-2">
+                                    {/* PDF Preview */}
+                                    {isPdf && message.mediaUrl && (
+                                      <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white">
+                                        <embed
+                                          src={message.mediaUrl}
+                                          type="application/pdf"
+                                          className="w-full h-[300px] min-w-[250px]"
+                                          title={fileName}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {/* Document info with actions */}
+                                    <div className="flex items-center gap-2 p-2 bg-background/20 rounded">
+                                      <FileText className="h-6 w-6 flex-shrink-0 text-red-500" aria-hidden="true" />
+                                      <span className="text-sm truncate flex-1">{fileName}</span>
+
+                                      {/* Download button */}
+                                      <a
+                                        href={message.mediaUrl}
+                                        download={fileName}
+                                        className="p-1.5 hover:bg-background/30 rounded transition-colors"
+                                        title="Baixar documento"
+                                        aria-label="Baixar documento"
+                                      >
+                                        <Download className="h-4 w-4" aria-hidden="true" />
+                                      </a>
+
+                                      {/* Open in new tab */}
+                                      <a
+                                        href={message.mediaUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1.5 hover:bg-background/30 rounded transition-colors"
+                                        title="Abrir em nova aba"
+                                        aria-label="Abrir documento em nova aba"
+                                      >
+                                        <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                )
+                              })()}
                               {/* Sticker (treated as image) */}
                               {message.type === 'sticker' && (
                                 <img
