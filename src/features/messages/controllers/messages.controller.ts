@@ -84,6 +84,9 @@ export const messagesController = igniter.controller({
 
         // NOVOS: Para mensagens interativas (list e buttons)
         interactiveData: z.any().optional(),
+
+        // Idempotency key para evitar duplicatas em retries
+        idempotencyKey: z.string().optional(),
       }),
       use: [authProcedure({ required: true })],
       handler: async ({ request, response, context }) => {
@@ -123,6 +126,7 @@ export const messagesController = igniter.controller({
           delayMs,
           showTyping,
           interactiveData,
+          idempotencyKey,
         } = request.body;
 
         // 1. BUSCAR SESSÃO
@@ -167,12 +171,58 @@ export const messagesController = igniter.controller({
           console.log(`[MessagesController.create] Session ${sessionId} reopened automatically for message send`);
         }
 
+        // 3.5. IDEMPOTENCY CHECK: Evitar duplicatas em retries
+        // Se uma idempotencyKey foi fornecida, verificar se já existe mensagem com essa chave
+        if (idempotencyKey) {
+          // Buscar mensagem com a mesma idempotencyKey no metadata
+          // Usamos raw query pois Prisma não suporta filtro em campos JSON de forma simples
+          const existingMessages = await database.message.findMany({
+            where: {
+              sessionId,
+              direction: 'OUTBOUND',
+              // Apenas mensagens criadas nos últimos 5 minutos (janela de idempotência)
+              createdAt: {
+                gte: new Date(Date.now() - 5 * 60 * 1000),
+              },
+            },
+            include: {
+              contact: {
+                select: {
+                  id: true,
+                  phoneNumber: true,
+                  name: true,
+                  profilePicUrl: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 20, // Limitar busca para performance
+          });
+
+          // Procurar mensagem com idempotencyKey no metadata
+          const existingMessage = existingMessages.find(msg => {
+            const meta = msg.metadata as { idempotencyKey?: string } | null;
+            return meta?.idempotencyKey === idempotencyKey;
+          });
+
+          if (existingMessage) {
+            console.log(`[MessagesController.create] Idempotency hit - returning existing message ${existingMessage.id} for key ${idempotencyKey}`);
+            return response.json({
+              message: existingMessage,
+              idempotencyHit: true,
+            });
+          }
+        }
+
         // 4. GERAR waMessageId único
         const timestamp = Date.now();
         const random = Math.random().toString(36).substring(7);
         const waMessageId = `msg_${timestamp}_${random}`;
 
         // 5. SALVAR MENSAGEM NO BANCO
+        // Se idempotencyKey foi fornecida, armazenar no metadata
+        const messageMetadata = idempotencyKey ? { idempotencyKey } : undefined;
+
         const message = await database.message.create({
           data: {
             sessionId,
@@ -186,6 +236,7 @@ export const messagesController = igniter.controller({
             status,
             mediaUrl,
             fileName: filename,
+            metadata: messageMetadata,
           },
           include: {
             contact: {

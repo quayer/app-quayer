@@ -1106,6 +1106,8 @@ export default function ConversationsPage() {
           sendExternalMessage: true,
           showTyping: true,
           delayMs: 500,
+          // Idempotency key para evitar duplicatas em retries
+          idempotencyKey: data.tempId,
         }
       })
       return { ...response, tempId: data.tempId }
@@ -1190,6 +1192,8 @@ export default function ConversationsPage() {
           sendExternalMessage: true,
           showTyping: true,
           delayMs: 500,
+          // Mesmo idempotencyKey do envio original para evitar duplicatas
+          idempotencyKey: data.tempId,
         }
       })
       return { ...response, tempId: data.tempId }
