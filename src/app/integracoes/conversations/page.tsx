@@ -728,12 +728,12 @@ export default function ConversationsPage() {
     // Nota: wa_isGroup pode vir como string "true"/"false" ou boolean
     if (chatTypeFilter === 'direct') {
       filtered = filtered.filter(chat => {
-        const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+        const isGroup = chat.wa_isGroup === true || String(chat.wa_isGroup) === 'true'
         return !isGroup
       })
     } else if (chatTypeFilter === 'groups') {
       filtered = filtered.filter(chat => {
-        const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+        const isGroup = chat.wa_isGroup === true || String(chat.wa_isGroup) === 'true'
         return isGroup
       })
     }
@@ -2268,7 +2268,7 @@ export default function ConversationsPage() {
               // Para grupos, se o nome parece ser um ID (sem espaços, parece hash), mostrar "Grupo"
               const rawName = safeRenderContent(chat.wa_name)
               const looksLikeId = rawName && /^[a-z0-9]{10,}$/i.test(rawName) && !rawName.includes(' ')
-              const isGroup = chat.wa_isGroup === true || chat.wa_isGroup === 'true'
+              const isGroup = chat.wa_isGroup === true || String(chat.wa_isGroup) === 'true'
               const displayName = isGroup && (!rawName || looksLikeId)
                 ? 'Grupo'
                 : rawName || 'Contato'

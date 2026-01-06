@@ -41,10 +41,70 @@ import { webhookRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-l
 import { logger } from '@/lib/logging/logger';
 import crypto from 'crypto';
 
+// ⭐ Webhook Security & Performance Improvements
+import {
+  validateWebhookPayload,
+  withMessageLock,
+  sanitizeContent,
+  sanitizeContactName,
+  getCachedContact,
+  getCachedConnection,
+  getCachedConnectionByToken,
+  updateContactCache,
+  createWebhookTrace,
+  trace,
+  addTraceAttributes,
+  type TraceContext,
+} from '@/lib/webhook';
+
 // Lazy import to avoid circular dependency during build
 async function getChatwootSyncService() {
   const { getChatwootSyncService: getService } = await import('@/features/chatwoot');
   return getService();
+}
+
+/**
+ * Download image URL and convert to base64 data URI
+ * Prevents URL expiration issues with WhatsApp CDN
+ */
+async function downloadImageAsBase64(imageUrl: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout for webhook
+
+    const response = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'image/*',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      // 403/404 are expected for expired/missing images
+      if (response.status !== 403 && response.status !== 404) {
+        console.warn(`[Webhook] Failed to download profile image: ${response.status}`);
+      }
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    if (!contentType.startsWith('image/')) {
+      console.warn(`[Webhook] Unexpected content type for profile image: ${contentType}`);
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    return `data:${contentType};base64,${base64}`;
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error('[Webhook] Error downloading profile image:', error.message);
+    }
+    return null;
+  }
 }
 
 // ============================================================================
@@ -461,11 +521,23 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     try {
       const profilePicUrl = await orchestrator.getProfilePicture(instanceId, provider, cleanNumber);
       if (profilePicUrl) {
+        // Convert to base64 to prevent URL expiration (WhatsApp CDN URLs expire quickly)
+        let finalUrl = profilePicUrl;
+        if (!profilePicUrl.startsWith('data:')) {
+          const base64Url = await downloadImageAsBase64(profilePicUrl);
+          if (base64Url) {
+            finalUrl = base64Url;
+            console.log(`[Webhook] Profile picture converted to base64 for ${cleanNumber}`);
+          } else {
+            // Fallback to original URL if base64 conversion fails
+            console.warn(`[Webhook] Could not convert profile picture to base64, using URL for ${cleanNumber}`);
+          }
+        }
         contact = await database.contact.update({
           where: { id: contact.id },
-          data: { profilePicUrl },
+          data: { profilePicUrl: finalUrl },
         });
-        console.log(`[Webhook] Profile picture updated for ${cleanNumber}: ${profilePicUrl}`);
+        console.log(`[Webhook] Profile picture updated for ${cleanNumber} (base64: ${finalUrl.startsWith('data:')})`);
       } else {
         console.log(`[Webhook] No profile picture returned for ${cleanNumber}`);
       }
@@ -944,8 +1016,9 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
       let mediaUrl: string | null = message.media?.mediaUrl || null;
       const hasMedia = message.media && ['image', 'video', 'audio', 'voice', 'ptt', 'document', 'sticker'].includes(message.type);
 
-      if (hasMedia && message.media?.messageId) {
-        console.log(`[Webhook] 📥 Downloading OUTBOUND media for message ${message.media.messageId}`);
+      // ⭐ OUTBOUND media download - use same endpoint as INBOUND (POST /message/download)
+      if (hasMedia && message.media?.id) {
+        console.log(`[Webhook] 📥 Downloading OUTBOUND media for message ${message.media.id}`);
 
         try {
           // Buscar token da conexão
@@ -956,11 +1029,19 @@ async function processOutgoingMessage(webhook: NormalizedWebhook): Promise<void>
 
           if (connectionWithToken?.uazapiToken) {
             const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com';
-            const downloadResponse = await fetch(`${UAZAPI_URL}/chat/downloadBase64/${message.media.messageId}`, {
-              method: 'GET',
+            // Use POST /message/download - same endpoint that works for INBOUND
+            const downloadResponse = await fetch(`${UAZAPI_URL}/message/download`, {
+              method: 'POST',
               headers: {
+                'Content-Type': 'application/json',
                 'token': connectionWithToken.uazapiToken,
               },
+              body: JSON.stringify({
+                id: message.media.id,
+                return_link: true,
+                generate_mp3: true,
+                return_base64: true,
+              }),
             });
 
             if (downloadResponse.ok) {

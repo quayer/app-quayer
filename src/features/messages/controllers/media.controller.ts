@@ -133,7 +133,6 @@ export const mediaController = igniter.controller({
                 connectionId: instanceId,
                 organizationId: connection.organizationId!,
                 status: 'ACTIVE',
-                attendanceStatus: 'WAITING',
               }
             })
             console.log(`[MediaController] Created new session: ${session.id}`)
@@ -327,7 +326,6 @@ export const mediaController = igniter.controller({
                 connectionId: instanceId,
                 organizationId: connection.organizationId!,
                 status: 'ACTIVE',
-                attendanceStatus: 'WAITING',
               }
             })
             console.log(`[MediaController] Created new session: ${session.id}`)
@@ -519,7 +517,6 @@ export const mediaController = igniter.controller({
                 connectionId: instanceId,
                 organizationId: connection.organizationId!,
                 status: 'ACTIVE',
-                attendanceStatus: 'WAITING',
               }
             })
             console.log(`[MediaController] Created new session: ${session.id}`)
@@ -717,7 +714,6 @@ export const mediaController = igniter.controller({
                 connectionId: instanceId,
                 organizationId: connection.organizationId!,
                 status: 'ACTIVE',
-                attendanceStatus: 'WAITING',
               }
             })
             console.log(`[MediaController] Created new session: ${session.id}`)
