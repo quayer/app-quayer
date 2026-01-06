@@ -1485,11 +1485,12 @@ export default function ConversationsPage() {
         await endpoint.mutate({
           body: {
             instanceId: selectedChatInstanceId,
-            chatId: waChatId, // Use WhatsApp chat ID, not session UUID
+            chatId: waChatId, // Use WhatsApp chat ID for UAZapi
             mediaBase64: base64,
             mimeType: selectedFile.type,
             fileName: selectedFile.name,
-            caption: messageText || undefined
+            caption: messageText || undefined,
+            sessionId: selectedChatId || undefined, // ⭐ CRITICAL: Pass session ID to ensure file appears in correct chat
           }
         })
 
@@ -1521,16 +1522,17 @@ export default function ConversationsPage() {
   const handleSendAudio = useCallback(async (audioBase64: string, mimeType: string, duration: number) => {
     // Use wa_chatid (WhatsApp chat ID) for UAZapi, not session UUID
     const waChatId = selectedChat?.wa_chatid
-    if (!selectedChatInstanceId || !waChatId) return
+    if (!selectedChatInstanceId || !waChatId || !selectedChatId) return
 
     try {
       await api.media.sendAudio.mutate({
         body: {
           instanceId: selectedChatInstanceId,
-          chatId: waChatId, // Use WhatsApp chat ID, not session UUID
+          chatId: waChatId, // Use WhatsApp chat ID for UAZapi
           mediaBase64: audioBase64,
           mimeType: mimeType,
           duration: duration,
+          sessionId: selectedChatId, // ⭐ CRITICAL: Pass session ID to ensure audio appears in correct chat
         }
       })
 
@@ -1542,7 +1544,7 @@ export default function ConversationsPage() {
       toast.error('Erro ao enviar audio', { description })
       throw error // Re-throw so AudioRecorder knows it failed
     }
-  }, [selectedChatInstanceId, selectedChat?.wa_chatid, refetchMessages])
+  }, [selectedChatInstanceId, selectedChat?.wa_chatid, selectedChatId, refetchMessages])
 
   // Cache de áudios que falharam ao carregar (não tentar novamente)
   const [failedAudioIds, setFailedAudioIds] = useState<Set<string>>(new Set())

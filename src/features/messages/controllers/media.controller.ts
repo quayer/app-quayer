@@ -18,6 +18,7 @@ const sendMediaSchema = z.object({
   mimeType: z.string().min(1, 'MIME type é obrigatório'),
   fileName: z.string().optional(),
   caption: z.string().optional(),
+  sessionId: z.string().uuid().optional(), // ⭐ CRITICAL: Use existing session to ensure message appears in correct chat
 })
 
 const sendAudioSchema = z.object({
@@ -26,6 +27,7 @@ const sendAudioSchema = z.object({
   mediaBase64: z.string().min(1, 'Audio base64 é obrigatório'),
   mimeType: z.string().min(1, 'MIME type é obrigatório'),
   duration: z.number().optional(), // Duration in seconds
+  sessionId: z.string().uuid().optional(), // ⭐ CRITICAL: Use existing session to ensure message appears in correct chat
 })
 
 export const mediaController = igniter.controller({
@@ -50,7 +52,7 @@ export const mediaController = igniter.controller({
       body: sendMediaSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, caption } = request.body
+          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, caption, sessionId: providedSessionId } = request.body
 
           // Buscar conexão (instância WhatsApp)
           const connection = await database.connection.findUnique({
@@ -94,48 +96,69 @@ export const mediaController = igniter.controller({
             return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
           }
 
-          // ========== SALVAR MENSAGEM NO BANCO ==========
-          // 1. Buscar ou criar contato
-          let contact = await database.contact.findUnique({
-            where: { phoneNumber: chatId }
-          })
+          // ========== BUSCAR/CRIAR SESSÃO E CONTATO ==========
+          let session: any
+          let contact: any
 
-          if (!contact) {
+          // ⭐ CRITICAL FIX: Se sessionId foi fornecido, usar essa sessão diretamente
+          if (providedSessionId) {
+            session = await database.chatSession.findUnique({
+              where: { id: providedSessionId },
+              include: { contact: true }
+            })
+
+            if (!session) {
+              return response.notFound('Sessão não encontrada')
+            }
+
+            if (session.connectionId !== instanceId) {
+              return response.badRequest('Sessão não pertence a esta conexão')
+            }
+
+            contact = session.contact
+            console.log(`[MediaController] Using provided session for image: ${session.id}`)
+          } else {
+            // Fallback: buscar/criar contato e sessão
             contact = await database.contact.findUnique({
-              where: { phoneNumber }
+              where: { phoneNumber: chatId }
             })
-          }
 
-          if (!contact) {
-            contact = await database.contact.create({
-              data: {
-                phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
-                name: phoneNumber,
-              }
-            })
-            console.log(`[MediaController] Created new contact: ${contact.id}`)
-          }
+            if (!contact) {
+              contact = await database.contact.findUnique({
+                where: { phoneNumber }
+              })
+            }
 
-          // 2. Buscar ou criar sessão
-          let session = await database.chatSession.findFirst({
-            where: {
-              contactId: contact.id,
-              connectionId: instanceId,
-              status: { not: 'CLOSED' }
-            },
-            orderBy: { createdAt: 'desc' }
-          })
+            if (!contact) {
+              contact = await database.contact.create({
+                data: {
+                  phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
+                  name: phoneNumber,
+                }
+              })
+              console.log(`[MediaController] Created new contact: ${contact.id}`)
+            }
 
-          if (!session) {
-            session = await database.chatSession.create({
-              data: {
+            session = await database.chatSession.findFirst({
+              where: {
                 contactId: contact.id,
                 connectionId: instanceId,
-                organizationId: connection.organizationId!,
-                status: 'ACTIVE',
-              }
+                status: { not: 'CLOSED' }
+              },
+              orderBy: { createdAt: 'desc' }
             })
-            console.log(`[MediaController] Created new session: ${session.id}`)
+
+            if (!session) {
+              session = await database.chatSession.create({
+                data: {
+                  contactId: contact.id,
+                  connectionId: instanceId,
+                  organizationId: connection.organizationId!,
+                  status: 'ACTIVE',
+                }
+              })
+              console.log(`[MediaController] Created new session: ${session.id}`)
+            }
           }
 
           // 3. Salvar mensagem de imagem no banco
@@ -242,7 +265,7 @@ export const mediaController = igniter.controller({
       body: sendMediaSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, fileName, caption } = request.body
+          const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, fileName, caption, sessionId: providedSessionId } = request.body
 
           // Buscar conexão (instância WhatsApp)
           const connection = await database.connection.findUnique({
@@ -287,48 +310,70 @@ export const mediaController = igniter.controller({
             return response.badRequest('mediaUrl ou mediaBase64 é obrigatório')
           }
 
-          // ========== SALVAR MENSAGEM NO BANCO ==========
-          // 1. Buscar ou criar contato
-          let contact = await database.contact.findUnique({
-            where: { phoneNumber: chatId }
-          })
+          // ========== BUSCAR/CRIAR SESSÃO E CONTATO ==========
+          let session: any
+          let contact: any
 
-          if (!contact) {
+          // ⭐ CRITICAL FIX: Se sessionId foi fornecido, usar essa sessão diretamente
+          if (providedSessionId) {
+            session = await database.chatSession.findUnique({
+              where: { id: providedSessionId },
+              include: { contact: true }
+            })
+
+            if (!session) {
+              return response.notFound('Sessão não encontrada')
+            }
+
+            if (session.connectionId !== instanceId) {
+              return response.badRequest('Sessão não pertence a esta conexão')
+            }
+
+            contact = session.contact
+            console.log(`[MediaController] Using provided session for document: ${session.id}`)
+          } else {
+            // Fallback: buscar/criar contato e sessão
             contact = await database.contact.findUnique({
-              where: { phoneNumber }
+              where: { phoneNumber: chatId }
             })
-          }
 
-          if (!contact) {
-            contact = await database.contact.create({
-              data: {
-                phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
-                name: phoneNumber,
-              }
-            })
-            console.log(`[MediaController] Created new contact: ${contact.id}`)
-          }
+            if (!contact) {
+              contact = await database.contact.findUnique({
+                where: { phoneNumber }
+              })
+            }
 
-          // 2. Buscar ou criar sessão
-          let session = await database.chatSession.findFirst({
-            where: {
-              contactId: contact.id,
-              connectionId: instanceId,
-              status: { not: 'CLOSED' }
-            },
-            orderBy: { createdAt: 'desc' }
-          })
+            if (!contact) {
+              contact = await database.contact.create({
+                data: {
+                  phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
+                  name: phoneNumber,
+                }
+              })
+              console.log(`[MediaController] Created new contact: ${contact.id}`)
+            }
 
-          if (!session) {
-            session = await database.chatSession.create({
-              data: {
+            // Buscar ou criar sessão
+            session = await database.chatSession.findFirst({
+              where: {
                 contactId: contact.id,
                 connectionId: instanceId,
-                organizationId: connection.organizationId!,
-                status: 'ACTIVE',
-              }
+                status: { not: 'CLOSED' }
+              },
+              orderBy: { createdAt: 'desc' }
             })
-            console.log(`[MediaController] Created new session: ${session.id}`)
+
+            if (!session) {
+              session = await database.chatSession.create({
+                data: {
+                  contactId: contact.id,
+                  connectionId: instanceId,
+                  organizationId: connection.organizationId!,
+                  status: 'ACTIVE',
+                }
+              })
+              console.log(`[MediaController] Created new session: ${session.id}`)
+            }
           }
 
           // 3. Salvar mensagem de documento no banco
@@ -437,7 +482,7 @@ export const mediaController = igniter.controller({
       body: sendAudioSchema,
       handler: async ({ request, response, context }) => {
         try {
-          const { instanceId, chatId, mediaBase64, mimeType, duration } = request.body
+          const { instanceId, chatId, mediaBase64, mimeType, duration, sessionId: providedSessionId } = request.body
 
           // Buscar conexão (instância WhatsApp)
           const connection = await database.connection.findUnique({
@@ -474,52 +519,72 @@ export const mediaController = igniter.controller({
             ? mediaBase64
             : `data:${mimeType};base64,${mediaBase64}`
 
-          // ========== SALVAR MENSAGEM NO BANCO ==========
-          // 1. Buscar ou criar contato pelo número
-          let contact = await database.contact.findUnique({
-            where: { phoneNumber: chatId } // chatId inclui @s.whatsapp.net
-          })
+          // ========== BUSCAR/CRIAR SESSÃO E CONTATO ==========
+          let session: any
+          let contact: any
 
-          if (!contact) {
-            // Tentar sem sufixo
+          // ⭐ CRITICAL FIX: Se sessionId foi fornecido, usar essa sessão diretamente
+          // Isso garante que o áudio aparece no chat correto no frontend
+          if (providedSessionId) {
+            session = await database.chatSession.findUnique({
+              where: { id: providedSessionId },
+              include: { contact: true }
+            })
+
+            if (!session) {
+              return response.notFound('Sessão não encontrada')
+            }
+
+            // Verificar se sessão pertence à mesma conexão/org
+            if (session.connectionId !== instanceId) {
+              return response.badRequest('Sessão não pertence a esta conexão')
+            }
+
+            contact = session.contact
+            console.log(`[MediaController] Using provided session: ${session.id}`)
+          } else {
+            // Fallback: buscar/criar contato e sessão (comportamento antigo)
             contact = await database.contact.findUnique({
-              where: { phoneNumber }
+              where: { phoneNumber: chatId }
             })
-          }
 
-          if (!contact) {
-            // Criar contato novo
-            contact = await database.contact.create({
-              data: {
-                phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
-                name: phoneNumber,
-              }
-            })
-            console.log(`[MediaController] Created new contact: ${contact.id}`)
-          }
+            if (!contact) {
+              contact = await database.contact.findUnique({
+                where: { phoneNumber }
+              })
+            }
 
-          // 2. Buscar sessão ativa para este contato/conexão
-          // ⚠️ CRITICAL: Use chatSession (not session - that's for auth!)
-          let session = await database.chatSession.findFirst({
-            where: {
-              contactId: contact.id,
-              connectionId: instanceId,
-              status: { not: 'CLOSED' }
-            },
-            orderBy: { createdAt: 'desc' }
-          })
+            if (!contact) {
+              contact = await database.contact.create({
+                data: {
+                  phoneNumber: chatId.includes('@') ? chatId : phoneNumber,
+                  name: phoneNumber,
+                }
+              })
+              console.log(`[MediaController] Created new contact: ${contact.id}`)
+            }
 
-          if (!session) {
-            // Criar nova sessão
-            session = await database.chatSession.create({
-              data: {
+            // Buscar sessão ativa para este contato/conexão
+            session = await database.chatSession.findFirst({
+              where: {
                 contactId: contact.id,
                 connectionId: instanceId,
-                organizationId: connection.organizationId!,
-                status: 'ACTIVE',
-              }
+                status: { not: 'CLOSED' }
+              },
+              orderBy: { createdAt: 'desc' }
             })
-            console.log(`[MediaController] Created new session: ${session.id}`)
+
+            if (!session) {
+              session = await database.chatSession.create({
+                data: {
+                  contactId: contact.id,
+                  connectionId: instanceId,
+                  organizationId: connection.organizationId!,
+                  status: 'ACTIVE',
+                }
+              })
+              console.log(`[MediaController] Created new session: ${session.id}`)
+            }
           }
 
           // 3. Criar mensagem de áudio no banco COM o mediaUrl (data URI)
