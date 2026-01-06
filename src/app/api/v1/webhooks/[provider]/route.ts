@@ -52,7 +52,6 @@ import {
   getCachedConnectionByToken,
   updateContactCache,
   createWebhookTrace,
-  trace,
   addTraceAttributes,
   type TraceContext,
 } from '@/lib/webhook';
@@ -306,6 +305,19 @@ export async function POST(
     );
   }
 
+  // ⭐ PAYLOAD VALIDATION: Validate structure with Zod
+  const validationResult = validateWebhookPayload(provider, rawBody);
+  if (!validationResult.success) {
+    logger.warn('Invalid webhook payload structure', {
+      provider,
+      errors: validationResult.errors.slice(0, 3), // Limit logged errors
+    });
+    return NextResponse.json(
+      { error: 'Invalid payload structure', details: validationResult.errors.slice(0, 3) },
+      { status: 400 }
+    );
+  }
+
   // 3. SIGNATURE VERIFICATION
   const signature = request.headers.get('x-webhook-signature') ||
                    request.headers.get('x-hub-signature-256'); // Meta uses this
@@ -319,8 +331,20 @@ export async function POST(
 
   // =========================================================================
 
+  // ⭐ TRACING: Create trace context for request correlation
+  const traceCtx = createWebhookTrace(
+    provider,
+    rawBody?.event || rawBody?.data?.event || 'unknown',
+    rawBody?.data?.message?.id
+  );
+  addTraceAttributes(traceCtx, {
+    'client.ip': clientIP,
+    'webhook.instanceId': rawBody?.instanceId || rawBody?.instance?.instanceId || 'unknown',
+  });
+
   // Log estruturado - evita logar payload inteiro em produção
   logger.info('Webhook received', {
+    traceId: traceCtx.traceId,
     provider,
     clientIP,
     eventType: rawBody?.event || rawBody?.data?.event || 'unknown',
@@ -335,16 +359,14 @@ export async function POST(
 
     // 2. RESOLVER instanceId pelo token (UAZapi Global Webhook envia token, não instanceId)
     if (provider === 'uazapi' && normalized.instanceId) {
-      // O instanceId pode ser um token UUID - buscar a conexão
-      const instance = await database.connection.findFirst({
-        where: {
-          OR: [
-            { id: normalized.instanceId },
-            { uazapiToken: normalized.instanceId },
-          ],
-        },
-        select: { id: true },
-      });
+      // O instanceId pode ser um token UUID - buscar a conexão (⭐ usando cache)
+      // Primeiro tentar por ID direto, depois por token
+      let instance = await getCachedConnection(normalized.instanceId);
+
+      if (!instance) {
+        // Tentar buscar por token
+        instance = await getCachedConnectionByToken(normalized.instanceId);
+      }
 
       if (instance) {
         console.log(`[Webhook] UAZapi: Resolved token ${normalized.instanceId} to instanceId ${instance.id}`);
@@ -384,7 +406,25 @@ export async function POST(
     // 3. PROCESSAR POR TIPO DE EVENTO
     switch (normalized.event) {
       case 'message.received':
-        await processIncomingMessage(normalized, provider);
+        // ⭐ DISTRIBUTED LOCK: Prevent duplicate processing across instances
+        const messageId = normalized.data.message?.id;
+        if (messageId) {
+          const lockResult = await withMessageLock(messageId, async () => {
+            await processIncomingMessage(normalized, provider, traceCtx);
+            return true;
+          });
+
+          if (!lockResult.processed) {
+            logger.debug('Message skipped (already being processed)', {
+              traceId: traceCtx.traceId,
+              messageId,
+              reason: lockResult.reason,
+            });
+          }
+        } else {
+          // No message ID, process without lock
+          await processIncomingMessage(normalized, provider, traceCtx);
+        }
         break;
 
       case 'message.sent':
@@ -460,7 +500,11 @@ async function checkExternalWebhooks(organizationId: string, connectionId: strin
 /**
  * Processar mensagem recebida (INBOUND)
  */
-async function processIncomingMessage(webhook: NormalizedWebhook, provider: BrokerType): Promise<void> {
+async function processIncomingMessage(
+  webhook: NormalizedWebhook,
+  provider: BrokerType,
+  traceCtx?: TraceContext
+): Promise<void> {
   const { instanceId, data } = webhook;
   const { from, message, contactName } = data;
 
@@ -468,6 +512,9 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     console.log('[Webhook] Missing from or message data');
     return;
   }
+
+  // ⭐ SANITIZATION: Sanitize contact name to prevent XSS
+  const sanitizedContactName = sanitizeContactName(contactName);
 
   // ⭐ BOT ECHO DETECTION - Prevenir loops infinitos
   // Se a mensagem contém nossa assinatura, é um echo do bot
@@ -484,18 +531,18 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     return;
   }
 
-  console.log(`[Webhook] Processing incoming message from ${from} (provider: ${provider})`);
+  // ⭐ TRACING: Log with trace ID for correlation
+  const logPrefix = traceCtx ? `[Webhook:${traceCtx.traceId.slice(0, 8)}]` : '[Webhook]';
+  console.log(`${logPrefix} Processing incoming message from ${from} (provider: ${provider})`);
 
-  // 1. Buscar ou criar contato
-  let contact = await database.contact.findUnique({
-    where: { phoneNumber: from },
-  });
+  // 1. Buscar ou criar contato (⭐ usando cache Redis)
+  let contact = await getCachedContact(from);
 
   const isNewContact = !contact;
 
   if (!contact) {
-    // Usar contactName se disponível, senão usar o phoneNumber
-    const displayName = contactName && contactName !== from ? contactName : from;
+    // Usar contactName sanitizado se disponível, senão usar o phoneNumber
+    const displayName = sanitizedContactName && sanitizedContactName !== from ? sanitizedContactName : from;
     console.log(`[Webhook] Creating new contact: ${from} (name: ${displayName})`);
     contact = await database.contact.create({
       data: {
@@ -503,13 +550,17 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
         name: displayName,
       },
     });
-  } else if (contactName && contactName !== from && contact.name === from) {
+    // Atualizar cache com novo contato
+    await updateContactCache(contact);
+  } else if (sanitizedContactName && sanitizedContactName !== from && contact.name === from) {
     // Atualizar nome do contato se tivermos um nome melhor e o atual é apenas o número
-    console.log(`[Webhook] Updating contact name from ${from} to ${contactName}`);
+    console.log(`[Webhook] Updating contact name from ${from} to ${sanitizedContactName}`);
     contact = await database.contact.update({
       where: { id: contact.id },
-      data: { name: contactName },
+      data: { name: sanitizedContactName },
     });
+    // Atualizar cache
+    await updateContactCache(contact);
   }
 
   // 1.5. Buscar foto de perfil do contato (se novo ou não tem foto)
@@ -547,11 +598,8 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     }
   }
 
-  // 2. Buscar instância para obter organizationId
-  const instance = await database.connection.findUnique({
-    where: { id: instanceId },
-    select: { organizationId: true },
-  });
+  // 2. Buscar instância para obter organizationId (⭐ usando cache Redis)
+  const instance = await getCachedConnection(instanceId);
 
   if (!instance || !instance.organizationId) {
     console.error(`[Webhook] Instance ${instanceId} not found or missing organizationId`);
@@ -611,7 +659,10 @@ async function processIncomingMessage(webhook: NormalizedWebhook, provider: Brok
     }
 
     // Limpar assinatura do bot se presente (caso tenha passado pelo check inicial)
-    const cleanContent = message.content ? stripBotSignature(message.content) : '';
+    // ⭐ SANITIZATION: Sanitize content to prevent XSS attacks
+    const cleanContent = message.content
+      ? sanitizeContent(stripBotSignature(message.content))
+      : '';
 
     // ⭐ CHATWOOT SYNC: Sincronizar IMEDIATAMENTE com Chatwoot (real-time para agentes)
     // Chatwoot é uma ferramenta de chat ao vivo - agentes precisam ver mensagens em tempo real
