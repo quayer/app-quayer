@@ -2,7 +2,22 @@ import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { authProcedure } from '@/features/auth/procedures/auth.procedure'
 import { database } from '@/services/database'
-import { ConnectionStatus } from '@prisma/client'
+import { ConnectionStatus, Provider } from '@prisma/client'
+import { orchestrator } from '@/lib/providers'
+import type { BrokerType, SendMediaInput } from '@/lib/providers/core/provider.types'
+
+/**
+ * Helper to map Prisma Provider enum to BrokerType
+ */
+function providerToBrokerType(provider: Provider): BrokerType {
+  switch (provider) {
+    case Provider.WHATSAPP_CLOUD_API:
+      return 'cloudapi'
+    case Provider.WHATSAPP_WEB:
+    default:
+      return 'uazapi'
+  }
+}
 
 /**
  * @controller MediaController
@@ -54,10 +69,19 @@ export const mediaController = igniter.controller({
         try {
           const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, caption, sessionId: providedSessionId } = request.body
 
-          // Buscar conexão (instância WhatsApp)
+          // Buscar conexão (instância WhatsApp) - inclui campos para ambos providers
           const connection = await database.connection.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazapiToken: true, status: true, organizationId: true }
+            select: {
+              id: true,
+              uazapiToken: true,
+              status: true,
+              organizationId: true,
+              provider: true,
+              cloudApiAccessToken: true,
+              cloudApiPhoneNumberId: true,
+              cloudApiWabaId: true,
+            }
           })
 
           if (!connection) {
@@ -77,8 +101,16 @@ export const mediaController = igniter.controller({
             return response.badRequest('Conexão não está conectada')
           }
 
-          if (!connection.uazapiToken) {
-            return response.badRequest('Token UAZ não configurado')
+          // Verificar credenciais baseado no provider
+          const isCloudAPI = connection.provider === Provider.WHATSAPP_CLOUD_API
+          if (isCloudAPI) {
+            if (!connection.cloudApiAccessToken || !connection.cloudApiPhoneNumberId) {
+              return response.badRequest('Credenciais Cloud API não configuradas')
+            }
+          } else {
+            if (!connection.uazapiToken) {
+              return response.badRequest('Token UAZ não configurado')
+            }
           }
 
           // Extrair número do chatId (remover @s.whatsapp.net ou @g.us)
@@ -181,53 +213,92 @@ export const mediaController = igniter.controller({
 
           console.log(`[MediaController] Image message saved: ${savedMessage.id}`)
 
-          // ========== ENVIAR PARA UAZAPI ==========
-          const payload = {
-            number: phoneNumber,
-            type: 'image',
-            file: dataUri,
-            ...(caption && { caption }),
-          }
+          // ========== ENVIAR PARA PROVIDER (UAZAPI ou Cloud API) ==========
+          let waMessageId: string | undefined
 
-          const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
-
-          console.log('[MediaController] Sending image to UAZapi:', {
-            endpoint: `${UAZAPI_URL}/send/media`,
-            number: phoneNumber,
-            type: 'image',
-            hasCaption: !!caption
-          })
-
-          const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'token': connection.uazapiToken
-            },
-            body: JSON.stringify(payload)
-          })
-
-          const uazData = await uazResponse.json()
-
-          if (!uazResponse.ok) {
-            console.error('[MediaController] UAZapi image error:', {
-              status: uazResponse.status,
-              data: uazData
+          if (isCloudAPI) {
+            // ========== CLOUD API ==========
+            const brokerType = providerToBrokerType(connection.provider)
+            console.log('[MediaController] Sending image via Cloud API:', {
+              instanceId,
+              brokerType,
+              to: phoneNumber,
+              hasCaption: !!caption
             })
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { status: 'failed' }
-            })
-            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar imagem')
-          }
 
-          // Atualizar waMessageId
-          const waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
-          if (waMessageId) {
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { waMessageId, status: 'sent' }
+            try {
+              const mediaInput: SendMediaInput = {
+                to: phoneNumber,
+                mediaType: 'image',
+                mediaUrl: dataUri,
+                caption,
+                mimeType: mimeType || 'image/jpeg',
+              }
+
+              const result = await orchestrator.sendMedia(instanceId, brokerType, mediaInput)
+              waMessageId = result.messageId
+
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            } catch (error: any) {
+              console.error('[MediaController] Cloud API image error:', error)
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(error.message || 'Erro ao enviar imagem via Cloud API')
+            }
+          } else {
+            // ========== UAZAPI ==========
+            const payload = {
+              number: phoneNumber,
+              type: 'image',
+              file: dataUri,
+              ...(caption && { caption }),
+            }
+
+            const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+
+            console.log('[MediaController] Sending image to UAZapi:', {
+              endpoint: `${UAZAPI_URL}/send/media`,
+              number: phoneNumber,
+              type: 'image',
+              hasCaption: !!caption
             })
+
+            const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': connection.uazapiToken!
+              },
+              body: JSON.stringify(payload)
+            })
+
+            const uazData = await uazResponse.json()
+
+            if (!uazResponse.ok) {
+              console.error('[MediaController] UAZapi image error:', {
+                status: uazResponse.status,
+                data: uazData
+              })
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar imagem')
+            }
+
+            // Atualizar waMessageId
+            waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
+            if (waMessageId) {
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            }
           }
 
           return response.success({
@@ -267,10 +338,19 @@ export const mediaController = igniter.controller({
         try {
           const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, fileName, caption, sessionId: providedSessionId } = request.body
 
-          // Buscar conexão (instância WhatsApp)
+          // Buscar conexão (instância WhatsApp) - inclui campos para ambos providers
           const connection = await database.connection.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazapiToken: true, status: true, organizationId: true }
+            select: {
+              id: true,
+              uazapiToken: true,
+              status: true,
+              organizationId: true,
+              provider: true,
+              cloudApiAccessToken: true,
+              cloudApiPhoneNumberId: true,
+              cloudApiWabaId: true,
+            }
           })
 
           if (!connection) {
@@ -290,8 +370,16 @@ export const mediaController = igniter.controller({
             return response.badRequest('Conexão não está conectada')
           }
 
-          if (!connection.uazapiToken) {
-            return response.badRequest('Token UAZ não configurado')
+          // Verificar credenciais baseado no provider
+          const isCloudAPI = connection.provider === Provider.WHATSAPP_CLOUD_API
+          if (isCloudAPI) {
+            if (!connection.cloudApiAccessToken || !connection.cloudApiPhoneNumberId) {
+              return response.badRequest('Credenciais Cloud API não configuradas')
+            }
+          } else {
+            if (!connection.uazapiToken) {
+              return response.badRequest('Token UAZ não configurado')
+            }
           }
 
           // Extrair número do chatId
@@ -397,54 +485,93 @@ export const mediaController = igniter.controller({
 
           console.log(`[MediaController] Document message saved: ${savedMessage.id}`)
 
-          // ========== ENVIAR PARA UAZAPI ==========
-          const payload = {
-            number: phoneNumber,
-            type: 'document',
-            file: dataUri,
-            filename: docFileName,
-            ...(caption && { caption }),
-          }
+          // ========== ENVIAR PARA PROVIDER (UAZAPI ou Cloud API) ==========
+          let waMessageId: string | undefined
 
-          const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
-
-          console.log('[MediaController] Sending document to UAZapi:', {
-            endpoint: `${UAZAPI_URL}/send/media`,
-            number: phoneNumber,
-            type: 'document',
-            filename: docFileName
-          })
-
-          const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'token': connection.uazapiToken
-            },
-            body: JSON.stringify(payload)
-          })
-
-          const uazData = await uazResponse.json()
-
-          if (!uazResponse.ok) {
-            console.error('[MediaController] UAZapi document error:', {
-              status: uazResponse.status,
-              data: uazData
+          if (isCloudAPI) {
+            // ========== CLOUD API ==========
+            const brokerType = providerToBrokerType(connection.provider)
+            console.log('[MediaController] Sending document via Cloud API:', {
+              instanceId,
+              brokerType,
+              to: phoneNumber,
+              filename: docFileName
             })
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { status: 'failed' }
-            })
-            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar documento')
-          }
 
-          // Atualizar waMessageId
-          const waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
-          if (waMessageId) {
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { waMessageId, status: 'sent' }
+            try {
+              const mediaInput: SendMediaInput = {
+                to: phoneNumber,
+                mediaType: 'document',
+                mediaUrl: dataUri,
+                caption,
+                fileName: docFileName,
+                mimeType: mimeType || 'application/pdf',
+              }
+
+              const result = await orchestrator.sendMedia(instanceId, brokerType, mediaInput)
+              waMessageId = result.messageId
+
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            } catch (error: any) {
+              console.error('[MediaController] Cloud API document error:', error)
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(error.message || 'Erro ao enviar documento via Cloud API')
+            }
+          } else {
+            // ========== UAZAPI ==========
+            const payload = {
+              number: phoneNumber,
+              type: 'document',
+              file: dataUri,
+              filename: docFileName,
+              ...(caption && { caption }),
+            }
+
+            const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+
+            console.log('[MediaController] Sending document to UAZapi:', {
+              endpoint: `${UAZAPI_URL}/send/media`,
+              number: phoneNumber,
+              type: 'document',
+              filename: docFileName
             })
+
+            const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': connection.uazapiToken!
+              },
+              body: JSON.stringify(payload)
+            })
+
+            const uazData = await uazResponse.json()
+
+            if (!uazResponse.ok) {
+              console.error('[MediaController] UAZapi document error:', {
+                status: uazResponse.status,
+                data: uazData
+              })
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar documento')
+            }
+
+            waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
+            if (waMessageId) {
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            }
           }
 
           return response.success({
@@ -484,10 +611,19 @@ export const mediaController = igniter.controller({
         try {
           const { instanceId, chatId, mediaBase64, mimeType, duration, sessionId: providedSessionId } = request.body
 
-          // Buscar conexão (instância WhatsApp)
+          // Buscar conexão (instância WhatsApp) - inclui campos para ambos providers
           const connection = await database.connection.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazapiToken: true, status: true, organizationId: true }
+            select: {
+              id: true,
+              uazapiToken: true,
+              status: true,
+              organizationId: true,
+              provider: true,
+              cloudApiAccessToken: true,
+              cloudApiPhoneNumberId: true,
+              cloudApiWabaId: true,
+            }
           })
 
           if (!connection) {
@@ -507,8 +643,16 @@ export const mediaController = igniter.controller({
             return response.badRequest('Conexão não está conectada')
           }
 
-          if (!connection.uazapiToken) {
-            return response.badRequest('Token UAZ não configurado')
+          // Verificar credenciais baseado no provider
+          const isCloudAPI = connection.provider === Provider.WHATSAPP_CLOUD_API
+          if (isCloudAPI) {
+            if (!connection.cloudApiAccessToken || !connection.cloudApiPhoneNumberId) {
+              return response.badRequest('Credenciais Cloud API não configuradas')
+            }
+          } else {
+            if (!connection.uazapiToken) {
+              return response.badRequest('Token UAZ não configurado')
+            }
           }
 
           // Extrair número do chatId (pode ter @s.whatsapp.net ou @g.us)
@@ -609,57 +753,90 @@ export const mediaController = igniter.controller({
 
           console.log(`[MediaController] Audio message saved: ${savedMessage.id} (mediaUrl: ${dataUri.substring(0, 50)}...)`)
 
-          // ========== ENVIAR PARA UAZAPI ==========
-          const payload = {
-            number: phoneNumber,
-            type: 'ptt',
-            file: dataUri,
-          }
+          // ========== ENVIAR PARA PROVIDER (UAZAPI ou Cloud API) ==========
+          let waMessageId: string | undefined
 
-          const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
-
-          console.log('[MediaController] Sending audio to UAZapi:', {
-            endpoint: `${UAZAPI_URL}/send/media`,
-            number: phoneNumber,
-            type: 'ptt',
-            mimeType,
-            mediaLength: mediaBase64.length
-          })
-
-          const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'token': connection.uazapiToken
-            },
-            body: JSON.stringify(payload)
-          })
-
-          const uazData = await uazResponse.json()
-
-          if (!uazResponse.ok) {
-            console.error('[MediaController] UAZapi audio error:', {
-              status: uazResponse.status,
-              data: uazData
+          if (isCloudAPI) {
+            // ========== CLOUD API ==========
+            const brokerType = providerToBrokerType(connection.provider)
+            console.log('[MediaController] Sending audio via Cloud API:', {
+              instanceId,
+              brokerType,
+              to: phoneNumber,
+              mimeType
             })
-            // Marcar mensagem como falha
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { status: 'failed' }
-            })
-            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar audio')
-          }
 
-          // Atualizar mensagem com o waMessageId real da UAZapi
-          const waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
-          if (waMessageId) {
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: {
-                waMessageId,
-                status: 'sent'
+            try {
+              const mediaInput: SendMediaInput = {
+                to: phoneNumber,
+                mediaType: 'voice',
+                mediaUrl: dataUri,
+                mimeType,
               }
+
+              const result = await orchestrator.sendMedia(instanceId, brokerType, mediaInput)
+              waMessageId = result.messageId
+
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            } catch (error: any) {
+              console.error('[MediaController] Cloud API audio error:', error)
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(error.message || 'Erro ao enviar audio via Cloud API')
+            }
+          } else {
+            // ========== UAZAPI ==========
+            const payload = {
+              number: phoneNumber,
+              type: 'ptt',
+              file: dataUri,
+            }
+
+            const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+
+            console.log('[MediaController] Sending audio to UAZapi:', {
+              endpoint: `${UAZAPI_URL}/send/media`,
+              number: phoneNumber,
+              type: 'ptt',
+              mimeType,
+              mediaLength: mediaBase64.length
             })
+
+            const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': connection.uazapiToken!
+              },
+              body: JSON.stringify(payload)
+            })
+
+            const uazData = await uazResponse.json()
+
+            if (!uazResponse.ok) {
+              console.error('[MediaController] UAZapi audio error:', {
+                status: uazResponse.status,
+                data: uazData
+              })
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar audio')
+            }
+
+            waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
+            if (waMessageId) {
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            }
           }
 
           return response.success({
@@ -698,10 +875,19 @@ export const mediaController = igniter.controller({
         try {
           const { instanceId, chatId, mediaUrl, mediaBase64, mimeType, caption } = request.body
 
-          // Buscar conexão (instância WhatsApp)
+          // Buscar conexão (instância WhatsApp) - inclui campos para ambos providers
           const connection = await database.connection.findUnique({
             where: { id: instanceId },
-            select: { id: true, uazapiToken: true, status: true, organizationId: true }
+            select: {
+              id: true,
+              uazapiToken: true,
+              status: true,
+              organizationId: true,
+              provider: true,
+              cloudApiAccessToken: true,
+              cloudApiPhoneNumberId: true,
+              cloudApiWabaId: true,
+            }
           })
 
           if (!connection) {
@@ -721,8 +907,16 @@ export const mediaController = igniter.controller({
             return response.badRequest('Conexão não está conectada')
           }
 
-          if (!connection.uazapiToken) {
-            return response.badRequest('Token UAZ não configurado')
+          // Verificar credenciais baseado no provider
+          const isCloudAPI = connection.provider === Provider.WHATSAPP_CLOUD_API
+          if (isCloudAPI) {
+            if (!connection.cloudApiAccessToken || !connection.cloudApiPhoneNumberId) {
+              return response.badRequest('Credenciais Cloud API não configuradas')
+            }
+          } else {
+            if (!connection.uazapiToken) {
+              return response.badRequest('Token UAZ não configurado')
+            }
           }
 
           // Extrair número do chatId
@@ -804,53 +998,91 @@ export const mediaController = igniter.controller({
 
           console.log(`[MediaController] Video message saved: ${savedMessage.id}`)
 
-          // ========== ENVIAR PARA UAZAPI ==========
-          const payload = {
-            number: phoneNumber,
-            type: 'video',
-            file: dataUri,
-            ...(caption && { caption }),
-          }
+          // ========== ENVIAR PARA PROVIDER (UAZAPI ou Cloud API) ==========
+          let waMessageId: string | undefined
 
-          const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
-
-          console.log('[MediaController] Sending video to UAZapi:', {
-            endpoint: `${UAZAPI_URL}/send/media`,
-            number: phoneNumber,
-            type: 'video',
-            hasCaption: !!caption
-          })
-
-          const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'token': connection.uazapiToken
-            },
-            body: JSON.stringify(payload)
-          })
-
-          const uazData = await uazResponse.json()
-
-          if (!uazResponse.ok) {
-            console.error('[MediaController] UAZapi video error:', {
-              status: uazResponse.status,
-              data: uazData
+          if (isCloudAPI) {
+            // ========== CLOUD API ==========
+            const brokerType = providerToBrokerType(connection.provider)
+            console.log('[MediaController] Sending video via Cloud API:', {
+              instanceId,
+              brokerType,
+              to: phoneNumber,
+              hasCaption: !!caption
             })
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { status: 'failed' }
-            })
-            return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar vídeo')
-          }
 
-          // Atualizar waMessageId
-          const waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
-          if (waMessageId) {
-            await database.message.update({
-              where: { id: savedMessage.id },
-              data: { waMessageId, status: 'sent' }
+            try {
+              const mediaInput: SendMediaInput = {
+                to: phoneNumber,
+                mediaType: 'video',
+                mediaUrl: dataUri,
+                caption,
+                mimeType: mimeType || 'video/mp4',
+              }
+
+              const result = await orchestrator.sendMedia(instanceId, brokerType, mediaInput)
+              waMessageId = result.messageId
+
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            } catch (error: any) {
+              console.error('[MediaController] Cloud API video error:', error)
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(error.message || 'Erro ao enviar vídeo via Cloud API')
+            }
+          } else {
+            // ========== UAZAPI ==========
+            const payload = {
+              number: phoneNumber,
+              type: 'video',
+              file: dataUri,
+              ...(caption && { caption }),
+            }
+
+            const UAZAPI_URL = process.env.UAZAPI_URL || 'https://quayer.uazapi.com'
+
+            console.log('[MediaController] Sending video to UAZapi:', {
+              endpoint: `${UAZAPI_URL}/send/media`,
+              number: phoneNumber,
+              type: 'video',
+              hasCaption: !!caption
             })
+
+            const uazResponse = await fetch(`${UAZAPI_URL}/send/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'token': connection.uazapiToken!
+              },
+              body: JSON.stringify(payload)
+            })
+
+            const uazData = await uazResponse.json()
+
+            if (!uazResponse.ok) {
+              console.error('[MediaController] UAZapi video error:', {
+                status: uazResponse.status,
+                data: uazData
+              })
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { status: 'failed' }
+              })
+              return response.badRequest(uazData.error || uazData.message || 'Erro ao enviar vídeo')
+            }
+
+            waMessageId = uazData.messageid || uazData.messageId || uazData.id || uazData.key?.id
+            if (waMessageId) {
+              await database.message.update({
+                where: { id: savedMessage.id },
+                data: { waMessageId, status: 'sent' }
+              })
+            }
           }
 
           return response.success({
