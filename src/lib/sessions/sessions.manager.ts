@@ -15,6 +15,7 @@
 
 import { database } from '@/services/database';
 import { redis } from '@/services/redis';
+import { withLock } from '@/lib/webhook/distributed-lock';
 import type { SessionStatus } from '@prisma/client';
 
 // ===== CONSTANTS =====
@@ -55,11 +56,12 @@ export interface ListSessionsFilters {
 export class SessionsManager {
   /**
    * Criar ou recuperar sessão ativa
+   * Usa lock distribuído para evitar race conditions e sessões duplicadas
    */
   async getOrCreateSession(input: GetOrCreateSessionInput) {
     const { contactId, connectionId, organizationId } = input;
 
-    // Buscar sessão ativa (QUEUED ou ACTIVE)
+    // Primeiro, tentar buscar sessão existente (sem lock - operação de leitura)
     let session = await database.chatSession.findFirst({
       where: {
         contactId,
@@ -72,11 +74,47 @@ export class SessionsManager {
       },
     });
 
-    // Criar nova se não existir
-    if (!session) {
+    // Se já existe, apenas atualizar lastMessageAt
+    if (session) {
+      session = await database.chatSession.update({
+        where: { id: session.id },
+        data: { lastMessageAt: new Date() },
+        include: {
+          contact: true,
+          connection: true,
+        },
+      });
+      return session;
+    }
+
+    // Se não existe, usar lock distribuído para evitar duplicatas
+    // Lock key único por contactId + connectionId
+    const lockKey = `session:create:${contactId}:${connectionId}`;
+
+    const lockResult = await withLock(lockKey, 5000, async () => {
+      // Re-verificar dentro do lock (double-check pattern)
+      const existingSession = await database.chatSession.findFirst({
+        where: {
+          contactId,
+          connectionId,
+          status: { in: ['QUEUED', 'ACTIVE'] },
+        },
+        include: {
+          contact: true,
+          connection: true,
+        },
+      });
+
+      if (existingSession) {
+        // Outra request criou enquanto esperávamos o lock
+        console.log(`[Sessions] Session already exists (race avoided): ${existingSession.id}`);
+        return existingSession;
+      }
+
+      // Criar nova sessão
       console.log(`[Sessions] Creating new session for contact ${contactId}`);
 
-      session = await database.chatSession.create({
+      const newSession = await database.chatSession.create({
         data: {
           contactId,
           connectionId,
@@ -92,24 +130,57 @@ export class SessionsManager {
 
       // Publicar evento de nova sessão
       await redis.publish('session:created', JSON.stringify({
-        sessionId: session.id,
+        sessionId: newSession.id,
         contactId,
         connectionId,
         organizationId,
       }));
-    } else {
-      // Atualizar lastMessageAt
-      session = await database.chatSession.update({
-        where: { id: session.id },
-        data: { lastMessageAt: new Date() },
+
+      return newSession;
+    });
+
+    if (lockResult.acquired && lockResult.result) {
+      return lockResult.result;
+    }
+
+    // Se não conseguiu o lock, outra request pode estar criando
+    // Esperar um pouco e buscar novamente
+    if (!lockResult.acquired) {
+      console.log(`[Sessions] Lock not acquired, waiting and retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const retrySession = await database.chatSession.findFirst({
+        where: {
+          contactId,
+          connectionId,
+          status: { in: ['QUEUED', 'ACTIVE'] },
+        },
         include: {
           contact: true,
           connection: true,
         },
       });
+
+      if (retrySession) {
+        return retrySession;
+      }
     }
 
-    return session;
+    // Fallback: criar sem lock (último recurso)
+    console.warn(`[Sessions] Fallback: creating session without lock for contact ${contactId}`);
+    return database.chatSession.create({
+      data: {
+        contactId,
+        connectionId,
+        organizationId,
+        status: 'QUEUED',
+        lastMessageAt: new Date(),
+      },
+      include: {
+        contact: true,
+        connection: true,
+      },
+    });
   }
 
   /**
