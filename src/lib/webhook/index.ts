@@ -59,3 +59,6 @@ export {
   type TraceContext,
   type Span,
 } from './tracing';
+
+// Event Processor (shared between routes)
+export { processWebhookEvent } from './processor';

@@ -54,7 +54,7 @@ interface CreateIntegrationData {
   cloudApiWabaId?: string;
 }
 
-type Step = 'channel' | 'config' | 'credentials' | 'method' | 'connect' | 'share' | 'success';
+type Step = 'channel' | 'config' | 'credentials' | 'method' | 'connect' | 'share' | 'success' | 'webhook-config';
 type ConnectionMethod = 'qrcode' | 'share' | null;
 
 interface CloudApiValidation {
@@ -71,6 +71,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
   const [instanceId, setInstanceId] = useState<string>('');
   const [connectionMethod, setConnectionMethod] = useState<ConnectionMethod>(null);
   const [cloudApiValidation, setCloudApiValidation] = useState<CloudApiValidation>({ status: 'idle' });
+  const [copiedField, setCopiedField] = useState<'webhookUrl' | 'verifyToken' | null>(null);
   const [formData, setFormData] = useState<CreateIntegrationData>({
     name: '',
     description: '',
@@ -89,6 +90,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
         { id: 'channel', title: 'Canal', icon: MessageSquare },
         { id: 'config', title: 'Nome', icon: Settings },
         { id: 'credentials', title: 'Credenciais', icon: Shield },
+        { id: 'webhook-config', title: 'Webhook', icon: Webhook },
         { id: 'success', title: 'Concluído', icon: CheckCircle }
       ];
     }
@@ -105,7 +107,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
   // Ordem dos steps baseada no provider
   const getStepOrder = (): Step[] => {
     if (formData.provider === 'WHATSAPP_CLOUD_API') {
-      return ['channel', 'config', 'credentials', 'success'];
+      return ['channel', 'config', 'credentials', 'webhook-config', 'success'];
     }
     return ['channel', 'config', 'method', 'success'];
   };
@@ -183,9 +185,9 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
 
       setInstanceId(result.instanceId);
 
-      // Se for Cloud API, já está conectado (não tem QR code), ir para sucesso
+      // Se for Cloud API, ir para configuração do webhook
       if (formData.provider === 'WHATSAPP_CLOUD_API') {
-        setCurrentStep('success');
+        setCurrentStep('webhook-config');
       } else {
         // UAZAPI precisa escolher método de conexão (QR Code ou Link)
         setCurrentStep('method');
@@ -256,6 +258,43 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     }
   };
 
+  // Gerar URL do webhook dinâmica por instância
+  const getWebhookUrl = () => {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    // URL dinâmica com instanceId para isolamento multi-tenant
+    return instanceId
+      ? `${baseUrl}/api/v1/webhooks/cloudapi/${instanceId}`
+      : `${baseUrl}/api/v1/webhooks/cloudapi`;
+  };
+
+  // Copiar URL do webhook (Cloud API)
+  const handleCopyWebhookUrl = async () => {
+    const webhookUrl = getWebhookUrl();
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopiedField('webhookUrl');
+      toast.success('URL do Webhook copiada!');
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      toast.error('Erro ao copiar URL');
+    }
+  };
+
+  // Copiar token de verificação (Cloud API) - usa env pública ou default
+  const getVerifyToken = () => process.env.NEXT_PUBLIC_CLOUDAPI_VERIFY_TOKEN || 'quayer-cloudapi-verify';
+
+  const handleCopyVerifyToken = async () => {
+    const verifyToken = getVerifyToken();
+    try {
+      await navigator.clipboard.writeText(verifyToken);
+      setCopiedField('verifyToken');
+      toast.success('Token copiado!');
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      toast.error('Erro ao copiar token');
+    }
+  };
+
   const handleShare = async () => {
     if (navigator.share) {
       try {
@@ -288,6 +327,7 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
     setInstanceId('');
     setConnectionMethod(null);
     setCloudApiValidation({ status: 'idle' });
+    setCopiedField(null);
     onClose();
   };
 
@@ -754,6 +794,116 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
             </div>
           )}
 
+          {/* Step: Configuração Webhook (Cloud API) */}
+          {currentStep === 'webhook-config' && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Webhook className="h-8 w-8 text-blue-600" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Configure o Webhook</h3>
+                <p className="text-muted-foreground">
+                  Para receber mensagens, configure o webhook no Meta for Developers
+                </p>
+              </div>
+
+              {/* Sucesso da criação com dados da instância */}
+              <Alert className="bg-green-50 border-green-200">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-700 text-sm">
+                  <strong>{formData.name}</strong> foi criada com sucesso!
+                  {cloudApiValidation.verifiedName && (
+                    <div className="mt-2 pt-2 border-t border-green-200 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-600">📱</span>
+                        <span>{cloudApiValidation.phoneNumber}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-600">✓</span>
+                        <span>{cloudApiValidation.verifiedName}</span>
+                      </div>
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+
+              {/* URL do Webhook - Dinâmica por instância */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">URL do Webhook (Callback URL)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={getWebhookUrl()}
+                    readOnly
+                    className="font-mono text-xs bg-muted"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyWebhookUrl}
+                  >
+                    {copiedField === 'webhookUrl' ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Token de Verificação */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Token de Verificação (Verify Token)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={getVerifyToken()}
+                    readOnly
+                    className="font-mono text-xs bg-muted"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyVerifyToken}
+                  >
+                    {copiedField === 'verifyToken' ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Campos para assinar */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Campos do Webhook (Webhook Fields)</Label>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <code className="bg-muted px-1.5 py-0.5 rounded text-xs">messages</code>
+                  <span>— Obrigatório</span>
+                </div>
+              </div>
+
+              {/* Instruções */}
+              <Alert className="bg-blue-50 border-blue-200">
+                <Info className="h-4 w-4 text-blue-600" />
+                <AlertDescription className="text-blue-700 text-sm">
+                  <p className="font-medium mb-2">Como configurar:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-xs">
+                    <li>Acesse o <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="underline font-medium">Meta for Developers</a></li>
+                    <li>Vá em seu App → WhatsApp → Configuration</li>
+                    <li>Em "Webhook", clique em <strong>Edit</strong></li>
+                    <li>Cole a <strong>URL do Webhook</strong> acima</li>
+                    <li>Cole o <strong>Token de Verificação</strong></li>
+                    <li>Clique em <strong>Verify and save</strong></li>
+                    <li>Marque o campo <code className="bg-white/50 px-1 rounded">messages</code> e clique em <strong>Subscribe</strong></li>
+                  </ol>
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+
           {currentStep === 'success' && (
             <div className="text-center space-y-6">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
@@ -833,6 +983,11 @@ export function CreateIntegrationModal({ open, onClose, onCreate, onSelectQRCode
             {currentStep === 'success' ? (
               <Button onClick={handleClose}>
                 Concluir
+              </Button>
+            ) : currentStep === 'webhook-config' ? (
+              <Button onClick={handleNext}>
+                Próximo
+                <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             ) : currentStep === 'share' ? (
               <Button onClick={handleClose}>

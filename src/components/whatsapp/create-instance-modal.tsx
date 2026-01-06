@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Loader2, Plus, QrCode, Share2, ArrowLeft, ArrowRight, Copy, Check, Smartphone, Key, Cloud } from 'lucide-react'
+import { Loader2, Plus, QrCode, Share2, ArrowLeft, ArrowRight, Copy, Check, Smartphone, Key, Cloud, Webhook, ExternalLink, CheckCircle } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { useCreateInstance } from '@/hooks/useInstance'
@@ -45,7 +45,7 @@ const createInstanceSchema = z.object({
 type CreateInstanceForm = z.infer<typeof createInstanceSchema>
 
 // Tipos para o fluxo de etapas
-type Step = 'form' | 'choose-connection' | 'qr-code' | 'share-link' | 'pairing-code' | 'success'
+type Step = 'form' | 'choose-connection' | 'qr-code' | 'share-link' | 'pairing-code' | 'success' | 'webhook-config'
 
 interface CreateInstanceModalProps {
   isOpen: boolean
@@ -70,6 +70,7 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
   const [isGeneratingPairingCode, setIsGeneratingPairingCode] = useState(false)
   const [pairingPhoneNumber, setPairingPhoneNumber] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copiedField, setCopiedField] = useState<'webhookUrl' | 'verifyToken' | null>(null)
 
   const createInstanceMutation = useCreateInstance()
   const { canSelectBroker } = usePermissions()
@@ -136,10 +137,10 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
       // Salvar instancia criada
       setCreatedInstance(result)
 
-      // Para Cloud API, ir direto para sucesso (ja esta conectado)
+      // Para Cloud API, ir para configuração do webhook
       if (isCloudAPIBroker) {
-        setStep('success')
-        toast.success('Instância Cloud API criada e conectada com sucesso!')
+        setStep('webhook-config')
+        toast.success('Instância Cloud API criada! Configure o webhook no Meta.')
         onSuccess?.()
         return
       }
@@ -318,6 +319,45 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
     }
   }
 
+  // Gerar URL do webhook dinâmica por instância
+  const getWebhookUrl = () => {
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
+    const instId = createdInstance?.id || createdInstance?.data?.id
+    // URL dinâmica com instanceId para isolamento multi-tenant
+    return instId
+      ? `${baseUrl}/api/v1/webhooks/cloudapi/${instId}`
+      : `${baseUrl}/api/v1/webhooks/cloudapi`
+  }
+
+  // Copiar URL do webhook (Cloud API)
+  const handleCopyWebhookUrl = async () => {
+    const webhookUrl = getWebhookUrl()
+    try {
+      await navigator.clipboard.writeText(webhookUrl)
+      setCopiedField('webhookUrl')
+      toast.success('URL do Webhook copiada!')
+      setTimeout(() => setCopiedField(null), 2000)
+    } catch {
+      toast.error('Erro ao copiar URL')
+    }
+  }
+
+  // Token de verificação - usa env pública ou default
+  const getVerifyToken = () => process.env.NEXT_PUBLIC_CLOUDAPI_VERIFY_TOKEN || 'quayer-cloudapi-verify'
+
+  // Copiar token de verificação (Cloud API)
+  const handleCopyVerifyToken = async () => {
+    const verifyToken = getVerifyToken()
+    try {
+      await navigator.clipboard.writeText(verifyToken)
+      setCopiedField('verifyToken')
+      toast.success('Token copiado!')
+      setTimeout(() => setCopiedField(null), 2000)
+    } catch {
+      toast.error('Erro ao copiar token')
+    }
+  }
+
   // Fechar e resetar
   const handleClose = () => {
     if (isSubmitting || isGeneratingQR || isGeneratingLink) return
@@ -326,11 +366,11 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
     setStep('form')
     setCreatedInstance(null)
     setQrCode(null)
-    setQrCode(null)
     setShareLink(null)
     setPairingCode(null)
     setPairingPhoneNumber('')
     setCopied(false)
+    setCopiedField(null)
     onClose()
 
     // Se criou instancia, chamar onSuccess
@@ -342,7 +382,6 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
   // Voltar para escolha de conexao
   const handleBack = () => {
     setStep('choose-connection')
-    setQrCode(null)
     setQrCode(null)
     setShareLink(null)
     setPairingCode(null)
@@ -944,6 +983,131 @@ export function CreateInstanceModal({ isOpen, onClose, onSuccess }: CreateInstan
                 <p><strong>Nome Verificado:</strong> {createdInstance?.cloudApiVerifiedName || createdInstance?.data?.cloudApiVerifiedName || 'N/A'}</p>
                 <p><strong>Telefone:</strong> {createdInstance?.phoneNumber || createdInstance?.data?.phoneNumber || 'N/A'}</p>
               </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                onClick={handleClose}
+                className="w-full"
+              >
+                Concluir
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Etapa: Configuração Webhook (Cloud API) */}
+        {step === 'webhook-config' && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Webhook className="h-5 w-5 text-blue-600" />
+                Configure o Webhook
+              </DialogTitle>
+              <DialogDescription>
+                Para receber mensagens, configure o webhook no Meta for Developers
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4 space-y-4">
+              {/* Sucesso da criação com dados da instância */}
+              <Alert className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-800 dark:text-green-200">
+                  <strong>{createdInstance?.name || createdInstance?.data?.name}</strong> foi criada com sucesso!
+                  {(createdInstance?.phoneNumber || createdInstance?.data?.phoneNumber || createdInstance?.cloudApiVerifiedName || createdInstance?.data?.cloudApiVerifiedName) && (
+                    <div className="mt-2 pt-2 border-t border-green-300 dark:border-green-700 space-y-1 text-sm">
+                      {(createdInstance?.phoneNumber || createdInstance?.data?.phoneNumber) && (
+                        <div className="flex items-center gap-2">
+                          <span>📱</span>
+                          <span>{createdInstance?.phoneNumber || createdInstance?.data?.phoneNumber}</span>
+                        </div>
+                      )}
+                      {(createdInstance?.cloudApiVerifiedName || createdInstance?.data?.cloudApiVerifiedName) && (
+                        <div className="flex items-center gap-2">
+                          <span>✓</span>
+                          <span>{createdInstance?.cloudApiVerifiedName || createdInstance?.data?.cloudApiVerifiedName}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </AlertDescription>
+              </Alert>
+
+              {/* URL do Webhook - Dinâmica por instância */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">URL do Webhook (Callback URL)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={getWebhookUrl()}
+                    readOnly
+                    className="font-mono text-xs bg-muted"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyWebhookUrl}
+                  >
+                    {copiedField === 'webhookUrl' ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Token de Verificação */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Token de Verificação (Verify Token)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={getVerifyToken()}
+                    readOnly
+                    className="font-mono text-xs bg-muted"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyVerifyToken}
+                  >
+                    {copiedField === 'verifyToken' ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Campos para assinar */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Campos do Webhook (Webhook Fields)</Label>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <code className="bg-muted px-1.5 py-0.5 rounded text-xs">messages</code>
+                  <span>— Obrigatório</span>
+                </div>
+              </div>
+
+              {/* Instruções */}
+              <Alert className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+                <AlertDescription className="text-blue-800 dark:text-blue-200 text-sm">
+                  <p className="font-medium mb-2">Como configurar:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-xs">
+                    <li>Acesse o <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="underline font-medium inline-flex items-center gap-1">Meta for Developers <ExternalLink className="h-3 w-3" /></a></li>
+                    <li>Vá em seu App → WhatsApp → Configuration</li>
+                    <li>Em "Webhook", clique em <strong>Edit</strong></li>
+                    <li>Cole a <strong>URL do Webhook</strong> acima</li>
+                    <li>Cole o <strong>Token de Verificação</strong></li>
+                    <li>Clique em <strong>Verify and save</strong></li>
+                    <li>Marque o campo <code className="bg-white/50 px-1 rounded">messages</code> e clique em <strong>Subscribe</strong></li>
+                  </ol>
+                </AlertDescription>
+              </Alert>
             </div>
 
             <div className="flex gap-3 pt-2">
