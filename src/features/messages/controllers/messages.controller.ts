@@ -143,6 +143,17 @@ export const messagesController = igniter.controller({
           return response.forbidden('Acesso negado a esta sessão');
         }
 
+        // 2.5. VERIFICAR STATUS DA CONEXÃO (se vai enviar externamente)
+        if (sendExternalMessage && direction === 'OUTBOUND') {
+          const connectionStatus = session.connection.status;
+          if (connectionStatus === 'DISCONNECTED' || connectionStatus === 'ERROR') {
+            return response.badRequest(
+              'WhatsApp desconectado. Reconecte a instância para enviar mensagens.',
+              { code: 'INSTANCE_DISCONNECTED', instanceId: session.connectionId }
+            );
+          }
+        }
+
         // 3. SE SESSÃO ESTÁ FECHADA, REABRIR AUTOMATICAMENTE
         if (session.status === 'CLOSED') {
           await database.chatSession.update({

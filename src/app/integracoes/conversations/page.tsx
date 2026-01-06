@@ -319,6 +319,7 @@ interface OptimisticMessage {
   direction: 'OUTBOUND'
   type: 'text'
   author: 'AGENT'
+  sessionId: string // Store sessionId for correct retry
 }
 
 interface Instance {
@@ -1119,6 +1120,7 @@ export default function ConversationsPage() {
         direction: 'OUTBOUND',
         type: 'text',
         author: 'AGENT',
+        sessionId: data.sessionId, // Store for retry
       }
       setOptimisticMessages(prev => [...prev, optimisticMsg])
     },
@@ -3317,10 +3319,12 @@ export default function ConversationsPage() {
                                   size="sm"
                                   className="h-6 px-2 text-xs text-destructive hover:text-destructive"
                                   onClick={() => {
-                                    if (selectedChatId) {
+                                    // Use stored sessionId from optimistic message for correct retry
+                                    const optMsg = message as OptimisticMessage
+                                    if (optMsg.sessionId) {
                                       retryMessageMutation.mutate({
                                         tempId: message.id,
-                                        sessionId: selectedChatId,
+                                        sessionId: optMsg.sessionId,
                                         content: message.content,
                                       })
                                     }
