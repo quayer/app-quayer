@@ -1347,37 +1347,9 @@ export default function ConversationsPage() {
     }
   })
 
-  // Sync chats from UAZapi (manual import)
-  const syncChatsMutation = useMutation({
-    mutationFn: async (instanceId: string) => {
-      // Direct fetch to sync endpoint (schema may not be regenerated yet)
-      const response = await fetch('/api/v1/chats/sync', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ instanceId }),
-      })
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Erro ao sincronizar' }))
-        throw new Error(error.message || 'Erro ao sincronizar chats')
-      }
-
-      return response.json()
-    },
-    onSuccess: (data: any) => {
-      const result = data?.data ?? data
-      const message = typeof result?.message === 'string' ? result.message : 'Chats sincronizados!'
-      toast.success(message)
-      refetchChats()
-    },
-    onError: (error: any) => {
-      const message = typeof error?.message === 'string' ? error.message : 'Erro ao sincronizar chats'
-      toast.error(message)
-    }
-  })
+  // 🚀 SYNC REMOVIDO - Arquitetura 100% Reativa
+  // Conversas são criadas automaticamente via webhooks quando mensagens chegam
+  // Funciona igual para UAZAPI e Cloud API
 
   // ==================== HANDLERS ====================
 
@@ -1710,33 +1682,24 @@ export default function ConversationsPage() {
   }, [messages, loadedAudioUrls, loadingAudioIds, failedAudioIds, handleLoadAudio])
 
   const handleManualRefresh = useCallback(async () => {
-    // Fazer sync forçado com UAZapi para buscar novos chats
+    // Atualiza dados do cache - conversas são criadas via webhook automaticamente
     try {
-      toast.loading('Sincronizando com WhatsApp...', { id: 'sync' })
+      toast.loading('Atualizando...', { id: 'refresh' })
 
-      // Chamar API com forceSync=true para sincronizar novos chats do UAZapi
-      await api.chats.all.query({
-        query: {
-          instanceIds: instanceIdsToFetch,
-          limit: 100,
-          forceSync: true, // Força sync com UAZapi
-        }
-      })
-
-      // Refetch todos os dados
+      // Refetch todos os dados do cache
       await Promise.all([
         refetchInstances(),
         refetchChats(),
         refetchMessages(),
       ])
 
-      toast.success('Sincronizado com sucesso!', { id: 'sync' })
+      toast.success('Atualizado!', { id: 'refresh' })
     } catch (error: any) {
-      console.error('[Conversations] Force sync error:', error)
+      console.error('[Conversations] Refresh error:', error)
       const description = typeof error?.message === 'string' ? error.message : undefined
-      toast.error('Erro ao sincronizar', { id: 'sync', description })
+      toast.error('Erro ao atualizar', { id: 'refresh', description })
     }
-  }, [refetchInstances, refetchChats, refetchMessages, instanceIdsToFetch])
+  }, [refetchInstances, refetchChats, refetchMessages])
 
   // Navegação por teclado na lista de chats (WCAG 2.1.1)
   const handleChatListKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -2229,32 +2192,7 @@ export default function ConversationsPage() {
                 </p>
               </>
             )}
-            {/* Sync button - only show when not searching and has instances */}
-            {!debouncedSearchText && instanceIdsToFetch.length > 0 && (
-              <div className="space-y-2 mt-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    instanceIdsToFetch.forEach((instanceId: string) => {
-                      syncChatsMutation.mutate(instanceId)
-                    })
-                  }}
-                  disabled={syncChatsMutation.isPending}
-                  className="gap-2"
-                >
-                  {syncChatsMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  Importar chats existentes
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Clique para importar conversas existentes do WhatsApp
-                </p>
-              </div>
-            )}
+            {/* 🚀 Arquitetura Reativa - Conversas são criadas automaticamente via webhook */}
           </div>
         ) : (
           <div
@@ -2445,7 +2383,6 @@ export default function ConversationsPage() {
     focusedChatIndex,
     tabCounts,
     instancesLoading,
-    syncChatsMutation.isPending,
     // Callbacks - must be included to avoid stale closures
     handleSelectChat,
     handleManualRefresh,
