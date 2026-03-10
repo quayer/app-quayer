@@ -4,27 +4,18 @@ import * as React from "react"
 import Image from "next/image"
 import {
   LayoutDashboard,
-  Users,
   Settings2,
   MessagesSquare,
   Building2,
   Plug,
-  Webhook,
-  ShieldCheck,
-  FileText,
   Shield,
-  UserCog,
-  Mail,
-  Bell,
-  Wrench,
-  ClipboardList,
-  Headset,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
 import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
+import { OrganizationSwitcher } from "@/components/organization-switcher"
 import {
   Sidebar,
   SidebarContent,
@@ -47,9 +38,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const orgRole = (user as any)?.organizationRole || 'user'
 
   // ✅ CORREÇÃO BRUTAL: Buscar nome da organização atual via getCurrent
-  // Safety: ensure name is always a string to prevent React Error #310
-  const rawOrgName = (currentOrgData as any)?.data?.name || (currentOrgData as any)?.name
-  const selectedOrgName = typeof rawOrgName === 'string' ? rawOrgName : (rawOrgName?.name || rawOrgName?.title || null)
+  const selectedOrgName = currentOrgData?.name || null
 
   const data = React.useMemo(() => {
     const adminMenu = isSystemAdmin ? [{
@@ -69,54 +58,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           icon: Building2,
         },
         {
-          title: "Clientes",
-          url: "/admin/clients",
-          icon: Users,
-        },
-        {
-          title: "Mensagens",
-          url: "/admin/messages",
-          icon: Mail,
-        },
-        {
-          title: "Sessoes",
-          url: "/admin/sessions",
-          icon: Headset,
-        },
-        {
           title: "Integrações",
           url: "/admin/integracoes",
           icon: Plug,
-        },
-        {
-          title: "Webhooks",
-          url: "/admin/webhooks",
-          icon: Webhook,
-        },
-        {
-          title: "Logs Técnicos",
-          url: "/admin/logs",
-          icon: FileText,
-        },
-        {
-          title: "Audit Log",
-          url: "/admin/audit",
-          icon: ClipboardList,
-        },
-        {
-          title: "Permissões",
-          url: "/admin/permissions",
-          icon: ShieldCheck,
-        },
-        {
-          title: "Notificações",
-          url: "/admin/notificacoes",
-          icon: Bell,
-        },
-        {
-          title: "Configurações",
-          url: "/admin/settings",
-          icon: Settings2,
         },
       ],
     }] : [];
@@ -124,15 +68,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     // ✅ CORREÇÃO BRUTAL: Organization menu apenas quando admin TEM organização
     // Se admin não tem org (onboarding), não mostrar menu de organização
     const hasOrganization = user?.currentOrgId !== null
-
+    
     const orgMenu = ((isSystemAdmin && hasOrganization) || orgRole === 'master' || orgRole === 'manager') ? [
       {
-        title: "Dashboard",
-        url: "/integracoes/dashboard",
-        icon: LayoutDashboard,
-      },
-      {
-        title: "Canais",
+        title: "Integrações",
         url: "/integracoes",
         icon: Plug,
       },
@@ -140,21 +79,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Conversas",
         url: "/conversas",
         icon: MessagesSquare,
-      },
-      {
-        title: "Contatos",
-        url: "/contatos",
-        icon: UserCog,
-      },
-      {
-        title: "Equipe",
-        url: "/integracoes/users",
-        icon: Users,
-      },
-      {
-        title: "Ferramentas",
-        url: "/ferramentas",
-        icon: Wrench,
       },
       {
         title: "Configurações",
@@ -166,7 +90,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     // User menu (simplified) - AGORA INCLUI CONFIGURAÇÕES
     const userMenu = (!isSystemAdmin && orgRole === 'user') ? [
       {
-        title: "Canais",
+        title: "Minhas Integrações",
         url: "/integracoes",
         icon: Plug,
       },
@@ -174,11 +98,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         title: "Conversas",
         url: "/conversas",
         icon: MessagesSquare,
-      },
-      {
-        title: "Contatos",
-        url: "/contatos",
-        icon: Users,
       },
       {
         title: "Configurações",
@@ -218,37 +137,43 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   width={120}
                   height={28}
                   priority
-                  className="dark:brightness-100 dark:invert-0 brightness-0"
+                  className="dark:invert-0"
                 />
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-
       </SidebarHeader>
 
       <SidebarContent>
         {/* Admin Global Menu */}
         {data.adminMenu.length > 0 && (
-          <NavMain items={data.adminMenu} label={null} />
-        )}
+          <>
+            <NavMain items={data.adminMenu} />
 
-        {/* Separator between admin and org menus */}
-        {data.adminMenu.length > 0 && data.orgMenu.length > 0 && (
-          <SidebarSeparator className="my-2" />
+            {/* Separator with organization name */}
+            {data.selectedOrgName && (
+              <>
+                <SidebarSeparator className="my-2" />
+                <div className="px-4 py-2 flex items-center gap-2">
+                  <Building2 className="h-3 w-3 text-muted-foreground" />
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {data.selectedOrgName}
+                  </p>
+                </div>
+              </>
+            )}
+          </>
         )}
 
         {/* Organization Menu (for admin viewing as org, or master/manager) */}
         {data.orgMenu.length > 0 && (
-          <NavMain
-            items={data.orgMenu}
-            label={data.selectedOrgName || "Organização"}
-          />
+          <NavMain items={data.orgMenu} />
         )}
 
         {/* User Menu (simplified) */}
         {data.userMenu.length > 0 && (
-          <NavMain items={data.userMenu} label={null} />
+          <NavMain items={data.userMenu} />
         )}
 
         {data.projects.length > 0 && <NavProjects projects={data.projects} />}
