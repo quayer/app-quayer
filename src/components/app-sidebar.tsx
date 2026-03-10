@@ -10,6 +10,7 @@ import {
   Plug,
   Shield,
   MonitorPlay,
+  Settings,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -67,6 +68,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           title: "Sessões",
           url: "/admin/sessions",
           icon: MonitorPlay,
+        },
+        {
+          title: "Configurações",
+          url: "/admin/settings",
+          icon: Settings,
         },
       ],
     }] : [];

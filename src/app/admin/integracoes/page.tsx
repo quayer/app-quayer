@@ -38,7 +38,8 @@ import { listAllInstancesAdminAction, type AdminInstance } from '../actions'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-function getBrokerLabel(brokerType: string): string {
+function getBrokerLabel(brokerType: string | undefined | null): string {
+  if (!brokerType) return 'Desconhecido'
   const lower = brokerType.toLowerCase()
   if (lower.includes('uazapi') || lower.includes('uaz')) return 'UAZapi'
   if (lower.includes('whatsapp') || lower.includes('cloud')) return 'WhatsApp Cloud'
@@ -90,7 +91,7 @@ export default function IntegracoesAdminPage() {
   const filtered = useMemo(() => {
     return instances.filter((i) => {
       const matchSearch =
-        i.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (i.name ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (i.phoneNumber ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (i.organization?.name ?? '').toLowerCase().includes(searchTerm.toLowerCase())
       const matchStatus =
