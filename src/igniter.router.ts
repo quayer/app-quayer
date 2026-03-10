@@ -11,6 +11,8 @@ import { invitationsController } from '@/features/invitations'
 import { dashboardController } from '@/features/dashboard'
 import { chatsController, messagesController, mediaController } from '@/features/messages'
 import { sessionsController } from '@/features/sessions'
+import { auditController } from '@/features/audit'
+import { notificationsController } from '@/features/notifications'
 
 /**
  * @description Main application router configuration
@@ -32,6 +34,8 @@ export const AppRouter = igniter.router({
     instances: instancesController,
     share: shareController,
     sessions: sessionsController,
+    audit: auditController,
+    notifications: notificationsController,
   }
 })
 
