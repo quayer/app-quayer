@@ -24,7 +24,7 @@ COPY package.json package-lock.json* ./
 
 # Install dependencies (BuildKit cache mount persists across docker system prune)
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --only=production --ignore-scripts
+    npm ci --only=production --ignore-scripts --legacy-peer-deps
 
 # ==================================
 # STAGE 2: Builder
@@ -40,7 +40,7 @@ COPY package.json package-lock.json* ./
 
 # Install ALL dependencies (BuildKit cache mount persists across docker system prune)
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --ignore-scripts
+    npm ci --ignore-scripts --legacy-peer-deps
 
 # Copy application code
 COPY . .
