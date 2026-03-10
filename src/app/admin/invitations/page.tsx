@@ -61,20 +61,9 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { toast } from 'sonner'
-import { formatDistanceToNow } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 
-// Helper para formatar datas com segurança
-function safeFormatDate(date: any): string {
-  if (!date) return 'N/A'
-  try {
-    const d = new Date(date)
-    if (isNaN(d.getTime())) return 'N/A'
-    return formatDistanceToNow(d, { addSuffix: true, locale: ptBR })
-  } catch {
-    return 'N/A'
-  }
-}
+import { safeFormatDate } from '@/lib/utils/format'
+import { api } from '@/igniter.client'
 
 import {
   getInvitationsAction,
@@ -115,6 +104,12 @@ export default function AdminInvitationsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Organizations for select dropdown
+  const { data: orgsData } = api.organizations.list.useQuery({ query: { limit: 100 } })
+  const organizations: Array<{ id: string; name: string }> = Array.isArray((orgsData as any)?.data)
+    ? (orgsData as any).data
+    : []
+
   // Form state
   const [formData, setFormData] = useState({
     email: '',
@@ -133,11 +128,7 @@ export default function AdminInvitationsPage() {
       setIsLoading(true)
       setError(null)
 
-      // ✅ CORREÇÃO BRUTAL: Passar token do localStorage para Server Action
-      // Fallback para compatibilidade com auth atual que usa localStorage
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
-
-      const result = await getInvitationsAction(token)
+      const result = await getInvitationsAction()
 
       if (result.success && result.data) {
         setInvitations(result.data)
@@ -192,9 +183,7 @@ export default function AdminInvitationsPage() {
     }
 
     try {
-      // ✅ Passar token do localStorage para Server Action
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
-      const result = await createInvitationAction({ ...formData, tokenFromClient: token })
+      const result = await createInvitationAction(formData)
 
       if (result.success) {
         toast.success('Convite criado com sucesso!', {
@@ -219,9 +208,7 @@ export default function AdminInvitationsPage() {
   // Handle resend invitation
   const handleResendInvitation = async (invitationId: string) => {
     try {
-      // ✅ Passar token do localStorage para Server Action
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
-      const result = await resendInvitationAction(invitationId, token)
+      const result = await resendInvitationAction(invitationId)
 
       if (result.success) {
         toast.success('Convite reenviado com sucesso!')
@@ -239,9 +226,7 @@ export default function AdminInvitationsPage() {
     if (!selectedInvitation) return
 
     try {
-      // ✅ Passar token do localStorage para Server Action
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || undefined : undefined
-      const result = await deleteInvitationAction(selectedInvitation.id, token)
+      const result = await deleteInvitationAction(selectedInvitation.id)
 
       if (result.success) {
         toast.success('Convite cancelado com sucesso!')
@@ -546,16 +531,24 @@ export default function AdminInvitationsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="organizationId">ID da Organização *</Label>
-              <Input
-                id="organizationId"
-                placeholder="uuid-da-organizacao"
+              <Label htmlFor="organizationId">Organização *</Label>
+              <Select
                 value={formData.organizationId}
-                onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })}
-              />
-              <p className="text-xs text-muted-foreground">
-                Encontre o ID na página de organizações
-              </p>
+                onValueChange={(value) => setFormData({ ...formData, organizationId: value })}
+              >
+                <SelectTrigger id="organizationId">
+                  <SelectValue placeholder="Selecione uma organização..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {organizations.length === 0 ? (
+                    <SelectItem value="_none" disabled>Nenhuma organização encontrada</SelectItem>
+                  ) : (
+                    organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
