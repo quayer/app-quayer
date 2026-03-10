@@ -55,6 +55,14 @@ RUN npx prisma generate
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# Build-time public env vars (baked into client bundle by Next.js)
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_IGNITER_API_URL
+ARG NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_IGNITER_API_URL}
+ENV NEXT_PUBLIC_IGNITER_API_BASE_PATH=${NEXT_PUBLIC_IGNITER_API_BASE_PATH}
+
 # Build Next.js application
 # This will create .next/standalone for optimal production bundle
 RUN npm run build
