@@ -1,31 +1,16 @@
 import { igniter } from '@/igniter'
+import { exampleController } from '@/features/example'
 import { instancesController } from '@/features/instances/controllers/instances.controller'
+import { shareController } from '@/features/share'
 import { authController } from '@/features/auth/controllers/auth.controller'
 import { organizationsController } from '@/features/organizations'
+import { projectsController } from '@/features/projects'
 import { webhooksController } from '@/features/webhooks'
 import { onboardingController } from '@/features/onboarding/controllers/onboarding.controller'
 import { invitationsController } from '@/features/invitations'
 import { dashboardController } from '@/features/dashboard'
 import { chatsController, messagesController, mediaController } from '@/features/messages'
-import { sessionsController, notesController } from '@/features/sessions'
-import { attributesController, contactAttributeController } from '@/features/attributes'
-import { observationsController } from '@/features/observations'
-import { sseController } from '@/features/sse'
-import { callsController } from '@/features/calls'
-import { analyticsController } from '@/features/analytics/controllers/analytics.controller'
-import { contactsController } from '@/features/contacts'
-import { systemSettingsController } from '@/features/system-settings'
-import { logsController, logsSseController } from '@/features/logs'
-import { permissionsController } from '@/features/permissions'
-import { apiKeysController } from '@/features/api-keys'
-import { notificationsController } from '@/features/notifications'
-import { chatwootController } from '@/features/chatwoot'
-import { healthController } from '@/features/health'
-import { auditController } from '@/features/audit'
-import { connectionSettingsController } from '@/features/connection-settings'
-import { organizationProvidersController } from '@/features/organization-providers'
-import { aiController } from '@/features/ai/controllers/ai.controller'
-import { quickRepliesController } from '@/features/quick-replies'
+import { sessionsController } from '@/features/sessions'
 
 /**
  * @description Main application router configuration
@@ -34,37 +19,19 @@ import { quickRepliesController } from '@/features/quick-replies'
 export const AppRouter = igniter.router({
   controllers: {
     auth: authController,
-    analytics: analyticsController,
     onboarding: onboardingController,
     organizations: organizationsController,
     invitations: invitationsController,
     dashboard: dashboardController,
-    attribute: attributesController,
-    'contact-attribute': contactAttributeController,
-    contacts: contactsController,
-    'contact-observation': observationsController,
     chats: chatsController,
     messages: messagesController,
     media: mediaController,
-    sessions: sessionsController,
-    notes: notesController,
+    projects: projectsController,
     webhooks: webhooksController,
-    calls: callsController,
-    sse: sseController,
+    example: exampleController,
     instances: instancesController,
-    'system-settings': systemSettingsController,
-    logs: logsController,
-    'logs-sse': logsSseController,
-    permissions: permissionsController,
-    'api-keys': apiKeysController,
-    notifications: notificationsController,
-    chatwoot: chatwootController,
-    health: healthController,
-    audit: auditController,
-    'connection-settings': connectionSettingsController,
-    'organization-providers': organizationProvidersController,
-    ai: aiController,
-    'quick-replies': quickRepliesController,
+    share: shareController,
+    sessions: sessionsController,
   }
 })
 
