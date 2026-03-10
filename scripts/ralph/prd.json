@@ -1,0 +1,74 @@
+{
+  "project": "app-quayer",
+  "branchName": "ralph/admin-integracoes-improvements",
+  "description": "Admin Integrações: limpeza brutal da tabela, visão global cross-org, OrgSheet com tab de Instâncias. Deletar arquivo morto assign-organization-modal. Garantir jornada completa admin → instâncias.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Server Actions admin de instâncias",
+      "description": "Como admin, preciso de Server Actions para listar instâncias de uma org específica (para OrgSheet) e todas as instâncias do sistema com nome da org (para visão global).",
+      "acceptanceCriteria": [
+        "Adicionar OrgInstance interface em src/app/admin/actions.ts",
+        "Adicionar listOrgInstancesAction(organizationId: string) — Prisma query com select e orderBy name",
+        "Adicionar AdminInstance interface com campo organization: { id, name } | null",
+        "Adicionar listAllInstancesAdminAction() — Prisma query com include organization",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implementado. database.instance.findMany com include organization. createdAt convertido para ISO string."
+    },
+    {
+      "id": "US-002",
+      "title": "Deletar assign-organization-modal.tsx (arquivo morto)",
+      "description": "Como desenvolvedor, quero remover o arquivo assign-organization-modal.tsx que tem 3 imports quebrados de Server Actions inexistentes e não é usado em nenhum lugar.",
+      "acceptanceCriteria": [
+        "Deletar src/app/admin/integracoes/assign-organization-modal.tsx",
+        "Verificar que nenhum outro arquivo importa assign-organization-modal",
+        "Typecheck passes (os 3 erros de import deste arquivo somem)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Deletado. Apenas page-WIN-QVULKCTEEEN.tsx (arquivo legado ignorado) importava. 3 erros de typecheck eliminados."
+    },
+    {
+      "id": "US-003",
+      "title": "Refatorar /admin/integracoes — tabela limpa + visão global com org",
+      "description": "Como admin, quero ver TODAS as instâncias do sistema com a organização dona, filtros por status, tabela limpa sem colunas redundantes.",
+      "acceptanceCriteria": [
+        "Substituir useInstances() hook por listAllInstancesAdminAction() via useEffect + useState",
+        "Colunas da tabela: Nome | Telefone | Organização | Provedor | Status | Criado em | Ações",
+        "Coluna Organização: mostra organization.name ou Badge outline 'Sem organização' se null",
+        "Coluna Provedor: usa instance.brokerType via getBrokerLabel()",
+        "Coluna Status: UM único Badge — removida coluna Conexão duplicada",
+        "REMOVIDO coluna Agentes (era hardcoded '0 agente(s)')",
+        "REMOVIDO coluna Atualizado em",
+        "Select de filtro por status: Todos | Conectadas | Desconectadas",
+        "4 stat cards: Total | Conectadas | Desconectadas | Sem organização",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Implementado. useAllInstances hook também corrigido para usar listAllInstancesAdminAction. Modais recebem as any para compatibilidade de tipos."
+    },
+    {
+      "id": "US-004",
+      "title": "OrgSheet — adicionar tab Instâncias",
+      "description": "Como admin, ao abrir o sheet de uma organização, quero ver as instâncias dela com status, para ter visão completa da org em um só lugar.",
+      "acceptanceCriteria": [
+        "State instances: OrgInstance[] e isLoadingInstances: boolean adicionados",
+        "listOrgInstancesAction carregado no useEffect junto com loadMembers",
+        "TabsList: grid-cols-3",
+        "TabsTrigger 'Instâncias ({instances.length})' entre Usuários e Info",
+        "Header 'X / org.maxInstances instâncias usadas'",
+        "Loading: 2 Skeleton rows",
+        "Empty: 'Nenhuma instância configurada nesta organização'",
+        "Lista: ícone Plug + nome + telefone + Badge status",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Implementado. Tab grid-cols-3. Carregamento paralelo com loadMembers no useEffect."
+    }
+  ]
+}
