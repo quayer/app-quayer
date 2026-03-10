@@ -113,7 +113,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - quayer_postgres_data:/var/lib/postgresql/data
+      - /opt/quayer/data/postgres:/var/lib/postgresql/data
     networks:
       - quayer-internal
     healthcheck:
@@ -152,7 +152,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - quayer_redis_data:/data
+      - /opt/quayer/data/redis:/data
     networks:
       - quayer-internal
     healthcheck:
@@ -177,13 +177,7 @@ services:
 # ==================================
 # VOLUMES
 # ==================================
-volumes:
-  quayer_postgres_data:
-    driver: local
-    name: quayer-postgres-data
-  quayer_redis_data:
-    driver: local
-    name: quayer-redis-data
+volumes: {}
 
 # ==================================
 # NETWORKS

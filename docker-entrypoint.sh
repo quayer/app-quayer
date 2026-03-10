@@ -6,7 +6,7 @@ echo "🚀 Starting Quayer Application..."
 # Run database migrations if DATABASE_URL is set
 if [ -n "$DATABASE_URL" ]; then
     echo "📦 Running database migrations..."
-    npx prisma migrate deploy --schema=./prisma/schema.prisma || {
+    node ./node_modules/prisma/build/index.js migrate deploy --schema=./prisma/schema.prisma || {
         echo "⚠️ Migration failed, but continuing startup (might already be up to date)"
     }
     echo "✅ Migrations complete!"

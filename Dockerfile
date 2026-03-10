@@ -89,12 +89,17 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma client (required for database access)
+# Copy Prisma client and CLI (required for database access and migrations)
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 
 # Copy prisma schema (for migrations if needed)
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+
+# Copy entrypoint script (runs migrations before starting app)
+COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Switch to non-root user
 USER nextjs
@@ -107,7 +112,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {if(r.statusCode !== 200) throw new Error('Health check failed')})" || exit 1
 
 # Use tini as init system (handles signals properly)
-ENTRYPOINT ["/sbin/tini", "--"]
-
-# Start the application
-CMD ["node", "server.js"]
+ENTRYPOINT ["/sbin/tini", "--", "./docker-entrypoint.sh"]

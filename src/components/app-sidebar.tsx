@@ -11,6 +11,9 @@ import {
   Shield,
   MonitorPlay,
   Settings,
+  FileText,
+  Bell,
+  Mail,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -68,6 +71,21 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           title: "Sessões",
           url: "/admin/sessions",
           icon: MonitorPlay,
+        },
+        {
+          title: "Convites",
+          url: "/admin/invitations",
+          icon: Mail,
+        },
+        {
+          title: "Notificações",
+          url: "/admin/notificacoes",
+          icon: Bell,
+        },
+        {
+          title: "Auditoria",
+          url: "/admin/audit",
+          icon: FileText,
         },
         {
           title: "Configurações",
