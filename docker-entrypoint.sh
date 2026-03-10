@@ -10,6 +10,11 @@ if [ -n "$DATABASE_URL" ]; then
         echo "⚠️ Migration failed, but continuing startup (might already be up to date)"
     }
     echo "✅ Migrations complete!"
+
+    echo "👤 Ensuring admin user exists..."
+    node ./prisma/create-admin.js || {
+        echo "⚠️ Admin seed failed, but continuing startup"
+    }
 fi
 
 # Start the application
