@@ -113,6 +113,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-bytea ./nod
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-date ./node_modules/postgres-date
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-interval ./node_modules/postgres-interval
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-protocol ./node_modules/pg-protocol
+# effect is required by @prisma/config (used by prisma CLI for db push)
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/effect ./node_modules/effect
 
 # Copy prisma schema (for migrations if needed)
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
