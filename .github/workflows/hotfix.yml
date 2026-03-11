@@ -25,6 +25,7 @@ on:
           - full-rebuild   # Rebuild completo (sem cache)
           - db-migrate     # Rodar migrations do Prisma
           - logs           # Ver últimos logs
+          - diagnose       # Diagnóstico de rede e Redis
 
 jobs:
   hotfix:
@@ -103,6 +104,29 @@ jobs:
               "logs")
                 echo "📋 Últimos logs:"
                 docker logs quayer-app --tail 100
+                exit 0
+                ;;
+
+              "diagnose")
+                echo "🔍 Diagnóstico de containers e rede..."
+                docker ps --format "{{.Names}}\t{{.Status}}\t{{.Networks}}"
+                echo "---"
+                echo "Env vars Redis no container:"
+                docker exec quayer-app printenv | grep -E "REDIS|NEXT_PUBLIC" || echo "Container não disponível"
+                echo "---"
+                echo "Ping Redis do container app:"
+                docker exec quayer-app node -e "
+                  const r = require('net').createConnection(6379, 'quayer-redis');
+                  r.on('connect', () => { console.log('TCP OK - Redis reachable'); r.end(); });
+                  r.on('error', (e) => { console.log('TCP FAIL:', e.message); });
+                  setTimeout(() => { console.log('timeout'); process.exit(1); }, 3000);
+                " || true
+                echo "---"
+                echo "Docker networks:"
+                docker network ls
+                echo "---"
+                echo "Container quayer-redis inspect (network):"
+                docker inspect quayer-redis --format '{{json .NetworkSettings.Networks}}' || echo "quayer-redis não encontrado"
                 exit 0
                 ;;
             esac
