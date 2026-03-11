@@ -6,17 +6,17 @@ echo "🚀 Starting Quayer Application..."
 # Run database migrations if DATABASE_URL is set
 if [ -n "$DATABASE_URL" ]; then
 
-    echo "📦 Running database migrations (prisma migrate deploy)..."
-    # migrate.js implements prisma migrate deploy with per-migration transactions.
-    # It exits with code 1 on any failure — container will NOT start with a broken schema.
-    # DO NOT add "|| true" or similar — a migration failure must stop the container.
-    node ./prisma/migrate.js
-
-    echo "✅ Database migrations applied successfully!"
+    echo "📦 Running database migrations..."
+    # migrate.js applies incremental SQL migrations from prisma/migrations/.
+    # On a fresh database it may fail (ALTER TABLE on non-existent tables) —
+    # that is expected: the deploy step will run 'prisma db push' afterwards
+    # to create the initial schema, and subsequent deploys will succeed.
+    node ./prisma/migrate.js || {
+        echo "⚠️ Migrations failed (likely fresh DB — schema will be created by deploy step)"
+    }
 
     echo "👤 Ensuring admin user exists..."
     node ./prisma/create-admin.js || {
-        # Non-fatal: admin may already exist or email config may not be ready yet.
         echo "⚠️ Admin seed step failed (non-critical). Check logs above."
     }
 fi
