@@ -92,8 +92,10 @@ jobs:
                 ;;
 
               "db-migrate")
-                echo "🗄️ Rodando migrations..."
-                docker exec quayer-app npx prisma migrate deploy
+                echo "🗄️ Rodando migrations dentro do container..."
+                docker exec quayer-app node ./node_modules/prisma/build/index.js migrate deploy --schema=./prisma/schema.prisma
+                echo "👤 Garantindo usuário admin..."
+                docker exec quayer-app node ./prisma/create-admin.js || true
                 ;;
 
               "logs")
