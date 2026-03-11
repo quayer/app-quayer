@@ -29,6 +29,15 @@ export function getRedis(): Redis {
     _redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
       maxRetriesPerRequest: null,
       lazyConnect: true,
+      enableOfflineQueue: false,
+      retryStrategy: (times) => {
+        if (times > 10) return null
+        return Math.min(times * 2000, 30000)
+      },
+    })
+    // Prevent unhandled error events from crashing the process
+    _redis.on('error', (err) => {
+      console.error('[Redis] Connection error (non-fatal):', err.message)
     })
   }
   return _redis
