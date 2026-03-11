@@ -148,28 +148,6 @@ jobs:
 
             if [ "$HEALTHY" = "true" ]; then
               echo "App HEALTHY apos ${ELAPSED}s!"
-
-              # 7b. Sincronizar schema do banco (cria tabelas se for banco novo)
-              echo "📦 Sincronizando schema do banco de dados..."
-              set +e
-              docker exec quayer-app sh -c '
-                for PRISMA in \
-                  "node_modules/.bin/prisma" \
-                  "node_modules/prisma/build/index.js" \
-                  "node_modules/prisma/dist/bin.js"; do
-                  if [ -f "$PRISMA" ]; then
-                    echo "Usando: $PRISMA"
-                    node "$PRISMA" db push \
-                      --schema=./prisma/schema.prisma \
-                      --skip-generate \
-                      --accept-data-loss 2>&1
-                    exit $?
-                  fi
-                done
-                echo "Prisma CLI nao encontrado no container"
-                exit 1
-              ' && echo "✅ Schema sincronizado!" || echo "⚠️ Schema sync falhou (tabelas podem estar desatualizadas)"
-              set -e
             else
               echo "FALHA: App nao ficou healthy em ${MAX_WAIT}s (status: $STATUS)"
               docker logs quayer-app --tail 50

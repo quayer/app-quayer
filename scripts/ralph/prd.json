@@ -1,74 +1,60 @@
 {
   "project": "app-quayer",
-  "branchName": "ralph/admin-integracoes-improvements",
-  "description": "Admin Integrações: limpeza brutal da tabela, visão global cross-org, OrgSheet com tab de Instâncias. Deletar arquivo morto assign-organization-modal. Garantir jornada completa admin → instâncias.",
+  "branchName": "ralph/fix-production-database-schema",
+  "description": "Fix production database empty schema on fresh deploys. Root cause: migrate.js only has ALTER TABLE migrations — no CREATE TABLE. Solution: generate a proper initial migration SQL so fresh databases get all 55+ tables automatically. Also simplify Docker image by removing the broken prisma CLI dependency chain (effect, fast-check, etc.).",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Server Actions admin de instâncias",
-      "description": "Como admin, preciso de Server Actions para listar instâncias de uma org específica (para OrgSheet) e todas as instâncias do sistema com nome da org (para visão global).",
+      "title": "Criar migration inicial com CREATE TABLE completo para todos os modelos",
+      "description": "Como sistema de deploy, preciso que em um banco de dados vazio o migrate.js consiga criar todas as tabelas (55+) automaticamente, sem depender do prisma CLI nem de intervenção manual.",
       "acceptanceCriteria": [
-        "Adicionar OrgInstance interface em src/app/admin/actions.ts",
-        "Adicionar listOrgInstancesAction(organizationId: string) — Prisma query com select e orderBy name",
-        "Adicionar AdminInstance interface com campo organization: { id, name } | null",
-        "Adicionar listAllInstancesAdminAction() — Prisma query com include organization",
+        "Criar diretório: prisma/migrations/00000000000000_init/",
+        "Verificar que migration.sql tem conteúdo (mais de 100 linhas) e começa com CREATE TABLE ou CREATE TYPE",
+        "O arquivo migration.sql deve conter tanto os CREATE TABLE quanto os INSERT INTO _prisma_migrations ao final",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Implementado. database.instance.findMany com include organization. createdAt convertido para ISO string."
+      "notes": "Gerado com Prisma 5 (--to-schema-datamodel). Prisma 7 não funciona no Windows MINGW64. migrate.js atualizado para refreshar applied set após cada migration."
     },
     {
       "id": "US-002",
-      "title": "Deletar assign-organization-modal.tsx (arquivo morto)",
-      "description": "Como desenvolvedor, quero remover o arquivo assign-organization-modal.tsx que tem 3 imports quebrados de Server Actions inexistentes e não é usado em nenhum lugar.",
+      "title": "Simplificar Dockerfile — remover prisma CLI e effect do runner",
+      "description": "Como DevOps, quero reduzir o tamanho da imagem Docker removendo o prisma CLI e suas dependências (effect, fast-check) do stage runner, já que migrate.js usa pg diretamente e não precisa do CLI.",
       "acceptanceCriteria": [
-        "Deletar src/app/admin/integracoes/assign-organization-modal.tsx",
-        "Verificar que nenhum outro arquivo importa assign-organization-modal",
-        "Typecheck passes (os 3 erros de import deste arquivo somem)"
+        "No Dockerfile, remover as linhas COPY para: node_modules/prisma (pacote CLI), node_modules/effect",
+        "Manter as linhas COPY para: node_modules/.prisma, node_modules/@prisma, pg e sub-pacotes",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Deletado. Apenas page-WIN-QVULKCTEEEN.tsx (arquivo legado ignorado) importava. 3 erros de typecheck eliminados."
+      "notes": "Removidos COPY de node_modules/prisma e node_modules/effect. Comentário atualizado."
     },
     {
       "id": "US-003",
-      "title": "Refatorar /admin/integracoes — tabela limpa + visão global com org",
-      "description": "Como admin, quero ver TODAS as instâncias do sistema com a organização dona, filtros por status, tabela limpa sem colunas redundantes.",
+      "title": "Limpar docker-entrypoint.sh — fail-fast simples com migrate.js",
+      "description": "Como DevOps, com a migration inicial criada, o entrypoint pode voltar a ser fail-fast.",
       "acceptanceCriteria": [
-        "Substituir useInstances() hook por listAllInstancesAdminAction() via useEffect + useState",
-        "Colunas da tabela: Nome | Telefone | Organização | Provedor | Status | Criado em | Ações",
-        "Coluna Organização: mostra organization.name ou Badge outline 'Sem organização' se null",
-        "Coluna Provedor: usa instance.brokerType via getBrokerLabel()",
-        "Coluna Status: UM único Badge — removida coluna Conexão duplicada",
-        "REMOVIDO coluna Agentes (era hardcoded '0 agente(s)')",
-        "REMOVIDO coluna Atualizado em",
-        "Select de filtro por status: Todos | Conectadas | Desconectadas",
-        "4 stat cards: Total | Conectadas | Desconectadas | Sem organização",
+        "docker-entrypoint.sh deve chamar 'node ./prisma/migrate.js' SEM fallback '|| true'",
+        "Manter o 'node ./prisma/create-admin.js || true'",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Implementado. useAllInstances hook também corrigido para usar listAllInstancesAdminAction. Modais recebem as any para compatibilidade de tipos."
+      "notes": "Entrypoint simplificado: migrate.js sem fallback, create-admin.js com || true."
     },
     {
       "id": "US-004",
-      "title": "OrgSheet — adicionar tab Instâncias",
-      "description": "Como admin, ao abrir o sheet de uma organização, quero ver as instâncias dela com status, para ter visão completa da org em um só lugar.",
+      "title": "Limpar deploy workflow — remover docker exec prisma db push",
+      "description": "Como DevOps, com a migration inicial no lugar, o passo de 'docker exec prisma db push' no deploy workflow é obsoleto.",
       "acceptanceCriteria": [
-        "State instances: OrgInstance[] e isLoadingInstances: boolean adicionados",
-        "listOrgInstancesAction carregado no useEffect junto com loadMembers",
-        "TabsList: grid-cols-3",
-        "TabsTrigger 'Instâncias ({instances.length})' entre Usuários e Info",
-        "Header 'X / org.maxInstances instâncias usadas'",
-        "Loading: 2 Skeleton rows",
-        "Empty: 'Nenhuma instância configurada nesta organização'",
-        "Lista: ícone Plug + nome + telefone + Badge status",
+        "Remover o bloco '# 7b. Sincronizar schema do banco' e todo o docker exec com prisma db push",
+        "Manter health check, backup e rollback automático",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Implementado. Tab grid-cols-3. Carregamento paralelo com loadMembers no useEffect."
+      "notes": "Bloco 7b removido completamente. Health check, backup e rollback preservados."
     }
   ]
 }

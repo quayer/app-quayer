@@ -84,6 +84,11 @@ async function main() {
         await client.query('COMMIT')
         console.log(`  ✅ Applied: ${folder}`)
         appliedCount++
+        // Refresh applied set so migrations pre-marked by init SQL are respected
+        const refreshed = await client.query(
+          'SELECT "migration_name" FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL'
+        )
+        refreshed.rows.forEach((r) => applied.add(r.migration_name))
       } catch (err) {
         await client.query('ROLLBACK')
         throw new Error(`Migration ${folder} failed: ${err.message}`)

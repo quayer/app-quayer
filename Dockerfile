@@ -97,10 +97,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma client and CLI (required for database access and migrations)
+# Copy Prisma client runtime (prisma CLI removed — migrate.js uses pg directly)
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 
 # Copy pg and all sub-dependencies (required by prisma/migrate.js at runtime)
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
@@ -113,8 +112,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-bytea ./nod
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-date ./node_modules/postgres-date
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-interval ./node_modules/postgres-interval
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-protocol ./node_modules/pg-protocol
-# effect is required by @prisma/config (used by prisma CLI for db push)
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/effect ./node_modules/effect
 
 # Copy prisma schema (for migrations if needed)
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
