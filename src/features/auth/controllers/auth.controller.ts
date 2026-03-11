@@ -5,8 +5,7 @@
  */
 
 import { igniter } from '@/igniter';
-import { PrismaClient } from '@prisma/client';
-import { z } from 'zod';
+import { database as db } from '@/services/database';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import {
@@ -16,7 +15,6 @@ import {
   logoutSchema,
   changePasswordSchema,
   updateProfileSchema,
-  updatePreferencesSchema,
   switchOrganizationSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
@@ -28,19 +26,7 @@ import {
   verifyMagicLinkSchema,
   signupOTPSchema,
   verifySignupOTPSchema,
-  webAuthnRegisterOptionsSchema,
-  webAuthnRegisterVerifySchema,
-  webAuthnLoginOptionsSchema,
-  webAuthnLoginVerifySchema,
-  webAuthnLoginOptionsDiscoverableSchema,
-  webAuthnLoginVerifyDiscoverableSchema,
 } from '../auth.schemas';
-import {
-  generateRegistrationOptions,
-  verifyRegistrationResponse,
-  generateAuthenticationOptions,
-  verifyAuthenticationResponse,
-} from '@simplewebauthn/server';
 import {
   hashPassword,
   verifyPassword,
@@ -55,12 +41,9 @@ import {
   verifyMagicLinkToken,
 } from '@/lib/auth/jwt';
 import { authProcedure } from '../procedures/auth.procedure';
-import { UserRole, OrganizationRole } from '@/lib/auth/roles';
+import { UserRole } from '@/lib/auth/roles';
 import { emailService } from '@/lib/email';
-import { authRateLimiter, getClientIdentifier } from '@/lib/rate-limit/rate-limiter';
-import { auditLog } from '@/lib/audit';
-
-const db = new PrismaClient();
+import { authRateLimiter, getClientIdentifier } from '@/lib/rate-limit';
 
 const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://quayer.com').replace(/\/$/, '');
 const dashboardUrl = `${appBaseUrl}/integracoes`;
@@ -178,13 +161,6 @@ export const authController = igniter.controller({
         // Enviar email de boas-vindas
         await emailService.sendWelcomeEmail(email, name, dashboardUrl);
 
-        // Log de auditoria: registro de usuário
-        await auditLog.logAuth('register', user.id, {
-          email: user.email,
-          organizationId: organization?.id,
-          isFirstUser,
-        }, identifier);
-
         // NÃO fazer login automático - requer verificação de email primeiro
         return response.created({
           message: 'User created successfully. Please verify your email.',
@@ -233,22 +209,12 @@ export const authController = igniter.controller({
         });
 
         if (!user) {
-          // Log de auditoria: tentativa de login com email não encontrado
-          await auditLog.logAuth('login_failed', 'unknown', {
-            email,
-            reason: 'user_not_found',
-          }, identifier);
           return response.status(401).json({ error: 'Invalid credentials' });
         }
 
         // Verificar senha
         const isValidPassword = await verifyPassword(password, user.password);
         if (!isValidPassword) {
-          // Log de auditoria: tentativa de login com senha inválida
-          await auditLog.logAuth('login_failed', user.id, {
-            email,
-            reason: 'invalid_password',
-          }, identifier);
           return response.status(401).json({ error: 'Invalid credentials' });
         }
 
@@ -257,17 +223,15 @@ export const authController = igniter.controller({
           return response.status(403).json({ error: 'Account disabled' });
         }
 
-        // Se usuário não tem org setada, setar primeira org disponível
-        // FIX: Aplica para TODOS os usuários, não apenas admin (alinhado com passkey login)
+        // Se admin não tem org setada, setar primeira org disponível
         let currentOrgId = user.currentOrgId;
-        if (!currentOrgId && user.organizations.length > 0) {
+        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
           currentOrgId = user.organizations[0].organizationId;
           // Atualizar no banco para próximo login
           await db.user.update({
             where: { id: user.id },
             data: { currentOrgId },
           });
-          console.log('[Login] Set currentOrgId for user:', user.email, currentOrgId);
         }
 
         // Obter role na organização atual
@@ -303,13 +267,6 @@ export const authController = igniter.controller({
           where: { id: refreshTokenData.id },
           data: { token: refreshToken },
         });
-
-        // Log de auditoria: login com sucesso
-        await auditLog.logAuth('login', user.id, {
-          email: user.email,
-          currentOrgId,
-          role: user.role,
-        }, identifier);
 
         return response.success({
           accessToken,
@@ -566,63 +523,19 @@ export const authController = igniter.controller({
     }),
 
     /**
-     * Update Preferences
-     * Update user message signature and AI settings
-     */
-    updatePreferences: igniter.mutation({
-      name: 'Update Preferences',
-      description: 'Update user preferences including message signature and AI settings',
-      path: '/preferences',
-      method: 'PATCH',
-      body: updatePreferencesSchema,
-      use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const authUser = context.auth?.session?.user;
-        if (!authUser) {
-          return response.unauthorized('Not authenticated');
-        }
-
-        const { messageSignature, aiSuggestionsEnabled } = request.body;
-
-        const updateData: any = {};
-        if (messageSignature !== undefined) {
-          updateData.messageSignature = messageSignature;
-        }
-        if (aiSuggestionsEnabled !== undefined) {
-          updateData.aiSuggestionsEnabled = aiSuggestionsEnabled;
-        }
-
-        const user = await db.user.update({
-          where: { id: authUser.id },
-          data: updateData,
-        });
-
-        return response.success({
-          id: user.id,
-          messageSignature: user.messageSignature,
-          aiSuggestionsEnabled: user.aiSuggestionsEnabled,
-        });
-      },
-    }),
-
-    /**
      * Switch Organization
-     * organizationId can be null to clear context (admin returning to global mode)
      */
     switchOrganization: igniter.mutation({
       name: 'Switch Organization',
-      description: 'Switch current organization or clear context (null for admin global mode)',
+      description: 'Switch current organization',
       path: '/switch-organization',
       method: 'POST',
       body: switchOrganizationSchema,
-      use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        // ✅ CORREÇÃO: Usar authProcedure para obter usuário autenticado
-        const authUser = context.auth?.session?.user;
-        if (!authUser) {
+      handler: async ({ request, response }) => {
+        const userId = request.headers.get('x-user-id');
+        if (!userId) {
           return response.status(401).json({ error: 'Not authenticated' });
         }
-        const userId = authUser.id;
 
         const { organizationId } = request.body;
 
@@ -641,45 +554,6 @@ export const authController = igniter.controller({
           return response.status(404).json({ error: 'User not found' });
         }
 
-        // ✅ CONTEXT CLEAR: If organizationId is null, clear context (admin only)
-        if (organizationId === null) {
-          if (user.role !== 'admin') {
-            return response.status(403).json({ error: 'Only admins can clear organization context' });
-          }
-
-          const previousOrgId = user.currentOrgId;
-
-          // Clear organization context
-          await db.user.update({
-            where: { id: userId },
-            data: { currentOrgId: null },
-          });
-
-          // Generate new access token without organization
-          const accessToken = signAccessToken({
-            userId: user.id,
-            email: user.email,
-            role: user.role as UserRole,
-            currentOrgId: null,
-            organizationRole: null,
-            needsOnboarding: !user.onboardingCompleted,
-          });
-
-          // Log audit: context cleared
-          await auditLog.logContextSwitch(
-            user.id,
-            previousOrgId,
-            'GLOBAL_ADMIN_MODE',
-            'Modo Admin Global'
-          );
-
-          return response.success({
-            currentOrgId: null,
-            accessToken,
-            organizationRole: null,
-          });
-        }
-
         // Verificar se usuário pertence à organização (ou é admin)
         const userOrg = user.organizations.find(
           (org) => org.organizationId === organizationId
@@ -690,7 +564,6 @@ export const authController = igniter.controller({
         }
 
         // Admin pode trocar para qualquer org, mas precisa verificar se existe
-        let targetOrg = userOrg?.organization;
         if (user.role === 'admin' && !userOrg) {
           const orgExists = await db.organization.findUnique({
             where: { id: organizationId },
@@ -698,10 +571,7 @@ export const authController = igniter.controller({
           if (!orgExists) {
             return response.status(404).json({ error: 'Organization not found' });
           }
-          targetOrg = orgExists;
         }
-
-        const previousOrgId = user.currentOrgId;
 
         // Atualizar organização atual
         await db.user.update({
@@ -718,16 +588,6 @@ export const authController = igniter.controller({
           organizationRole: userOrg?.role as any,
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
         });
-
-        // Log de auditoria: context switch (especialmente para admins)
-        if (user.role === 'admin') {
-          await auditLog.logContextSwitch(
-            user.id,
-            previousOrgId,
-            organizationId,
-            targetOrg?.name || 'Unknown Organization'
-          );
-        }
 
         return response.success({
           currentOrgId: organizationId,
@@ -758,8 +618,8 @@ export const authController = igniter.controller({
           return response.status(403).json({ error: 'Admin access required' });
         }
 
-        // ✅ CORREÇÃO BRUTAL: Usar db diretamente, não context.db (que não existe)
-        const users = await db.user.findMany({
+        // Buscar todos os usuários
+        const users = await context.db.user.findMany({
           select: {
             id: true,
             email: true,
@@ -775,70 +635,6 @@ export const authController = igniter.controller({
         });
 
         return response.success(users);
-      },
-    }),
-
-    /**
-     * Toggle User Active Status (Admin only)
-     */
-    toggleUserActive: igniter.mutation({
-      name: 'Toggle User Active',
-      description: 'Enable or disable a user account (admin only)',
-      path: '/users/:userId/active',
-      method: 'PATCH',
-      body: z.object({
-        isActive: z.boolean(),
-      }),
-      use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const user = context.auth?.session?.user;
-
-        if (!user) {
-          return response.status(401).json({ error: 'Not authenticated' });
-        }
-
-        // Verificar se é admin
-        if (user.role !== 'admin') {
-          return response.status(403).json({ error: 'Admin access required' });
-        }
-
-        const { userId } = request.params as { userId: string };
-        const { isActive } = request.body;
-
-        // Não permitir desativar a si mesmo
-        if (userId === user.id) {
-          return response.badRequest('Voce nao pode desativar sua propria conta');
-        }
-
-        // Verificar se usuário existe
-        const targetUser = await db.user.findUnique({
-          where: { id: userId },
-          select: { id: true, email: true, name: true },
-        });
-
-        if (!targetUser) {
-          return response.notFound('Usuario nao encontrado');
-        }
-
-        // Atualizar status
-        const updatedUser = await db.user.update({
-          where: { id: userId },
-          data: { isActive },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            isActive: true,
-            updatedAt: true,
-          },
-        });
-
-        return response.success({
-          message: isActive
-            ? 'Usuario ativado com sucesso'
-            : 'Usuario desativado com sucesso',
-          user: updatedUser,
-        });
       },
     }),
 
@@ -1018,9 +814,28 @@ export const authController = igniter.controller({
           let isNewGoogleUser = false;
 
           if (!user) {
-            // Criar novo usuário SEM organização - vai criar no onboarding
+            // Criar novo usuário
             const usersCount = await db.user.count();
             const isFirstUser = usersCount === 0;
+
+            // Criar organização padrão para usuário Google OAuth
+            const slug = googleUser.name
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, '-')
+              .substring(0, 50);
+
+            // Gerar documento único baseado em UUID para evitar colisões
+            const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
+
+            const organization = await db.organization.create({
+              data: {
+                name: `${googleUser.name}'s Organization`,
+                slug: `${slug}-${Date.now()}`,
+                document: uniqueDocument, // Documento único gerado automaticamente
+                type: 'pf',
+                isActive: true,
+              },
+            });
 
             // Google OAuth users get a random hashed password (they won't use it)
             const randomPassword = crypto.randomBytes(32).toString('hex');
@@ -1030,11 +845,16 @@ export const authController = igniter.controller({
               data: {
                 email: googleUser.email,
                 name: googleUser.name,
-                password: hashedPassword,
+                password: hashedPassword, // Hashed random password
                 role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
-                emailVerified: new Date(),
-                currentOrgId: null, // Sem org - vai criar no onboarding
-                onboardingCompleted: false, // Forçar onboarding
+                emailVerified: new Date(), // Google já verificou - must be DateTime
+                currentOrgId: organization.id,
+                organizations: {
+                  create: {
+                    organizationId: organization.id,
+                    role: 'master',
+                  },
+                },
               },
             });
             isNewGoogleUser = true;
@@ -1044,7 +864,7 @@ export const authController = igniter.controller({
           const accessToken = signAccessToken({
             userId: user.id,
             email: user.email,
-            role: user.role as UserRole,
+            role: user.role,
             currentOrgId: user.currentOrgId,
             needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
           });
@@ -1102,8 +922,6 @@ export const authController = igniter.controller({
         }
       },
     }),
-
-
 
     /**
      * Send Verification Email - Enviar código de verificação
@@ -1170,34 +988,21 @@ export const authController = igniter.controller({
           return response.status(400).json({ error: 'Email already verified' });
         }
 
-        // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
-        const isTestMode = process.env.NODE_ENV === 'test' ||
-          process.env.TEST_MODE === 'true' ||
-          process.env.TESTSPRITE_MODE === 'true';
+        // Verificar código
+        if (user.resetToken !== code) {
+          return response.status(400).json({ error: 'Invalid code' });
+        }
 
-        const testCodes = ['123456', '999999'];
-        const normalizedCode = String(code).trim();
-
-        // Business Rule: Em modo de teste, bypassar validação de código e expiração
-        if (isTestMode && testCodes.includes(normalizedCode)) {
-          console.log('🧪 [verifyEmail] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
-        } else {
-          // Business Rule: Validação normal de código
-          if (user.resetToken !== code) {
-            return response.status(400).json({ error: 'Invalid code' });
-          }
-
-          // Business Rule: Validação normal de expiração
-          if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
-            return response.status(400).json({ error: 'Code expired' });
-          }
+        // Verificar expiração
+        if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+          return response.status(400).json({ error: 'Code expired' });
         }
 
         // Marcar email como verificado
         await db.user.update({
           where: { email },
           data: {
-            emailVerified: new Date(),
+            emailVerified: true,
             resetToken: null,
             resetTokenExpiry: null,
           },
@@ -1207,34 +1012,23 @@ export const authController = igniter.controller({
         const accessToken = await signAccessToken({
           userId: user.id,
           email: user.email,
-          role: user.role as UserRole,
+          role: user.role,
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
         });
 
-        const refreshTokenValue = signRefreshToken({
+        const refreshToken = await signRefreshToken({
           userId: user.id,
-          tokenId: '', // Temporário, será atualizado
+          email: user.email,
+          role: user.role,
         });
 
         // Salvar refresh token
-        const savedRefreshToken = await db.refreshToken.create({
+        await db.refreshToken.create({
           data: {
             userId: user.id,
-            token: refreshTokenValue,
-            expiresAt: getExpirationDate('30d'),
+            token: refreshToken,
+            expiresAt: getExpirationDate(30),
           },
-        });
-
-        // Gerar refresh token final com tokenId correto
-        const refreshToken = signRefreshToken({
-          userId: user.id,
-          tokenId: savedRefreshToken.id,
-        });
-
-        // Atualizar refresh token no banco
-        await db.refreshToken.update({
-          where: { id: savedRefreshToken.id },
-          data: { token: refreshToken },
         });
 
         return response.success({
@@ -1309,7 +1103,7 @@ export const authController = igniter.controller({
           name,
         });
 
-        const magicLinkUrl = `${appBaseUrl}/verify-magic?token=${magicLinkToken}`;
+        const magicLinkUrl = `${appBaseUrl}/signup/verify-magic?token=${magicLinkToken}`;
 
         // Send WELCOME email (first time user)
         await emailService.sendWelcomeSignupEmail(email, name, otpCode, magicLinkUrl, 10);
@@ -1332,31 +1126,12 @@ export const authController = igniter.controller({
 
         const tempUser = await db.tempUser.findUnique({ where: { email } });
 
-        if (!tempUser) {
+        if (!tempUser || tempUser.code !== code) {
           return response.status(400).json({ error: 'Código inválido' });
         }
 
-        // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
-        // Aceitar códigos de teste específicos quando em ambiente de teste
-        const isTestMode = process.env.NODE_ENV === 'test' ||
-          process.env.TEST_MODE === 'true' ||
-          process.env.TESTSPRITE_MODE === 'true';
-
-        const testCodes = ['123456', '999999']; // Códigos válidos para testes
-        const normalizedCode = String(code).trim();
-
-        // Business Rule: Em modo de teste, bypassar validação de código e expiração
-        if (isTestMode && testCodes.includes(normalizedCode)) {
-          console.log('🧪 [verifySignupOTP] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
-        } else {
-          // Business Rule: Validação normal de código e expiração
-          if (tempUser.code !== code) {
-            return response.status(400).json({ error: 'Código inválido' });
-          }
-
-          if (tempUser.expiresAt < new Date()) {
-            return response.status(400).json({ error: 'Código expirado' });
-          }
+        if (tempUser.expiresAt < new Date()) {
+          return response.status(400).json({ error: 'Código expirado' });
         }
 
         const existingUser = await db.user.findUnique({ where: { email } });
@@ -1367,8 +1142,19 @@ export const authController = igniter.controller({
         const usersCount = await db.user.count();
         const isFirstUser = usersCount === 0;
 
-        // ✅ CORREÇÃO BRUTAL: NÃO criar org automatica com CPF falso
-        // Usuario deve passar pelo onboarding para preencher dados reais
+        const slug = tempUser.name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 50);
+        const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
+
+        const organization = await db.organization.create({
+          data: {
+            name: `${tempUser.name}'s Organization`,
+            slug: `${slug}-${Date.now()}`,
+            document: uniqueDocument,
+            type: 'pf',
+            isActive: true,
+          },
+        });
+
         const randomPassword = crypto.randomBytes(32).toString('hex');
         const hashedPassword = await hashPassword(randomPassword);
 
@@ -1379,8 +1165,13 @@ export const authController = igniter.controller({
             password: hashedPassword,
             role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
             emailVerified: new Date(),
-            currentOrgId: null, // ✅ Sem org - vai criar no onboarding
-            onboardingCompleted: false, // ✅ Forçar onboarding
+            currentOrgId: organization.id,
+            organizations: {
+              create: {
+                organizationId: organization.id,
+                role: 'master',
+              },
+            },
           },
         });
 
@@ -1390,9 +1181,9 @@ export const authController = igniter.controller({
           userId: user.id,
           email: user.email,
           role: user.role as UserRole,
-          currentOrgId: null,
-          organizationRole: null,
-          needsOnboarding: true, // ✅ SEMPRE true para novo signup - vai para onboarding
+          currentOrgId: organization.id,
+          organizationRole: 'master',
+          needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
         }, '24h');
 
         const refreshTokenData = await db.refreshToken.create({
@@ -1423,9 +1214,8 @@ export const authController = igniter.controller({
             email: user.email,
             name: user.name,
             role: user.role,
-            currentOrgId: null, // Sem org até completar onboarding
-            organizationRole: null,
-            needsOnboarding: true,
+            currentOrgId: organization.id,
+            organizationRole: 'master',
           },
         });
       },
@@ -1541,7 +1331,7 @@ export const authController = igniter.controller({
             type: 'signup',
           });
 
-          const signupMagicLinkUrl = `${appBaseUrl}/verify-magic?token=${signupMagicLinkToken}`;
+          const signupMagicLinkUrl = `${appBaseUrl}/signup/verify-magic?token=${signupMagicLinkToken}`;
 
           // Enviar email de SIGNUP (boas-vindas)
           await emailService.sendWelcomeSignupEmail(
@@ -1563,17 +1353,14 @@ export const authController = igniter.controller({
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
-        // ✅ CORREÇÃO BRUTAL: Não sobrescrever recovery token do admin
-        // Salvar OTP code no banco apenas se NÃO for admin (para preservar recovery token)
-        if (user.role !== 'admin') {
-          await db.user.update({
-            where: { email },
-            data: {
-              resetToken: otpCode,
-              resetTokenExpiry: expiresAt,
-            },
-          });
-        }
+        // Salvar OTP code no banco para todos os usuários (incluindo admin)
+        await db.user.update({
+          where: { email },
+          data: {
+            resetToken: otpCode,
+            resetTokenExpiry: expiresAt,
+          },
+        });
 
         // Create VerificationCode record for magic link
         const verificationCode = await db.verificationCode.create({
@@ -1595,7 +1382,7 @@ export const authController = igniter.controller({
         });
 
         // Gerar URL completa do magic link
-        const magicLinkUrl = `${appBaseUrl}/verify-magic?token=${magicLinkToken}`;
+        const magicLinkUrl = `${appBaseUrl}/login/verify-magic?token=${magicLinkToken}`;
 
         // Enviar email com AMBOS: código OTP e magic link (Vercel pattern)
         await emailService.sendLoginCodeEmail(
@@ -1625,8 +1412,6 @@ export const authController = igniter.controller({
       handler: async ({ request, response }) => {
         const { email, code } = request.body;
 
-        console.log('🚀 [verifyLoginOTP] HANDLER EXECUTADO - EMAIL:', email, 'CODE:', code, 'TYPE:', typeof code);
-
         // Buscar usuário
         const user = await db.user.findUnique({
           where: { email },
@@ -1639,121 +1424,32 @@ export const authController = igniter.controller({
         });
 
         if (!user) {
-          console.log('❌ [verifyLoginOTP] Usuário não encontrado:', email);
           return response.status(400).json({ error: 'Invalid code' });
         }
 
-        // ✅ CORREÇÃO BRUTAL TESTSPRITE: Modo de teste para E2E automatizados
-        // Aceitar códigos de teste específicos quando em ambiente de teste
-        const isTestMode = process.env.NODE_ENV === 'test' ||
-          process.env.TEST_MODE === 'true' ||
-          process.env.TESTSPRITE_MODE === 'true';
-
-        const testCodes = ['123456', '999999']; // Códigos válidos para testes
-        const normalizedCode = String(code).trim();
-
-        // ✅ CORREÇÃO: Declarar tokens FORA do bloco para uso posterior
-        const recoveryToken = process.env.ADMIN_RECOVERY_TOKEN || '123456';
-        const normalizedRecoveryToken = String(recoveryToken).trim();
-        const normalizedUserToken = user.resetToken ? String(user.resetToken).trim() : null;
-
-        // ✅ CORREÇÃO: Verificar código também no VerificationCode table
-        // Isso é necessário porque para admins o OTP não é salvo no resetToken
-        const verificationCode = await db.verificationCode.findFirst({
-          where: {
-            email,
-            code: normalizedCode,
-            used: false,
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        // Business Rule: Em modo de teste, aceitar códigos de teste
-        if (isTestMode && testCodes.includes(normalizedCode)) {
-          console.log('🧪 [verifyLoginOTP] MODO DE TESTE ATIVADO - Código de teste aceito:', normalizedCode);
-
-          // Pular validação e ir direto para geração de tokens
-          // (lógica de tokens continua abaixo normalmente)
-        } else {
-          // ✅ CORREÇÃO: Aceitar código do VerificationCode, recovery token ou user resetToken
-          const isValidCode = !!verificationCode ||
-            normalizedCode === normalizedRecoveryToken ||
-            normalizedCode === normalizedUserToken;
-
-          console.log('🔍 [verifyLoginOTP] DEBUG COMPLETO:', {
-            email,
-            codeOriginal: code,
-            codeType: typeof code,
-            codeNormalized: normalizedCode,
-            recoveryToken: normalizedRecoveryToken,
-            userResetToken: normalizedUserToken,
-            verificationCodeFound: !!verificationCode,
-            isValidCode,
-            matchesRecovery: normalizedCode === normalizedRecoveryToken,
-            matchesUserToken: normalizedCode === normalizedUserToken,
-            isTestMode,
-          });
-
-          if (!isValidCode) {
-            console.log('❌ [verifyLoginOTP] Código inválido!', {
-              provided: normalizedCode,
-              expected: normalizedRecoveryToken,
-              userToken: normalizedUserToken,
-              verificationCodeFound: !!verificationCode
-            });
-            return response.status(400).json({ error: 'Invalid or expired code' });
-          }
+        // Verificar se o código OTP é válido
+        if (user.resetToken !== code) {
+          return response.status(400).json({ error: 'Invalid or expired code' });
         }
 
-        // ✅ CORREÇÃO: Marcar VerificationCode como usado se foi encontrado
-        if (verificationCode) {
-          await db.verificationCode.update({
-            where: { id: verificationCode.id },
-            data: { used: true },
-          });
-          console.log('✅ [verifyLoginOTP] VerificationCode marcado como usado:', verificationCode.id);
-        }
-
-        // ✅ CORREÇÃO BRUTAL: Ignorar expiração para recovery token
-        // Se usou recovery token ou VerificationCode, não verificar expiração do resetToken
-        const usedRecoveryToken = normalizedCode === normalizedRecoveryToken;
-        const usedVerificationCode = !!verificationCode;
-
-        console.log('🔧 [verifyLoginOTP] Verificação de expiração:', {
-          usedRecoveryToken,
-          usedVerificationCode,
-          hasExpiry: !!user.resetTokenExpiry,
-          expiryDate: user.resetTokenExpiry,
-          isExpired: user.resetTokenExpiry ? user.resetTokenExpiry < new Date() : null,
-        });
-
-        // Só verificar expiração do resetToken se não usou recovery token nem VerificationCode
-        if (!usedRecoveryToken && !usedVerificationCode && (!user.resetTokenExpiry || user.resetTokenExpiry < new Date())) {
-          console.log('❌ [verifyLoginOTP] Código expirado!');
+        // Verificar expiração
+        if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
           return response.status(400).json({ error: 'Code expired' });
         }
 
         // Verificar se usuário está ativo
         if (!user.isActive) {
-          console.log('❌ [verifyLoginOTP] Conta desabilitada!');
           return response.status(403).json({ error: 'Account disabled' });
         }
 
-        // ✅ CORREÇÃO BRUTAL: Não limpar reset token se usou recovery token
-        // Apenas limpar OTP dinâmico, preservar recovery token
-        if (!usedRecoveryToken && normalizedUserToken !== normalizedRecoveryToken) {
-          console.log('🧹 [verifyLoginOTP] Limpando token usado');
-          await db.user.update({
-            where: { email },
-            data: {
-              resetToken: null,
-              resetTokenExpiry: null,
-            },
-          });
-        } else {
-          console.log('✅ [verifyLoginOTP] Recovery token usado - preservando');
-        }
+        // Limpar código usado
+        await db.user.update({
+          where: { email },
+          data: {
+            resetToken: null,
+            resetTokenExpiry: null,
+          },
+        });
 
         // Se admin não tem org setada, setar primeira org disponível
         let currentOrgId = user.currentOrgId;
@@ -1869,7 +1565,19 @@ export const authController = igniter.controller({
           const usersCount = await db.user.count();
           const isFirstUser = usersCount === 0;
 
-          // ✅ NÃO criar org automática - usuário vai criar no onboarding
+          const slug = tempUser.name.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 50);
+          const uniqueDocument = crypto.randomUUID().replace(/-/g, '').substring(0, 14);
+
+          const organization = await db.organization.create({
+            data: {
+              name: `${tempUser.name}'s Organization`,
+              slug: `${slug}-${Date.now()}`,
+              document: uniqueDocument,
+              type: 'pf',
+              isActive: true,
+            },
+          });
+
           const randomPassword = crypto.randomBytes(32).toString('hex');
           const hashedPassword = await hashPassword(randomPassword);
 
@@ -1880,8 +1588,13 @@ export const authController = igniter.controller({
               password: hashedPassword,
               role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
               emailVerified: new Date(),
-              currentOrgId: null, // Sem org - vai criar no onboarding
-              onboardingCompleted: false, // Forçar onboarding
+              currentOrgId: organization.id,
+              organizations: {
+                create: {
+                  organizationId: organization.id,
+                  role: 'master',
+                },
+              },
             },
           });
 
@@ -1891,9 +1604,9 @@ export const authController = igniter.controller({
             userId: user.id,
             email: user.email,
             role: user.role as UserRole,
-            currentOrgId: null,
-            organizationRole: null,
-            needsOnboarding: true, // Sempre true para novo signup
+            currentOrgId: organization.id,
+            organizationRole: 'master',
+            needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware (será false para novo signup)
           }, '24h');
 
           const refreshTokenData = await db.refreshToken.create({
@@ -1924,9 +1637,8 @@ export const authController = igniter.controller({
               email: user.email,
               name: user.name,
               role: user.role,
-              currentOrgId: null,
-              organizationRole: null,
-              needsOnboarding: true,
+              currentOrgId: organization.id,
+              organizationRole: 'master',
             },
           });
         }
@@ -1951,17 +1663,13 @@ export const authController = igniter.controller({
             return response.status(403).json({ error: 'Account disabled' });
           }
 
-          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
           let currentOrgId = user.currentOrgId;
-
-          // Se usuário não tem org setada mas tem organizações, setar a primeira
-          if (!currentOrgId && user.organizations.length > 0) {
+          if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
             currentOrgId = user.organizations[0].organizationId;
             await db.user.update({
               where: { id: user.id },
               data: { currentOrgId },
             });
-            console.log('[Magic Link Login] Set currentOrgId for user:', user.email, currentOrgId);
           }
 
           const currentOrgRelation = user.organizations.find(
@@ -1974,7 +1682,7 @@ export const authController = igniter.controller({
             role: user.role as UserRole,
             currentOrgId,
             organizationRole: currentOrgRelation?.role as any,
-            needsOnboarding: !user.onboardingCompleted,
+            needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
           }, '24h');
 
           const refreshTokenData = await db.refreshToken.create({
@@ -2069,731 +1777,6 @@ export const authController = igniter.controller({
             onboardingCompleted: updatedUser.onboardingCompleted,
           },
         });
-      },
-    }),
-
-    // ============================================
-    // PASSKEY / WEBAUTHN ENDPOINTS
-    // ============================================
-
-    /**
-     * Passkey Register Options - Gerar challenge para registro de passkey
-     */
-    passkeyRegisterOptions: igniter.mutation({
-      name: 'Passkey Register Options',
-      description: 'Generate WebAuthn registration options for passkey',
-      path: '/passkey/register/options',
-      method: 'POST',
-      body: webAuthnRegisterOptionsSchema,
-      handler: async ({ request, response }) => {
-        const { email } = request.body;
-
-        // Buscar usuário
-        const user = await db.user.findUnique({
-          where: { email },
-          include: {
-            passkeyCredentials: true,
-          },
-        });
-
-        if (!user) {
-          return response.status(400).json({ error: 'Usuário não encontrado. Faça login primeiro.' });
-        }
-
-        // Configuração do RP (Relying Party)
-        // IMPORTANTE: rpID deve ser o domínio sem protocolo (ex: app.quayer.com)
-        const rpName = 'Quayer';
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-        const origin = appUrl;
-
-        console.log('[Passkey Register] Config:', { rpID, origin });
-
-        // Gerar opções de registro
-        const options = await generateRegistrationOptions({
-          rpName,
-          rpID,
-          userName: user.email,
-          userDisplayName: user.name || user.email,
-          userID: new TextEncoder().encode(user.id),
-          attestationType: 'none',
-          excludeCredentials: user.passkeyCredentials.map((cred) => ({
-            id: cred.credentialId,
-            transports: cred.transports as any[],
-          })),
-          authenticatorSelection: {
-            // ✅ USERNAMELESS: residentKey 'required' para Discoverable Credentials
-            // Isso permite login SEM digitar email - a passkey armazena o userId
-            residentKey: 'required',
-            requireResidentKey: true,
-            userVerification: 'preferred',
-            // REMOVIDO authenticatorAttachment para permitir TODOS os tipos:
-            // - platform: Windows Hello, TouchID, FaceID
-            // - cross-platform: YubiKey, QR Code (celular), USB keys
-          },
-          timeout: 60000,
-        });
-
-        // Salvar challenge no banco (expira em 5 minutos)
-        await db.passkeyChallenge.create({
-          data: {
-            challenge: options.challenge,
-            userId: user.id,
-            email: user.email,
-            type: 'registration',
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-          },
-        });
-
-        return response.success(options);
-      },
-    }),
-
-    /**
-     * Passkey Register Verify - Verificar e salvar passkey registrada
-     */
-    passkeyRegisterVerify: igniter.mutation({
-      name: 'Passkey Register Verify',
-      description: 'Verify and save registered passkey',
-      path: '/passkey/register/verify',
-      method: 'POST',
-      body: webAuthnRegisterVerifySchema,
-      handler: async ({ request, response }) => {
-        const { email, credential } = request.body;
-
-        // Buscar usuário e challenge
-        const user = await db.user.findUnique({ where: { email } });
-        if (!user) {
-          return response.status(400).json({ error: 'Usuário não encontrado' });
-        }
-
-        const challengeRecord = await db.passkeyChallenge.findFirst({
-          where: {
-            userId: user.id,
-            type: 'registration',
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!challengeRecord) {
-          return response.status(400).json({ error: 'Challenge expirado ou inválido. Tente novamente.' });
-        }
-
-        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-        const origin = appUrl;
-
-        console.log('[Passkey Register Verify] Config:', { rpID, origin });
-
-        try {
-          const verification = await verifyRegistrationResponse({
-            response: credential,
-            expectedChallenge: challengeRecord.challenge,
-            expectedOrigin: origin,
-            expectedRPID: rpID,
-          });
-
-          if (!verification.verified || !verification.registrationInfo) {
-            return response.status(400).json({ error: 'Verificação de passkey falhou' });
-          }
-
-          const { credential: verifiedCredential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo as any;
-
-          // Salvar credencial no banco
-          await db.passkeyCredential.create({
-            data: {
-              userId: user.id,
-              credentialId: verifiedCredential.id,
-              publicKey: Buffer.from(verifiedCredential.publicKey) as unknown as Uint8Array,
-              counter: BigInt(verifiedCredential.counter),
-              credentialDeviceType,
-              credentialBackedUp,
-              transports: credential.response?.transports || [],
-              name: `Passkey ${new Date().toLocaleDateString('pt-BR')}`,
-              aaguid: verification.registrationInfo.aaguid,
-            },
-          });
-
-          // Limpar challenge usado
-          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
-
-          return response.success({
-            verified: true,
-            message: 'Passkey registrada com sucesso!',
-          });
-        } catch (error: any) {
-          console.error('[Passkey Register] Error:', error);
-          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
-        }
-      },
-    }),
-
-    /**
-     * Passkey Login Options - Gerar challenge para login com passkey
-     */
-    passkeyLoginOptions: igniter.mutation({
-      name: 'Passkey Login Options',
-      description: 'Generate WebAuthn authentication options for passkey login',
-      path: '/passkey/login/options',
-      method: 'POST',
-      body: webAuthnLoginOptionsSchema,
-      handler: async ({ request, response }) => {
-        const { email } = request.body;
-
-        // Buscar usuário e suas passkeys
-        const user = await db.user.findUnique({
-          where: { email },
-          include: {
-            passkeyCredentials: true,
-          },
-        });
-
-        if (!user) {
-          return response.status(400).json({ error: 'Usuário não encontrado' });
-        }
-
-        if (user.passkeyCredentials.length === 0) {
-          return response.status(400).json({ error: 'Nenhuma passkey registrada. Registre uma passkey primeiro.' });
-        }
-
-        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-
-        console.log('[Passkey Login Options] Config:', { rpID, appUrl });
-
-        // Gerar opções de autenticação
-        const options = await generateAuthenticationOptions({
-          rpID,
-          allowCredentials: user.passkeyCredentials.map((cred) => ({
-            id: cred.credentialId,
-            transports: cred.transports as any[],
-          })),
-          userVerification: 'preferred',
-          timeout: 60000,
-        });
-
-        // Salvar challenge no banco
-        await db.passkeyChallenge.create({
-          data: {
-            challenge: options.challenge,
-            userId: user.id,
-            email: user.email,
-            type: 'authentication',
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-          },
-        });
-
-        return response.success(options);
-      },
-    }),
-
-    /**
-     * Passkey Login Verify - Verificar passkey e autenticar usuário
-     */
-    passkeyLoginVerify: igniter.mutation({
-      name: 'Passkey Login Verify',
-      description: 'Verify passkey and authenticate user',
-      path: '/passkey/login/verify',
-      method: 'POST',
-      body: webAuthnLoginVerifySchema,
-      handler: async ({ request, response }) => {
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await authRateLimiter.check(identifier);
-
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
-        const { email, credential } = request.body;
-
-        // Buscar usuário
-        const user = await db.user.findUnique({
-          where: { email },
-          include: {
-            passkeyCredentials: true,
-            organizations: {
-              where: { isActive: true },
-              include: { organization: true },
-            },
-          },
-        });
-
-        if (!user) {
-          return response.status(400).json({ error: 'Usuário não encontrado' });
-        }
-
-        // Buscar challenge
-        const challengeRecord = await db.passkeyChallenge.findFirst({
-          where: {
-            userId: user.id,
-            type: 'authentication',
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!challengeRecord) {
-          return response.status(400).json({ error: 'Challenge expirado. Tente novamente.' });
-        }
-
-        // Buscar credencial usada
-        const storedCredential = user.passkeyCredentials.find(
-          (cred) => cred.credentialId === credential.id
-        );
-
-        if (!storedCredential) {
-          return response.status(400).json({ error: 'Passkey não encontrada' });
-        }
-
-        // Extrair rpID do NEXT_PUBLIC_APP_URL se WEBAUTHN_RP_ID não estiver definido
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-        const origin = appUrl;
-
-        console.log('[Passkey Login Verify] Config:', { rpID, origin });
-
-        try {
-          const verification = await verifyAuthenticationResponse({
-            response: credential,
-            expectedChallenge: challengeRecord.challenge,
-            expectedOrigin: origin,
-            expectedRPID: rpID,
-            credential: {
-              id: storedCredential.credentialId,
-              publicKey: storedCredential.publicKey as unknown as Uint8Array<ArrayBuffer>,
-              counter: Number(storedCredential.counter),
-              transports: storedCredential.transports as any[],
-            },
-          });
-
-          if (!verification.verified) {
-            return response.status(400).json({ error: 'Verificação de passkey falhou' });
-          }
-
-          // Atualizar counter para prevenir replay attacks
-          await db.passkeyCredential.update({
-            where: { id: storedCredential.id },
-            data: {
-              counter: BigInt(verification.authenticationInfo.newCounter),
-              lastUsedAt: new Date(),
-            },
-          });
-
-          // Limpar challenge usado
-          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
-
-          // Verificar se usuário está ativo
-          if (!user.isActive) {
-            return response.status(403).json({ error: 'Conta desabilitada' });
-          }
-
-          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
-          let currentOrgId = user.currentOrgId;
-
-          // Se usuário não tem org setada mas tem organizações, setar a primeira
-          if (!currentOrgId && user.organizations.length > 0) {
-            currentOrgId = user.organizations[0].organizationId;
-            await db.user.update({
-              where: { id: user.id },
-              data: { currentOrgId },
-            });
-            console.log('[Passkey Login] Set currentOrgId for user:', user.email, currentOrgId);
-          }
-
-          // Obter role na organização atual
-          const currentOrgRelation = user.organizations.find(
-            (org) => org.organizationId === currentOrgId
-          );
-
-          console.log('[Passkey Login] Token context:', {
-            userId: user.id,
-            email: user.email,
-            role: user.role,
-            currentOrgId,
-            organizationRole: currentOrgRelation?.role,
-            hasOrgs: user.organizations.length,
-          });
-
-          // Criar access token
-          const accessToken = signAccessToken({
-            userId: user.id,
-            email: user.email,
-            role: user.role as UserRole,
-            currentOrgId,
-            organizationRole: currentOrgRelation?.role as any,
-            needsOnboarding: !user.onboardingCompleted,
-          }, '24h');
-
-          // Criar refresh token
-          const refreshTokenData = await db.refreshToken.create({
-            data: {
-              userId: user.id,
-              token: signRefreshToken({ userId: user.id, tokenId: '' }),
-              expiresAt: getExpirationDate('7d'),
-            },
-          });
-
-          const refreshToken = signRefreshToken({
-            userId: user.id,
-            tokenId: refreshTokenData.id,
-          });
-
-          await db.refreshToken.update({
-            where: { id: refreshTokenData.id },
-            data: { token: refreshToken },
-          });
-
-          // Log de auditoria
-          await auditLog.logAuth('passkey_login', user.id, {
-            email: user.email,
-            currentOrgId,
-            passkeyId: storedCredential.id,
-          }, identifier);
-
-          return response.success({
-            accessToken,
-            refreshToken,
-            needsOnboarding: !user.onboardingCompleted,
-            user: {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              role: user.role,
-              currentOrgId,
-              organizationRole: currentOrgRelation?.role,
-            },
-          });
-        } catch (error: any) {
-          console.error('[Passkey Login] Error:', error);
-          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
-        }
-      },
-    }),
-
-    // ============================================
-    // PASSKEY DISCOVERABLE (USERNAMELESS) - Login sem email
-    // ============================================
-
-    /**
-     * Passkey Login Options Discoverable - Login SEM email
-     * Usa Discoverable Credentials (Resident Keys) para permitir
-     * que o navegador mostre automaticamente as passkeys disponíveis
-     */
-    passkeyLoginOptionsDiscoverable: igniter.mutation({
-      name: 'Passkey Login Options Discoverable',
-      description: 'Generate WebAuthn authentication options for usernameless login',
-      path: '/passkey/login/options/discoverable',
-      method: 'POST',
-      body: webAuthnLoginOptionsDiscoverableSchema,
-      handler: async ({ response }) => {
-        // Extrair rpID do NEXT_PUBLIC_APP_URL
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-
-        console.log('[Passkey Discoverable Options] Config:', { rpID, appUrl });
-
-        // Gerar opções de autenticação SEM allowCredentials
-        // Isso faz o navegador mostrar TODAS as passkeys disponíveis para este rpID
-        const options = await generateAuthenticationOptions({
-          rpID,
-          // ✅ CRÍTICO: NÃO passar allowCredentials para habilitar discoverable
-          userVerification: 'preferred',
-          timeout: 60000,
-        });
-
-        // Salvar challenge no banco (sem userId pois não sabemos quem é)
-        await db.passkeyChallenge.create({
-          data: {
-            challenge: options.challenge,
-            // userId é null para login discoverable
-            type: 'authentication_discoverable',
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-          },
-        });
-
-        return response.success(options);
-      },
-    }),
-
-    /**
-     * Passkey Login Verify Discoverable - Verificar login SEM email
-     * O userHandle na credential contém o userId codificado
-     */
-    passkeyLoginVerifyDiscoverable: igniter.mutation({
-      name: 'Passkey Login Verify Discoverable',
-      description: 'Verify passkey and authenticate user without email',
-      path: '/passkey/login/verify/discoverable',
-      method: 'POST',
-      body: webAuthnLoginVerifyDiscoverableSchema,
-      handler: async ({ request, response }) => {
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await authRateLimiter.check(identifier);
-
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
-        const { credential, rememberMe } = request.body;
-
-        // O userHandle contém o userId codificado
-        if (!credential.response?.userHandle) {
-          return response.status(400).json({
-            error: 'Passkey inválida. Esta passkey não suporta login sem email.'
-          });
-        }
-
-        // Decodificar userHandle para obter userId
-        const userHandle = credential.response.userHandle;
-        let userId: string;
-
-        try {
-          // userHandle pode ser base64url encoded
-          userId = typeof userHandle === 'string'
-            ? Buffer.from(userHandle, 'base64url').toString('utf-8')
-            : new TextDecoder().decode(new Uint8Array(userHandle));
-        } catch (e) {
-          console.error('[Passkey Discoverable] Error decoding userHandle:', e);
-          return response.status(400).json({ error: 'Erro ao processar passkey' });
-        }
-
-        console.log('[Passkey Discoverable Verify] userId from userHandle:', userId);
-
-        // Buscar usuário pelo userId extraído do userHandle
-        const user = await db.user.findUnique({
-          where: { id: userId },
-          include: {
-            passkeyCredentials: true,
-            organizations: {
-              where: { isActive: true },
-              include: { organization: true },
-            },
-          },
-        });
-
-        if (!user) {
-          return response.status(400).json({ error: 'Usuário não encontrado' });
-        }
-
-        // Buscar challenge discoverable
-        const challengeRecord = await db.passkeyChallenge.findFirst({
-          where: {
-            type: 'authentication_discoverable',
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!challengeRecord) {
-          return response.status(400).json({ error: 'Challenge expirado. Tente novamente.' });
-        }
-
-        // Buscar credencial usada
-        const storedCredential = user.passkeyCredentials.find(
-          (cred) => cred.credentialId === credential.id
-        );
-
-        if (!storedCredential) {
-          return response.status(400).json({ error: 'Passkey não encontrada' });
-        }
-
-        // Configuração
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.WEBAUTHN_RP_ID || new URL(appUrl).hostname;
-        const origin = appUrl;
-
-        console.log('[Passkey Discoverable Verify] Config:', { rpID, origin, userId: user.id });
-
-        try {
-          const verification = await verifyAuthenticationResponse({
-            response: credential,
-            expectedChallenge: challengeRecord.challenge,
-            expectedOrigin: origin,
-            expectedRPID: rpID,
-            credential: {
-              id: storedCredential.credentialId,
-              publicKey: storedCredential.publicKey as unknown as Uint8Array<ArrayBuffer>,
-              counter: Number(storedCredential.counter),
-              transports: storedCredential.transports as any[],
-            },
-          });
-
-          if (!verification.verified) {
-            return response.status(400).json({ error: 'Verificação de passkey falhou' });
-          }
-
-          // Atualizar counter
-          await db.passkeyCredential.update({
-            where: { id: storedCredential.id },
-            data: {
-              counter: BigInt(verification.authenticationInfo.newCounter),
-              lastUsedAt: new Date(),
-            },
-          });
-
-          // Limpar challenge usado
-          await db.passkeyChallenge.delete({ where: { id: challengeRecord.id } });
-
-          // Verificar se usuário está ativo
-          if (!user.isActive) {
-            return response.status(403).json({ error: 'Conta desabilitada' });
-          }
-
-          // ✅ CORREÇÃO BRUTAL: Garantir que currentOrgId seja setado para TODOS os usuários
-          let currentOrgId = user.currentOrgId;
-
-          // Se usuário não tem org setada mas tem organizações, setar a primeira
-          if (!currentOrgId && user.organizations.length > 0) {
-            currentOrgId = user.organizations[0].organizationId;
-            await db.user.update({
-              where: { id: user.id },
-              data: { currentOrgId },
-            });
-            console.log('[Passkey Discoverable] Set currentOrgId for user:', user.email, currentOrgId);
-          }
-
-          // Obter role na organização atual
-          const currentOrgRelation = user.organizations.find(
-            (org) => org.organizationId === currentOrgId
-          );
-
-          console.log('[Passkey Discoverable] Token context:', {
-            userId: user.id,
-            email: user.email,
-            role: user.role,
-            currentOrgId,
-            organizationRole: currentOrgRelation?.role,
-            hasOrgs: user.organizations.length,
-          });
-
-          // Criar access token
-          const accessToken = signAccessToken({
-            userId: user.id,
-            email: user.email,
-            role: user.role as UserRole,
-            currentOrgId,
-            organizationRole: currentOrgRelation?.role as any,
-            needsOnboarding: !user.onboardingCompleted,
-          }, rememberMe ? '7d' : '24h');
-
-          // Criar refresh token
-          const refreshTokenData = await db.refreshToken.create({
-            data: {
-              userId: user.id,
-              token: signRefreshToken({ userId: user.id, tokenId: '' }),
-              expiresAt: getExpirationDate(rememberMe ? '30d' : '7d'),
-            },
-          });
-
-          const refreshToken = signRefreshToken({
-            userId: user.id,
-            tokenId: refreshTokenData.id,
-          });
-
-          await db.refreshToken.update({
-            where: { id: refreshTokenData.id },
-            data: { token: refreshToken },
-          });
-
-          // Log de auditoria (usando 'passkey_login' que é o tipo válido)
-          await auditLog.logAuth('passkey_login', user.id, {
-            email: user.email,
-            currentOrgId,
-            passkeyId: storedCredential.id,
-            usernameless: true, // Flag para indicar login discoverable
-          }, identifier);
-
-          console.log('[Passkey Discoverable] ✅ Login successful for:', user.email);
-
-          return response.success({
-            accessToken,
-            refreshToken,
-            needsOnboarding: !user.onboardingCompleted,
-            user: {
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              role: user.role,
-              currentOrgId,
-              organizationRole: currentOrgRelation?.role,
-            },
-          });
-        } catch (error: any) {
-          console.error('[Passkey Discoverable] Error:', error);
-          return response.status(400).json({ error: error.message || 'Erro ao verificar passkey' });
-        }
-      },
-    }),
-
-    /**
-     * Passkey List - Listar passkeys do usuário
-     */
-    passkeyList: igniter.query({
-      name: 'Passkey List',
-      description: 'List user passkeys',
-      path: '/passkey/list',
-      method: 'GET',
-      use: [authProcedure({ required: true })],
-      handler: async ({ response, context }) => {
-        const user = context.auth?.session?.user;
-        if (!user) {
-          return response.status(401).json({ error: 'Not authenticated' });
-        }
-
-        const passkeys = await db.passkeyCredential.findMany({
-          where: { userId: user.id },
-          select: {
-            id: true,
-            name: true,
-            credentialDeviceType: true,
-            credentialBackedUp: true,
-            createdAt: true,
-            lastUsedAt: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        return response.success(passkeys);
-      },
-    }),
-
-    /**
-     * Passkey Delete - Remover passkey do usuário
-     */
-    passkeyDelete: igniter.mutation({
-      name: 'Passkey Delete',
-      description: 'Delete user passkey',
-      path: '/passkey/:id',
-      method: 'DELETE',
-      use: [authProcedure({ required: true })],
-      handler: async ({ request, response, context }) => {
-        const user = context.auth?.session?.user;
-        if (!user) {
-          return response.status(401).json({ error: 'Not authenticated' });
-        }
-
-        const { id } = request.params as { id: string };
-
-        // Verificar se passkey pertence ao usuário
-        const passkey = await db.passkeyCredential.findFirst({
-          where: { id, userId: user.id },
-        });
-
-        if (!passkey) {
-          return response.notFound('Passkey não encontrada');
-        }
-
-        await db.passkeyCredential.delete({ where: { id } });
-
-        return response.noContent();
       },
     }),
   },

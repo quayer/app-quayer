@@ -57,7 +57,12 @@ export const redis = new Proxy({} as Redis, {
     if (isBuildTime) {
       return () => Promise.resolve(null)
     }
-    return Reflect.get(getRedis(), prop)
+    const instance = getRedis()
+    const value = Reflect.get(instance, prop)
+    if (typeof value === 'function') {
+      return value.bind(instance)
+    }
+    return value
   },
   has() {
     return !isBuildTime
