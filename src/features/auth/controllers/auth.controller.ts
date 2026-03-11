@@ -43,7 +43,21 @@ import {
 import { authProcedure } from '../procedures/auth.procedure';
 import { UserRole } from '@/lib/auth/roles';
 import { emailService } from '@/lib/email';
-import { authRateLimiter, getClientIdentifier } from '@/lib/rate-limit';
+import { authRateLimiter } from '@/lib/rate-limit/rate-limiter';
+
+function getClientIdentifier(request: { headers: { get?: (key: string) => string | null; [key: string]: any } }): string {
+  const headers = request?.headers;
+  if (!headers) return 'unknown';
+  const get = (key: string): string | undefined => {
+    if (typeof headers.get === 'function') return headers.get(key) ?? undefined;
+    return headers[key];
+  };
+  const forwarded = get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+  const realIp = get('x-real-ip');
+  if (realIp) return realIp;
+  return 'unknown';
+}
 
 const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://quayer.com').replace(/\/$/, '');
 const dashboardUrl = `${appBaseUrl}/integracoes`;
