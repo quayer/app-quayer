@@ -59,8 +59,8 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # Preservar .env
-            git clean -fd -e .env
+            # Preservar .env e dados do postgres (data/ é bind mount do postgres)
+            git clean -fd -e .env -e data/
 
             git checkout main
             git pull origin main
@@ -84,9 +84,9 @@ jobs:
 
             echo "🐳 Usando: $COMPOSE_CMD"
 
-            # Limpar espaço em disco antes do build
+            # Limpar espaço em disco antes do build (sem --volumes para preservar dados)
             echo "🧹 Limpando espaço em disco..."
-            docker system prune -af --volumes 2>/dev/null || true
+            docker system prune -af 2>/dev/null || true
             docker builder prune -af 2>/dev/null || true
             rm -rf /tmp/* 2>/dev/null || true
 
