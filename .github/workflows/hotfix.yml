@@ -58,8 +58,10 @@ jobs:
 
             case "$ACTION" in
               "restart")
-                echo "🔄 Reiniciando container app..."
-                $COMPOSE_CMD -f $COMPOSE_FILE restart app
+                echo "🔄 Reiniciando todos os containers..."
+                $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans
+                docker rm -f quayer-redis quayer-postgres quayer-app 2>/dev/null || true
+                $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
                 ;;
 
               "pull-restart")
