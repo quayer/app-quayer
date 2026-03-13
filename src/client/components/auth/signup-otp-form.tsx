@@ -144,7 +144,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
       <Card className={cn("", className)} {...props}>
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
-            <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" />
+            <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" aria-hidden="true" />
           </div>
           <CardTitle className="text-xl">Conta criada!</CardTitle>
           <CardDescription>
@@ -167,7 +167,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         <form onSubmit={handleSubmit}>
           <FieldGroup>
             {error && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" role="alert" aria-live="assertive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -208,12 +208,13 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
 
             <Button
               type="submit"
-              className="w-full"
+              className="w-full min-h-[44px]"
               disabled={isLoading || otp.length !== 6}
+              aria-busy={isLoading}
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Verificando...
                 </>
               ) : (
@@ -227,12 +228,12 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
                 <button
                   type="button"
                   onClick={handleResend}
-                  className="text-primary underline underline-offset-4 hover:text-primary/80"
+                  className="min-h-[44px] min-w-[44px] inline-flex items-center text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                 >
                   Reenviar
                 </button>
               ) : (
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground" aria-live="polite" aria-atomic="true">
                   Aguarde {countdown}s
                 </span>
               )}
@@ -240,7 +241,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
 
             <FieldDescription className="text-center">
               Já tem uma conta?{" "}
-              <a href="/login" className="text-primary underline underline-offset-4 hover:text-primary/80">
+              <a href="/login" className="inline-flex min-h-[44px] items-center text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
                 Fazer Login
               </a>
             </FieldDescription>

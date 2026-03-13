@@ -173,13 +173,13 @@ export function SignupForm({
 
       {/* Alerts */}
       {error && (
-        <Alert variant="destructive" className="border-red-500/40 bg-red-500/10">
+        <Alert variant="destructive" role="alert" aria-live="assertive" className="border-red-500/40 bg-red-500/10">
           <AlertDescription className="text-red-300">{error}</AlertDescription>
         </Alert>
       )}
 
       {success && (
-        <Alert className="border-emerald-500/40 bg-emerald-500/10">
+        <Alert role="status" aria-live="polite" className="border-emerald-500/40 bg-emerald-500/10">
           <AlertDescription className="text-emerald-400">{success}</AlertDescription>
         </Alert>
       )}
@@ -194,12 +194,12 @@ export function SignupForm({
       >
         {isGoogleLoading ? (
           <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             Conectando...
           </>
         ) : (
           <>
-            <GoogleIcon className="mr-2 size-4" />
+            <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
             Continuar com Google
           </>
         )}
@@ -273,17 +273,17 @@ export function SignupForm({
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Enviando código...
                 </>
               ) : isPhone ? (
                 <>
-                  <Smartphone className="mr-2 h-4 w-4" />
+                  <Smartphone className="mr-2 h-4 w-4" aria-hidden="true" />
                   Cadastrar com WhatsApp
                 </>
               ) : (
                 <>
-                  <Mail className="mr-2 h-4 w-4" />
+                  <Mail className="mr-2 h-4 w-4" aria-hidden="true" />
                   Cadastrar com Email
                 </>
               )}
