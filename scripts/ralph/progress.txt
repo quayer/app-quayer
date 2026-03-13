@@ -19,6 +19,8 @@
 - **Shadcn components path:** componentes ficam em `src/client/components/ui/` — usar esses, não criar novos
 - **Igniter data pattern:** `const { data } = api.x.y.useQuery()` — data pode ser `{ data: [...] }` ou array direto dependendo do controller
 - **Array guard pattern:** `Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []` — previne `.filter is not a function`
+- **npm install:** always use `--legacy-peer-deps` flag due to peer dependency conflicts
+- **crypto.ts AES-256-GCM:** `encrypt(plaintext)` / `decrypt(encrypted)` in `src/lib/crypto.ts` — reuse for any secret storage
 
 ---
 
@@ -56,4 +58,26 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Pre-existing TS errors in `admin/actions.ts`, `EmailSettings.tsx`, etc. — not related to schema changes, should not block
   - Prisma v7 removed `url` from datasource block in schema — connection config lives in `prisma.config.ts`
   - Shadow database migration replay fails due to inconsistent migration history — use `migrate deploy` + `migrate resolve` instead
+---
+
+## 2026-03-13 ~03:30 UTC-3 - US-002
+- **Implemented:** Endpoint totpSetup — gerar secret e QR code
+- **Changes:**
+  - Installed `otpauth`, `qrcode`, `@types/qrcode` packages (--legacy-peer-deps required)
+  - Added `totpSetupSchema` to `src/server/features/auth/auth.schemas.ts`
+  - Added `totpSetup` mutation action to `src/server/features/auth/controllers/auth.controller.ts`
+  - Uses existing `src/lib/crypto.ts` encrypt() for AES-256-GCM encryption of TOTP secret
+  - Uses existing `hashPassword()` from `src/lib/auth/bcrypt.ts` for recovery code hashing
+  - Rate limited via `authRateLimiter` with `totp-setup:` prefix
+  - Cleans up incomplete setups (unverified devices + unused recovery codes) before new setup
+- **Files changed:**
+  - `package.json` / `package-lock.json` — added otpauth, qrcode, @types/qrcode
+  - `src/server/features/auth/auth.schemas.ts` — added totpSetupSchema
+  - `src/server/features/auth/controllers/auth.controller.ts` — added totpSetup action + imports
+- **Learnings for future iterations:**
+  - `npm install` requires `--legacy-peer-deps` flag due to peer dependency conflicts in this repo
+  - crypto.ts already has AES-256-GCM encrypt/decrypt — reuse it, no need to create new helpers
+  - Auth controller actions follow pattern: `igniter.mutation({ name, description, path, method, use, body, handler })`
+  - Pre-existing TS errors (~60+) in unrelated files — do not block commits, verified no new errors in changed files
+  - `otpauth` library: `new OTPAuth.TOTP({ secret: new OTPAuth.Secret() })` for generation, `.toString()` for URI
 ---
