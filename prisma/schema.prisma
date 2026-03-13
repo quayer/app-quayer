@@ -81,7 +81,8 @@ model Organization {
   calls        Call[]
   providers     OrganizationProvider[]
   quickReplies QuickReply[]
-  customRoles  CustomRole[]
+  customRoles     CustomRole[]
+  verifiedDomains VerifiedDomain[]
 
   @@index([document])
   @@index([slug])
@@ -122,10 +123,31 @@ model CustomRole {
 
   organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userOrganizations UserOrganization[]
+  verifiedDomains   VerifiedDomain[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
   @@map("custom_roles")
+}
+
+model VerifiedDomain {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  domain             String
+  verificationMethod String    // DNS_TXT or EMAIL
+  verificationToken  String
+  verifiedAt         DateTime?
+  defaultRoleId      String?   // FK to CustomRole for auto-join
+  autoJoin           Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  defaultRole  CustomRole?  @relation(fields: [defaultRoleId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, domain])
+  @@index([organizationId])
+  @@index([domain])
+  @@map("verified_domains")
 }
 
 model User {

@@ -16,6 +16,7 @@ import { deviceSessionsController } from '@/server/features/device-sessions'
 import { ipRulesController } from '@/server/features/ip-rules'
 import { filesController } from '@/server/features/files'
 import { customRolesController } from '@/server/features/permissions/controllers/custom-roles.controller'
+import { verifiedDomainsController } from '@/server/features/verified-domains/controllers/verified-domains.controller'
 
 /**
  * @description Main application router configuration
@@ -42,6 +43,7 @@ export const AppRouter = igniter.router({
     ipRules: ipRulesController,
     files: filesController,
     customRoles: customRolesController,
+    verifiedDomains: verifiedDomainsController,
   }
 })
 
