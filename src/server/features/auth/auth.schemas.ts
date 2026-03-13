@@ -138,6 +138,15 @@ export const verifyMagicLinkSchema = z.object({
 export type VerifyMagicLinkInput = z.infer<typeof verifyMagicLinkSchema>;
 
 /**
+ * Schema de Check Magic Link Status (polling from original tab)
+ */
+export const checkMagicLinkStatusSchema = z.object({
+  sessionId: z.string({ required_error: 'Session ID is required' }).uuid('Invalid session ID'),
+});
+
+export type CheckMagicLinkStatusInput = z.infer<typeof checkMagicLinkStatusSchema>;
+
+/**
  * Schema de Passwordless OTP Request
  */
 export const passwordlessOTPSchema = z.object({

@@ -38,6 +38,7 @@ import {
   totpDisableRequestSchema,
   totpDisableSchema,
   totpRegenerateCodesSchema,
+  checkMagicLinkStatusSchema,
 } from '../auth.schemas';
 import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
@@ -1474,7 +1475,8 @@ export const authController = igniter.controller({
           return response.success({
             sent: true,
             isNewUser: true,
-            message: 'Código de cadastro enviado para seu email'
+            message: 'Código de cadastro enviado para seu email',
+            magicLinkSessionId: signupVerificationCode.id,
           });
         }
 
@@ -1525,6 +1527,7 @@ export const authController = igniter.controller({
         return response.success({
           sent: true,
           message: 'Login code sent to your email',
+          magicLinkSessionId: verificationCode.id,
         });
       },
     }),
@@ -1874,6 +1877,148 @@ export const authController = igniter.controller({
         }
 
         return response.status(400).json({ error: 'Invalid magic link type' });
+      },
+    }),
+
+    /**
+     * Check Magic Link Status — polling from original tab
+     *
+     * The original tab (OTP form) polls this endpoint every 3s to detect
+     * when the magic link has been verified in another tab.
+     * When verified, this endpoint issues auth cookies for the polling tab
+     * so it can redirect to the dashboard.
+     */
+    checkMagicLinkStatus: igniter.mutation({
+      name: 'Check Magic Link Status',
+      description: 'Poll to check if magic link was verified (for cross-tab login)',
+      path: '/check-magic-link-status',
+      method: 'POST',
+      body: checkMagicLinkStatusSchema,
+      handler: async ({ request, response }) => {
+        const { sessionId } = request.body;
+
+        // Rate limiting — reuse auth rate limiter with unique prefix for polling
+        const identifier = getClientIdentifier(request);
+        const rateLimit = await authRateLimiter.check(`mlpoll:${identifier}`);
+        if (!rateLimit.success) {
+          return response.status(429).json({ error: 'Too many requests', retryAfter: rateLimit.retryAfter });
+        }
+
+        // Find the VerificationCode by ID
+        const verificationCode = await db.verificationCode.findUnique({
+          where: { id: sessionId },
+        });
+
+        if (!verificationCode) {
+          return response.status(404).json({ error: 'Session not found' });
+        }
+
+        // Check if expired (5 minute polling timeout)
+        if (verificationCode.expiresAt < new Date()) {
+          return response.success({ verified: false, expired: true });
+        }
+
+        // Not yet verified — magic link hasn't been clicked
+        if (!verificationCode.used) {
+          return response.success({ verified: false, expired: false });
+        }
+
+        // Magic link WAS verified in another tab!
+        // Now authenticate this tab too by issuing cookies.
+        const user = await db.user.findUnique({
+          where: { email: verificationCode.email },
+          include: {
+            organizations: {
+              where: { isActive: true },
+              include: { organization: true },
+            },
+          },
+        });
+
+        if (!user) {
+          return response.status(404).json({ error: 'User not found' });
+        }
+
+        if (!user.isActive) {
+          return response.status(403).json({ error: 'Account disabled' });
+        }
+
+        // If 2FA is enabled, the new tab already handled 2FA.
+        // The original tab cannot bypass 2FA, so signal requiresTwoFactor
+        // and let the original tab show the 2FA challenge.
+        if (user.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(user.id);
+          return response.success({ verified: true, requiresTwoFactor: true, challengeId });
+        }
+
+        let currentOrgId = user.currentOrgId;
+        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+          currentOrgId = user.organizations[0].organizationId;
+          await db.user.update({
+            where: { id: user.id },
+            data: { currentOrgId },
+          });
+        }
+
+        const currentOrgRelation = user.organizations.find(
+          (org) => org.organizationId === currentOrgId
+        );
+
+        // Issue tokens for this tab
+        const accessToken = signAccessToken({
+          userId: user.id,
+          email: user.email,
+          role: user.role as UserRole,
+          currentOrgId,
+          organizationRole: currentOrgRelation?.role as any,
+          needsOnboarding: !user.onboardingCompleted,
+        }, '24h');
+
+        const refreshTokenData = await db.refreshToken.create({
+          data: {
+            userId: user.id,
+            token: signRefreshToken({ userId: user.id, tokenId: '' }),
+            expiresAt: getExpirationDate('7d'),
+          },
+        });
+
+        const refreshToken = signRefreshToken({
+          userId: user.id,
+          tokenId: refreshTokenData.id,
+        });
+
+        await db.refreshToken.update({
+          where: { id: refreshTokenData.id },
+          data: { token: refreshToken },
+        });
+
+        // Set httpOnly cookies for this tab
+        setAuthCookies(response, accessToken, refreshToken);
+
+        // Register device session (non-blocking)
+        await registerDeviceSession(user.id, request);
+
+        // Determine redirect path
+        let redirectPath = '/integracoes';
+        if (!user.onboardingCompleted || !currentOrgId) {
+          redirectPath = '/onboarding';
+        } else if (user.role === 'admin') {
+          redirectPath = '/admin';
+        }
+
+        return response.success({
+          verified: true,
+          redirectPath,
+          needsOnboarding: !user.onboardingCompleted,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role,
+          },
+        });
       },
     }),
 

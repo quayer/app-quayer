@@ -50,9 +50,10 @@ function formatPhoneDisplay(phone: string): string {
 interface LoginOTPFormProps extends React.ComponentProps<"div"> {
   email?: string
   phone?: string
+  magicLinkSessionId?: string
 }
 
-export function LoginOTPForm({ email, phone, className, ...props }: LoginOTPFormProps) {
+export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...props }: LoginOTPFormProps) {
   const identifier = phone || email
   const searchParams = useSearchParams()
   const isSignup = searchParams.get('signup') === 'true'
@@ -85,6 +86,77 @@ export function LoginOTPForm({ email, phone, className, ...props }: LoginOTPForm
       return () => bc.close()
     } catch { /* BroadcastChannel não suportado */ }
   }, [])
+
+  // Poll server to detect magic link verification (cross-tab, cross-browser)
+  useEffect(() => {
+    if (!magicLinkSessionId) return
+
+    const POLL_INTERVAL = 3000 // 3 seconds
+    const POLL_TIMEOUT = 5 * 60 * 1000 // 5 minutes
+    const startTime = Date.now()
+    let active = true
+
+    const poll = async () => {
+      if (!active) return
+
+      // Timeout check
+      if (Date.now() - startTime > POLL_TIMEOUT) {
+        setError('Link expirado. Solicite um novo código.')
+        return
+      }
+
+      try {
+        const { data, error: apiError } = await api.auth.checkMagicLinkStatus.mutate({
+          body: { sessionId: magicLinkSessionId }
+        })
+
+        if (apiError || !data) {
+          // Non-fatal — continue polling
+          if (active) setTimeout(poll, POLL_INTERVAL)
+          return
+        }
+
+        const result = data as {
+          verified: boolean
+          expired?: boolean
+          redirectPath?: string
+          requiresTwoFactor?: boolean
+          challengeId?: string
+        }
+
+        if (result.expired) {
+          setError('Link expirado. Solicite um novo código.')
+          return
+        }
+
+        if (result.verified) {
+          // Magic link was verified in another tab!
+          if (result.requiresTwoFactor && result.challengeId) {
+            setTwoFactorChallengeId(result.challengeId)
+            return
+          }
+          if (result.redirectPath) {
+            window.location.href = result.redirectPath
+            return
+          }
+        }
+
+        // Not yet verified — keep polling
+        if (active) setTimeout(poll, POLL_INTERVAL)
+      } catch {
+        // Network error — keep polling
+        if (active) setTimeout(poll, POLL_INTERVAL)
+      }
+    }
+
+    // Start polling after initial delay
+    const timerId = setTimeout(poll, POLL_INTERVAL)
+
+    return () => {
+      active = false
+      clearTimeout(timerId)
+    }
+  }, [magicLinkSessionId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

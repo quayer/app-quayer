@@ -10,6 +10,7 @@ function LoginVerifyContent() {
   const searchParams = useSearchParams()
   const email = searchParams.get('email')
   const phone = searchParams.get('phone')
+  const magicLinkSessionId = searchParams.get('mlsid')
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
@@ -24,7 +25,7 @@ function LoginVerifyContent() {
             priority
           />
         </Link>
-        <LoginOTPForm email={email || undefined} phone={phone || undefined} />
+        <LoginOTPForm email={email || undefined} phone={phone || undefined} magicLinkSessionId={magicLinkSessionId || undefined} />
       </div>
     </div>
   )

@@ -186,7 +186,11 @@ export function LoginFormFinal({
       }
 
       const isNewUser = (data as any)?.isNewUser
-      router.push(`/login/verify?email=${encodeURIComponent(email)}${isNewUser ? '&signup=true' : ''}`)
+      const magicLinkSessionId = (data as any)?.magicLinkSessionId
+      const params = new URLSearchParams({ email })
+      if (isNewUser) params.set('signup', 'true')
+      if (magicLinkSessionId) params.set('mlsid', magicLinkSessionId)
+      router.push(`/login/verify?${params.toString()}`)
     } catch (err: any) {
       console.error("OTP request error:", err)
 
