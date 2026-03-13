@@ -1,0 +1,36 @@
+## Codebase Patterns
+
+- Root page cookie: app saves 'accessToken' but root checked 'auth_token' (US-001 fix)
+- Auth redirect pattern: `role === 'admin' ? '/admin' : '/integracoes'` in 5+ files without onboarding check
+- Token dual-storage: localStorage + cookie (systemic issue)
+- Console.logs exposing tokens in google-callback (11 instances)
+- `as any` casts in 30+ locations, especially modal props in admin/integracoes
+- Dead buttons (18+) across ferramentas, integracoes, contatos pages
+- Fake saves in /integracoes/settings (toast without API call)
+- Fake validation in /(public)/connect/[token] (hardcoded responses)
+- Admin pages use native confirm()/alert() instead of shadcn AlertDialog
+- Sidebar: src/client/components/app-sidebar.tsx
+- Admin server actions: src/app/admin/actions.ts
+- Conversations use SSE with no reconnect backoff
+- onKeyPress (deprecated) used in chat components
+- Padrão Igniter.js: controller → actions (query/mutation) → handler com authProcedure
+- Schema Prisma: src/prisma/schema.prisma
+
+- Admin pages pattern: 'use client', apiFetch helper, header with SidebarTrigger+Breadcrumb, Card/Table layout, Dialog for create, AlertDialog for destructive actions
+- Sidebar menu items added in app-sidebar.tsx under adminMenu array
+
+---
+
+## 2026-03-13 - US-020
+- What was implemented: SCIM tokens management UI page at /admin/scim
+- Files changed:
+  - src/app/admin/scim/page.tsx (new) — Full SCIM token management page
+  - src/client/components/app-sidebar.tsx — Added SCIM menu item with Key icon
+- **Learnings for future iterations:**
+  - Admin pages follow consistent pattern: header with SidebarTrigger + Breadcrumb, apiFetch helper, Card/Table for data, Dialog for create, AlertDialog for destructive confirmations
+  - SCIM tokens API: GET /api/v1/scim-tokens (list), POST /api/v1/scim-tokens (create), POST /api/v1/scim-tokens/:id/revoke (revoke)
+  - Token is returned in plaintext only on create response (data.token), never shown again
+  - Pre-existing TS errors (50+) in codebase unrelated to changes — app-sidebar.tsx line 52 has pre-existing type error on currentOrgData
+  - Collapsible component available at @/client/components/ui/collapsible for expandable sections
+---
+

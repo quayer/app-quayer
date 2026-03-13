@@ -406,8 +406,8 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created /admin/scim page with full SCIM token management UI. CreateTokenDialog with name input + expiration selector, shows token once with copy button + warning. Token list with name, created date, last used (relative time), expiration, status badge (Ativo/Expirado/Revogado). RevokeTokenDialog with AlertDialog confirmation. IdP instructions section with collapsible guides for Okta, Azure AD, Google Workspace. SCIM Base URL display with copy button. Added SCIM link with Key icon to admin sidebar."
     }
   ]
 }
