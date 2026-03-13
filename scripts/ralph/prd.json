@@ -260,8 +260,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added in-memory cache (Map) with 5min TTL for CustomRole permissions. getCustomRolePermissions() fetches from cache or DB. hasPermission() accepts optional customRolePermissions param, falls back to PERMISSIONS_MATRIX. checkPermission() context extended with customRolePermissions. authProcedure resolves customRole from UserOrganization.customRoleId and injects { id, slug, permissions, priority } into context.auth.customRole. Cache invalidation exported and called in custom-roles controller on create/update/delete."
     },
     {
       "id": "US-014",

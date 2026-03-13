@@ -28,6 +28,9 @@
 - **Token issuance flow:** signAccessToken → db.refreshToken.create → signRefreshToken → update → setAuthCookies → registerDeviceSession — duplicated in login/totpChallenge/totpRecovery
 - **2FA status check (frontend):** `/api/v1/auth/me` does NOT return `twoFactorEnabled` — use `/api/v1/auth/totp/devices` and check for verified devices instead
 - **Igniter extra body fields:** procedure-consumed fields (like `cf-turnstile-response`) aren't in Zod schema — use `as any` cast on body object in typed `api.*.mutate()` calls
+- **CustomRole permissions cache:** `getCustomRolePermissions(id, db)` in `src/lib/auth/permissions.ts` — in-memory Map with 5min TTL. Call `invalidateCustomRoleCache(id)` when CRUD-ing CustomRoles
+- **hasPermission with CustomRole:** `hasPermission(orgRole, resource, action, customRolePerms?)` — 4th param is optional; if provided, checks CustomRole JSON instead of PERMISSIONS_MATRIX
+- **authProcedure customRole context:** `context.auth.customRole` is `{ id, slug, permissions, priority } | null` — resolved from `UserOrganization.customRoleId` of current org
 - **apiFetch helper pattern:** wrap `fetch()` with `{ credentials: 'include', headers: { 'Content-Type': 'application/json' } }` + error extraction from response body
 
 ---
@@ -323,4 +326,32 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Custom role slug generation: normalize NFD + strip accents + kebab-case — handles Portuguese characters
   - `@@unique([organizationId, slug])` maps to Prisma `findUnique({ where: { organizationId_slug: { organizationId, slug } } })`
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-012
+---
+
+## 2026-03-13 ~14:00 UTC-3 - US-013
+- **Implemented:** Migrate permission system to use CustomRole from DB
+- **Changes:**
+  - Added in-memory cache (`Map<string, CacheEntry>`) with 5min TTL in `src/lib/auth/permissions.ts`
+  - Added `getCustomRolePermissions(customRoleId, db)`: fetches from cache or DB, returns permissions JSON
+  - Added `invalidateCustomRoleCache(customRoleId)` and `clearCustomRoleCache()` exports for cache management
+  - Added `CustomRolePermissions` type and `CustomRoleContext` interface (id, slug, permissions, priority)
+  - Updated `hasPermission()`: new optional 4th param `customRolePermissions` — if provided, checks against CustomRole permissions instead of PERMISSIONS_MATRIX
+  - Updated `checkPermission()`: context type extended with optional `customRolePermissions` field, passed through to `hasPermission()`
+  - Updated `authProcedure` in `auth.procedure.ts`:
+    - Added `customRole: CustomRoleContext | null` to `AuthContext` type
+    - After user lookup, resolves `customRoleId` from current org's `UserOrganization`
+    - Calls `getCustomRolePermissions()` to fetch/cache permissions
+    - Fetches slug + priority from DB for full `CustomRoleContext`
+    - Injects `context.auth.customRole` in all return paths (null for unauthenticated/admin)
+  - Updated `custom-roles.controller.ts`: calls `invalidateCustomRoleCache()` after create, update, and delete (both force+reassign and simple delete paths)
+  - Zero breaking changes: all existing callers of `hasPermission(role, resource, action)` continue working unchanged
+- **Files changed:**
+  - `src/lib/auth/permissions.ts` — cache, types, updated hasPermission/checkPermission
+  - `src/server/features/auth/procedures/auth.procedure.ts` — customRole context injection
+  - `src/server/features/permissions/controllers/custom-roles.controller.ts` — cache invalidation on CRUD
+- **Learnings for future iterations:**
+  - `getCustomRolePermissions` takes `db` as param to avoid importing database service in a lib module (keeps it framework-agnostic)
+  - The `organizations` include in authProcedure user query already includes `customRoleId` via the Prisma schema relation — no need to add explicit `select`
+  - Cache invalidation should also cover the `reassignToRoleId` target role on force-delete, since users now point to a different role
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-013
 ---
