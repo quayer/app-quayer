@@ -6,13 +6,6 @@ import { startAuthentication } from '@simplewebauthn/browser'
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/client/components/ui/card"
-import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -240,180 +233,170 @@ export function LoginFormFinal({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">Bem-vindo</CardTitle>
-          <CardDescription>
-            Digite seu email ou telefone para continuar
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleOTPRequest}>
-            <FieldGroup>
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
+    <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
+      {/* Header */}
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold text-white">Bem-vindo de volta</h1>
+        <p className="text-gray-400">Entre com sua conta para continuar</p>
+      </div>
+
+      <form onSubmit={handleOTPRequest}>
+        <FieldGroup>
+          {error && (
+            <Alert variant="destructive" className="border-red-500/50 bg-red-500/10 text-red-200">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* GOOGLE OAUTH — FIRST */}
+          <Field>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isGoogleLoading || isLoading}
+              className="w-full bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 hover:text-gray-800"
+            >
+              {isGoogleLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Conectando...
+                </>
+              ) : (
+                <>
+                  <GoogleIcon className="mr-2 size-4" />
+                  Continuar com Google
+                </>
               )}
+            </Button>
+          </Field>
 
-              {/* EMAIL / PHONE INPUT */}
-              <Field>
-                <FieldLabel htmlFor="email">Email ou Telefone</FieldLabel>
-                {/*
-                  Ambos inputs estão sempre no DOM — alternamos com hidden.
-                  Isso evita o flash de unmount/mount que causava delay.
-                */}
-                <div className={cn("flex w-full items-stretch", !isPhone && "hidden")}>
-                  <Popover open={openCountry} onOpenChange={setOpenCountry}>
-                    <PopoverTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={isLoading || isGoogleLoading}
-                        aria-label="Selecionar país"
-                        className={cn(
-                          "flex items-center justify-center gap-1 h-9 !min-h-9 w-24 shrink-0 leading-none overflow-hidden",
-                          "border border-input border-r-0 rounded-l-md px-2",
-                          "bg-background hover:bg-accent hover:text-accent-foreground transition-colors",
-                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                          "disabled:opacity-50 disabled:pointer-events-none"
-                        )}
-                      >
-                        <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
-                        <span className="text-muted-foreground text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
-                        <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      className="p-0 w-[min(320px,calc(100vw-2rem))]"
-                      align="start"
-                    >
-                      <Command>
-                        <CommandInput placeholder="Buscar país..." />
-                        <CommandList className="max-h-56">
-                          <CommandEmpty>País não encontrado.</CommandEmpty>
-                          <CommandGroup>
-                            {ALL_COUNTRIES.map(c => (
-                              <CommandItem
-                                key={c.iso2}
-                                value={`${c.name} ${c.dialCode}`}
-                                onSelect={() => { setCountryIso2(c.iso2); setOpenCountry(false) }}
-                                className="gap-2"
-                              >
-                                <FlagIcon iso2={c.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
-                                <span className="flex-1 truncate text-sm">{c.name}</span>
-                                <span className="text-muted-foreground text-xs ml-auto">+{c.dialCode}</span>
-                                {c.iso2 === countryIso2 && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <Input
-                    ref={phoneInputRef}
-                    id={isPhone ? "email" : undefined}
-                    name={isPhone ? "email" : undefined}
-                    type="text"
-                    inputMode="tel"
-                    tabIndex={isPhone ? 0 : -1}
-                    placeholder="(11) 99999-9999"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+          <FieldSeparator className="text-gray-400 [&>span]:text-gray-400 [&>div]:border-gray-600">Ou continue com</FieldSeparator>
+
+          {/* EMAIL / PHONE INPUT */}
+          <Field>
+            <FieldLabel htmlFor="email" className="text-gray-300">Email ou Telefone</FieldLabel>
+            {/*
+              Ambos inputs estão sempre no DOM — alternamos com hidden.
+              Isso evita o flash de unmount/mount que causava delay.
+            */}
+            <div className={cn("flex w-full items-stretch", !isPhone && "hidden")}>
+              <Popover open={openCountry} onOpenChange={setOpenCountry}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
                     disabled={isLoading || isGoogleLoading}
-                    className="flex-1 rounded-l-none border-l-0 shadow-none"
-                  />
-                </div>
-                <Input
-                  id={!isPhone ? "email" : undefined}
-                  name={!isPhone ? "email" : undefined}
-                  type="text"
-                  inputMode="email"
-                  tabIndex={!isPhone ? 0 : -1}
-                  placeholder="email@exemplo.com ou (11) 99999-9999"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={isLoading || isGoogleLoading}
-                  autoFocus
-                  autoComplete="username webauthn"
-                  className={cn(isPhone && "hidden")}
-                />
-              </Field>
-
-              <TurnstileWidget
-                onSuccess={setTurnstileToken}
-                action="login"
+                    aria-label="Selecionar país"
+                    className={cn(
+                      "flex items-center justify-center gap-1 h-9 !min-h-9 w-24 shrink-0 leading-none overflow-hidden",
+                      "border border-white/20 border-r-0 rounded-l-md px-2",
+                      "bg-white/10 hover:bg-white/15 text-white transition-colors",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent",
+                      "disabled:opacity-50 disabled:pointer-events-none"
+                    )}
+                  >
+                    <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
+                    <span className="text-gray-300 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
+                    <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="p-0 w-[min(320px,calc(100vw-2rem))]"
+                  align="start"
+                >
+                  <Command>
+                    <CommandInput placeholder="Buscar país..." />
+                    <CommandList className="max-h-56">
+                      <CommandEmpty>País não encontrado.</CommandEmpty>
+                      <CommandGroup>
+                        {ALL_COUNTRIES.map(c => (
+                          <CommandItem
+                            key={c.iso2}
+                            value={`${c.name} ${c.dialCode}`}
+                            onSelect={() => { setCountryIso2(c.iso2); setOpenCountry(false) }}
+                            className="gap-2"
+                          >
+                            <FlagIcon iso2={c.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
+                            <span className="flex-1 truncate text-sm">{c.name}</span>
+                            <span className="text-muted-foreground text-xs ml-auto">+{c.dialCode}</span>
+                            {c.iso2 === countryIso2 && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <Input
+                ref={phoneInputRef}
+                id={isPhone ? "email" : undefined}
+                name={isPhone ? "email" : undefined}
+                type="text"
+                inputMode="tel"
+                tabIndex={isPhone ? 0 : -1}
+                placeholder="(11) 99999-9999"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading || isGoogleLoading}
+                className="flex-1 rounded-l-none border-l-0 shadow-none bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus-visible:ring-purple-500"
               />
+            </div>
+            <Input
+              id={!isPhone ? "email" : undefined}
+              name={!isPhone ? "email" : undefined}
+              type="text"
+              inputMode="email"
+              tabIndex={!isPhone ? 0 : -1}
+              placeholder="email@exemplo.com ou (11) 99999-9999"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading || isGoogleLoading}
+              autoFocus
+              autoComplete="username webauthn"
+              className={cn("bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus-visible:ring-purple-500", isPhone && "hidden")}
+            />
+          </Field>
 
-              {/* SEND CODE BUTTON - PRIMARY */}
-              <Field>
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isLoading || isGoogleLoading}
-                  aria-busy={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Enviando...
-                    </>
-                  ) : isPhone ? (
-                    <>
-                      <Smartphone className="mr-2 h-4 w-4" />
-                      Continuar com WhatsApp
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="mr-2 h-4 w-4" />
-                      Continuar com Email
-                    </>
-                  )}
-                </Button>
-              </Field>
+          <TurnstileWidget
+            onSuccess={setTurnstileToken}
+            action="login"
+          />
 
-              <FieldSeparator>Ou</FieldSeparator>
+          {/* SEND CODE BUTTON - PRIMARY GRADIENT */}
+          <Field>
+            <Button
+              type="submit"
+              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white border-0"
+              disabled={isLoading || isGoogleLoading}
+              aria-busy={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Enviando...
+                </>
+              ) : isPhone ? (
+                <>
+                  <Smartphone className="mr-2 h-4 w-4" />
+                  Continuar com WhatsApp
+                </>
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Continuar com Email
+                </>
+              )}
+            </Button>
+          </Field>
 
-              {/* GOOGLE OAUTH */}
-              <Field>
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={handleGoogleLogin}
-                  disabled={isGoogleLoading || isLoading}
-                  className="w-full"
-                >
-                  {isGoogleLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Conectando...
-                    </>
-                  ) : (
-                    <>
-                      <GoogleIcon className="mr-2 size-4" />
-                      Continuar com Google
-                    </>
-                  )}
-                </Button>
-              </Field>
-
-              <FieldDescription className="text-center">
-                <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-primary">
-                  Esqueceu a senha?
-                </Link>
-              </FieldDescription>
-
-              <FieldDescription className="text-center">
-                Não tem uma conta?{" "}
-                <Link href="/signup" className="underline underline-offset-4 hover:text-primary">
-                  Cadastre-se
-                </Link>
-              </FieldDescription>
-            </FieldGroup>
-          </form>
-        </CardContent>
-      </Card>
+          <FieldDescription className="text-center text-gray-400">
+            Não tem uma conta?{" "}
+            <Link href="/signup" className="text-white underline underline-offset-4 hover:text-purple-300">
+              Cadastre-se
+            </Link>
+          </FieldDescription>
+        </FieldGroup>
+      </form>
     </div>
   )
 }
