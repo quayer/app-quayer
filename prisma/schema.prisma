@@ -154,7 +154,7 @@ model VerifiedDomain {
 model User {
   id               String    @id @default(uuid())
   email            String    @unique
-  password         String
+  password         String?
   name             String
   emailVerified    DateTime?
   currentOrgId     String? // Org ativa no momento

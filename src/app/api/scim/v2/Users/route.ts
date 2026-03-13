@@ -10,8 +10,6 @@
 
 import { NextRequest } from 'next/server'
 import { database as db } from '@/server/services/database'
-import { hashPassword } from '@/lib/auth/bcrypt'
-import crypto from 'crypto'
 import {
   authenticateScim,
   scimError,
@@ -206,15 +204,12 @@ export async function POST(request: NextRequest) {
     return Response.json(scimUser, { status: 201 })
   }
 
-  // Create brand new user
-  const randomPassword = crypto.randomBytes(32).toString('hex')
-  const hashedPassword = await hashPassword(randomPassword)
-
+  // Create brand new user (passwordless — SCIM-provisioned users use SSO or magic link)
   const newUser = await db.user.create({
     data: {
       email: userName.toLowerCase(),
       name: displayName,
-      password: hashedPassword,
+      password: null,
       emailVerified: new Date(), // SCIM-provisioned users are pre-verified
       isActive: true,
       currentOrgId: organizationId,
@@ -248,7 +243,7 @@ export async function POST(request: NextRequest) {
         <h2>Bem-vindo ao Quayer!</h2>
         <p>Sua conta foi provisionada automaticamente pela sua organização.</p>
         <p>Acesse <a href="${appUrl}">${appUrl}</a> e faça login com seu email.</p>
-        <p>Como sua conta foi criada via provisionamento automático, use "Esqueci minha senha" para definir sua senha.</p>
+        <p>Como sua conta foi criada via provisionamento automático, use o login com magic link ou configure uma senha em "Esqueci minha senha".</p>
       `,
     })
   } catch (emailErr) {

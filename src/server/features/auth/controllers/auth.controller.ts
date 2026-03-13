@@ -1384,15 +1384,12 @@ export const authController = igniter.controller({
               },
             });
 
-            // Google OAuth users get a random hashed password (they won't use it)
-            const randomPassword = crypto.randomBytes(32).toString('hex');
-            const hashedPassword = await hashPassword(randomPassword);
-
+            // Google OAuth users are passwordless
             user = await db.user.create({
               data: {
                 email: googleUser.email,
                 name: googleUser.name,
-                password: hashedPassword, // Hashed random password
+                password: null, // Passwordless — OAuth user
                 role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
                 emailVerified: new Date(), // Google já verificou - must be DateTime
                 currentOrgId: organization.id,
@@ -1717,14 +1714,11 @@ export const authController = igniter.controller({
           },
         });
 
-        const randomPassword = crypto.randomBytes(32).toString('hex');
-        const hashedPassword = await hashPassword(randomPassword);
-
         const user = await db.user.create({
           data: {
             email: tempUser.email,
             name: tempUser.name,
-            password: hashedPassword,
+            password: null, // Passwordless — magic link user
             role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
             emailVerified: new Date(),
             currentOrgId: organization.id,
@@ -2154,14 +2148,11 @@ export const authController = igniter.controller({
             },
           });
 
-          const randomPassword = crypto.randomBytes(32).toString('hex');
-          const hashedPassword = await hashPassword(randomPassword);
-
           const user = await db.user.create({
             data: {
               email: tempUser.email,
               name: tempUser.name,
-              password: hashedPassword,
+              password: null, // Passwordless — OTP signup user
               role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
               emailVerified: new Date(),
               currentOrgId: organization.id,
@@ -2757,14 +2748,12 @@ export const authController = igniter.controller({
 
         let createdUser = user
         if (!createdUser) {
-          const randomPassword = crypto.randomBytes(32).toString('hex')
-          const hashedPassword = await hashPassword(randomPassword)
           createdUser = await db.user.create({
             data: {
               email: normalized + '@phone.quayer.app',
               phone: normalized,
               name: 'Usuário WhatsApp',
-              password: hashedPassword,
+              password: null, // Passwordless — phone OTP user
               role: 'user',
               emailVerified: null,
               phoneVerified: true,

@@ -165,9 +165,11 @@ export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 export const acceptInvitationSchema = z.object({
   token: z.string({ required_error: 'Invitation token is required' }),
   password: z
-    .string({ required_error: 'Password is required' })
+    .string()
     .min(8, 'Password must be at least 8 characters')
-    .max(72, 'Password cannot exceed 72 characters'),
+    .max(72, 'Password cannot exceed 72 characters')
+    .optional()
+    .nullable(),
   name: z
     .string({ required_error: 'Name is required' })
     .min(2, 'Name must be at least 2 characters')
