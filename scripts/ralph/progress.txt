@@ -421,23 +421,20 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
 - **Implemented:** Auto-join by verified domain on signup
 - **Changes:**
   - Added `autoJoinByVerifiedDomain()` helper function in `src/server/features/auth/controllers/auth.controller.ts`
-  - Extracts domain from email (split @, toLowerCase), queries VerifiedDomain with autoJoin=true and verifiedAt not null
-  - Creates UserOrganization for each matching org with role from defaultRoleId (or fallback 'user'), sets customRoleId
-  - Skips if user already member of org or org is inactive
-  - Handles multiple orgs with same domain: joins all matching
-  - Sets User.currentOrgId to first joined org if user has no current org
-  - Audit log: `domain_auto_join` with metadata { orgId, orgName, domain, roleSlug }
-  - Fail-open: entire function wrapped in try/catch, per-org joins also wrapped individually
-  - Integrated in 4 signup/verification flows:
-    - `verifyEmail` (after email verification for register flow)
-    - `verifySignupOTP` (after OTP-based signup creates user)
-    - `verifyMagicLink` (signup branch, after magic link creates user)
-    - `verifyLoginOTPPhone` (for newly created phone users only)
+  - Extracts domain from email, queries VerifiedDomain with autoJoin=true and verifiedAt not null
+  - Creates UserOrganization for each matching org, sets customRoleId, sets currentOrgId
+  - Fail-open, handles multiple orgs, skips existing members
+  - Integrated in 4 flows: verifyEmail, verifySignupOTP, verifyMagicLink, verifyLoginOTPPhone
 - **Files changed:**
-  - `src/server/features/auth/controllers/auth.controller.ts` — added helper function + 4 call sites
-- **Learnings for future iterations:**
-  - VerifiedDomain has `defaultRole` relation to CustomRole via `defaultRoleId` — use `include: { defaultRole: { select: { id, slug } } }` to get role info
-  - Phone OTP users get synthetic email `@phone.quayer.app` — won't match real domains but auto-join is still called for completeness
-  - The `register` action does NOT verify email inline — verification happens later in `verifyEmail` action, so auto-join goes in `verifyEmail` not `register`
-  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-016
+  - `src/server/features/auth/controllers/auth.controller.ts`
+---
+
+## 2026-03-13 ~17:00 UTC-3 - US-017
+- **Implemented:** UI de Dominios Verificados — pagina admin completa
+- **Changes:**
+  - Created `/admin/domains` page with DNS/Email verification, auto-join toggle, default role selector
+  - Added "Dominios" menu item to admin sidebar
+- **Files changed:**
+  - `src/app/admin/domains/page.tsx` — new page
+  - `src/client/components/app-sidebar.tsx` — added menu item
 ---
