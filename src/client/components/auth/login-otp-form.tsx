@@ -232,26 +232,21 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
           window.location.href = userRole === "admin" ? "/admin" : "/integracoes"
         }
       }
-    } catch (err: any) {
-      // Log completo do erro para debug
-      console.error("OTP verification error:", err)
-      console.error("Error structure:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2))
-
+    } catch (err: unknown) {
       let errorMessage = "Erro ao verificar código. Tente novamente."
 
-      // Tentar múltiplas estruturas de erro possíveis
-      if (err?.data?.error) {
-        errorMessage = err.data.error
-      } else if (err?.error?.details && Array.isArray(err.error.details) && err.error.details.length > 0) {
-        errorMessage = err.error.details[0].message || errorMessage
-      } else if (err?.error?.message) {
-        errorMessage = err.error.message
-      } else if (err?.message) {
-        errorMessage = err.message
+      const e = err as Record<string, unknown> | undefined
+      const errObj = e?.error as Record<string, unknown> | undefined
+      if (e?.data && typeof (e.data as Record<string, unknown>).error === 'string') {
+        errorMessage = (e.data as Record<string, unknown>).error as string
+      } else if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
+        errorMessage = String(errObj.details[0]?.message) || errorMessage
+      } else if (typeof errObj?.message === 'string') {
+        errorMessage = errObj.message
+      } else if (typeof e?.message === 'string') {
+        errorMessage = e.message
       } else if (typeof err === 'string') {
         errorMessage = err
-      } else if (err?.response?.data?.error) {
-        errorMessage = err.response.data.error
       }
 
       // Traduzir mensagens técnicas inglesas para português
@@ -308,8 +303,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         setCanResend(true)
         setCountdown(0)
       }
-    } catch (err: any) {
-      console.error("Resend error:", err)
+    } catch {
       setError("Erro ao reenviar código")
       setCanResend(true)
       setCountdown(0)

@@ -178,30 +178,30 @@ export function LoginFormFinal({
 
     try {
       const { data, error: apiError } = await api.auth.loginOTP.mutate({
-        body: { email, 'cf-turnstile-response': turnstileToken } as any
+        body: { email, 'cf-turnstile-response': turnstileToken } as Record<string, string>
       })
 
       if (apiError) {
         throw apiError
       }
 
-      const isNewUser = (data as any)?.isNewUser
-      const magicLinkSessionId = (data as any)?.magicLinkSessionId
+      const isNewUser = (data as { isNewUser?: boolean; magicLinkSessionId?: string } | null)?.isNewUser
+      const magicLinkSessionId = (data as { isNewUser?: boolean; magicLinkSessionId?: string } | null)?.magicLinkSessionId
       const params = new URLSearchParams({ email })
       if (isNewUser) params.set('signup', 'true')
       if (magicLinkSessionId) params.set('mlsid', magicLinkSessionId)
       router.push(`/login/verify?${params.toString()}`)
-    } catch (err: any) {
-      console.error("OTP request error:", err)
-
+    } catch (err: unknown) {
       let errorMessage = "Erro ao enviar código. Tente novamente."
 
-      if (err?.error?.details && Array.isArray(err.error.details) && err.error.details.length > 0) {
-        errorMessage = err.error.details[0].message || errorMessage
-      } else if (err?.error?.message) {
-        errorMessage = err.error.message
-      } else if (err?.message) {
-        errorMessage = err.message
+      const e = err as Record<string, unknown> | undefined
+      const errObj = e?.error as Record<string, unknown> | undefined
+      if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
+        errorMessage = String(errObj.details[0]?.message) || errorMessage
+      } else if (typeof errObj?.message === 'string') {
+        errorMessage = errObj.message
+      } else if (typeof e?.message === 'string') {
+        errorMessage = e.message
       }
 
       setError(errorMessage)
@@ -229,8 +229,7 @@ export function LoginFormFinal({
         setError("Erro ao obter URL de autenticação do Google")
         setIsGoogleLoading(false)
       }
-    } catch (error) {
-      console.error("Error logging in with Google:", error)
+    } catch {
       setError("Erro ao conectar com Google. Tente novamente.")
       setIsGoogleLoading(false)
     }

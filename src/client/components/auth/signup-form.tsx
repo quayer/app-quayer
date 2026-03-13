@@ -94,7 +94,7 @@ export function SignupForm({
     try {
       // Send OTP code to email (SIGNUP endpoint - creates TempUser)
       const { data, error: apiError } = await api.auth.signupOTP.mutate({
-        body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as any
+        body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as Record<string, string>
       })
 
       if (apiError) {
@@ -130,7 +130,6 @@ export function SignupForm({
         errorMessage = e.message
       }
 
-      console.error("Signup error:", errorMessage)
       setError(errorMessage)
     } finally {
       setIsLoading(false)
@@ -156,8 +155,7 @@ export function SignupForm({
         setError('Erro ao obter URL de autenticação do Google')
         setIsGoogleLoading(false)
       }
-    } catch (error) {
-      console.error("Error signing up with Google:", error)
+    } catch {
       setError('Erro ao conectar com Google. Tente novamente.')
       setIsGoogleLoading(false)
     }
