@@ -438,3 +438,34 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - `src/app/admin/domains/page.tsx` — new page
   - `src/client/components/app-sidebar.tsx` — added menu item
 ---
+
+## 2026-03-13 ~18:00 UTC-3 - US-018
+- **Implemented:** SCIM 2.0 — Schema e token management
+- **Changes:**
+  - Added `ScimToken` model to `prisma/schema.prisma`: id (uuid), organizationId (FK), name, tokenHash (bcrypt), lastUsedAt, expiresAt, revokedAt, createdAt
+  - Table mapped to `scim_tokens` via `@@map`, index on `organizationId`
+  - Added `scimTokens ScimToken[]` relation to Organization model
+  - Created migration `20260313230000_add_scim_tokens` manually (shadow DB workaround), applied with `prisma migrate deploy`
+  - Created `src/server/features/scim-tokens/controllers/scim-tokens.controller.ts` with 3 actions:
+    - `list` (query): returns tokens for org (without tokenHash), ordered by createdAt desc
+    - `create` (mutation): generates 64-byte hex token (128 chars), hashes with bcrypt, returns plaintext once
+    - `revoke` (mutation): sets revokedAt=now(), checks org ownership + not already revoked
+  - All actions use `authProcedure({ required: true })`, master/admin-only checks
+  - Created `src/server/features/scim-tokens/validate-scim-token.ts`:
+    - `validateScimToken(bearerToken)` iterates non-revoked tokens, bcrypt comparison (timing-safe)
+    - Skips expired tokens, updates lastUsedAt fire-and-forget on match
+    - Returns `{ organizationId, tokenId }` or null
+  - Registered `scimTokensController` in `src/igniter.router.ts`
+- **Files changed:**
+  - `prisma/schema.prisma` — added ScimToken model + Organization relation
+  - `prisma/migrations/20260313230000_add_scim_tokens/migration.sql` — new migration
+  - `src/server/features/scim-tokens/controllers/scim-tokens.controller.ts` — new controller
+  - `src/server/features/scim-tokens/validate-scim-token.ts` — new validation function
+  - `src/igniter.router.ts` — registered scimTokensController
+- **Learnings for future iterations:**
+  - Controller pattern: `context.auth?.session?.user as any` for user access, `context.db` for Prisma access, `user.organizationRole` for org role check
+  - Response methods take string args (`response.unauthorized('msg')`) not objects — objects cause TS errors
+  - Route params via `request.params as { id: string }` cast
+  - bcrypt hashPassword has 72 char limit — 128 hex chars from 64-byte token works since bcrypt truncates internally but the full token is still unique enough for comparison
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-018
+---

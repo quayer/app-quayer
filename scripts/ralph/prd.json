@@ -361,8 +361,8 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added ScimToken model with bcrypt tokenHash. Controller with list/create/revoke actions (master-only, authProcedure). validateScimToken function iterates non-revoked tokens with bcrypt comparison, updates lastUsedAt fire-and-forget. Token generated as 64 bytes hex (128 chars), stored as bcrypt hash. Migration applied manually (shadow DB workaround)."
     },
     {
       "id": "US-019",
