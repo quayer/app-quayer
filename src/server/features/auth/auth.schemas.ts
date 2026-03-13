@@ -431,3 +431,18 @@ export type VerifyPhoneOTPInput = z.infer<typeof verifyPhoneOTPSchema>;
 export const totpSetupSchema = z.object({});
 
 export type TotpSetupInput = z.infer<typeof totpSetupSchema>;
+
+/**
+ * Schema de TOTP Verify — confirmar setup digitando código do authenticator
+ */
+export const totpVerifySchema = z.object({
+  code: z
+    .string({ required_error: 'TOTP code is required' })
+    .length(6, 'Code must be 6 digits')
+    .regex(/^\d+$/, 'Code must contain only digits'),
+  deviceId: z
+    .string({ required_error: 'Device ID is required' })
+    .uuid('Invalid device ID format'),
+});
+
+export type TotpVerifyInput = z.infer<typeof totpVerifySchema>;

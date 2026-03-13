@@ -37,6 +37,7 @@ import {
   phoneOTPSchema,
   verifyPhoneOTPSchema,
   totpSetupSchema,
+  totpVerifySchema,
 } from '../auth.schemas';
 import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
@@ -60,7 +61,7 @@ import { authRateLimiter } from '@/lib/rate-limit/rate-limiter';
 import { checkOtpRateLimit } from '@/lib/rate-limit/otp-rate-limit';
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from '@/lib/auth/csrf';
 import { getIpGeolocation } from '@/lib/geocoding/ip-geolocation';
-import { encrypt } from '@/lib/crypto';
+import { encrypt, decrypt } from '@/lib/crypto';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 
@@ -2804,6 +2805,98 @@ export const authController = igniter.controller({
           qrCode: qrCodeDataUrl,
           secret: secretBase32,
           recoveryCodes,
+        });
+      },
+    }),
+
+    /**
+     * TOTP Verify - Confirmar setup de 2FA
+     *
+     * Valida o código TOTP do authenticator para ativar 2FA na conta.
+     */
+    totpVerify: igniter.mutation({
+      name: 'TOTP Verify',
+      description: 'Confirm 2FA setup by verifying a TOTP code from the authenticator app',
+      path: '/totp/verify',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      body: totpVerifySchema,
+      handler: async ({ request, response, context }) => {
+        // Rate limiting: 5 attempts / 15 min
+        const identifier = getClientIdentifier(request);
+        const rateLimit = await authRateLimiter.check(`totp-verify:${identifier}`);
+        if (!rateLimit.success) {
+          return response.status(429).json({
+            error: 'Too many attempts',
+            retryAfter: rateLimit.retryAfter,
+          });
+        }
+
+        const user = context.auth?.session?.user;
+        if (!user) return response.unauthorized('Authentication required');
+        const userId = user.id;
+
+        const { code, deviceId } = request.body;
+
+        // Find the TotpDevice by deviceId, must belong to the user
+        const device = await db.totpDevice.findFirst({
+          where: { id: deviceId, userId },
+        });
+
+        if (!device) {
+          return response.status(404).json({
+            error: 'Device not found',
+            code: 'DEVICE_NOT_FOUND',
+          });
+        }
+
+        if (device.verified) {
+          return response.status(400).json({
+            error: 'Device already verified',
+            code: 'DEVICE_ALREADY_VERIFIED',
+          });
+        }
+
+        // Decrypt the stored secret
+        const secretBase32 = decrypt(device.secret);
+
+        // Validate TOTP code with window=1 (accepts ±1 period)
+        const totp = new OTPAuth.TOTP({
+          issuer: 'Quayer',
+          label: user.email || userId,
+          algorithm: 'SHA1',
+          digits: 6,
+          period: 30,
+          secret: OTPAuth.Secret.fromBase32(secretBase32),
+        });
+
+        const delta = totp.validate({ token: code, window: 1 });
+
+        if (delta === null) {
+          return response.status(400).json({
+            error: 'invalid_code',
+            code: 'INVALID_TOTP_CODE',
+          });
+        }
+
+        // Code is valid — mark device as verified and enable 2FA on user
+        await db.$transaction([
+          db.totpDevice.update({
+            where: { id: deviceId },
+            data: { verified: true },
+          }),
+          db.user.update({
+            where: { id: userId },
+            data: { twoFactorEnabled: true },
+          }),
+        ]);
+
+        // Audit log: totp_setup_completed
+        console.log(`[AUDIT] totp_setup_completed userId=${userId} deviceId=${deviceId}`);
+
+        return response.success({
+          verified: true,
+          twoFactorEnabled: true,
         });
       },
     }),
