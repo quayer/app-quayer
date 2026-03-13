@@ -5,13 +5,6 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/client/components/ui/card"
-import {
   Field,
   FieldDescription,
   FieldError,
@@ -171,147 +164,141 @@ export function SignupForm({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">Criar uma conta</CardTitle>
-          <CardDescription>
-            Comece gratuitamente em segundos
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
+    <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
+      {/* Header */}
+      <div className="text-center space-y-2">
+        <h1 className="text-2xl font-bold text-white">Crie sua conta</h1>
+        <p className="text-gray-400">Comece gratuitamente em segundos</p>
+      </div>
 
-            {success && (
-              <Alert className="border-emerald-500/40 bg-emerald-500/10">
-                <AlertDescription className="text-emerald-400">{success}</AlertDescription>
-              </Alert>
-            )}
+      {/* Alerts */}
+      {error && (
+        <Alert variant="destructive" className="border-red-500/40 bg-red-500/10">
+          <AlertDescription className="text-red-300">{error}</AlertDescription>
+        </Alert>
+      )}
 
-            {/* Google OAuth */}
+      {success && (
+        <Alert className="border-emerald-500/40 bg-emerald-500/10">
+          <AlertDescription className="text-emerald-400">{success}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Google OAuth — First */}
+      <Button
+        type="button"
+        onClick={handleGoogleSignup}
+        disabled={isLoading || isGoogleLoading}
+        className="w-full bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 min-h-[44px]"
+        aria-busy={isGoogleLoading}
+      >
+        {isGoogleLoading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Conectando...
+          </>
+        ) : (
+          <>
+            <GoogleIcon className="mr-2 size-4" />
+            Continuar com Google
+          </>
+        )}
+      </Button>
+
+      <FieldSeparator className="text-gray-400">Ou continue com email</FieldSeparator>
+
+      {/* Email/Phone Signup Form */}
+      <form onSubmit={handleEmailSignup}>
+        <FieldGroup>
+          {!isPhone && (
             <Field>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleGoogleSignup}
-                disabled={isLoading || isGoogleLoading}
-                className="w-full"
-                aria-busy={isGoogleLoading}
-              >
-                {isGoogleLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Conectando...
-                  </>
-                ) : (
-                  <>
-                    <GoogleIcon className="mr-2 size-4" />
-                    Continuar com Google
-                  </>
-                )}
-              </Button>
+              <FieldLabel htmlFor="name" className="text-gray-300">Nome completo</FieldLabel>
+              <Input
+                id="name"
+                type="text"
+                placeholder="João Silva"
+                value={name}
+                onChange={(e) => { setName(e.target.value); if (nameError) setNameError("") }}
+                disabled={isLoading}
+                autoFocus
+                aria-invalid={!!nameError}
+                aria-describedby={nameError ? "name-error" : undefined}
+              />
+              {nameError && <FieldError id="name-error">{nameError}</FieldError>}
             </Field>
+          )}
 
-            <FieldSeparator>Ou</FieldSeparator>
+          <Field>
+            <FieldLabel htmlFor="email" className="text-gray-300">Email ou Telefone</FieldLabel>
+            {isPhone ? (
+              <PhoneInput
+                ref={phoneInputRef}
+                id="email"
+                name="email"
+                value={email}
+                onChange={(v) => { setEmail(v); setIsPhone(looksLikePhone(v)); if (emailError) setEmailError("") }}
+                disabled={isLoading}
+                placeholder="+55 11 99999-9999"
+              />
+            ) : (
+              <Input
+                id="email"
+                type="text"
+                inputMode="email"
+                placeholder="email@exemplo.com ou +55 11 99999-9999"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setIsPhone(looksLikePhone(e.target.value)); if (emailError) setEmailError("") }}
+                disabled={isLoading}
+                aria-invalid={!!emailError}
+                aria-describedby={emailError ? "email-error" : "email-desc"}
+              />
+            )}
+            {emailError && <FieldError id="email-error">{emailError}</FieldError>}
+            <FieldDescription id="email-desc" className="text-gray-500">
+              {isPhone ? 'Enviaremos um código via WhatsApp' : 'Enviaremos um código de login para seu email'}
+            </FieldDescription>
+          </Field>
 
-            {/* Email/Phone Signup Form */}
-            <form onSubmit={handleEmailSignup}>
-              <FieldGroup>
-                {!isPhone && (
-                  <Field>
-                    <FieldLabel htmlFor="name">Nome completo</FieldLabel>
-                    <Input
-                      id="name"
-                      type="text"
-                      placeholder="João Silva"
-                      value={name}
-                      onChange={(e) => { setName(e.target.value); if (nameError) setNameError("") }}
-                      disabled={isLoading}
-                      autoFocus
-                      aria-invalid={!!nameError}
-                      aria-describedby={nameError ? "name-error" : undefined}
-                    />
-                    {nameError && <FieldError id="name-error">{nameError}</FieldError>}
-                  </Field>
-                )}
+          <TurnstileWidget
+            onSuccess={setTurnstileToken}
+            action="signup"
+          />
 
-                <Field>
-                  <FieldLabel htmlFor="email">Email ou Telefone</FieldLabel>
-                  {isPhone ? (
-                    <PhoneInput
-                      ref={phoneInputRef}
-                      id="email"
-                      name="email"
-                      value={email}
-                      onChange={(v) => { setEmail(v); setIsPhone(looksLikePhone(v)); if (emailError) setEmailError("") }}
-                      disabled={isLoading}
-                      placeholder="+55 11 99999-9999"
-                    />
-                  ) : (
-                    <Input
-                      id="email"
-                      type="text"
-                      inputMode="email"
-                      placeholder="email@exemplo.com ou +55 11 99999-9999"
-                      value={email}
-                      onChange={(e) => { setEmail(e.target.value); setIsPhone(looksLikePhone(e.target.value)); if (emailError) setEmailError("") }}
-                      disabled={isLoading}
-                      aria-invalid={!!emailError}
-                      aria-describedby={emailError ? "email-error" : "email-desc"}
-                    />
-                  )}
-                  {emailError && <FieldError id="email-error">{emailError}</FieldError>}
-                  <FieldDescription id="email-desc">
-                    {isPhone ? 'Enviaremos um código via WhatsApp' : 'Enviaremos um código de login para seu email'}
-                  </FieldDescription>
-                </Field>
+          <Field>
+            <Button
+              type="submit"
+              disabled={isLoading || isGoogleLoading}
+              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white min-h-[44px]"
+              aria-busy={isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Enviando código...
+                </>
+              ) : isPhone ? (
+                <>
+                  <Smartphone className="mr-2 h-4 w-4" />
+                  Cadastrar com WhatsApp
+                </>
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Cadastrar com Email
+                </>
+              )}
+            </Button>
+          </Field>
+        </FieldGroup>
+      </form>
 
-                <TurnstileWidget
-                  onSuccess={setTurnstileToken}
-                  action="signup"
-                />
-
-                <Field>
-                  <Button
-                    type="submit"
-                    disabled={isLoading || isGoogleLoading}
-                    className="w-full"
-                    aria-busy={isLoading}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Enviando código...
-                      </>
-                    ) : isPhone ? (
-                      <>
-                        <Smartphone className="mr-2 h-4 w-4" />
-                        Cadastrar com WhatsApp
-                      </>
-                    ) : (
-                      <>
-                        <Mail className="mr-2 h-4 w-4" />
-                        Cadastrar com Email
-                      </>
-                    )}
-                  </Button>
-                  <FieldDescription className="text-center">
-                    Já tem uma conta?{" "}
-                    <Link href="/login" className="inline-flex min-h-[44px] items-center underline underline-offset-4 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
-                      Faça login
-                    </Link>
-                  </FieldDescription>
-                </Field>
-              </FieldGroup>
-            </form>
-          </FieldGroup>
-        </CardContent>
-      </Card>
+      {/* Login link */}
+      <p className="text-center text-sm text-gray-400">
+        Já tem uma conta?{" "}
+        <Link href="/login" className="inline-flex min-h-[44px] items-center text-white underline underline-offset-4 hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
+          Faça login
+        </Link>
+      </p>
     </div>
   )
 }
