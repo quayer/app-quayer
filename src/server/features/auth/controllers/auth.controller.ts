@@ -48,6 +48,8 @@ import {
   hashPassword,
   verifyPassword,
   validatePasswordStrength,
+  generateOTPCode,
+  generateRecoveryCodes,
 } from '@/lib/auth/bcrypt';
 import {
   signAccessToken,
@@ -82,6 +84,29 @@ function getClientIdentifier(request: { headers: { get?: (key: string) => string
   const realIp = get('x-real-ip');
   if (realIp) return realIp;
   return 'unknown';
+}
+
+async function createAuditLog(
+  action: string,
+  userId: string,
+  request: { headers: { get?: (key: string) => string | null; [key: string]: any } },
+  metadata?: Record<string, any>,
+  organizationId?: string | null,
+) {
+  try {
+    await db.auditLog.create({
+      data: {
+        action,
+        resource: 'auth',
+        userId,
+        organizationId: organizationId ?? undefined,
+        ipAddress: getClientIdentifier(request),
+        metadata: metadata ?? undefined,
+      },
+    });
+  } catch (err) {
+    console.error(`[AuditLog] Failed to write ${action}:`, err);
+  }
 }
 
 const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://quayer.com').replace(/\/$/, '');
@@ -168,25 +193,35 @@ function verify2faChallenge(token: string): { userId: string } | null {
 }
 
 /**
- * In-memory map to track failed 2FA attempts per challengeId.
- * Key = challengeId JWT string, Value = number of failed attempts.
- * Entries are auto-cleaned after 10 minutes.
+ * Track failed 2FA attempts per challengeId via Redis.
+ * TTL = 10 minutes. Works across multiple server instances.
  */
-const challengeAttempts = new Map<string, number>();
+import { getRedis } from '@/server/services/redis';
 
-function getChallengeAttempts(challengeId: string): number {
-  return challengeAttempts.get(challengeId) || 0;
+const CHALLENGE_ATTEMPTS_PREFIX = 'auth:2fa:attempts:';
+const CHALLENGE_ATTEMPTS_TTL = 600; // 10 minutes
+
+async function getChallengeAttempts(challengeId: string): Promise<number> {
+  try {
+    const val = await getRedis().get(`${CHALLENGE_ATTEMPTS_PREFIX}${challengeId}`);
+    return val ? parseInt(val, 10) : 0;
+  } catch {
+    return 0;
+  }
 }
 
-function incrementChallengeAttempts(challengeId: string): number {
-  const current = getChallengeAttempts(challengeId);
-  const next = current + 1;
-  challengeAttempts.set(challengeId, next);
-  // Auto-clean after 10 min
-  if (current === 0) {
-    setTimeout(() => challengeAttempts.delete(challengeId), 10 * 60 * 1000);
+async function incrementChallengeAttempts(challengeId: string): Promise<number> {
+  try {
+    const redis = getRedis();
+    const key = `${CHALLENGE_ATTEMPTS_PREFIX}${challengeId}`;
+    const next = await redis.incr(key);
+    if (next === 1) {
+      await redis.expire(key, CHALLENGE_ATTEMPTS_TTL);
+    }
+    return next;
+  } catch {
+    return 1;
   }
-  return next;
 }
 
 const MAX_2FA_ATTEMPTS = 5;
@@ -360,6 +395,106 @@ async function registerDeviceSession(userId: string, request: any): Promise<{ bl
   }
 }
 
+
+/**
+ * Auto-join by verified domain.
+ * After email verification in signup flows, extract domain from email and look up
+ * VerifiedDomain records where domain matches, verifiedAt is not null, autoJoin is true.
+ * If found, create UserOrganization with defaultRoleId (or fallback 'user').
+ * Fail-open: don't block signup if auto-join fails.
+ * Returns the list of orgIds the user was added to (may be empty).
+ */
+async function autoJoinByVerifiedDomain(
+  userId: string,
+  email: string,
+  request: { headers: { get?: (key: string) => string | null; [key: string]: any } },
+): Promise<{ joinedOrgIds: string[] }> {
+  try {
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return { joinedOrgIds: [] };
+
+    // Look up verified domains with autoJoin enabled
+    const verifiedDomains = await db.verifiedDomain.findMany({
+      where: {
+        domain,
+        verifiedAt: { not: null },
+        autoJoin: true,
+      },
+      include: {
+        organization: { select: { id: true, name: true, isActive: true } },
+        defaultRole: { select: { id: true, slug: true } },
+      },
+    });
+
+    if (verifiedDomains.length === 0) return { joinedOrgIds: [] };
+
+    // Check existing memberships to avoid duplicates
+    const existingMemberships = await db.userOrganization.findMany({
+      where: {
+        userId,
+        organizationId: { in: verifiedDomains.map(vd => vd.organizationId) },
+      },
+      select: { organizationId: true },
+    });
+    const existingOrgIds = new Set(existingMemberships.map(m => m.organizationId));
+
+    const joinedOrgIds: string[] = [];
+
+    for (const vd of verifiedDomains) {
+      // Skip if user already member or org inactive
+      if (existingOrgIds.has(vd.organizationId)) continue;
+      if (!vd.organization.isActive) continue;
+
+      try {
+        // Determine role: use defaultRoleId from VerifiedDomain, or fallback to 'user'
+        const roleSlug = vd.defaultRole?.slug || 'user';
+
+        await db.userOrganization.create({
+          data: {
+            userId,
+            organizationId: vd.organizationId,
+            role: roleSlug,
+            isActive: true,
+            customRoleId: vd.defaultRoleId || undefined,
+          },
+        });
+
+        joinedOrgIds.push(vd.organizationId);
+
+        // Audit log
+        await createAuditLog('domain_auto_join', userId, request, {
+          orgId: vd.organizationId,
+          orgName: vd.organization.name,
+          domain,
+          roleSlug,
+        }, vd.organizationId);
+
+        console.log(`[AUDIT] domain_auto_join userId=${userId} orgId=${vd.organizationId} domain=${domain}`);
+      } catch (joinErr) {
+        // Fail-open per org: if one fails, continue with others
+        console.error(`[AutoJoin] Failed to join org ${vd.organizationId} for user ${userId}:`, joinErr);
+      }
+    }
+
+    // Set currentOrgId to the first joined org if user has no current org
+    if (joinedOrgIds.length > 0) {
+      const user = await db.user.findUnique({ where: { id: userId }, select: { currentOrgId: true } });
+      if (!user?.currentOrgId) {
+        await db.user.update({
+          where: { id: userId },
+          data: { currentOrgId: joinedOrgIds[0] },
+        });
+      }
+    }
+
+    return { joinedOrgIds };
+  } catch (err) {
+    // Fail-open: don't block signup if auto-join fails
+    console.error(`[AutoJoin] Failed for user ${userId}:`, err);
+    return { joinedOrgIds: [] };
+  }
+}
+
 export const authController = igniter.controller({
   name: 'auth',
   path: '/auth',
@@ -458,7 +593,7 @@ export const authController = igniter.controller({
         }
 
         // Generate verification code and send email
-        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const verificationCode = generateOTPCode();
         const verificationExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
         await db.user.update({
@@ -517,7 +652,7 @@ export const authController = igniter.controller({
           include: {
             organizations: {
               where: { isActive: true },
-              include: { organization: true },
+              select: { organizationId: true, role: true },
             },
           },
         });
@@ -529,6 +664,7 @@ export const authController = igniter.controller({
         // Verificar senha
         const isValidPassword = await verifyPassword(password, user.password);
         if (!isValidPassword) {
+          await createAuditLog('LOGIN_FAILED', user.id, request, { reason: 'invalid_password' }, user.currentOrgId);
           return response.status(401).json({ error: 'Invalid credentials' });
         }
 
@@ -540,7 +676,7 @@ export const authController = igniter.controller({
         // 2FA check: if user has TOTP enabled, return challenge instead of tokens
         if (user.twoFactorEnabled) {
           const challengeId = sign2faChallenge(user.id);
-          console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=password`);
+          createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'password' }, user.currentOrgId);
           return response.success({ requiresTwoFactor: true, challengeId });
         }
 
@@ -589,18 +725,19 @@ export const authController = igniter.controller({
           data: { token: refreshToken },
         });
 
-        // Set httpOnly cookies (backend-managed)
-        setAuthCookies(response, accessToken, refreshToken);
-
-        // Register device session + geo check
+        // Register device session + geo check BEFORE setting cookies
         const deviceResult = await registerDeviceSession(user.id, request);
         if (deviceResult.blocked) {
-          clearAuthCookies(response);
           return Response.json(
             { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
             { status: 403 }
           );
         }
+
+        // Set httpOnly cookies (backend-managed) — only after device check passes
+        setAuthCookies(response, accessToken, refreshToken);
+
+        await createAuditLog('LOGIN_SUCCESS', user.id, request, { method: 'password' }, currentOrgId);
 
         return response.success({
           needsOnboarding: !user.onboardingCompleted,
@@ -862,6 +999,8 @@ export const authController = igniter.controller({
           where: { userId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+
+        await createAuditLog('PASSWORD_CHANGED', userId, request, { method: 'change_password' }, user.currentOrgId);
 
         return response.success({ message: 'Password changed successfully' });
       },
@@ -1127,11 +1266,15 @@ export const authController = igniter.controller({
           });
         }
 
-        // Hash e atualizar senha
+        // Hash e atualizar senha + clear stale resetToken
         const hashedPassword = await hashPassword(password);
         await db.user.update({
           where: { id: payload.userId },
-          data: { password: hashedPassword },
+          data: {
+            password: hashedPassword,
+            resetToken: null,
+            resetTokenExpiry: null,
+          },
         });
 
         // Revogar token usado
@@ -1145,6 +1288,8 @@ export const authController = igniter.controller({
           where: { userId: payload.userId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+
+        await createAuditLog('PASSWORD_RESET', payload.userId, request, { method: 'reset_token' });
 
         return response.success({ message: 'Password reset successfully' });
       },
@@ -1265,7 +1410,7 @@ export const authController = igniter.controller({
           // 2FA check: if existing user has TOTP enabled, return challenge
           if (!isNewGoogleUser && user.twoFactorEnabled) {
             const challengeId = sign2faChallenge(user.id);
-            console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=google`);
+            createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'google' }, user.currentOrgId);
             return response.success({ requiresTwoFactor: true, challengeId });
           }
 
@@ -1358,7 +1503,7 @@ export const authController = igniter.controller({
         }
 
         // Gerar código de 6 dígitos
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const code = generateOTPCode();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
 
         // Salvar código no banco (criar tabela de verification codes ou usar campo temporário)
@@ -1419,6 +1564,9 @@ export const authController = igniter.controller({
             resetTokenExpiry: null,
           },
         });
+
+        // Auto-join by verified domain (fail-open)
+        await autoJoinByVerifiedDomain(user.id, user.email, request);
 
         // Gerar tokens JWT
         const accessToken = await signAccessToken({
@@ -1488,7 +1636,7 @@ export const authController = igniter.controller({
         }
 
         // Generate OTP
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpCode = generateOTPCode();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         // Save to TempUser (temporary storage before verification)
@@ -1591,6 +1739,9 @@ export const authController = igniter.controller({
 
         await db.tempUser.delete({ where: { email } });
 
+        // Auto-join by verified domain (fail-open, non-blocking)
+        await autoJoinByVerifiedDomain(user.id, user.email, request);
+
         const accessToken = signAccessToken({
           userId: user.id,
           email: user.email,
@@ -1658,7 +1809,7 @@ export const authController = igniter.controller({
         }
 
         // Gerar novo código
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const code = generateOTPCode();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
         await db.user.update({
@@ -1717,7 +1868,7 @@ export const authController = igniter.controller({
 
         // 🚀 NOVO: Se usuário não existe, enviar OTP de SIGNUP automaticamente
         if (!user) {
-          const signupOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
+          const signupOtpCode = generateOTPCode();
           const signupExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
           const tempName = email.split('@')[0]; // Extract name from email
 
@@ -1765,7 +1916,7 @@ export const authController = igniter.controller({
         }
 
         // Gerar código OTP de 6 dígitos para LOGIN
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpCode = generateOTPCode();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
         // Salvar OTP code no banco para todos os usuários (incluindo admin)
@@ -1910,18 +2061,17 @@ export const authController = igniter.controller({
           data: { token: refreshToken },
         });
 
-        // Set httpOnly cookies
-        setAuthCookies(response, accessToken, refreshToken);
-
-        // Register device session + geo check
+        // Register device session + geo check BEFORE setting cookies
         const deviceResult = await registerDeviceSession(user.id, request);
         if (deviceResult.blocked) {
-          clearAuthCookies(response);
           return Response.json(
             { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
             { status: 403 }
           );
         }
+
+        // Set httpOnly cookies — only after device check passes
+        setAuthCookies(response, accessToken, refreshToken);
 
         return response.success({
           needsOnboarding: !user.onboardingCompleted,
@@ -2026,6 +2176,9 @@ export const authController = igniter.controller({
 
           await db.tempUser.delete({ where: { email: payload.email } });
 
+          // Auto-join by verified domain (fail-open, non-blocking)
+          await autoJoinByVerifiedDomain(user.id, user.email, request);
+
           const accessToken = signAccessToken({
             userId: user.id,
             email: user.email,
@@ -2097,7 +2250,7 @@ export const authController = igniter.controller({
           // 2FA check: if user has TOTP enabled, return challenge
           if (user.twoFactorEnabled) {
             const challengeId = sign2faChallenge(user.id);
-            console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=magic-link`);
+            createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'magic-link' }, user.currentOrgId);
             return response.success({ requiresTwoFactor: true, challengeId });
           }
 
@@ -2553,7 +2706,7 @@ export const authController = igniter.controller({
           )
         }
 
-        const code = Math.floor(100000 + Math.random() * 900000).toString()
+        const code = generateOTPCode()
 
         await db.verificationCode.deleteMany({ where: { email: normalized, type: 'WHATSAPP_OTP' } })
         await db.verificationCode.create({
@@ -2628,10 +2781,15 @@ export const authController = igniter.controller({
 
         await db.verificationCode.delete({ where: { id: vc.id } })
 
+        // Auto-join by verified domain for newly created phone users (fail-open)
+        if (!user) {
+          await autoJoinByVerifiedDomain(createdUser.id, createdUser.email, request);
+        }
+
         // 2FA check: if existing user has TOTP enabled, return challenge (skip for newly created)
         if (user && createdUser.twoFactorEnabled) {
           const challengeId = sign2faChallenge(createdUser.id);
-          console.log(`[AUDIT] 2fa_challenge_issued userId=${createdUser.id} method=phone-otp`);
+          createAuditLog('2FA_CHALLENGE_ISSUED', createdUser.id, request, { method: 'phone-otp' });
           return response.success({ requiresTwoFactor: true, challengeId });
         }
 
@@ -2868,10 +3026,7 @@ export const authController = igniter.controller({
         });
 
         // Generate 8 recovery codes
-        const recoveryCodes: string[] = [];
-        for (let i = 0; i < 8; i++) {
-          recoveryCodes.push(crypto.randomBytes(4).toString('hex'));
-        }
+        const recoveryCodes = generateRecoveryCodes(8);
 
         // Hash and store recovery codes (bcrypt 12 rounds)
         const recoveryCodePromises = recoveryCodes.map(async (code) => {
@@ -2977,8 +3132,7 @@ export const authController = igniter.controller({
           }),
         ]);
 
-        // Audit log: totp_setup_completed
-        console.log(`[AUDIT] totp_setup_completed userId=${userId} deviceId=${deviceId}`);
+        await createAuditLog('TOTP_ENABLED', userId, request, { deviceId }, user.currentOrgId);
 
         return response.success({
           verified: true,
@@ -3001,9 +3155,8 @@ export const authController = igniter.controller({
         const { challengeId, code } = request.body;
 
         // Check attempt count before doing any work
-        const attempts = getChallengeAttempts(challengeId);
+        const attempts = await getChallengeAttempts(challengeId);
         if (attempts >= MAX_2FA_ATTEMPTS) {
-          console.log(`[AUDIT] 2fa_challenge_failed reason=max_attempts challengeId=${challengeId.substring(0, 20)}...`);
           return response.status(403).json({
             error: 'Too many failed attempts. Please login again.',
             code: 'CHALLENGE_EXHAUSTED',
@@ -3056,9 +3209,9 @@ export const authController = igniter.controller({
         const delta = totp.validate({ token: code, window: 1 });
 
         if (delta === null) {
-          const newAttempts = incrementChallengeAttempts(challengeId);
+          const newAttempts = await incrementChallengeAttempts(challengeId);
           const remaining = MAX_2FA_ATTEMPTS - newAttempts;
-          console.log(`[AUDIT] 2fa_challenge_failed userId=${userId} attempts=${newAttempts}`);
+          createAuditLog('2FA_CHALLENGE_FAILED', userId, request, { attempts: newAttempts });
           return response.status(400).json({
             error: 'Invalid TOTP code.',
             code: 'INVALID_CODE',
@@ -3104,23 +3257,22 @@ export const authController = igniter.controller({
           data: { token: refreshToken },
         });
 
-        // Set httpOnly cookies
-        setAuthCookies(response, accessToken, refreshToken);
-
-        // Register device session (non-blocking)
+        // Register device session + geo check BEFORE setting cookies
         const deviceResult = await registerDeviceSession(user.id, request);
         if (deviceResult.blocked) {
-          clearAuthCookies(response);
           return Response.json(
             { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
             { status: 403 }
           );
         }
 
-        // Clean up challenge attempts
-        challengeAttempts.delete(challengeId);
+        // Set httpOnly cookies — only after device check passes
+        setAuthCookies(response, accessToken, refreshToken);
 
-        console.log(`[AUDIT] 2fa_challenge_success userId=${userId}`);
+        // Clean up challenge attempts
+        getRedis().del(`${CHALLENGE_ATTEMPTS_PREFIX}${challengeId}`).catch(() => {});
+
+        await createAuditLog('LOGIN_SUCCESS', userId, request, { method: '2fa_totp' }, user.currentOrgId);
 
         return response.success({
           needsOnboarding: !user.onboardingCompleted,
@@ -3149,9 +3301,8 @@ export const authController = igniter.controller({
         const { challengeId, recoveryCode } = request.body;
 
         // Check attempt count before doing any work (shares limit with totpChallenge)
-        const attempts = getChallengeAttempts(challengeId);
+        const attempts = await getChallengeAttempts(challengeId);
         if (attempts >= MAX_2FA_ATTEMPTS) {
-          console.log(`[AUDIT] 2fa_recovery_failed reason=max_attempts challengeId=${challengeId.substring(0, 20)}...`);
           return response.status(403).json({
             error: 'Too many failed attempts. Please login again.',
             code: 'CHALLENGE_EXHAUSTED',
@@ -3208,9 +3359,9 @@ export const authController = igniter.controller({
         }
 
         if (!matchedCodeId) {
-          const newAttempts = incrementChallengeAttempts(challengeId);
+          const newAttempts = await incrementChallengeAttempts(challengeId);
           const remaining = MAX_2FA_ATTEMPTS - newAttempts;
-          console.log(`[AUDIT] 2fa_recovery_failed userId=${userId} attempts=${newAttempts}`);
+          createAuditLog('2FA_RECOVERY_FAILED', userId, request, { attempts: newAttempts });
           return response.status(400).json({
             error: 'Invalid recovery code.',
             code: 'INVALID_CODE',
@@ -3227,7 +3378,7 @@ export const authController = igniter.controller({
         // Count remaining unused codes
         const remainingCodes = user.recoveryCodes.length - 1; // one just used
 
-        console.log(`[AUDIT] 2fa_recovery_used userId=${userId} remainingCodes=${remainingCodes}`);
+        await createAuditLog('LOGIN_SUCCESS', userId, request, { method: '2fa_recovery', remainingCodes }, user.currentOrgId);
 
         // If all codes used: disable 2FA entirely and send email alert
         if (remainingCodes === 0) {
@@ -3241,7 +3392,7 @@ export const authController = igniter.controller({
             }),
           ]);
 
-          console.log(`[AUDIT] 2fa_auto_disabled userId=${userId} reason=all_recovery_codes_used`);
+          await createAuditLog('TOTP_AUTO_DISABLED', userId, request, { reason: 'all_recovery_codes_used' }, user.currentOrgId);
 
           // Send email alert (non-blocking)
           try {
@@ -3301,21 +3452,20 @@ export const authController = igniter.controller({
           data: { token: refreshToken },
         });
 
-        // Set httpOnly cookies
-        setAuthCookies(response, accessToken, refreshToken);
-
-        // Register device session (non-blocking)
+        // Register device session + geo check BEFORE setting cookies
         const deviceResult = await registerDeviceSession(user.id, request);
         if (deviceResult.blocked) {
-          clearAuthCookies(response);
           return Response.json(
             { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
             { status: 403 }
           );
         }
 
+        // Set httpOnly cookies — only after device check passes
+        setAuthCookies(response, accessToken, refreshToken);
+
         // Clean up challenge attempts
-        challengeAttempts.delete(challengeId);
+        getRedis().del(`${CHALLENGE_ATTEMPTS_PREFIX}${challengeId}`).catch(() => {});
 
         // Build response
         const responseData: any = {
@@ -3453,8 +3603,7 @@ export const authController = igniter.controller({
           }),
         ]);
 
-        // Audit log
-        console.log(`[AUDIT] totp_disabled userId=${userId}`);
+        await createAuditLog('TOTP_DISABLED', userId, request, undefined, user.currentOrgId);
 
         return response.success({
           twoFactorEnabled: false,
@@ -3527,10 +3676,7 @@ export const authController = igniter.controller({
         });
 
         // Generate 8 new recovery codes
-        const recoveryCodes: string[] = [];
-        for (let i = 0; i < 8; i++) {
-          recoveryCodes.push(crypto.randomBytes(4).toString('hex'));
-        }
+        const recoveryCodes = generateRecoveryCodes(8);
 
         // Hash and store new recovery codes
         const recoveryCodePromises = recoveryCodes.map(async (rc) => {
@@ -3544,8 +3690,7 @@ export const authController = igniter.controller({
         });
         await Promise.all(recoveryCodePromises);
 
-        // Audit log
-        console.log(`[AUDIT] totp_codes_regenerated userId=${userId}`);
+        await createAuditLog('TOTP_CODES_REGENERATED', userId, request, undefined, user.currentOrgId);
 
         return response.success({
           recoveryCodes,
