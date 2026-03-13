@@ -461,3 +461,18 @@ export const totpChallengeSchema = z.object({
 });
 
 export type TotpChallengeInput = z.infer<typeof totpChallengeSchema>;
+
+/**
+ * Schema de TOTP Recovery — login via recovery code when authenticator unavailable
+ */
+export const totpRecoverySchema = z.object({
+  challengeId: z
+    .string({ required_error: 'Challenge ID is required' })
+    .min(1, 'Challenge ID is required'),
+  recoveryCode: z
+    .string({ required_error: 'Recovery code is required' })
+    .min(1, 'Recovery code is required')
+    .max(20, 'Recovery code is too long'),
+});
+
+export type TotpRecoveryInput = z.infer<typeof totpRecoverySchema>;

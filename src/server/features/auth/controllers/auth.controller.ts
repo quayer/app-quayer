@@ -39,6 +39,7 @@ import {
   totpSetupSchema,
   totpVerifySchema,
   totpChallengeSchema,
+  totpRecoverySchema,
 } from '../auth.schemas';
 import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
@@ -3124,6 +3125,215 @@ export const authController = igniter.controller({
             organizationRole: currentOrgRelation?.role,
           },
         });
+      },
+    }),
+
+    /**
+     * TOTP Recovery — login with recovery code when authenticator is unavailable
+     */
+    totpRecovery: igniter.mutation({
+      name: 'TOTP Recovery',
+      description: 'Validate a recovery code for 2FA login bypass',
+      path: '/totp-recovery',
+      method: 'POST',
+      body: totpRecoverySchema,
+      handler: async ({ request, response }) => {
+        const { challengeId, recoveryCode } = request.body;
+
+        // Check attempt count before doing any work (shares limit with totpChallenge)
+        const attempts = getChallengeAttempts(challengeId);
+        if (attempts >= MAX_2FA_ATTEMPTS) {
+          console.log(`[AUDIT] 2fa_recovery_failed reason=max_attempts challengeId=${challengeId.substring(0, 20)}...`);
+          return response.status(403).json({
+            error: 'Too many failed attempts. Please login again.',
+            code: 'CHALLENGE_EXHAUSTED',
+          });
+        }
+
+        // Verify challengeId JWT (same as totpChallenge)
+        const challengePayload = verify2faChallenge(challengeId);
+        if (!challengePayload) {
+          return response.status(400).json({
+            error: 'Invalid or expired challenge. Please login again.',
+            code: 'INVALID_CHALLENGE',
+          });
+        }
+
+        const { userId } = challengePayload;
+
+        // Fetch user with unused recovery codes
+        const user = await db.user.findUnique({
+          where: { id: userId },
+          include: {
+            recoveryCodes: { where: { usedAt: null } },
+            organizations: {
+              where: { isActive: true },
+              include: { organization: true },
+            },
+          },
+        });
+
+        if (!user || !user.twoFactorEnabled) {
+          return response.status(400).json({
+            error: '2FA is not configured for this account.',
+            code: 'NO_2FA',
+          });
+        }
+
+        if (user.recoveryCodes.length === 0) {
+          return response.status(400).json({
+            error: 'No recovery codes available. Contact your administrator.',
+            code: 'NO_RECOVERY_CODES',
+          });
+        }
+
+        // Compare recoveryCode with each hash using bcrypt.compare (timing-safe by nature)
+        let matchedCodeId: string | null = null;
+        const normalizedInput = recoveryCode.trim().toLowerCase();
+
+        for (const rc of user.recoveryCodes) {
+          const isMatch = await verifyPassword(normalizedInput, rc.code);
+          if (isMatch) {
+            matchedCodeId = rc.id;
+            break;
+          }
+        }
+
+        if (!matchedCodeId) {
+          const newAttempts = incrementChallengeAttempts(challengeId);
+          const remaining = MAX_2FA_ATTEMPTS - newAttempts;
+          console.log(`[AUDIT] 2fa_recovery_failed userId=${userId} attempts=${newAttempts}`);
+          return response.status(400).json({
+            error: 'Invalid recovery code.',
+            code: 'INVALID_CODE',
+            attemptsRemaining: remaining,
+          });
+        }
+
+        // Mark recovery code as used
+        await db.recoveryCode.update({
+          where: { id: matchedCodeId },
+          data: { usedAt: new Date() },
+        });
+
+        // Count remaining unused codes
+        const remainingCodes = user.recoveryCodes.length - 1; // one just used
+
+        console.log(`[AUDIT] 2fa_recovery_used userId=${userId} remainingCodes=${remainingCodes}`);
+
+        // If all codes used: disable 2FA entirely and send email alert
+        if (remainingCodes === 0) {
+          await db.$transaction([
+            db.user.update({
+              where: { id: userId },
+              data: { twoFactorEnabled: false },
+            }),
+            db.totpDevice.deleteMany({
+              where: { userId },
+            }),
+          ]);
+
+          console.log(`[AUDIT] 2fa_auto_disabled userId=${userId} reason=all_recovery_codes_used`);
+
+          // Send email alert (non-blocking)
+          try {
+            await emailService.send({
+              to: user.email,
+              subject: 'Quayer — Autenticação em duas etapas desativada',
+              html: `
+                <h2>2FA Desativada Automaticamente</h2>
+                <p>Olá ${user.name || 'usuário'},</p>
+                <p>Todos os seus códigos de recuperação foram utilizados. Por segurança, a autenticação em duas etapas (2FA) foi <strong>desativada automaticamente</strong> na sua conta.</p>
+                <p>Recomendamos que você reative o 2FA o mais rápido possível nas configurações de segurança da sua conta.</p>
+                <p>Se você não reconhece esta atividade, entre em contato com o suporte imediatamente.</p>
+                <br/>
+                <p>— Equipe Quayer</p>
+              `,
+            });
+          } catch (emailErr) {
+            console.error('[Auth] Failed to send 2FA disabled email alert:', emailErr);
+          }
+        }
+
+        // Issue tokens (same flow as totpChallenge)
+        let currentOrgId = user.currentOrgId;
+        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+          currentOrgId = user.organizations[0].organizationId;
+          await db.user.update({ where: { id: user.id }, data: { currentOrgId } });
+        }
+
+        const currentOrgRelation = user.organizations.find(
+          (org) => org.organizationId === currentOrgId
+        );
+
+        const accessToken = signAccessToken({
+          userId: user.id,
+          email: user.email,
+          role: user.role as UserRole,
+          currentOrgId,
+          organizationRole: currentOrgRelation?.role as any,
+          needsOnboarding: !user.onboardingCompleted,
+        });
+
+        const refreshTokenData = await db.refreshToken.create({
+          data: {
+            userId: user.id,
+            token: signRefreshToken({ userId: user.id, tokenId: '' }),
+            expiresAt: getExpirationDate('7d'),
+          },
+        });
+
+        const refreshToken = signRefreshToken({
+          userId: user.id,
+          tokenId: refreshTokenData.id,
+        });
+
+        await db.refreshToken.update({
+          where: { id: refreshTokenData.id },
+          data: { token: refreshToken },
+        });
+
+        // Set httpOnly cookies
+        setAuthCookies(response, accessToken, refreshToken);
+
+        // Register device session (non-blocking)
+        const deviceResult = await registerDeviceSession(user.id, request);
+        if (deviceResult.blocked) {
+          clearAuthCookies(response);
+          return Response.json(
+            { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
+            { status: 403 }
+          );
+        }
+
+        // Clean up challenge attempts
+        challengeAttempts.delete(challengeId);
+
+        // Build response
+        const responseData: any = {
+          needsOnboarding: !user.onboardingCompleted,
+          remainingCodes,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role,
+          },
+        };
+
+        // Warning if few codes remaining
+        if (remainingCodes > 0 && remainingCodes <= 2) {
+          responseData.warning = 'few_codes_remaining';
+        }
+
+        // If all codes used, notify that 2FA was disabled
+        if (remainingCodes === 0) {
+          responseData.warning = '2fa_disabled_no_codes';
+        }
+
+        return response.success(responseData);
       },
     }),
 
