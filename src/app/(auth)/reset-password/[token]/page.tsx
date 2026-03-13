@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
-export default function ForgotPasswordPage() {
+export default function ResetPasswordPage() {
   redirect('/login')
 }
