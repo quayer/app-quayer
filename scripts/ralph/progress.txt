@@ -26,6 +26,8 @@
 - **Prisma $transaction array:** `db.$transaction([op1, op2])` for atomic multi-table updates
 - **verifyPassword reuse:** `verifyPassword(plain, hash)` from `@/lib/auth/bcrypt` wraps `bcrypt.compare` — use for any hash comparison (passwords, recovery codes, etc.)
 - **Token issuance flow:** signAccessToken → db.refreshToken.create → signRefreshToken → update → setAuthCookies → registerDeviceSession — duplicated in login/totpChallenge/totpRecovery
+- **2FA status check (frontend):** `/api/v1/auth/me` does NOT return `twoFactorEnabled` — use `/api/v1/auth/totp/devices` and check for verified devices instead
+- **apiFetch helper pattern:** wrap `fetch()` with `{ credentials: 'include', headers: { 'Content-Type': 'application/json' } }` + error extraction from response body
 
 ---
 
@@ -169,4 +171,30 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - totpDisable accepts both TOTP codes (6 digits regex) and recovery codes as second factor — first tries TOTP, falls back to recovery code comparison
   - Pattern for invalidating recovery codes: `updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } })` instead of deleting, preserves audit trail
   - Pre-existing TS errors (~60+) continue in unrelated files — confirmed zero new errors from US-006 changes
+---
+
+## 2026-03-13 ~08:00 UTC-3 - US-007
+- **Implemented:** UI de configuracao 2FA na pagina de seguranca do usuario
+- **Changes:**
+  - Added `TwoFactorSection` component to `/user/seguranca/page.tsx`
+  - Disabled state: Card with ShieldOff icon + description + "Ativar 2FA" button
+  - Setup wizard Dialog with 3 steps:
+    - Step 1: QR code image (base64) + secret in monospace with show/hide toggle + copy button
+    - Step 2: InputOTP 6-digit verification
+    - Step 3: Recovery codes in 2x4 grid + copy all + download .txt
+  - Enabled state: Card with ShieldCheck icon + "Ativo" badge + "Desabilitar 2FA" and "Regenerar Codigos" buttons
+  - Disable 2FA modal: password input + TOTP/recovery code input
+  - Regenerate codes modal: TOTP code verification then shows new codes grid
+  - Loading states, error handling with Alert components, toast notifications throughout
+  - Uses `apiFetch` helper with fetch API (same pattern as admin/security page)
+  - API endpoints: `/api/v1/auth/totp/setup`, `/totp/verify`, `/totp/disable`, `/totp/regenerate-codes`, `/totp/devices`
+- **Files changed:**
+  - `src/app/user/seguranca/page.tsx` — added TwoFactorSection + updated header description
+- **Learnings for future iterations:**
+  - `/user/seguranca` page was untracked on this branch (exists only in worktree) — use `git add` explicitly
+  - The page uses raw `fetch` with `credentials: 'include'` (not the Igniter `api.*` client) because it's a standalone `'use client'` page
+  - `apiFetch` helper pattern (from admin/security) is clean and reusable — wraps fetch with credentials, JSON headers, and error extraction
+  - Auth controller base path is `/auth`, so TOTP endpoints are at `/api/v1/auth/totp/*`
+  - `me` endpoint does NOT return `twoFactorEnabled` — use `totpListDevices` to check 2FA status (verified devices = 2FA enabled)
+  - InputOTP component from `@/client/components/ui/input-otp` — uses `input-otp` library, 6 slots in one group
 ---

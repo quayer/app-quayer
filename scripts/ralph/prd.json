@@ -140,8 +140,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added TwoFactorSection component to /user/seguranca page with setup wizard (3 steps), disable modal, regenerate codes modal. Uses fetch API to call /api/v1/auth/totp/* endpoints."
     },
     {
       "id": "US-008",
