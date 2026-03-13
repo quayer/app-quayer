@@ -275,3 +275,28 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Widget ref has `.reset()` method to re-render on error/expiry
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-010
 ---
+
+## 2026-03-13 ~12:00 UTC-3 - US-011
+- **Implemented:** Schema de Custom Roles — model CustomRole + customRoleId no UserOrganization
+- **Changes:**
+  - Added `CustomRole` model to `prisma/schema.prisma` with: id (uuid), organizationId (FK), name, slug, description, permissions (Json), isSystem (Boolean default false), priority (Int), createdAt, updatedAt
+  - Table mapped to `custom_roles` via `@@map`
+  - Unique constraint: `@@unique([organizationId, slug])`
+  - Index: `@@index([organizationId])`
+  - Added `customRoleId` (String? FK) to `UserOrganization` with `onDelete: SetNull`
+  - Added `@@index([customRoleId])` to UserOrganization
+  - Added relation: Organization hasMany CustomRole (onDelete: Cascade)
+  - Created migration `20260313210000_add_custom_roles` manually (shadow DB workaround)
+  - Data migration SQL creates 3 system CustomRoles per existing org (master priority=3, manager priority=2, user priority=1) with permissions JSON matching PERMISSIONS_MATRIX
+  - Data migration links existing UserOrganization records to their corresponding CustomRole by matching `role` string to `slug`
+  - Applied with `prisma migrate deploy`
+  - `prisma generate` successful
+- **Files changed:**
+  - `prisma/schema.prisma` — added CustomRole model + customRoleId field + relations
+  - `prisma/migrations/20260313210000_add_custom_roles/migration.sql` — new migration with DDL + data migration
+- **Learnings for future iterations:**
+  - Permissions JSON structure mirrors PERMISSIONS_MATRIX: `{ "resource_name": ["action1", "action2", ...] }` using Resource enum values as keys and Action enum values in arrays
+  - System roles use `isSystem=true` and cannot be edited/deleted by users (enforced at controller level in future US-012)
+  - Priority maps to ROLE_HIERARCHY: master=3, manager=2, user=1
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-011
+---

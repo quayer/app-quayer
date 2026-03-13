@@ -220,8 +220,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added CustomRole model with uuid id, organizationId FK, name, slug, description, permissions (Json), isSystem, priority, timestamps. Added customRoleId FK to UserOrganization with OnDelete SetNull. Migration creates 3 system roles per existing org (master/manager/user) with permissions matching PERMISSIONS_MATRIX. Links existing UserOrganization records to corresponding CustomRole."
     },
     {
       "id": "US-012",
