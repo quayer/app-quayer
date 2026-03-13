@@ -98,8 +98,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented totpRecovery action in auth.controller.ts. Shares challengeId JWT + attempt tracking with totpChallenge. Uses verifyPassword (bcrypt.compare) for timing-safe recovery code comparison. Auto-disables 2FA + sends email when all codes exhausted."
     },
     {
       "id": "US-006",

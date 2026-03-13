@@ -24,6 +24,8 @@
 - **otpauth validate:** `totp.validate({ token, window })` returns `null` if invalid, integer delta if valid
 - **otpauth Secret from stored:** `OTPAuth.Secret.fromBase32(base32)` to reconstruct from DB, NOT `new OTPAuth.Secret()`
 - **Prisma $transaction array:** `db.$transaction([op1, op2])` for atomic multi-table updates
+- **verifyPassword reuse:** `verifyPassword(plain, hash)` from `@/lib/auth/bcrypt` wraps `bcrypt.compare` — use for any hash comparison (passwords, recovery codes, etc.)
+- **Token issuance flow:** signAccessToken → db.refreshToken.create → signRefreshToken → update → setAuthCookies → registerDeviceSession — duplicated in login/totpChallenge/totpRecovery
 
 ---
 
@@ -126,4 +128,27 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - When modifying multiple login flows, the 2FA check must go AFTER first-factor validation but BEFORE token issuance
   - For Google OAuth and phone OTP login, skip 2FA check for newly created users (they can't have 2FA configured yet)
   - Pre-existing TS errors (~60+) in unrelated files continue — confirmed no new errors from US-004 changes
+---
+
+## 2026-03-13 ~06:00 UTC-3 - US-005
+- **Implemented:** Login com Recovery Code — totpRecovery action
+- **Changes:**
+  - Added `totpRecoverySchema` to `src/server/features/auth/auth.schemas.ts` (challengeId + recoveryCode)
+  - Added `totpRecovery` mutation action to `src/server/features/auth/controllers/auth.controller.ts`
+  - Verifies challengeId JWT using same `verify2faChallenge()` helper as totpChallenge
+  - Shares in-memory `challengeAttempts` map (max 5 attempts per challengeId)
+  - Fetches all unused recovery codes (`usedAt: null`) and compares with `verifyPassword` (bcrypt.compare)
+  - On match: marks code as used (`usedAt = now()`), issues tokens (same flow as totpChallenge)
+  - Returns `remainingCodes` count in response
+  - If `remainingCodes <= 2`: includes `warning: 'few_codes_remaining'`
+  - If `remainingCodes === 0`: disables 2FA (`twoFactorEnabled=false`), deletes all TotpDevices, sends email alert
+  - Email alert uses `emailService.send()` with HTML body explaining 2FA was auto-disabled
+  - Audit logs: `2fa_recovery_used`, `2fa_recovery_failed`, `2fa_auto_disabled`
+- **Files changed:**
+  - `src/server/features/auth/auth.schemas.ts` — added totpRecoverySchema + TotpRecoveryInput type
+  - `src/server/features/auth/controllers/auth.controller.ts` — added totpRecovery action + totpRecoverySchema import
+- **Learnings for future iterations:**
+  - `verifyPassword()` from `@/lib/auth/bcrypt` is a generic bcrypt.compare wrapper — reusable for any hash comparison, not just passwords
+  - Recovery code comparison must iterate all unused codes since we can't look up by plaintext (hashed storage)
+  - The token issuance flow (signAccessToken → create refreshToken → update → setAuthCookies → registerDeviceSession) is duplicated across totpChallenge/totpRecovery — consider extracting a helper in future
 ---
