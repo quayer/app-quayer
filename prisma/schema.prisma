@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -121,6 +120,9 @@ model User {
   onboardingCompleted Boolean @default(false)
   lastOrganizationId  String?
 
+  // Two-Factor Authentication
+  twoFactorEnabled Boolean @default(false)
+
   // Message signature and AI preferences
   messageSignature     Json?   @db.JsonB // { enabled, format, department, customText, showPreview }
   aiSuggestionsEnabled Boolean @default(true)
@@ -142,6 +144,8 @@ model User {
   passkeyCredentials PasskeyCredential[]
   sessionNotes       SessionNote[]  // Notas criadas pelo usuário
   quickReplies       QuickReply[]   // Respostas rápidas criadas pelo usuário
+  totpDevices        TotpDevice[]
+  recoveryCodes      RecoveryCode[]
 
   @@index([email])
   @@index([currentOrgId])
@@ -2006,4 +2010,35 @@ enum NotificationType {
   ERROR // Erro
   SYSTEM // Sistema
   CONNECTION // Status de conexão
+}
+
+// ============================================
+// TOTP 2FA (Two-Factor Authentication)
+// ============================================
+
+model TotpDevice {
+  id        String   @id @default(uuid())
+  userId    String
+  secret    String // Encrypted TOTP secret
+  name      String // Device/app name (e.g., "Google Authenticator")
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("totp_devices")
+}
+
+model RecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  code      String // Hashed recovery code (bcrypt)
+  usedAt    DateTime? // Null if not yet used
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("recovery_codes")
 }
