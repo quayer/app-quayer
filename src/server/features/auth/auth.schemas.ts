@@ -476,3 +476,30 @@ export const totpRecoverySchema = z.object({
 });
 
 export type TotpRecoveryInput = z.infer<typeof totpRecoverySchema>;
+
+/**
+ * Schema de TOTP Disable — desabilitar 2FA (requer senha + código TOTP ou recovery code)
+ */
+export const totpDisableSchema = z.object({
+  password: z
+    .string({ required_error: 'Password is required' })
+    .min(1, 'Password is required'),
+  code: z
+    .string({ required_error: 'TOTP or recovery code is required' })
+    .min(1, 'Code is required')
+    .max(20, 'Code is too long'),
+});
+
+export type TotpDisableInput = z.infer<typeof totpDisableSchema>;
+
+/**
+ * Schema de TOTP Regenerate Codes — gerar novos recovery codes (requer código TOTP válido)
+ */
+export const totpRegenerateCodesSchema = z.object({
+  code: z
+    .string({ required_error: 'TOTP code is required' })
+    .length(6, 'Code must be 6 digits')
+    .regex(/^\d+$/, 'Code must contain only digits'),
+});
+
+export type TotpRegenerateCodesInput = z.infer<typeof totpRegenerateCodesSchema>;

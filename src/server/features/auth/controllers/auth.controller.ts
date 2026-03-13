@@ -40,6 +40,8 @@ import {
   totpVerifySchema,
   totpChallengeSchema,
   totpRecoverySchema,
+  totpDisableSchema,
+  totpRegenerateCodesSchema,
 } from '../auth.schemas';
 import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
@@ -3334,6 +3336,245 @@ export const authController = igniter.controller({
         }
 
         return response.success(responseData);
+      },
+    }),
+
+    /**
+     * TOTP Disable — desabilitar 2FA
+     *
+     * Requer senha atual + código TOTP válido (ou recovery code como alternativa).
+     * Deleta todos os TotpDevices e RecoveryCodes, desabilita 2FA no user.
+     */
+    totpDisable: igniter.mutation({
+      name: 'TOTP Disable',
+      description: 'Disable 2FA on the authenticated user account',
+      path: '/totp/disable',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      body: totpDisableSchema,
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) return response.unauthorized('Authentication required');
+        const userId = user.id;
+
+        // User must have 2FA enabled
+        if (!user.twoFactorEnabled) {
+          return response.status(400).json({
+            error: '2FA is not enabled on this account.',
+            code: 'TWO_FACTOR_NOT_ENABLED',
+          });
+        }
+
+        const { password, code } = request.body;
+
+        // Verify current password
+        const dbUser = await db.user.findUnique({
+          where: { id: userId },
+          select: { password: true },
+        });
+
+        if (!dbUser?.password) {
+          return response.status(400).json({
+            error: 'Cannot verify password. Account may use social login only.',
+            code: 'NO_PASSWORD',
+          });
+        }
+
+        const passwordValid = await verifyPassword(password, dbUser.password);
+        if (!passwordValid) {
+          return response.status(400).json({
+            error: 'Invalid password.',
+            code: 'INVALID_PASSWORD',
+          });
+        }
+
+        // Verify TOTP code OR recovery code
+        let codeValid = false;
+
+        // First try as TOTP code (6 digits)
+        if (/^\d{6}$/.test(code)) {
+          const device = await db.totpDevice.findFirst({
+            where: { userId, verified: true },
+          });
+
+          if (device) {
+            const secretBase32 = decrypt(device.secret);
+            const totp = new OTPAuth.TOTP({
+              issuer: 'Quayer',
+              label: user.email || userId,
+              algorithm: 'SHA1',
+              digits: 6,
+              period: 30,
+              secret: OTPAuth.Secret.fromBase32(secretBase32),
+            });
+            const delta = totp.validate({ token: code, window: 1 });
+            if (delta !== null) {
+              codeValid = true;
+            }
+          }
+        }
+
+        // If not valid as TOTP, try as recovery code
+        if (!codeValid) {
+          const recoveryCodes = await db.recoveryCode.findMany({
+            where: { userId, usedAt: null },
+          });
+
+          const normalizedInput = code.trim().toLowerCase();
+          for (const rc of recoveryCodes) {
+            const isMatch = await verifyPassword(normalizedInput, rc.code);
+            if (isMatch) {
+              codeValid = true;
+              break;
+            }
+          }
+        }
+
+        if (!codeValid) {
+          return response.status(400).json({
+            error: 'Invalid TOTP code or recovery code.',
+            code: 'INVALID_CODE',
+          });
+        }
+
+        // Delete all TOTP devices and recovery codes, disable 2FA
+        await db.$transaction([
+          db.totpDevice.deleteMany({ where: { userId } }),
+          db.recoveryCode.deleteMany({ where: { userId } }),
+          db.user.update({
+            where: { id: userId },
+            data: { twoFactorEnabled: false },
+          }),
+        ]);
+
+        // Audit log
+        console.log(`[AUDIT] totp_disabled userId=${userId}`);
+
+        return response.success({
+          twoFactorEnabled: false,
+          message: '2FA has been disabled successfully.',
+        });
+      },
+    }),
+
+    /**
+     * TOTP Regenerate Codes — gerar novos recovery codes
+     *
+     * Requer código TOTP válido. Invalida todos os códigos existentes e gera 8 novos.
+     */
+    totpRegenerateCodes: igniter.mutation({
+      name: 'TOTP Regenerate Codes',
+      description: 'Invalidate existing recovery codes and generate new ones',
+      path: '/totp/regenerate-codes',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      body: totpRegenerateCodesSchema,
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) return response.unauthorized('Authentication required');
+        const userId = user.id;
+
+        // User must have 2FA enabled
+        if (!user.twoFactorEnabled) {
+          return response.status(400).json({
+            error: '2FA is not enabled on this account.',
+            code: 'TWO_FACTOR_NOT_ENABLED',
+          });
+        }
+
+        const { code } = request.body;
+
+        // Verify TOTP code
+        const device = await db.totpDevice.findFirst({
+          where: { userId, verified: true },
+        });
+
+        if (!device) {
+          return response.status(400).json({
+            error: 'No verified TOTP device found.',
+            code: 'NO_VERIFIED_DEVICE',
+          });
+        }
+
+        const secretBase32 = decrypt(device.secret);
+        const totp = new OTPAuth.TOTP({
+          issuer: 'Quayer',
+          label: user.email || userId,
+          algorithm: 'SHA1',
+          digits: 6,
+          period: 30,
+          secret: OTPAuth.Secret.fromBase32(secretBase32),
+        });
+
+        const delta = totp.validate({ token: code, window: 1 });
+        if (delta === null) {
+          return response.status(400).json({
+            error: 'Invalid TOTP code.',
+            code: 'INVALID_TOTP_CODE',
+          });
+        }
+
+        // Invalidate all existing recovery codes (set usedAt = now)
+        await db.recoveryCode.updateMany({
+          where: { userId, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+
+        // Generate 8 new recovery codes
+        const recoveryCodes: string[] = [];
+        for (let i = 0; i < 8; i++) {
+          recoveryCodes.push(crypto.randomBytes(4).toString('hex'));
+        }
+
+        // Hash and store new recovery codes
+        const recoveryCodePromises = recoveryCodes.map(async (rc) => {
+          const hashedCode = await hashPassword(rc);
+          return db.recoveryCode.create({
+            data: {
+              userId,
+              code: hashedCode,
+            },
+          });
+        });
+        await Promise.all(recoveryCodePromises);
+
+        // Audit log
+        console.log(`[AUDIT] totp_codes_regenerated userId=${userId}`);
+
+        return response.success({
+          recoveryCodes,
+        });
+      },
+    }),
+
+    /**
+     * TOTP List Devices — listar dispositivos TOTP do usuário
+     *
+     * Retorna todos os TotpDevices do user autenticado (id, name, verified, createdAt).
+     */
+    totpListDevices: igniter.query({
+      name: 'TOTP List Devices',
+      description: 'List all TOTP devices for the authenticated user',
+      path: '/totp/devices',
+      method: 'GET',
+      use: [authProcedure({ required: true })],
+      handler: async ({ response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) return response.unauthorized('Authentication required');
+        const userId = user.id;
+
+        const devices = await db.totpDevice.findMany({
+          where: { userId },
+          select: {
+            id: true,
+            name: true,
+            verified: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        return response.success({ devices });
       },
     }),
 
