@@ -207,14 +207,14 @@ export function TwoFactorChallenge({
             <form onSubmit={(e) => { e.preventDefault(); handleTotpSubmit(totpCode) }}>
               <FieldGroup>
                 {error && (
-                  <Alert variant="destructive">
+                  <Alert variant="destructive" role="alert" aria-live="assertive">
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
 
                 {warning && (
                   <Alert>
-                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
                     <AlertDescription>{warning}</AlertDescription>
                   </Alert>
                 )}
@@ -257,7 +257,7 @@ export function TwoFactorChallenge({
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                       Verificando...
                     </>
                   ) : (
@@ -269,9 +269,9 @@ export function TwoFactorChallenge({
                   <button
                     type="button"
                     onClick={() => switchMode("recovery")}
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                   >
-                    <KeyRound className="h-3.5 w-3.5" />
+                    <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     Perdeu acesso ao autenticador?
                   </button>
                 </FieldDescription>
@@ -280,9 +280,9 @@ export function TwoFactorChallenge({
                   <button
                     type="button"
                     onClick={onCancel}
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                   >
-                    <ArrowLeft className="h-3.5 w-3.5" />
+                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                     Voltar ao login
                   </button>
                 </FieldDescription>
@@ -292,14 +292,14 @@ export function TwoFactorChallenge({
             <form onSubmit={handleRecoverySubmit}>
               <FieldGroup>
                 {error && (
-                  <Alert variant="destructive">
+                  <Alert variant="destructive" role="alert" aria-live="assertive">
                     <AlertDescription>{error}</AlertDescription>
                   </Alert>
                 )}
 
                 {warning && (
                   <Alert>
-                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
                     <AlertDescription>{warning}</AlertDescription>
                   </Alert>
                 )}
@@ -335,7 +335,7 @@ export function TwoFactorChallenge({
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                       Verificando...
                     </>
                   ) : (
@@ -347,9 +347,9 @@ export function TwoFactorChallenge({
                   <button
                     type="button"
                     onClick={() => switchMode("totp")}
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                   >
-                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
                     Usar código do autenticador
                   </button>
                 </FieldDescription>
@@ -358,9 +358,9 @@ export function TwoFactorChallenge({
                   <button
                     type="button"
                     onClick={onCancel}
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                   >
-                    <ArrowLeft className="h-3.5 w-3.5" />
+                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                     Voltar ao login
                   </button>
                 </FieldDescription>

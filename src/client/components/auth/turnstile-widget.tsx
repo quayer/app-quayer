@@ -41,17 +41,19 @@ export function TurnstileWidget({
   if (!SITE_KEY) return null
 
   return (
-    <Turnstile
-      ref={ref}
-      siteKey={SITE_KEY}
-      onSuccess={onSuccess}
-      onError={handleError}
-      onExpire={handleExpire}
-      options={{
-        action,
-        size: "flexible",
-        theme: "auto",
-      }}
-    />
+    <div aria-label="Verificação de segurança" role="group">
+      <Turnstile
+        ref={ref}
+        siteKey={SITE_KEY}
+        onSuccess={onSuccess}
+        onError={handleError}
+        onExpire={handleExpire}
+        options={{
+          action,
+          size: "flexible",
+          theme: "auto",
+        }}
+      />
+    </div>
   )
 }

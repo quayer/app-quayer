@@ -243,7 +243,7 @@ export function LoginFormFinal({
       <form onSubmit={handleOTPRequest}>
         <FieldGroup>
           {error && (
-            <Alert variant="destructive" className="border-red-500/50 bg-red-500/10 text-red-200">
+            <Alert variant="destructive" role="alert" aria-live="assertive" className="border-red-500/50 bg-red-500/10 text-red-200">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
@@ -255,16 +255,16 @@ export function LoginFormFinal({
               type="button"
               onClick={handleGoogleLogin}
               disabled={isGoogleLoading || isLoading}
-              className="w-full bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 hover:text-gray-800"
+              className="w-full min-h-[44px] bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 hover:text-gray-800"
             >
               {isGoogleLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Conectando...
                 </>
               ) : (
                 <>
-                  <GoogleIcon className="mr-2 size-4" />
+                  <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
                   Continuar com Google
                 </>
               )}
@@ -297,7 +297,7 @@ export function LoginFormFinal({
                   >
                     <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
                     <span className="text-gray-300 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
-                    <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" />
+                    <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" aria-hidden="true" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent
@@ -366,23 +366,23 @@ export function LoginFormFinal({
           <Field>
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white border-0"
+              className="w-full min-h-[44px] bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white border-0"
               disabled={isLoading || isGoogleLoading}
               aria-busy={isLoading}
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Enviando...
                 </>
               ) : isPhone ? (
                 <>
-                  <Smartphone className="mr-2 h-4 w-4" />
+                  <Smartphone className="mr-2 h-4 w-4" aria-hidden="true" />
                   Continuar com WhatsApp
                 </>
               ) : (
                 <>
-                  <Mail className="mr-2 h-4 w-4" />
+                  <Mail className="mr-2 h-4 w-4" aria-hidden="true" />
                   Continuar com Email
                 </>
               )}
@@ -391,7 +391,7 @@ export function LoginFormFinal({
 
           <FieldDescription className="text-center text-gray-400">
             Não tem uma conta?{" "}
-            <Link href="/signup" className="text-white underline underline-offset-4 hover:text-purple-300">
+            <Link href="/signup" className="text-white underline underline-offset-4 hover:text-purple-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent rounded-sm">
               Cadastre-se
             </Link>
           </FieldDescription>

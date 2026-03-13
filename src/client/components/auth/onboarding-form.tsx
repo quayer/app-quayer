@@ -160,7 +160,7 @@ export function OnboardingForm({
       <div className={cn("w-full max-w-sm mx-auto", className)} {...props}>
         <div className="space-y-4 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-500/20">
-            <Building2 className="h-6 w-6 text-purple-300" />
+            <Building2 className="h-6 w-6 text-purple-300" aria-hidden="true" />
           </div>
           <h1 className="text-2xl font-bold text-white">Preparando tudo...</h1>
           <p className="text-gray-400">
@@ -191,13 +191,15 @@ export function OnboardingForm({
               {/* firstName + lastName side by side */}
               <div className="grid grid-cols-2 gap-4">
                 <Field>
-                  <FieldLabel className="text-gray-300">Nome</FieldLabel>
+                  <FieldLabel htmlFor="firstName" className="text-gray-300">Nome</FieldLabel>
                   <Input
+                    id="firstName"
                     type="text"
                     placeholder="João"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     required
+                    aria-required="true"
                     minLength={2}
                     autoFocus
                     disabled={isLoading}
@@ -205,8 +207,9 @@ export function OnboardingForm({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel className="text-gray-300">Sobrenome</FieldLabel>
+                  <FieldLabel htmlFor="lastName" className="text-gray-300">Sobrenome</FieldLabel>
                   <Input
+                    id="lastName"
                     type="text"
                     placeholder="Silva"
                     value={lastName}
@@ -219,13 +222,15 @@ export function OnboardingForm({
 
               {/* companyName full width */}
               <Field>
-                <FieldLabel className="text-gray-300">Nome da empresa</FieldLabel>
+                <FieldLabel htmlFor="companyName" className="text-gray-300">Nome da empresa</FieldLabel>
                 <Input
+                  id="companyName"
                   type="text"
                   placeholder="Minha Empresa"
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
                   required
+                  aria-required="true"
                   minLength={2}
                   disabled={isLoading}
                   className="border-white/10 bg-white/5 text-white placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
@@ -233,20 +238,21 @@ export function OnboardingForm({
               </Field>
 
               {error && (
-                <Alert variant="destructive">
+                <Alert variant="destructive" role="alert" aria-live="assertive">
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
 
               <Button
                 type="submit"
-                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 border-0"
+                className="w-full min-h-[44px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 border-0"
                 disabled={isLoading || !firstName.trim() || !companyName.trim()}
+                aria-busy={isLoading}
               >
                 {isLoading ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Criando conta...</>
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Criando conta...</>
                 ) : (
-                  <>Continuar<ArrowRight className="ml-2 h-4 w-4" /></>
+                  <>Continuar<ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" /></>
                 )}
               </Button>
 
@@ -272,7 +278,7 @@ export function OnboardingForm({
       <div className={cn("w-full max-w-sm mx-auto", className)} {...props}>
         <div className="space-y-4 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
-            <CheckCircle className="h-6 w-6 text-green-400" />
+            <CheckCircle className="h-6 w-6 text-green-400" aria-hidden="true" />
           </div>
           <h1 className="text-2xl font-bold text-white">Tudo pronto!</h1>
           <p className="text-gray-400">

@@ -298,7 +298,7 @@ export function LoginOTPForm({ email, phone, className, ...props }: LoginOTPForm
         <form onSubmit={handleSubmit}>
           <FieldGroup>
             {error && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" role="alert" aria-live="assertive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -334,12 +334,13 @@ export function LoginOTPForm({ email, phone, className, ...props }: LoginOTPForm
 
             <Button
               type="submit"
-              className="w-full"
+              className="w-full min-h-[44px]"
               disabled={isLoading || otp.length !== 6}
+              aria-busy={isLoading}
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Verificando...
                 </>
               ) : (
@@ -353,20 +354,20 @@ export function LoginOTPForm({ email, phone, className, ...props }: LoginOTPForm
                 <button
                   type="button"
                   onClick={handleResend}
-                  className="text-primary underline underline-offset-4 hover:text-primary/80"
+                  className="min-h-[44px] min-w-[44px] inline-flex items-center text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
                 >
                   Reenviar
                 </button>
               ) : (
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground" aria-live="polite" aria-atomic="true">
                   Aguarde {countdown}s
                 </span>
               )}
             </FieldDescription>
 
             <FieldDescription className="text-center">
-              <Link href="/login" className="text-muted-foreground hover:text-foreground">
-                ← Voltar
+              <Link href="/login" className="inline-flex min-h-[44px] items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
+                <span aria-hidden="true">←</span> Voltar
               </Link>
             </FieldDescription>
           </FieldGroup>
