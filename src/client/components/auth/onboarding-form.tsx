@@ -189,7 +189,7 @@ export function OnboardingForm({
           <form onSubmit={handleSubmit} className="space-y-4">
             <FieldGroup>
               {/* firstName + lastName side by side */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field>
                   <FieldLabel htmlFor="firstName" className="text-gray-300">Nome</FieldLabel>
                   <Input
@@ -214,6 +214,8 @@ export function OnboardingForm({
                     placeholder="Silva"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
+                    required
+                    aria-required="true"
                     disabled={isLoading}
                     className="border-white/10 bg-white/5 text-white placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
                   />
