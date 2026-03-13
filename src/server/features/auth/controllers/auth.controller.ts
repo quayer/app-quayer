@@ -1076,7 +1076,7 @@ export const authController = igniter.controller({
         await db.user.update({
           where: { email },
           data: {
-            // Temporário: usar campo password reset (criar tabela própria em produção)
+            // Usar campo resetToken para armazenar OTP temporário
             resetToken: code,
             resetTokenExpiry: expiresAt,
           },
@@ -3175,69 +3175,31 @@ export const authController = igniter.controller({
           });
         }
 
-        const { password, emailCode, code } = request.body;
+        const { emailCode, code } = request.body;
 
-        // Must provide at least one second factor: password or emailCode
-        if (!password && !emailCode) {
-          return response.status(400).json({
-            error: 'Password or email verification code is required.',
-            code: 'email_code_required',
-          });
-        }
-
-        // Verify second factor: password OR emailCode
-        const dbUser = await db.user.findUnique({
-          where: { id: userId },
-          select: { password: true },
+        // Verify email OTP
+        const vc = await db.verificationCode.findFirst({
+          where: {
+            userId,
+            type: 'TOTP_DISABLE',
+            used: false,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
         });
 
-        if (password) {
-          // Password-based verification (backward compat)
-          if (!dbUser?.password) {
-            return response.status(400).json({
-              error: 'Cannot verify password. Account may use social login only.',
-              code: 'NO_PASSWORD',
-            });
-          }
-
-          const passwordValid = await verifyPassword(password, dbUser.password);
-          if (!passwordValid) {
-            return response.status(400).json({
-              error: 'Invalid password.',
-              code: 'INVALID_PASSWORD',
-            });
-          }
-        } else if (emailCode) {
-          // Email OTP verification
-          const vc = await db.verificationCode.findFirst({
-            where: {
-              userId,
-              type: 'TOTP_DISABLE',
-              used: false,
-              expiresAt: { gt: new Date() },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-
-          if (!vc || vc.code !== emailCode) {
-            return response.status(400).json({
-              error: 'Invalid or expired email verification code.',
-              code: 'INVALID_EMAIL_CODE',
-            });
-          }
-
-          // Mark code as used
-          await db.verificationCode.update({
-            where: { id: vc.id },
-            data: { used: true },
-          });
-        } else {
-          // User has no password and didn't provide emailCode
+        if (!vc || vc.code !== emailCode) {
           return response.status(400).json({
-            error: 'Email verification code is required for accounts without a password.',
-            code: 'email_code_required',
+            error: 'Invalid or expired email verification code.',
+            code: 'INVALID_EMAIL_CODE',
           });
         }
+
+        // Mark code as used
+        await db.verificationCode.update({
+          where: { id: vc.id },
+          data: { used: true },
+        });
 
         // Verify TOTP code OR recovery code
         let codeValid = false;

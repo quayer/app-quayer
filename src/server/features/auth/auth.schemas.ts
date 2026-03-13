@@ -48,25 +48,6 @@ export const resendVerificationSchema = z.object({
 export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 
 /**
- * Schema de Accept Invitation
- */
-export const acceptInvitationSchema = z.object({
-  token: z.string({ required_error: 'Invitation token is required' }),
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .max(72, 'Password cannot exceed 72 characters')
-    .optional()
-    .nullable(),
-  name: z
-    .string({ required_error: 'Name is required' })
-    .min(2, 'Name must be at least 2 characters')
-    .trim(),
-});
-
-export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
-
-/**
  * Schema de Update Profile
  */
 export const updateProfileSchema = z.object({
@@ -358,17 +339,12 @@ export const totpDisableRequestSchema = z.object({});
 export type TotpDisableRequestInput = z.infer<typeof totpDisableRequestSchema>;
 
 /**
- * Schema de TOTP Disable — desabilitar 2FA (requer código TOTP + senha OU emailCode)
+ * Schema de TOTP Disable — desabilitar 2FA (requer código TOTP + emailCode)
  */
 export const totpDisableSchema = z.object({
-  password: z
-    .string()
-    .min(1, 'Password is required')
-    .optional(),
   emailCode: z
-    .string()
-    .length(6, 'Email code must be 6 digits')
-    .optional(),
+    .string({ required_error: 'Email verification code is required' })
+    .length(6, 'Email code must be 6 digits'),
   code: z
     .string({ required_error: 'TOTP or recovery code is required' })
     .min(1, 'Code is required')
