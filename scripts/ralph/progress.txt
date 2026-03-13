@@ -152,3 +152,21 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Recovery code comparison must iterate all unused codes since we can't look up by plaintext (hashed storage)
   - The token issuance flow (signAccessToken → create refreshToken → update → setAuthCookies → registerDeviceSession) is duplicated across totpChallenge/totpRecovery — consider extracting a helper in future
 ---
+
+## 2026-03-13 ~07:00 UTC-3 - US-006
+- **Implemented:** Gerenciamento 2FA — desabilitar, regenerar codes, listar devices
+- **Changes:**
+  - Added `totpDisableSchema` and `totpRegenerateCodesSchema` to `src/server/features/auth/auth.schemas.ts`
+  - Added `totpDisable` mutation action: verifies password (bcrypt), then verifies TOTP code OR recovery code as alternative, deletes all TotpDevices + RecoveryCodes, sets `twoFactorEnabled=false`
+  - Added `totpRegenerateCodes` mutation action: verifies TOTP code with window=1, invalidates existing codes (`usedAt=now()`), generates 8 new codes hashed with bcrypt, returns plaintext
+  - Added `totpListDevices` query action: returns user's TotpDevices with `id, name, verified, createdAt`
+  - Audit logs: `totp_disabled`, `totp_codes_regenerated`
+  - All three actions use `authProcedure({ required: true })`
+- **Files changed:**
+  - `src/server/features/auth/auth.schemas.ts` — added totpDisableSchema, totpRegenerateCodesSchema
+  - `src/server/features/auth/controllers/auth.controller.ts` — added totpDisable, totpRegenerateCodes, totpListDevices actions + schema imports
+- **Learnings for future iterations:**
+  - totpDisable accepts both TOTP codes (6 digits regex) and recovery codes as second factor — first tries TOTP, falls back to recovery code comparison
+  - Pattern for invalidating recovery codes: `updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } })` instead of deleting, preserves audit trail
+  - Pre-existing TS errors (~60+) continue in unrelated files — confirmed zero new errors from US-006 changes
+---

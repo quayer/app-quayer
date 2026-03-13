@@ -117,8 +117,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added totpDisable (password + TOTP/recovery code verification), totpRegenerateCodes (TOTP code verification, invalidates old codes, generates 8 new), totpListDevices (query returning devices). Audit logs for each action."
     },
     {
       "id": "US-007",
