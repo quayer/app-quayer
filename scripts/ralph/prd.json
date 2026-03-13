@@ -304,8 +304,8 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added VerifiedDomain model with DNS TXT and email verification methods. Controller with addDomain, verifyDomainDns, verifyDomainEmail, list, updateDomain, removeDomain. Blocklist for 15+ generic email domains. In-memory rate limit 10/hour/org. In-memory email verification codes with 30min expiry. Registered in igniter.router.ts."
     },
     {
       "id": "US-016",

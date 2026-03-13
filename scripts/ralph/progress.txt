@@ -32,6 +32,8 @@
 - **hasPermission with CustomRole:** `hasPermission(orgRole, resource, action, customRolePerms?)` — 4th param is optional; if provided, checks CustomRole JSON instead of PERMISSIONS_MATRIX
 - **authProcedure customRole context:** `context.auth.customRole` is `{ id, slug, permissions, priority } | null` — resolved from `UserOrganization.customRoleId` of current org
 - **apiFetch helper pattern:** wrap `fetch()` with `{ credentials: 'include', headers: { 'Content-Type': 'application/json' } }` + error extraction from response body
+- **Igniter 429 response:** `response` object has no `tooManyRequests` method — use `return Response.json({ error: '...' }, { status: 429 })` directly
+- **dns.resolveTxt():** returns `string[][]` — use `.flat()` to get flat array of TXT records before searching
 
 ---
 
@@ -381,4 +383,36 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - DELETE endpoint expects JSON body with `force` and `reassignToRoleId` — standard fetch with method: DELETE + body works
   - Resources and Actions are string enums from `@/lib/auth/permissions` — mirror them as constant arrays in frontend for the matrix UI
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-014
+---
+
+## 2026-03-13 ~16:00 UTC-3 - US-015
+- **Implemented:** Schema e verificação DNS/Email para Domínios Verificados
+- **Changes:**
+  - Added `VerifiedDomain` model to `prisma/schema.prisma`: id, organizationId (FK), domain, verificationMethod (DNS_TXT/EMAIL), verificationToken, verifiedAt, defaultRoleId (FK CustomRole), autoJoin, createdAt
+  - Unique constraint: `@@unique([organizationId, domain])`, indexes on organizationId and domain
+  - Added relation from Organization (hasMany VerifiedDomain) and CustomRole (hasMany VerifiedDomain via defaultRoleId)
+  - Created migration `20260313220000_add_verified_domains` manually (shadow DB workaround)
+  - Applied with `prisma migrate deploy`, `prisma generate` successful
+  - Created `src/server/features/verified-domains/controllers/verified-domains.controller.ts` with 6 actions:
+    - `addDomain`: POST, generates `quayer-verify=<64hexchars>` token, sends email to admin@domain for EMAIL method
+    - `verifyDomainDns`: POST, uses `dns.resolveTxt()` to find TXT record containing token
+    - `verifyDomainEmail`: POST, validates 6-digit code against in-memory store (30min expiry)
+    - `list`: GET, returns all domains for org with defaultRole include
+    - `updateDomain`: PUT /:id, toggle autoJoin and set defaultRoleId (requires verified domain)
+    - `removeDomain`: DELETE /:id, deletes domain + cleans up email verification codes
+  - Blocklist: 15+ generic email domains (gmail, hotmail, outlook, yahoo, live, icloud, protonmail, etc.)
+  - Rate limit: in-memory 10 verifications/hour/org with sliding window
+  - All actions protected with `authProcedure({ required: true })`, master/admin-only checks
+  - Registered `verifiedDomainsController` in `src/igniter.router.ts`
+- **Files changed:**
+  - `prisma/schema.prisma` — added VerifiedDomain model + relations to Organization and CustomRole
+  - `prisma/migrations/20260313220000_add_verified_domains/migration.sql` — new migration
+  - `src/server/features/verified-domains/controllers/verified-domains.controller.ts` — new controller
+  - `src/igniter.router.ts` — registered verifiedDomainsController
+- **Learnings for future iterations:**
+  - Igniter `response` object does NOT have `tooManyRequests` method — use `Response.json({}, { status: 429 })` directly for 429 responses
+  - `dns.resolveTxt()` returns `string[][]` (array of arrays) — flatten with `.flat()` before searching
+  - In-memory Maps are used for short-lived verification state (email codes, rate limits) — adequate for single-instance deployments
+  - VerifiedDomain.defaultRoleId FK points to CustomRole for auto-join role assignment
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-015
 ---
