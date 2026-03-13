@@ -140,10 +140,12 @@ function TwoFactorSection() {
 
   // Disable 2FA modal state
   const [disableOpen, setDisableOpen] = useState(false)
-  const [disablePassword, setDisablePassword] = useState('')
+  const [disableEmailCode, setDisableEmailCode] = useState('')
   const [disableCode, setDisableCode] = useState('')
   const [disableLoading, setDisableLoading] = useState(false)
   const [disableError, setDisableError] = useState<string | null>(null)
+  const [disableEmailSent, setDisableEmailSent] = useState(false)
+  const [disableEmailSending, setDisableEmailSending] = useState(false)
 
   // Regenerate codes modal state
   const [regenOpen, setRegenOpen] = useState(false)
@@ -257,13 +259,33 @@ function TwoFactorSection() {
 
   const handleOpenDisable = () => {
     setDisableOpen(true)
-    setDisablePassword('')
+    setDisableEmailCode('')
     setDisableCode('')
     setDisableError(null)
+    setDisableEmailSent(false)
+    setDisableEmailSending(false)
+  }
+
+  const handleSendDisableCode = async () => {
+    setDisableEmailSending(true)
+    setDisableError(null)
+
+    try {
+      await apiFetch('/api/v1/auth/totp/disable-request', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setDisableEmailSent(true)
+      toast.success('Codigo enviado para seu email')
+    } catch (err) {
+      setDisableError((err as Error).message || 'Erro ao enviar codigo')
+    } finally {
+      setDisableEmailSending(false)
+    }
   }
 
   const handleDisable2FA = async () => {
-    if (!disablePassword || !disableCode) {
+    if (!disableEmailCode || !disableCode) {
       setDisableError('Preencha todos os campos')
       return
     }
@@ -273,7 +295,7 @@ function TwoFactorSection() {
     try {
       await apiFetch('/api/v1/auth/totp/disable', {
         method: 'POST',
-        body: JSON.stringify({ password: disablePassword, code: disableCode }),
+        body: JSON.stringify({ emailCode: disableEmailCode, code: disableCode }),
       })
       toast.success('2FA desabilitado com sucesso')
       setDisableOpen(false)
@@ -555,20 +577,56 @@ function TwoFactorSection() {
           <DialogHeader>
             <DialogTitle>Desabilitar 2FA</DialogTitle>
             <DialogDescription>
-              Para desabilitar a autenticacao em duas etapas, confirme sua senha e insira o codigo do authenticator.
+              Para desabilitar a autenticacao em duas etapas, envie um codigo de verificacao para seu email e insira o codigo do authenticator.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="disable-password">Senha atual</Label>
-              <Input
-                id="disable-password"
-                type="password"
-                value={disablePassword}
-                onChange={(e) => { setDisablePassword(e.target.value); setDisableError(null) }}
-                placeholder="Digite sua senha"
-              />
+              <Label>Verificacao por email</Label>
+              {!disableEmailSent ? (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleSendDisableCode}
+                  disabled={disableEmailSending}
+                >
+                  {disableEmailSending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Enviar codigo por email
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">Codigo enviado! Verifique seu email.</p>
+                  <div className="flex justify-center">
+                    <InputOTP
+                      maxLength={6}
+                      value={disableEmailCode}
+                      onChange={(value) => {
+                        setDisableEmailCode(value)
+                        setDisableError(null)
+                      }}
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} />
+                        <InputOTPSlot index={1} />
+                        <InputOTPSlot index={2} />
+                        <InputOTPSlot index={3} />
+                        <InputOTPSlot index={4} />
+                        <InputOTPSlot index={5} />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 h-auto text-xs"
+                    onClick={handleSendDisableCode}
+                    disabled={disableEmailSending}
+                  >
+                    {disableEmailSending ? 'Enviando...' : 'Reenviar codigo'}
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -596,7 +654,7 @@ function TwoFactorSection() {
             <Button
               variant="destructive"
               onClick={handleDisable2FA}
-              disabled={disableLoading || !disablePassword || !disableCode}
+              disabled={disableLoading || !disableEmailCode || !disableCode}
             >
               {disableLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Desabilitar

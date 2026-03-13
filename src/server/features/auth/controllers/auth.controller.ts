@@ -17,15 +17,10 @@ import {
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import { z } from 'zod';
 import {
-  loginSchema,
-  registerSchema,
   refreshTokenSchema,
   logoutSchema,
-  changePasswordSchema,
   updateProfileSchema,
   switchOrganizationSchema,
-  forgotPasswordSchema,
-  resetPasswordSchema,
   googleCallbackSchema,
   sendVerificationSchema,
   verifyEmailCodeSchema,
@@ -40,6 +35,7 @@ import {
   totpVerifySchema,
   totpChallengeSchema,
   totpRecoverySchema,
+  totpDisableRequestSchema,
   totpDisableSchema,
   totpRegenerateCodesSchema,
 } from '../auth.schemas';
@@ -47,7 +43,6 @@ import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
   hashPassword,
   verifyPassword,
-  validatePasswordStrength,
   generateOTPCode,
   generateRecoveryCodes,
 } from '@/lib/auth/bcrypt';
@@ -501,259 +496,6 @@ export const authController = igniter.controller({
   description: 'Authentication and authorization',
   actions: {
     /**
-     * Register - Criar nova conta
-     */
-    register: igniter.mutation({
-      name: 'Register',
-      description: 'Create new user account',
-      path: '/register',
-      method: 'POST',
-      body: registerSchema,
-      use: [turnstileProcedure()],
-      handler: async ({ request, response, context }) => {
-        // Rate limiting
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await authRateLimiter.check(identifier);
-
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
-        const { email, password, name, document, organizationName } = request.body;
-
-        // Validar força da senha
-        const passwordValidation = validatePasswordStrength(password);
-        if (!passwordValidation.isValid) {
-          return response.status(400).json({
-            error: 'Password validation failed',
-            errors: passwordValidation.errors,
-          });
-        }
-
-        // Verificar se email já existe
-        const existingUser = await db.user.findUnique({ where: { email } });
-        if (existingUser) {
-          return response.status(400).json({ error: 'Email already registered' });
-        }
-
-        // Hash password
-        const hashedPassword = await hashPassword(password);
-
-        // Verificar se é o primeiro usuário (admin)
-        const usersCount = await db.user.count();
-        const isFirstUser = usersCount === 0;
-
-        // Criar organização se fornecida
-        let organization = null;
-        if (organizationName || isFirstUser) {
-          const slug = (organizationName || name)
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '-')
-            .substring(0, 50);
-
-          // Gerar document padrão se não fornecido (CPF fake para desenvolvimento)
-          const defaultDocument = document || `000${Date.now().toString().slice(-8)}`;
-
-          organization = await db.organization.create({
-            data: {
-              name: organizationName || `${name}'s Organization`,
-              slug: `${slug}-${Date.now()}`,
-              document: defaultDocument,
-              type: document ? (document.replace(/\D/g, '').length === 11 ? 'pf' : 'pj') : 'pf',
-              isActive: true,
-            },
-          });
-        }
-
-        // Criar usuário
-        const user = await db.user.create({
-          data: {
-            email,
-            password: hashedPassword,
-            name,
-            role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
-            currentOrgId: organization?.id || null,
-            isActive: true,
-          },
-        });
-
-        // Criar relação User-Organization se organização existe
-        if (organization) {
-          await db.userOrganization.create({
-            data: {
-              userId: user.id,
-              organizationId: organization.id,
-              role: 'master',
-              isActive: true,
-            },
-          });
-        }
-
-        // Generate verification code and send email
-        const verificationCode = generateOTPCode();
-        const verificationExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-        await db.user.update({
-          where: { id: user.id },
-          data: {
-            resetToken: verificationCode,
-            resetTokenExpiry: verificationExpiresAt,
-          },
-        });
-
-        await emailService.sendVerificationEmail(user.email, user.name, verificationCode, 15);
-
-        // Enviar email de boas-vindas
-        await emailService.sendWelcomeEmail(email, name, dashboardUrl);
-
-        // NÃO fazer login automático - requer verificação de email primeiro
-        return response.created({
-          message: 'User created successfully. Please verify your email.',
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            requiresEmailVerification: true,
-          },
-        });
-      },
-    }),
-
-    /**
-     * Login - Autenticar usuário
-     */
-    login: igniter.mutation({
-      name: 'Login',
-      description: 'Authenticate user',
-      path: '/login',
-      method: 'POST',
-      body: loginSchema,
-      use: [turnstileProcedure()],
-      handler: async ({ request, response }) => {
-        // Rate limiting
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await authRateLimiter.check(identifier);
-
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
-        const { email, password } = request.body;
-
-        // Buscar usuário
-        const user = await db.user.findUnique({
-          where: { email },
-          include: {
-            organizations: {
-              where: { isActive: true },
-              select: { organizationId: true, role: true },
-            },
-          },
-        });
-
-        if (!user) {
-          return response.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Verificar senha
-        const isValidPassword = await verifyPassword(password, user.password);
-        if (!isValidPassword) {
-          await createAuditLog('LOGIN_FAILED', user.id, request, { reason: 'invalid_password' }, user.currentOrgId);
-          return response.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Verificar se usuário está ativo
-        if (!user.isActive) {
-          return response.status(403).json({ error: 'Account disabled' });
-        }
-
-        // 2FA check: if user has TOTP enabled, return challenge instead of tokens
-        if (user.twoFactorEnabled) {
-          const challengeId = sign2faChallenge(user.id);
-          createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'password' }, user.currentOrgId);
-          return response.success({ requiresTwoFactor: true, challengeId });
-        }
-
-        // Se admin não tem org setada, setar primeira org disponível
-        let currentOrgId = user.currentOrgId;
-        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
-          currentOrgId = user.organizations[0].organizationId;
-          // Atualizar no banco para próximo login
-          await db.user.update({
-            where: { id: user.id },
-            data: { currentOrgId },
-          });
-        }
-
-        // Obter role na organização atual
-        const currentOrgRelation = user.organizations.find(
-          (org) => org.organizationId === currentOrgId
-        );
-
-        // Criar access token
-        const accessToken = signAccessToken({
-          userId: user.id,
-          email: user.email,
-          role: user.role as UserRole,
-          currentOrgId,
-          organizationRole: currentOrgRelation?.role as any,
-          needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
-        });
-
-        // Criar refresh token
-        const refreshTokenData = await db.refreshToken.create({
-          data: {
-            userId: user.id,
-            token: signRefreshToken({ userId: user.id, tokenId: '' }),
-            expiresAt: getExpirationDate('7d'),
-          },
-        });
-
-        const refreshToken = signRefreshToken({
-          userId: user.id,
-          tokenId: refreshTokenData.id,
-        });
-
-        await db.refreshToken.update({
-          where: { id: refreshTokenData.id },
-          data: { token: refreshToken },
-        });
-
-        // Register device session + geo check BEFORE setting cookies
-        const deviceResult = await registerDeviceSession(user.id, request);
-        if (deviceResult.blocked) {
-          return Response.json(
-            { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
-            { status: 403 }
-          );
-        }
-
-        // Set httpOnly cookies (backend-managed) — only after device check passes
-        setAuthCookies(response, accessToken, refreshToken);
-
-        await createAuditLog('LOGIN_SUCCESS', user.id, request, { method: 'password' }, currentOrgId);
-
-        return response.success({
-          needsOnboarding: !user.onboardingCompleted,
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            currentOrgId,
-            organizationRole: currentOrgRelation?.role,
-          },
-        });
-      },
-    }),
-
-    /**
      * Refresh Token - Renovar access token
      */
     refresh: igniter.mutation({
@@ -951,62 +693,6 @@ export const authController = igniter.controller({
     }),
 
     /**
-     * Change Password
-     */
-    changePassword: igniter.mutation({
-      name: 'Change Password',
-      description: 'Change user password',
-      path: '/change-password',
-      method: 'POST',
-      use: [authProcedure({ required: true }), csrfProcedure()],
-      body: changePasswordSchema,
-      handler: async ({ request, response, context }) => {
-        const user = context.auth?.session?.user;
-        if (!user) return response.unauthorized('Authentication required');
-        const userId = user.id;
-
-        const { currentPassword, newPassword } = request.body;
-
-        const dbUser = await db.user.findUnique({ where: { id: userId } });
-        if (!dbUser) {
-          return response.status(404).json({ error: 'User not found' });
-        }
-
-        // Verificar senha atual
-        const isValidPassword = await verifyPassword(currentPassword, dbUser.password);
-        if (!isValidPassword) {
-          return response.status(400).json({ error: 'Invalid current password' });
-        }
-
-        // Validar nova senha
-        const validation = validatePasswordStrength(newPassword);
-        if (!validation.isValid) {
-          return response.status(400).json({
-            error: 'Password validation failed',
-            errors: validation.errors,
-          });
-        }
-
-        // Hash e atualizar
-        const hashedPassword = await hashPassword(newPassword);
-        await db.user.update({
-          where: { id: userId },
-          data: { password: hashedPassword },
-        });
-
-        // Revogar todos os refresh tokens (forçar re-login)
-        await db.refreshToken.updateMany({
-          where: { userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-
-        await createAuditLog('PASSWORD_CHANGED', userId, request, { method: 'change_password' }, user.currentOrgId);
-
-        return response.success({ message: 'Password changed successfully' });
-      },
-    }),
-
-    /**
      * Update Profile
      */
     updateProfile: igniter.mutation({
@@ -1175,123 +861,6 @@ export const authController = igniter.controller({
         });
 
         return response.success(users);
-      },
-    }),
-
-    /**
-     * Forgot Password - Request password reset
-     */
-    forgotPassword: igniter.mutation({
-      name: 'Forgot Password',
-      description: 'Request password reset email',
-      path: '/forgot-password',
-      method: 'POST',
-      body: forgotPasswordSchema,
-      use: [turnstileProcedure()],
-      handler: async ({ request, response }) => {
-        const { email } = request.body;
-
-        // Buscar usuário
-        const user = await db.user.findUnique({ where: { email } });
-
-        // Sempre retornar sucesso (segurança: não revelar se email existe)
-        if (!user) {
-          return response.success({ message: 'If email exists, reset instructions sent' });
-        }
-
-        // Gerar token de reset (válido por 24 horas)
-        const resetToken = signRefreshToken({
-          userId: user.id,
-          tokenId: `reset-${Date.now()}`,
-        });
-
-        // Salvar token no banco
-        await db.refreshToken.create({
-          data: {
-            userId: user.id,
-            token: resetToken,
-            expiresAt: getExpirationDate('24h'),
-          },
-        });
-
-        // Gerar URL de reset completa
-        const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
-
-        // Enviar email (async, não bloquear resposta)
-        emailService
-          .sendPasswordResetEmail(user.email, user.name || 'User', resetUrl, 60)
-          .catch(console.error);
-
-        return response.success({ message: 'If email exists, reset instructions sent' });
-      },
-    }),
-
-    /**
-     * Reset Password - Complete password reset
-     */
-    resetPassword: igniter.mutation({
-      name: 'Reset Password',
-      description: 'Reset password with token',
-      path: '/reset-password',
-      method: 'POST',
-      body: resetPasswordSchema,
-      handler: async ({ request, response }) => {
-        const { token, password } = request.body;
-
-        // Verificar token
-        const payload = verifyRefreshToken(token);
-        if (!payload) {
-          return response.status(400).json({ error: 'Invalid or expired reset token' });
-        }
-
-        // Buscar token no banco
-        const tokenData = await db.refreshToken.findFirst({
-          where: {
-            token,
-            userId: payload.userId,
-            revokedAt: null,
-          },
-        });
-
-        if (!tokenData || tokenData.expiresAt < new Date()) {
-          return response.status(400).json({ error: 'Invalid or expired reset token' });
-        }
-
-        // Validar nova senha
-        const validation = validatePasswordStrength(password);
-        if (!validation.isValid) {
-          return response.status(400).json({
-            error: 'Password validation failed',
-            errors: validation.errors,
-          });
-        }
-
-        // Hash e atualizar senha + clear stale resetToken
-        const hashedPassword = await hashPassword(password);
-        await db.user.update({
-          where: { id: payload.userId },
-          data: {
-            password: hashedPassword,
-            resetToken: null,
-            resetTokenExpiry: null,
-          },
-        });
-
-        // Revogar token usado
-        await db.refreshToken.update({
-          where: { id: tokenData.id },
-          data: { revokedAt: new Date() },
-        });
-
-        // Revogar todos os refresh tokens (forçar re-login)
-        await db.refreshToken.updateMany({
-          where: { userId: payload.userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-
-        await createAuditLog('PASSWORD_RESET', payload.userId, request, { method: 'reset_token' });
-
-        return response.success({ message: 'Password reset successfully' });
       },
     }),
 
@@ -3485,9 +3054,105 @@ export const authController = igniter.controller({
     }),
 
     /**
-     * TOTP Disable — desabilitar 2FA
+     * TOTP Disable Request — envia OTP por email para confirmar desabilitação de 2FA
      *
-     * Requer senha atual + código TOTP válido (ou recovery code como alternativa).
+     * Gera código de 6 dígitos, salva em VerificationCode com type='TOTP_DISABLE',
+     * e envia por email. Usado como alternativa à senha para usuários sem senha (social login).
+     */
+    totpDisableRequest: igniter.mutation({
+      name: 'TOTP Disable Request',
+      description: 'Send email OTP to confirm 2FA disable',
+      path: '/totp/disable-request',
+      method: 'POST',
+      use: [authProcedure({ required: true })],
+      body: totpDisableRequestSchema,
+      handler: async ({ request, response, context }) => {
+        const user = context.auth?.session?.user;
+        if (!user) return response.unauthorized('Authentication required');
+        const userId = user.id;
+
+        if (!user.twoFactorEnabled) {
+          return response.status(400).json({
+            error: '2FA is not enabled on this account.',
+            code: 'TWO_FACTOR_NOT_ENABLED',
+          });
+        }
+
+        if (!user.email) {
+          return response.status(400).json({
+            error: 'No email associated with this account.',
+            code: 'NO_EMAIL',
+          });
+        }
+
+        // Rate limit
+        const clientIp = getClientIdentifier(request);
+        const rateLimitResult = await checkOtpRateLimit(user.email, clientIp);
+        if (!rateLimitResult.success) {
+          const retryAfter = rateLimitResult.retryAfter || 60;
+          return Response.json(
+            { error: `Muitas tentativas. Tente novamente em ${Math.ceil(retryAfter / 60)} minuto(s).` },
+            { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+          );
+        }
+
+        const otpCode = generateOTPCode();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Delete previous codes for this user/type
+        await db.verificationCode.deleteMany({
+          where: { userId, type: 'TOTP_DISABLE' },
+        });
+
+        // Create new verification code
+        await db.verificationCode.create({
+          data: {
+            userId,
+            email: user.email,
+            code: otpCode,
+            type: 'TOTP_DISABLE',
+            expiresAt,
+          },
+        });
+
+        // Send email
+        try {
+          await emailService.send({
+            to: user.email,
+            subject: 'Quayer — Código para desabilitar 2FA',
+            html: `
+              <h2>Código de verificação</h2>
+              <p>Olá ${user.name || 'usuário'},</p>
+              <p>Você solicitou a desativação da autenticação em duas etapas (2FA) na sua conta.</p>
+              <p>Use o código abaixo para confirmar:</p>
+              <div style="text-align:center;margin:24px 0">
+                <span style="font-size:32px;font-weight:bold;letter-spacing:8px;font-family:monospace">${otpCode}</span>
+              </div>
+              <p>Este código expira em <strong>10 minutos</strong>.</p>
+              <p>Se você não solicitou isso, ignore este email.</p>
+              <br/>
+              <p>— Equipe Quayer</p>
+            `,
+          });
+        } catch (emailErr) {
+          console.error('[Auth] Failed to send TOTP disable email OTP:', emailErr);
+          return response.status(500).json({
+            error: 'Failed to send verification email.',
+            code: 'EMAIL_SEND_FAILED',
+          });
+        }
+
+        await createAuditLog('TOTP_DISABLE_REQUESTED', userId, request, undefined, user.currentOrgId);
+
+        return response.success({ sent: true });
+      },
+    }),
+
+    /**
+     * TOTP Disable — desabilitar 2FA na conta do usuário
+     *
+     * Requer código TOTP válido (ou recovery code) + senha OU emailCode como segundo fator.
+     * Se o usuário não tem senha e emailCode não foi fornecido, retorna erro 'email_code_required'.
      * Deleta todos os TotpDevices e RecoveryCodes, desabilita 2FA no user.
      */
     totpDisable: igniter.mutation({
@@ -3510,26 +3175,67 @@ export const authController = igniter.controller({
           });
         }
 
-        const { password, code } = request.body;
+        const { password, emailCode, code } = request.body;
 
-        // Verify current password
+        // Must provide at least one second factor: password or emailCode
+        if (!password && !emailCode) {
+          return response.status(400).json({
+            error: 'Password or email verification code is required.',
+            code: 'email_code_required',
+          });
+        }
+
+        // Verify second factor: password OR emailCode
         const dbUser = await db.user.findUnique({
           where: { id: userId },
           select: { password: true },
         });
 
-        if (!dbUser?.password) {
-          return response.status(400).json({
-            error: 'Cannot verify password. Account may use social login only.',
-            code: 'NO_PASSWORD',
-          });
-        }
+        if (password) {
+          // Password-based verification (backward compat)
+          if (!dbUser?.password) {
+            return response.status(400).json({
+              error: 'Cannot verify password. Account may use social login only.',
+              code: 'NO_PASSWORD',
+            });
+          }
 
-        const passwordValid = await verifyPassword(password, dbUser.password);
-        if (!passwordValid) {
+          const passwordValid = await verifyPassword(password, dbUser.password);
+          if (!passwordValid) {
+            return response.status(400).json({
+              error: 'Invalid password.',
+              code: 'INVALID_PASSWORD',
+            });
+          }
+        } else if (emailCode) {
+          // Email OTP verification
+          const vc = await db.verificationCode.findFirst({
+            where: {
+              userId,
+              type: 'TOTP_DISABLE',
+              used: false,
+              expiresAt: { gt: new Date() },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (!vc || vc.code !== emailCode) {
+            return response.status(400).json({
+              error: 'Invalid or expired email verification code.',
+              code: 'INVALID_EMAIL_CODE',
+            });
+          }
+
+          // Mark code as used
+          await db.verificationCode.update({
+            where: { id: vc.id },
+            data: { used: true },
+          });
+        } else {
+          // User has no password and didn't provide emailCode
           return response.status(400).json({
-            error: 'Invalid password.',
-            code: 'INVALID_PASSWORD',
+            error: 'Email verification code is required for accounts without a password.',
+            code: 'email_code_required',
           });
         }
 

@@ -7,68 +7,6 @@
 import { z } from 'zod';
 
 /**
- * Schema de Login
- */
-export const loginSchema = z.object({
-  email: z
-    .string({ required_error: 'Email is required' })
-    .email('Invalid email format')
-    .toLowerCase()
-    .trim(),
-  password: z
-    .string({ required_error: 'Password is required' })
-    .min(1, 'Password is required'),
-});
-
-export type LoginInput = z.infer<typeof loginSchema>;
-
-/**
- * Schema de Registro
- */
-export const registerSchema = z.object({
-  email: z
-    .string({ required_error: 'Email is required' })
-    .email('Invalid email format')
-    .toLowerCase()
-    .trim(),
-  password: z
-    .string({ required_error: 'Password is required' })
-    .min(8, 'Password must be at least 8 characters')
-    .max(72, 'Password cannot exceed 72 characters')
-    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
-    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
-    .regex(/[0-9]/, 'Password must contain at least one number')
-    .regex(
-      /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
-      'Password must contain at least one special character'
-    ),
-  name: z
-    .string({ required_error: 'Name is required' })
-    .min(2, 'Name must be at least 2 characters')
-    .max(100, 'Name cannot exceed 100 characters')
-    .trim(),
-  document: z
-    .string()
-    .optional()
-    .refine(
-      (val) => {
-        if (!val) return true;
-        // Remove non-digits
-        const digits = val.replace(/\D/g, '');
-        // CPF: 11 digits, CNPJ: 14 digits
-        return digits.length === 11 || digits.length === 14;
-      },
-      { message: 'Document must be a valid CPF (11 digits) or CNPJ (14 digits)' }
-    ),
-  organizationName: z
-    .string()
-    .optional()
-    .transform((val) => val?.trim()),
-});
-
-export type RegisterInput = z.infer<typeof registerSchema>;
-
-/**
  * Schema de Refresh Token
  */
 export const refreshTokenSchema = z.object({
@@ -86,56 +24,6 @@ export const logoutSchema = z.object({
 });
 
 export type LogoutInput = z.infer<typeof logoutSchema>;
-
-/**
- * Schema de Forgot Password
- */
-export const forgotPasswordSchema = z.object({
-  email: z
-    .string({ required_error: 'Email is required' })
-    .email('Invalid email format')
-    .toLowerCase()
-    .trim(),
-});
-
-export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
-
-/**
- * Schema de Reset Password
- */
-export const resetPasswordSchema = z.object({
-  token: z.string({ required_error: 'Reset token is required' }),
-  password: z
-    .string({ required_error: 'Password is required' })
-    .min(8, 'Password must be at least 8 characters')
-    .max(72, 'Password cannot exceed 72 characters'),
-  // confirmPassword is validated client-side only
-});
-
-export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-
-/**
- * Schema de Change Password (usuário logado)
- */
-export const changePasswordSchema = z.object({
-  currentPassword: z.string({ required_error: 'Current password is required' }),
-  newPassword: z
-    .string({ required_error: 'New password is required' })
-    .min(8, 'Password must be at least 8 characters')
-    .max(72, 'Password cannot exceed 72 characters')
-    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
-    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
-    .regex(/[0-9]/, 'Password must contain at least one number'),
-  confirmPassword: z.string({ required_error: 'Confirm password is required' }),
-}).refine((data) => data.newPassword === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ['confirmPassword'],
-}).refine((data) => data.currentPassword !== data.newPassword, {
-  message: "New password must be different from current password",
-  path: ['newPassword'],
-});
-
-export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
 /**
  * Schema de Verify Email
@@ -333,23 +221,6 @@ export const verifySignupOTPSchema = z.object({
 export type VerifySignupOTPInput = z.infer<typeof verifySignupOTPSchema>;
 
 /**
- * Schema de Login com Remember Me
- */
-export const loginWithRememberMeSchema = z.object({
-  email: z
-    .string({ required_error: 'Email is required' })
-    .email('Invalid email format')
-    .toLowerCase()
-    .trim(),
-  password: z
-    .string({ required_error: 'Password is required' })
-    .min(1, 'Password is required'),
-  rememberMe: z.boolean().optional().default(false),
-});
-
-export type LoginWithRememberMeInput = z.infer<typeof loginWithRememberMeSchema>;
-
-/**
  * Schema de WebAuthn Registration Options
  */
 export const webAuthnRegisterOptionsSchema = z.object({
@@ -480,12 +351,24 @@ export const totpRecoverySchema = z.object({
 export type TotpRecoveryInput = z.infer<typeof totpRecoverySchema>;
 
 /**
- * Schema de TOTP Disable — desabilitar 2FA (requer senha + código TOTP ou recovery code)
+ * Schema de TOTP Disable Request — solicita OTP por email para desabilitar 2FA
+ */
+export const totpDisableRequestSchema = z.object({});
+
+export type TotpDisableRequestInput = z.infer<typeof totpDisableRequestSchema>;
+
+/**
+ * Schema de TOTP Disable — desabilitar 2FA (requer código TOTP + senha OU emailCode)
  */
 export const totpDisableSchema = z.object({
   password: z
-    .string({ required_error: 'Password is required' })
-    .min(1, 'Password is required'),
+    .string()
+    .min(1, 'Password is required')
+    .optional(),
+  emailCode: z
+    .string()
+    .length(6, 'Email code must be 6 digits')
+    .optional(),
   code: z
     .string({ required_error: 'TOTP or recovery code is required' })
     .min(1, 'Code is required')
