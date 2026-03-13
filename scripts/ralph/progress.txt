@@ -27,6 +27,7 @@
 - **verifyPassword reuse:** `verifyPassword(plain, hash)` from `@/lib/auth/bcrypt` wraps `bcrypt.compare` — use for any hash comparison (passwords, recovery codes, etc.)
 - **Token issuance flow:** signAccessToken → db.refreshToken.create → signRefreshToken → update → setAuthCookies → registerDeviceSession — duplicated in login/totpChallenge/totpRecovery
 - **2FA status check (frontend):** `/api/v1/auth/me` does NOT return `twoFactorEnabled` — use `/api/v1/auth/totp/devices` and check for verified devices instead
+- **Igniter extra body fields:** procedure-consumed fields (like `cf-turnstile-response`) aren't in Zod schema — use `as any` cast on body object in typed `api.*.mutate()` calls
 - **apiFetch helper pattern:** wrap `fetch()` with `{ credentials: 'include', headers: { 'Content-Type': 'application/json' } }` + error extraction from response body
 
 ---
@@ -243,4 +244,34 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Actions without `use` array can have one added — just add `use: [procedure()]` to the mutation/query config
   - Cloudflare Turnstile siteverify uses `application/x-www-form-urlencoded` content type, not JSON
   - Pre-existing TS errors (~60+) remain in unrelated files — no new errors from US-009
+---
+
+## 2026-03-13 ~11:00 UTC-3 - US-010
+- **Implemented:** Cloudflare Turnstile — React frontend widget
+- **Changes:**
+  - Installed `@marsidev/react-turnstile` package (--legacy-peer-deps)
+  - Created `TurnstileWidget` component in `src/client/components/auth/turnstile-widget.tsx`
+  - Mode: managed (invisible for humans, visual challenge only if suspicious), theme: auto, size: flexible
+  - Only renders when `NEXT_PUBLIC_TURNSTILE_SITE_KEY` env var is set (returns null otherwise)
+  - On error/expiry: shows toast via `sonner` and auto-resets widget via ref
+  - Integrated in 4 forms:
+    - `src/client/components/auth/login-form-final.tsx` — phone (raw fetch) + email (Igniter api) flows
+    - `src/client/components/auth/signup-form.tsx` — phone (raw fetch) + email (Igniter api) flows
+    - `src/client/components/auth/signup-otp-form.tsx` — resend OTP flow (Igniter api)
+    - `src/app/(auth)/forgot-password/page.tsx` — forgot password flow (Igniter api)
+  - Token sent as `cf-turnstile-response` field in body of all form submissions
+  - For Igniter typed API calls: used `as any` cast since `cf-turnstile-response` is extracted by turnstile procedure, not part of Zod body schema
+- **Files changed:**
+  - `package.json` / `package-lock.json` — added @marsidev/react-turnstile
+  - `src/client/components/auth/turnstile-widget.tsx` — new component
+  - `src/client/components/auth/login-form-final.tsx` — added TurnstileWidget + turnstileToken state
+  - `src/client/components/auth/signup-form.tsx` — added TurnstileWidget + turnstileToken state
+  - `src/client/components/auth/signup-otp-form.tsx` — added TurnstileWidget + turnstileToken state
+  - `src/app/(auth)/forgot-password/page.tsx` — added TurnstileWidget + turnstileToken state
+- **Learnings for future iterations:**
+  - Igniter typed API (`api.auth.*.mutate`) enforces strict body types from Zod schemas — extra fields like `cf-turnstile-response` need `as any` cast
+  - `@marsidev/react-turnstile` exports `Turnstile` component + `TurnstileInstance` type for ref
+  - Toast uses `sonner` library — `import { toast } from 'sonner'`
+  - Widget ref has `.reset()` method to re-render on error/expiry
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-010
 ---

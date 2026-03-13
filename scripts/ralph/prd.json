@@ -201,8 +201,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created TurnstileWidget with @marsidev/react-turnstile. Integrated in login-form-final, signup-form, signup-otp-form, forgot-password. Token sent as cf-turnstile-response via body. Uses 'as any' cast for Igniter typed API since turnstile field is extracted by procedure, not schema."
     },
     {
       "id": "US-011",
