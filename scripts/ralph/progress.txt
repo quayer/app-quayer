@@ -416,3 +416,31 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - VerifiedDomain.defaultRoleId FK points to CustomRole for auto-join role assignment
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-015
 ---
+
+## 2026-03-13 ~17:00 UTC-3 - US-017
+- **Implemented:** UI de Dominios Verificados — pagina admin completa
+- **Changes:**
+  - Created `/admin/domains` page (`src/app/admin/domains/page.tsx`) as 'use client' component
+  - Split view: Pending domains table (with Verify button) and Verified domains table (with settings)
+  - AddDomainDialog: domain input + method selector (DNS TXT / Email) as styled radio cards
+    - After adding DNS: shows TXT record instructions with copyable token
+    - After adding Email: shows sent-to address info
+  - DnsVerifyDialog: shows expected TXT record with copy button + "Verificar Agora" button calling verifyDomainDns
+  - EmailVerifyDialog: InputOTP 6-digit code input calling verifyDomainEmail
+  - DomainSettingsRow component: Switch for auto-join toggle + Select dropdown for default role (loads CustomRoles)
+  - RemoveDomainDialog: AlertDialog confirmation before deleting domain
+  - Empty state with Globe icon and "Adicionar primeiro dominio" button
+  - Error state with retry, loading state with skeletons
+  - Status badges: Clock (Pendente), CheckCircle2 (Verificado), ToggleRight (Auto-join)
+  - Added "Dominios" menu item with Globe icon to admin sidebar navigation
+  - Uses `apiFetch` helper pattern (fetch + credentials: include + JSON headers)
+  - API endpoints: `/api/v1/verified-domains` (list, add), `/verify-dns`, `/verify-email`, `/:id` (update, delete)
+  - Also loads `/api/v1/custom-roles` for default role dropdown options
+- **Files changed:**
+  - `src/app/admin/domains/page.tsx` — new page
+  - `src/client/components/app-sidebar.tsx` — added Globe import + Dominios menu item
+- **Learnings for future iterations:**
+  - Verified domains API returns `defaultRole` include with `{ id, name, slug }` — useful for displaying role name
+  - Domain list endpoint returns flat array (not paginated) — wrapped in `response.success(domains)` so client uses `json.data` or `json` guard
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-017
+---

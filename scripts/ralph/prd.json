@@ -344,8 +344,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created /admin/domains page with full domain management UI. Split view: pending domains (with Verify button) and verified domains (with auto-join toggle + default role dropdown). AddDomainDialog with DNS TXT / Email method selector. DnsVerifyDialog with copyable token + verify button. EmailVerifyDialog with InputOTP 6-digit code. RemoveDomainDialog with confirmation. Added Dominios link to admin sidebar. Uses apiFetch to /api/v1/verified-domains endpoints."
     },
     {
       "id": "US-018",
