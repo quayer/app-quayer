@@ -104,3 +104,26 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - `totp.validate({ token, window })` returns `null` if invalid, or a delta integer if valid — check `=== null` for failure
   - `db.$transaction([...])` accepts array of Prisma operations for atomic multi-table updates
 ---
+
+## 2026-03-13 ~05:00 UTC-3 - US-004
+- **Implemented:** Fluxo de login com 2FA challenge
+- **Changes:**
+  - Added `totpChallengeSchema` to `src/server/features/auth/auth.schemas.ts` (challengeId + 6-digit code)
+  - Added helper functions to auth controller: `sign2faChallenge()`, `verify2faChallenge()`, in-memory `challengeAttempts` Map with auto-cleanup
+  - Modified `login` action: after password verification + active check, if `user.twoFactorEnabled` → return `{ requiresTwoFactor: true, challengeId }`
+  - Modified `googleCallback` action: after user lookup/creation, if existing user has 2FA → return challenge (skip for new users)
+  - Modified `verifyMagicLink` action (login path): after active check, if 2FA enabled → return challenge
+  - Modified `verifyLoginOTPPhone` action: after phone OTP verified, if existing user has 2FA → return challenge (skip for newly created)
+  - Added `totpChallenge` mutation action: validates challengeId JWT (5min expiry), decrypts TOTP secret, validates code with window=1, issues tokens on success
+  - Attempt tracking: in-memory Map per challengeId, max 5 attempts, auto-cleanup after 10 minutes
+  - Audit logs: `2fa_challenge_issued`, `2fa_challenge_success`, `2fa_challenge_failed`
+- **Files changed:**
+  - `src/server/features/auth/auth.schemas.ts` — added totpChallengeSchema + TotpChallengeInput type
+  - `src/server/features/auth/controllers/auth.controller.ts` — added 2FA challenge helpers, modified 4 login actions, added totpChallenge action
+- **Learnings for future iterations:**
+  - `jwt.sign({ userId, type: '2fa-challenge' }, secret, { expiresIn: '5m' })` — use short-lived JWTs for challenge tokens instead of DB storage
+  - In-memory Map with `setTimeout` auto-cleanup is simple and effective for short-lived challenge attempt tracking
+  - When modifying multiple login flows, the 2FA check must go AFTER first-factor validation but BEFORE token issuance
+  - For Google OAuth and phone OTP login, skip 2FA check for newly created users (they can't have 2FA configured yet)
+  - Pre-existing TS errors (~60+) in unrelated files continue — confirmed no new errors from US-004 changes
+---

@@ -78,8 +78,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Modified login/googleCallback/verifyMagicLink/verifyLoginOTPPhone to check twoFactorEnabled. New totpChallenge action with JWT challenge + in-memory attempt tracking (max 5)."
     },
     {
       "id": "US-005",
