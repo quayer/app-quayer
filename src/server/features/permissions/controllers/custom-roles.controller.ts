@@ -8,7 +8,7 @@
 import { igniter } from '@/igniter'
 import { z } from 'zod'
 import { authProcedure } from '@/server/features/auth/procedures/auth.procedure'
-import { Resource, Action } from '@/lib/auth/permissions'
+import { Resource, Action, invalidateCustomRoleCache } from '@/lib/auth/permissions'
 
 // ==========================================
 // Zod Schemas
@@ -157,6 +157,9 @@ export const customRolesController = igniter.controller({
           },
         })
 
+        // Invalidate cache for newly created role
+        invalidateCustomRoleCache(role.id)
+
         return response.created(role)
       },
     }),
@@ -274,6 +277,9 @@ export const customRolesController = igniter.controller({
           },
         })
 
+        // Invalidate cache for updated role
+        invalidateCustomRoleCache(id)
+
         return response.success(updated)
       },
     }),
@@ -363,6 +369,10 @@ export const customRolesController = igniter.controller({
             context.db.customRole.delete({ where: { id } }),
           ])
 
+          // Invalidate cache for deleted and target roles
+          invalidateCustomRoleCache(id)
+          invalidateCustomRoleCache(reassignToRoleId)
+
           return response.success({
             message: 'Role deletado com sucesso',
             reassignedUsers: assignedCount,
@@ -371,6 +381,9 @@ export const customRolesController = igniter.controller({
 
         // No users assigned — just delete
         await context.db.customRole.delete({ where: { id } })
+
+        // Invalidate cache for deleted role
+        invalidateCustomRoleCache(id)
 
         return response.success({ message: 'Role deletado com sucesso' })
       },
