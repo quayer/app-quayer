@@ -38,6 +38,7 @@ import {
   verifyPhoneOTPSchema,
   totpSetupSchema,
   totpVerifySchema,
+  totpChallengeSchema,
 } from '../auth.schemas';
 import { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp';
 import {
@@ -137,6 +138,54 @@ function clearAuthCookies(response: any) {
   });
   clearCsrfCookie(response);
 }
+
+/**
+ * 2FA Challenge: sign a short-lived JWT (5 min) that proves first-factor passed.
+ */
+function sign2faChallenge(userId: string): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET is required');
+  return jwt.sign({ userId, type: '2fa-challenge' }, secret, { expiresIn: '5m', issuer: 'quayer' });
+}
+
+/**
+ * 2FA Challenge: verify the challenge JWT and return userId, or null if invalid/expired.
+ */
+function verify2faChallenge(token: string): { userId: string } | null {
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET is required');
+    const payload = jwt.verify(token, secret, { issuer: 'quayer' }) as any;
+    if (payload.type !== '2fa-challenge' || !payload.userId) return null;
+    return { userId: payload.userId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * In-memory map to track failed 2FA attempts per challengeId.
+ * Key = challengeId JWT string, Value = number of failed attempts.
+ * Entries are auto-cleaned after 10 minutes.
+ */
+const challengeAttempts = new Map<string, number>();
+
+function getChallengeAttempts(challengeId: string): number {
+  return challengeAttempts.get(challengeId) || 0;
+}
+
+function incrementChallengeAttempts(challengeId: string): number {
+  const current = getChallengeAttempts(challengeId);
+  const next = current + 1;
+  challengeAttempts.set(challengeId, next);
+  // Auto-clean after 10 min
+  if (current === 0) {
+    setTimeout(() => challengeAttempts.delete(challengeId), 10 * 60 * 1000);
+  }
+  return next;
+}
+
+const MAX_2FA_ATTEMPTS = 5;
 
 /**
  * Helper: Parse a human-readable device name from a User-Agent string.
@@ -480,6 +529,13 @@ export const authController = igniter.controller({
         // Verificar se usuário está ativo
         if (!user.isActive) {
           return response.status(403).json({ error: 'Account disabled' });
+        }
+
+        // 2FA check: if user has TOTP enabled, return challenge instead of tokens
+        if (user.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(user.id);
+          console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=password`);
+          return response.success({ requiresTwoFactor: true, challengeId });
         }
 
         // Se admin não tem org setada, setar primeira org disponível
@@ -1197,6 +1253,13 @@ export const authController = igniter.controller({
               },
             });
             isNewGoogleUser = true;
+          }
+
+          // 2FA check: if existing user has TOTP enabled, return challenge
+          if (!isNewGoogleUser && user.twoFactorEnabled) {
+            const challengeId = sign2faChallenge(user.id);
+            console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=google`);
+            return response.success({ requiresTwoFactor: true, challengeId });
           }
 
           // Gerar tokens JWT
@@ -2023,6 +2086,13 @@ export const authController = igniter.controller({
             return response.status(403).json({ error: 'Account disabled' });
           }
 
+          // 2FA check: if user has TOTP enabled, return challenge
+          if (user.twoFactorEnabled) {
+            const challengeId = sign2faChallenge(user.id);
+            console.log(`[AUDIT] 2fa_challenge_issued userId=${user.id} method=magic-link`);
+            return response.success({ requiresTwoFactor: true, challengeId });
+          }
+
           let currentOrgId = user.currentOrgId;
           if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
             currentOrgId = user.organizations[0].organizationId;
@@ -2549,6 +2619,13 @@ export const authController = igniter.controller({
 
         await db.verificationCode.delete({ where: { id: vc.id } })
 
+        // 2FA check: if existing user has TOTP enabled, return challenge (skip for newly created)
+        if (user && createdUser.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(createdUser.id);
+          console.log(`[AUDIT] 2fa_challenge_issued userId=${createdUser.id} method=phone-otp`);
+          return response.success({ requiresTwoFactor: true, challengeId });
+        }
+
         // Set org if admin without current org
         let currentOrgId = createdUser.currentOrgId;
         if (createdUser.role === 'admin' && !currentOrgId && createdUser.organizations.length > 0) {
@@ -2897,6 +2974,155 @@ export const authController = igniter.controller({
         return response.success({
           verified: true,
           twoFactorEnabled: true,
+        });
+      },
+    }),
+
+    /**
+     * TOTP Challenge — validate 2FA code during login flow
+     * Called after login/googleCallback/verifyMagicLink/verifyLoginOTPPhone returns requiresTwoFactor=true
+     */
+    totpChallenge: igniter.mutation({
+      name: 'TOTP Challenge',
+      description: 'Validate TOTP code for 2FA login challenge',
+      path: '/totp-challenge',
+      method: 'POST',
+      body: totpChallengeSchema,
+      handler: async ({ request, response }) => {
+        const { challengeId, code } = request.body;
+
+        // Check attempt count before doing any work
+        const attempts = getChallengeAttempts(challengeId);
+        if (attempts >= MAX_2FA_ATTEMPTS) {
+          console.log(`[AUDIT] 2fa_challenge_failed reason=max_attempts challengeId=${challengeId.substring(0, 20)}...`);
+          return response.status(403).json({
+            error: 'Too many failed attempts. Please login again.',
+            code: 'CHALLENGE_EXHAUSTED',
+          });
+        }
+
+        // Verify challengeId JWT
+        const challengePayload = verify2faChallenge(challengeId);
+        if (!challengePayload) {
+          return response.status(400).json({
+            error: 'Invalid or expired challenge. Please login again.',
+            code: 'INVALID_CHALLENGE',
+          });
+        }
+
+        const { userId } = challengePayload;
+
+        // Fetch user with verified TOTP device
+        const user = await db.user.findUnique({
+          where: { id: userId },
+          include: {
+            totpDevices: { where: { verified: true }, take: 1 },
+            organizations: {
+              where: { isActive: true },
+              include: { organization: true },
+            },
+          },
+        });
+
+        if (!user || !user.twoFactorEnabled || user.totpDevices.length === 0) {
+          return response.status(400).json({
+            error: '2FA is not configured for this account.',
+            code: 'NO_2FA',
+          });
+        }
+
+        // Decrypt TOTP secret and validate code
+        const device = user.totpDevices[0];
+        const secretBase32 = decrypt(device.secret);
+
+        const totp = new OTPAuth.TOTP({
+          issuer: 'Quayer',
+          label: user.email,
+          algorithm: 'SHA1',
+          digits: 6,
+          period: 30,
+          secret: OTPAuth.Secret.fromBase32(secretBase32),
+        });
+
+        const delta = totp.validate({ token: code, window: 1 });
+
+        if (delta === null) {
+          const newAttempts = incrementChallengeAttempts(challengeId);
+          const remaining = MAX_2FA_ATTEMPTS - newAttempts;
+          console.log(`[AUDIT] 2fa_challenge_failed userId=${userId} attempts=${newAttempts}`);
+          return response.status(400).json({
+            error: 'Invalid TOTP code.',
+            code: 'INVALID_CODE',
+            attemptsRemaining: remaining,
+          });
+        }
+
+        // Code valid — issue tokens
+        let currentOrgId = user.currentOrgId;
+        if (user.role === 'admin' && !currentOrgId && user.organizations.length > 0) {
+          currentOrgId = user.organizations[0].organizationId;
+          await db.user.update({ where: { id: user.id }, data: { currentOrgId } });
+        }
+
+        const currentOrgRelation = user.organizations.find(
+          (org) => org.organizationId === currentOrgId
+        );
+
+        const accessToken = signAccessToken({
+          userId: user.id,
+          email: user.email,
+          role: user.role as UserRole,
+          currentOrgId,
+          organizationRole: currentOrgRelation?.role as any,
+          needsOnboarding: !user.onboardingCompleted,
+        });
+
+        const refreshTokenData = await db.refreshToken.create({
+          data: {
+            userId: user.id,
+            token: signRefreshToken({ userId: user.id, tokenId: '' }),
+            expiresAt: getExpirationDate('7d'),
+          },
+        });
+
+        const refreshToken = signRefreshToken({
+          userId: user.id,
+          tokenId: refreshTokenData.id,
+        });
+
+        await db.refreshToken.update({
+          where: { id: refreshTokenData.id },
+          data: { token: refreshToken },
+        });
+
+        // Set httpOnly cookies
+        setAuthCookies(response, accessToken, refreshToken);
+
+        // Register device session (non-blocking)
+        const deviceResult = await registerDeviceSession(user.id, request);
+        if (deviceResult.blocked) {
+          clearAuthCookies(response);
+          return Response.json(
+            { error: 'Login bloqueado por política de segurança. Contate o administrador.' },
+            { status: 403 }
+          );
+        }
+
+        // Clean up challenge attempts
+        challengeAttempts.delete(challengeId);
+
+        console.log(`[AUDIT] 2fa_challenge_success userId=${userId}`);
+
+        return response.success({
+          needsOnboarding: !user.onboardingCompleted,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            currentOrgId,
+            organizationRole: currentOrgRelation?.role,
+          },
         });
       },
     }),

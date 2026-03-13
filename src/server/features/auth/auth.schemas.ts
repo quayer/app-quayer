@@ -446,3 +446,18 @@ export const totpVerifySchema = z.object({
 });
 
 export type TotpVerifyInput = z.infer<typeof totpVerifySchema>;
+
+/**
+ * Schema de TOTP Challenge — validar código TOTP durante login 2FA
+ */
+export const totpChallengeSchema = z.object({
+  challengeId: z
+    .string({ required_error: 'Challenge ID is required' })
+    .min(1, 'Challenge ID is required'),
+  code: z
+    .string({ required_error: 'TOTP code is required' })
+    .length(6, 'Code must be 6 digits')
+    .regex(/^\d+$/, 'Code must contain only digits'),
+});
+
+export type TotpChallengeInput = z.infer<typeof totpChallengeSchema>;
