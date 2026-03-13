@@ -16,6 +16,7 @@ import {
   Mail,
   ShieldCheck,
   Globe,
+  Key,
 } from "lucide-react"
 
 import { NavMain } from "@/client/components/nav-main"
@@ -106,6 +107,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           title: "Dominios",
           url: "/admin/domains",
           icon: Globe,
+        },
+        {
+          title: "SCIM",
+          url: "/admin/scim",
+          icon: Key,
         },
         {
           title: "Configurações",
