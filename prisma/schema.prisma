@@ -81,6 +81,7 @@ model Organization {
   calls        Call[]
   providers     OrganizationProvider[]
   quickReplies QuickReply[]
+  customRoles  CustomRole[]
 
   @@index([document])
   @@index([slug])
@@ -92,16 +93,39 @@ model UserOrganization {
   userId         String
   organizationId String
   role           String // master, manager, user
+  customRoleId   String? // FK to CustomRole (nullable for legacy compatibility)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customRole   CustomRole?  @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
 
   @@unique([userId, organizationId])
   @@index([userId])
   @@index([organizationId])
   @@index([role])
+  @@index([customRoleId])
+}
+
+model CustomRole {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  permissions    Json     // Matches PERMISSIONS_MATRIX structure: { resource: [action, ...] }
+  isSystem       Boolean  @default(false)
+  priority       Int      // 3=master, 2=manager, 1=user
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userOrganizations UserOrganization[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("custom_roles")
 }
 
 model User {
