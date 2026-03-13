@@ -198,3 +198,28 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - `me` endpoint does NOT return `twoFactorEnabled` — use `totpListDevices` to check 2FA status (verified devices = 2FA enabled)
   - InputOTP component from `@/client/components/ui/input-otp` — uses `input-otp` library, 6 slots in one group
 ---
+
+## 2026-03-13 ~09:00 UTC-3 - US-008
+- **Implemented:** UI de 2FA challenge no login
+- **Changes:**
+  - Created `TwoFactorChallenge` component in `src/client/components/auth/two-factor-challenge.tsx`
+  - TOTP mode: InputOTP 6-digit with auto-submit on complete, attempts remaining counter
+  - Recovery mode: text input for 8-char recovery code, warnings for low remaining codes
+  - Toggle between TOTP and recovery modes with clear state reset
+  - "Voltar ao login" cancel button
+  - Modified `src/client/components/auth/login-otp-form.tsx`: added twoFactorChallengeId state, detects requiresTwoFactor in both phone OTP and email OTP responses, renders TwoFactorChallenge inline
+  - Modified `src/app/(auth)/google-callback/page.tsx`: detects requiresTwoFactor from googleCallback response, shows TwoFactorChallenge with logo header
+  - Modified `src/app/(auth)/login/verify-magic/LoginVerifyMagicClient.tsx`: detects requiresTwoFactor from verifyMagicLink response, shows TwoFactorChallenge
+  - All flows redirect to onboarding/admin/integracoes based on user role after successful 2FA
+- **Files changed:**
+  - `src/client/components/auth/two-factor-challenge.tsx` — new component
+  - `src/client/components/auth/login-otp-form.tsx` — added 2FA detection + render
+  - `src/app/(auth)/google-callback/page.tsx` — added 2FA detection + render
+  - `src/app/(auth)/login/verify-magic/LoginVerifyMagicClient.tsx` — added 2FA detection + render
+- **Learnings for future iterations:**
+  - TOTP challenge endpoint is `/api/v1/auth/totp-challenge` (NOT `/totp/challenge` — no nested slash)
+  - Recovery endpoint is `/api/v1/auth/totp-recovery` (same pattern)
+  - Error responses from challenge/recovery include `code` field (CHALLENGE_EXHAUSTED, INVALID_CHALLENGE, INVALID_CODE) and `attemptsRemaining`
+  - Recovery success response includes `remainingCodes` and `warning` fields for low code warnings
+  - When integrating 2FA into Google callback, need to import Image/Link for logo header layout
+---
