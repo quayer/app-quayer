@@ -439,6 +439,35 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - `src/client/components/app-sidebar.tsx` — added menu item
 ---
 
+## 2026-03-13 ~19:00 UTC-3 - US-019
+- **Implemented:** SCIM 2.0 Users endpoints — full REST API
+- **Changes:**
+  - `src/app/api/scim/v2/Users/route.ts` — GET list (pagination + filter) + POST create
+  - `src/app/api/scim/v2/Users/[id]/route.ts` — GET single, PUT replace, PATCH partial update, DELETE soft-delete
+  - `src/app/api/scim/v2/Users/scim-utils.ts` — shared helpers (auth, error, user mapping, audit, filter parsing)
+  - GET /Users: ListResponse with totalResults/startIndex/itemsPerPage, filter by `userName eq "email"`
+  - POST /Users: creates User + UserOrganization, random password, welcome email, idempotent for existing users
+  - PUT /Users/:id: full replace of name/email/active
+  - PATCH /Users/:id: Operations array with op:replace for active, userName, name (path and no-path variants)
+  - DELETE /Users/:id: soft-delete via UserOrganization.isActive=false (204 No Content)
+  - All responses follow SCIM 2.0 format (schemas, meta with resourceType/created/lastModified/location)
+  - Errors follow SCIM format (schemas, status, detail, optional scimType)
+  - Max 100 results per page
+  - Audit log for every operation via scimAuditLog helper
+  - Fixed metadata type cast for Prisma Json field compatibility
+- **Files changed:**
+  - `src/app/api/scim/v2/Users/route.ts` — new file
+  - `src/app/api/scim/v2/Users/[id]/route.ts` — new file
+  - `src/app/api/scim/v2/Users/scim-utils.ts` — new file (fixed metadata TS error)
+- **Learnings for future iterations:**
+  - SCIM routes use Next.js route handlers (not Igniter) since SCIM is a separate API surface
+  - AuditLog.userId has FK to User — using 'system' as userId will fail FK constraint; wrap in try/catch
+  - AuditLog.metadata is Prisma Json type — needs `as Record<string, string>` cast for `Record<string, unknown>`
+  - SCIM PATCH Operations can have `path` (e.g., "active") or no path (value is partial user object) — handle both
+  - RouteContext params in Next.js 15 are `Promise<{ id: string }>` — must `await context.params`
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-019
+---
+
 ## 2026-03-13 ~18:00 UTC-3 - US-018
 - **Implemented:** SCIM 2.0 — Schema e token management
 - **Changes:**

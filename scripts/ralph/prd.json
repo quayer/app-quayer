@@ -385,8 +385,8 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created Next.js API routes at src/app/api/scim/v2/Users/ with GET list (pagination + filter), POST create, and [id]/route.ts with GET/PUT/PATCH/DELETE. Shared scim-utils.ts with auth, error formatting, user mapping, audit logging, and filter parsing. Bearer token auth via validateScimToken. PATCH supports op:replace for active/name/userName with path and no-path variants. DELETE soft-deletes via UserOrganization.isActive=false. POST creates user with random password, sends welcome email. Fixed metadata type for audit log."
     },
     {
       "id": "US-020",
