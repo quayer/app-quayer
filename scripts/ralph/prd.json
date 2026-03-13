@@ -283,8 +283,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created /admin/roles page with system roles cards (view-only) and custom roles table (CRUD). RoleFormDialog with permissions matrix (Resources x Actions checkboxes). DeleteRoleDialog with reassignment select for roles with members. Added Roles link to admin sidebar. Uses apiFetch to /api/v1/custom-roles endpoints."
     },
     {
       "id": "US-015",

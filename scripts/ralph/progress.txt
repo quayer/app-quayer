@@ -355,3 +355,30 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Cache invalidation should also cover the `reassignToRoleId` target role on force-delete, since users now point to a different role
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-013
 ---
+
+## 2026-03-13 ~15:00 UTC-3 - US-014
+- **Implemented:** UI de gerenciamento de Custom Roles
+- **Changes:**
+  - Created `/admin/roles` page (`src/app/admin/roles/page.tsx`) as 'use client' component
+  - System roles displayed as read-only cards (3 per row) with member count + "Somente leitura" label
+  - Custom roles displayed in table with name/slug, description, priority badge, member count, edit/delete actions
+  - RoleFormDialog: create/edit form with name (3-50 chars), description (optional), priority selector (1-2), full permissions matrix
+  - PermissionsMatrix component: table grid of Resources (14 rows) x Actions (6 columns: CRUD + List + Manage) with Checkbox components
+  - Click resource name to toggle all actions for that resource
+  - System roles open dialog in view-only mode (all inputs disabled, no save button)
+  - DeleteRoleDialog: confirmation with member count warning, Select dropdown for reassignment role when members exist
+  - Uses `apiFetch` helper (fetch + credentials: include + JSON headers) to call `/api/v1/custom-roles` endpoints
+  - Empty state for custom roles with "Criar primeiro role" button
+  - Error state with retry button
+  - Loading state with Skeleton placeholders
+  - Added "Roles" link with ShieldCheck icon to admin sidebar navigation in `app-sidebar.tsx`
+- **Files changed:**
+  - `src/app/admin/roles/page.tsx` — new page
+  - `src/client/components/app-sidebar.tsx` — added ShieldCheck import + Roles menu item
+- **Learnings for future iterations:**
+  - Admin pages follow consistent pattern: header with SidebarTrigger + Breadcrumb, then content div with `p-8 pt-6`
+  - Custom roles API returns `_count.userOrganizations` for member count — use `Array.isArray(json?.data)` guard for response parsing
+  - DELETE endpoint expects JSON body with `force` and `reassignToRoleId` — standard fetch with method: DELETE + body works
+  - Resources and Actions are string enums from `@/lib/auth/permissions` — mirror them as constant arrays in frontend for the matrix UI
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-014
+---
