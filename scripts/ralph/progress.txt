@@ -21,6 +21,9 @@
 - **Array guard pattern:** `Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []` — previne `.filter is not a function`
 - **npm install:** always use `--legacy-peer-deps` flag due to peer dependency conflicts
 - **crypto.ts AES-256-GCM:** `encrypt(plaintext)` / `decrypt(encrypted)` in `src/lib/crypto.ts` — reuse for any secret storage
+- **otpauth validate:** `totp.validate({ token, window })` returns `null` if invalid, integer delta if valid
+- **otpauth Secret from stored:** `OTPAuth.Secret.fromBase32(base32)` to reconstruct from DB, NOT `new OTPAuth.Secret()`
+- **Prisma $transaction array:** `db.$transaction([op1, op2])` for atomic multi-table updates
 
 ---
 
@@ -80,4 +83,24 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Auth controller actions follow pattern: `igniter.mutation({ name, description, path, method, use, body, handler })`
   - Pre-existing TS errors (~60+) in unrelated files — do not block commits, verified no new errors in changed files
   - `otpauth` library: `new OTPAuth.TOTP({ secret: new OTPAuth.Secret() })` for generation, `.toString()` for URI
+---
+
+## 2026-03-13 ~04:00 UTC-3 - US-003
+- **Implemented:** Endpoint totpVerify — confirmar setup de 2FA
+- **Changes:**
+  - Added `totpVerifySchema` to `src/server/features/auth/auth.schemas.ts` with Zod validation (code: 6 digits, deviceId: uuid)
+  - Added `totpVerify` mutation action to `src/server/features/auth/controllers/auth.controller.ts`
+  - Imports `decrypt` from `@/lib/crypto` to recover encrypted TOTP secret from DB
+  - Reconstructs `OTPAuth.TOTP` with `OTPAuth.Secret.fromBase32(decryptedSecret)` and validates with `window: 1`
+  - Uses `db.$transaction` for atomic update of TotpDevice.verified + User.twoFactorEnabled
+  - Rate limited via `authRateLimiter` with `totp-verify:` prefix (5 attempts / 15 min)
+  - Checks device ownership (userId match), device not already verified, and device exists
+  - Console audit log: `totp_setup_completed`
+- **Files changed:**
+  - `src/server/features/auth/auth.schemas.ts` — added totpVerifySchema + TotpVerifyInput type
+  - `src/server/features/auth/controllers/auth.controller.ts` — added totpVerify action + decrypt import
+- **Learnings for future iterations:**
+  - `OTPAuth.Secret.fromBase32(base32String)` to reconstruct secret from stored base32 (not `new OTPAuth.Secret({ buffer })`)
+  - `totp.validate({ token, window })` returns `null` if invalid, or a delta integer if valid — check `=== null` for failure
+  - `db.$transaction([...])` accepts array of Prisma operations for atomic multi-table updates
 ---

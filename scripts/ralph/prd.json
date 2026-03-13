@@ -57,8 +57,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in auth.controller.ts. Uses decrypt() from crypto.ts to recover secret, OTPAuth.TOTP.validate() with window=1, $transaction for atomic update of device+user."
     },
     {
       "id": "US-004",
