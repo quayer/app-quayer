@@ -223,3 +223,24 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Recovery success response includes `remainingCodes` and `warning` fields for low code warnings
   - When integrating 2FA into Google callback, need to import Image/Link for logo header layout
 ---
+
+## 2026-03-13 ~10:00 UTC-3 - US-009
+- **Implemented:** Cloudflare Turnstile backend procedure
+- **Changes:**
+  - Created `src/server/features/auth/procedures/turnstile.procedure.ts`
+  - Procedure validates `cf-turnstile-response` token from request body via Cloudflare siteverify API
+  - Fail-open: no TURNSTILE_SECRET_KEY = skip validation (dev), timeout/network error = accept request
+  - Fail-closed: production with missing token = 403 `bot_detected`, Cloudflare success=false = 403
+  - 5s timeout using AbortController on fetch to Cloudflare
+  - Sends `secret`, `response`, `remoteip` (from x-forwarded-for/x-real-ip) to Cloudflare
+  - Applied `use: [turnstileProcedure()]` to 5 actions: login, register, signupOTP, forgotPassword, loginOTPPhone
+  - Imported turnstileProcedure in auth.controller.ts
+- **Files changed:**
+  - `src/server/features/auth/procedures/turnstile.procedure.ts` — new file
+  - `src/server/features/auth/controllers/auth.controller.ts` — added import + use arrays on 5 actions
+- **Learnings for future iterations:**
+  - Igniter procedures follow pattern: `igniter.procedure({ name, handler: async (options, ctx) => {} })` returning `{}` for pass-through or `Response.json()` for rejection
+  - Actions without `use` array can have one added — just add `use: [procedure()]` to the mutation/query config
+  - Cloudflare Turnstile siteverify uses `application/x-www-form-urlencoded` content type, not JSON
+  - Pre-existing TS errors (~60+) remain in unrelated files — no new errors from US-009
+---

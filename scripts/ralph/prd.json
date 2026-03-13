@@ -181,8 +181,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created turnstile.procedure.ts with fail-open dev, fail-closed prod, 5s timeout. Applied to login, register, signupOTP, forgotPassword, loginOTPPhone via use: [turnstileProcedure()]."
     },
     {
       "id": "US-010",
