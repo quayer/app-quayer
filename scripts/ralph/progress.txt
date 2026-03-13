@@ -1,0 +1,59 @@
+## Codebase Patterns
+
+- **Cookie name:** auth usa `accessToken` (não `access_token`) — setCookie em auth.controller.ts line ~89
+- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
+- **PhoneInput:** usa react-international-phone + usePhoneInput hook; forwardRef expondo ref do input nativo; `forceDialCode: true` mantém Brasil selecionado
+- **looksLikePhone:** `const clean = v.replace(/[^\d]/g, ""); return clean.length >= 8` — funciona com E.164 e nacional
+- **normalizePhone backend:** `phone.replace(/\D/g, "")` strip tudo — aceita qualquer formato
+- **UAZAPI_INSTANCE_TOKEN env:** fallback quando nenhuma connection no DB tem uazapiToken
+- **igniter schema:** regenerar manualmente quando CLI falha (ajv/dist/core error)
+- **apiFetch helper:** retorna response.json() raw — data.data é o array
+- **Git mmap workaround:** Use `git hash-object -w <file>` then `git update-index --add --cacheinfo` when `git add` fails. For commits: rebuild index with `git ls-tree -r HEAD`, then `git write-tree` + `git commit-tree` + `git update-ref`
+- **Prisma migrate shadow DB issues:** When `prisma migrate dev` fails with shadow DB errors, create migration SQL manually and use `prisma migrate deploy`. Mark existing migrations as applied with `prisma migrate resolve --applied <name>`
+- **Prisma v7 datasource:** URL goes in `prisma.config.ts`, NOT in schema.prisma `datasource` block. Remove `url = env("DATABASE_URL")` from schema
+- **Corrupted git objects:** `.cursor/rules` tree object `fdc1aea` is missing from packfile. Workaround: skip it during index rebuild, use `git ls-tree -r HEAD 2>&1 | grep -v "^error:"`
+- **dev server:** roda em http://localhost:3000 — verificar com `curl -s http://localhost:3000/api/health`
+- **Tailwind dark mode / CSS vars:** globals.css define vars como `oklch(...)` diretamente (NÃO como valores de canal HSL). Ao usar inline styles, usar `var(--popover)` etc. diretamente — NUNCA `hsl(var(--popover))` pois quebra o color. Em classes Tailwind usar `bg-popover`, `text-popover-foreground` etc.
+- **FieldSeparator bg:** usa `bg-card` (não `bg-background`) pois o separador fica dentro de um Card — em dark mode card e background têm cores diferentes
+- **WCAG 2.1 AA:** contraste mínimo 4.5:1 texto normal, 3:1 elementos UI; touch target mínimo 44×44px; focus-visible em todos elementos interativos
+- **Shadcn components path:** componentes ficam em `src/client/components/ui/` — usar esses, não criar novos
+- **Igniter data pattern:** `const { data } = api.x.y.useQuery()` — data pode ser `{ data: [...] }` ou array direto dependendo do controller
+- **Array guard pattern:** `Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []` — previne `.filter is not a function`
+
+---
+
+# Ralph Progress Log
+
+## Previous PRD: UX Audit All Pages (ralph/ux-audit-all-pages)
+Archived to: scripts/ralph/archive/prd-ux-audit-all-pages.json
+US-001 and US-002 completed. Remaining stories paused.
+
+---
+
+## New PRD: Auth Platform Hardening (ralph/auth-platform-hardening)
+Started: Thu Mar 13 2026
+Scope: MFA/TOTP, Bot Detection (Turnstile), Custom Roles, Verified Domains, SCIM Provisioning
+Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US-018→020)
+---
+
+## 2026-03-13 ~03:30 UTC-3 - US-001
+- **Implemented:** Schema e modelos Prisma para TOTP 2FA
+- **Changes:**
+  - Added `twoFactorEnabled Boolean @default(false)` to User model
+  - Added `TotpDevice` model (id, userId, secret, name, verified, createdAt) with `@@map("totp_devices")`
+  - Added `RecoveryCode` model (id, userId, code, usedAt, createdAt) with `@@map("recovery_codes")`
+  - Added relations: User hasMany TotpDevice, User hasMany RecoveryCode (both with onDelete: Cascade)
+  - Added indexes: `@@index([userId])` on both new models
+  - Created migration `20260313200000_add_totp_2fa` manually (shadow DB unavailable)
+  - Applied migration with `prisma migrate deploy`
+  - Removed deprecated `url = env("DATABASE_URL")` from schema datasource (Prisma v7 uses prisma.config.ts)
+- **Files changed:**
+  - `prisma/schema.prisma` — added field + 2 models + relations
+  - `prisma/migrations/20260313200000_add_totp_2fa/migration.sql` — new migration
+- **Learnings for future iterations:**
+  - Git repo has corrupted `.cursor/rules` tree object — must use low-level git commands for all operations
+  - `git checkout` between branches fails with mmap error — use `git symbolic-ref HEAD` + `git read-tree` as workaround
+  - Pre-existing TS errors in `admin/actions.ts`, `EmailSettings.tsx`, etc. — not related to schema changes, should not block
+  - Prisma v7 removed `url` from datasource block in schema — connection config lives in `prisma.config.ts`
+  - Shadow database migration replay fails due to inconsistent migration history — use `migrate deploy` + `migrate resolve` instead
+---
