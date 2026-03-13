@@ -59,6 +59,7 @@ import {
 } from '@/lib/auth/jwt';
 import { authProcedure } from '../procedures/auth.procedure';
 import { csrfProcedure } from '../procedures/csrf.procedure';
+import { turnstileProcedure } from '../procedures/turnstile.procedure';
 import { UserRole } from '@/lib/auth/roles';
 import { emailService } from '@/lib/email';
 import { authRateLimiter } from '@/lib/rate-limit/rate-limiter';
@@ -373,6 +374,7 @@ export const authController = igniter.controller({
       path: '/register',
       method: 'POST',
       body: registerSchema,
+      use: [turnstileProcedure()],
       handler: async ({ request, response, context }) => {
         // Rate limiting
         const identifier = getClientIdentifier(request);
@@ -494,6 +496,7 @@ export const authController = igniter.controller({
       path: '/login',
       method: 'POST',
       body: loginSchema,
+      use: [turnstileProcedure()],
       handler: async ({ request, response }) => {
         // Rate limiting
         const identifier = getClientIdentifier(request);
@@ -1045,6 +1048,7 @@ export const authController = igniter.controller({
       path: '/forgot-password',
       method: 'POST',
       body: forgotPasswordSchema,
+      use: [turnstileProcedure()],
       handler: async ({ request, response }) => {
         const { email } = request.body;
 
@@ -1463,6 +1467,7 @@ export const authController = igniter.controller({
       path: '/signup-otp',
       method: 'POST',
       body: signupOTPSchema,
+      use: [turnstileProcedure()],
       handler: async ({ request, response }) => {
         const identifier = getClientIdentifier(request);
         const rateLimit = await authRateLimiter.check(identifier);
@@ -2532,6 +2537,7 @@ export const authController = igniter.controller({
       path: '/login-otp-phone',
       method: 'POST',
       body: phoneOTPSchema,
+      use: [turnstileProcedure()],
       handler: async ({ request, response }) => {
         const normalized = normalizePhone(request.body.phone)
         const clientIp = getClientIdentifier(request)
