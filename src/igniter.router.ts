@@ -17,6 +17,7 @@ import { ipRulesController } from '@/server/features/ip-rules'
 import { filesController } from '@/server/features/files'
 import { customRolesController } from '@/server/features/permissions/controllers/custom-roles.controller'
 import { verifiedDomainsController } from '@/server/features/verified-domains/controllers/verified-domains.controller'
+import { scimTokensController } from '@/server/features/scim-tokens/controllers/scim-tokens.controller'
 
 /**
  * @description Main application router configuration
@@ -44,6 +45,7 @@ export const AppRouter = igniter.router({
     files: filesController,
     customRoles: customRolesController,
     verifiedDomains: verifiedDomainsController,
+    scimTokens: scimTokensController,
   }
 })
 

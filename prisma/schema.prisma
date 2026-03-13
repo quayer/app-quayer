@@ -83,6 +83,7 @@ model Organization {
   quickReplies QuickReply[]
   customRoles     CustomRole[]
   verifiedDomains VerifiedDomain[]
+  scimTokens      ScimToken[]
 
   @@index([document])
   @@index([slug])
@@ -2087,4 +2088,24 @@ model RecoveryCode {
 
   @@index([userId])
   @@map("recovery_codes")
+}
+
+// ============================================
+// SCIM Provisioning Tokens
+// ============================================
+
+model ScimToken {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String // Friendly name for the token (e.g., "Okta SCIM")
+  tokenHash      String // bcrypt hash of the 64-byte hex token
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("scim_tokens")
 }
