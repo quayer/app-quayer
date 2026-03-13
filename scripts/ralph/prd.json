@@ -241,8 +241,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Created customRolesController with list/create/get/update/delete actions. All actions protected with authProcedure, check org role >= master. Slug auto-generated via kebab-case. Permissions validated with z.nativeEnum(Resource) and z.nativeEnum(Action). Delete supports force+reassignToRoleId. Registered in igniter.router.ts."
     },
     {
       "id": "US-013",

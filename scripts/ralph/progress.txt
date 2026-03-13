@@ -300,3 +300,27 @@ Phases: 1-Security (US-001→010), 2-Governance (US-011→017), 3-Enterprise (US
   - Priority maps to ROLE_HIERARCHY: master=3, manager=2, user=1
   - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-011
 ---
+
+## 2026-03-13 ~13:00 UTC-3 - US-012
+- **Implemented:** CRUD de Custom Roles — controller Igniter
+- **Changes:**
+  - Created `src/server/features/permissions/controllers/custom-roles.controller.ts` with 5 actions:
+    - `list` (query): returns CustomRole[] for current org, ordered by priority DESC, includes `_count.userOrganizations`
+    - `create` (mutation): validates name (3-50 chars), description, permissions (Json via z.nativeEnum), priority (1-2), auto-generates slug (kebab-case), checks uniqueness per org
+    - `get` (query): returns single role with `_count.userOrganizations`, checks org ownership
+    - `update` (mutation): edits name/description/permissions/priority, rejects if isSystem=true, regenerates slug if name changes with uniqueness check
+    - `delete` (mutation): rejects system roles, rejects if users assigned (returns count), supports force=true + reassignToRoleId for atomic reassign + delete via $transaction
+  - All actions use `authProcedure({ required: true })` and check `organizationRole === 'master'` or `user.role === 'admin'`
+  - Permissions validated with `z.record(z.nativeEnum(Resource), z.array(z.nativeEnum(Action)))` ensuring only valid Resource/Action enum values
+  - Registered `customRolesController` in `src/igniter.router.ts` as `customRoles` key
+- **Files changed:**
+  - `src/server/features/permissions/controllers/custom-roles.controller.ts` — new controller file
+  - `src/igniter.router.ts` — added import + registration of customRolesController
+- **Learnings for future iterations:**
+  - `z.nativeEnum(Resource)` and `z.nativeEnum(Action)` provide strict validation against TypeScript enums — use for any enum-based JSON validation
+  - `z.record(keySchema, valueSchema)` validates object keys and values — perfect for permissions JSON structure
+  - Igniter controller pattern: `response.created()` for POST success, `response.success()` for GET/PUT/DELETE
+  - Custom role slug generation: normalize NFD + strip accents + kebab-case — handles Portuguese characters
+  - `@@unique([organizationId, slug])` maps to Prisma `findUnique({ where: { organizationId_slug: { organizationId, slug } } })`
+  - Pre-existing TS errors (~60+) remain in unrelated files — zero new errors from US-012
+---
