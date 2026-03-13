@@ -15,6 +15,7 @@ import {
   Bell,
   Mail,
   ShieldCheck,
+  Globe,
 } from "lucide-react"
 
 import { NavMain } from "@/client/components/nav-main"
@@ -100,6 +101,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           title: "Roles",
           url: "/admin/roles",
           icon: ShieldCheck,
+        },
+        {
+          title: "Dominios",
+          url: "/admin/domains",
+          icon: Globe,
         },
         {
           title: "Configurações",
