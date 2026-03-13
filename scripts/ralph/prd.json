@@ -324,8 +324,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added autoJoinByVerifiedDomain helper in auth.controller.ts. Integrated in verifyEmail, verifySignupOTP, verifyMagicLink (signup branch), verifyLoginOTPPhone (new users). Fail-open with per-org error handling. Sets currentOrgId if user has none. Audit log domain_auto_join with orgId+domain metadata."
     },
     {
       "id": "US-017",
