@@ -247,7 +247,12 @@ export function OnboardingForm({
 
               <Button
                 type="submit"
-                className="w-full min-h-[44px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-500 hover:to-indigo-500 border-0"
+                className={cn(
+                  "w-full min-h-[44px] transition-colors",
+                  firstName.trim() && companyName.trim()
+                    ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                    : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                )}
                 disabled={isLoading || !firstName.trim() || !companyName.trim()}
                 aria-busy={isLoading}
               >

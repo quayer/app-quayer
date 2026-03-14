@@ -9,7 +9,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="relative min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="relative min-h-screen bg-white dark:bg-gray-950">
       <div className="relative">
         <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-gray-900 dark:text-white" role="status"><span className="sr-only">Carregando...</span><span aria-hidden="true">Carregando...</span></div>}>
           {children}

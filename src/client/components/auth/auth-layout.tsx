@@ -9,7 +9,7 @@ interface AuthLayoutProps {
 
 export function AuthLayout({ children }: AuthLayoutProps) {
   return (
-    <div className="relative min-h-screen w-full bg-gray-50 dark:bg-gray-950">
+    <div className="relative min-h-screen w-full bg-white dark:bg-gray-950">
       <div className="flex min-h-screen items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

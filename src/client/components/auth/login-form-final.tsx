@@ -345,11 +345,16 @@ export function LoginFormFinal({
             action="login"
           />
 
-          {/* SEND CODE BUTTON - PRIMARY GRADIENT */}
+          {/* SEND CODE BUTTON — neutral when empty, dark when has input */}
           <Field>
             <Button
               type="submit"
-              className="w-full min-h-[44px] bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white border-0"
+              className={cn(
+                "w-full min-h-[44px] transition-colors",
+                email.trim()
+                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              )}
               disabled={isLoading || isGoogleLoading}
               aria-busy={isLoading}
             >

@@ -250,7 +250,12 @@ export function SignupForm({
             <Button
               type="submit"
               disabled={isLoading || isGoogleLoading}
-              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white min-h-[44px]"
+              className={cn(
+                "w-full min-h-[44px] transition-colors",
+                email.trim()
+                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+              )}
               aria-busy={isLoading}
             >
               {isLoading ? (
