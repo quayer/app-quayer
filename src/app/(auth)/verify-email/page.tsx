@@ -4,13 +4,11 @@ import { Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Image from "next/image"
 import Link from "next/link"
-import { LoginOTPForm } from "@/client/components/auth/login-otp-form"
+import { VerifyEmailForm } from "@/client/components/auth/verify-email-form"
 
-function LoginVerifyContent() {
+function VerifyEmailContent() {
   const searchParams = useSearchParams()
   const email = searchParams.get('email')
-  const phone = searchParams.get('phone')
-  const magicLinkSessionId = searchParams.get('mlsid')
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
@@ -21,24 +19,23 @@ function LoginVerifyContent() {
             alt="Quayer"
             width={120}
             height={28}
-            style={{ height: "auto" }}
             priority
           />
         </Link>
-        <LoginOTPForm email={email || undefined} phone={phone || undefined} magicLinkSessionId={magicLinkSessionId || undefined} />
+        <VerifyEmailForm email={email || undefined} />
       </div>
     </div>
   )
 }
 
-export default function LoginVerifyPage() {
+export default function VerifyEmailPage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-svh" role="status">
+      <div className="flex items-center justify-center min-h-screen">
         <p className="text-gray-500 dark:text-gray-400">Carregando...</p>
       </div>
     }>
-      <LoginVerifyContent />
+      <VerifyEmailContent />
     </Suspense>
   )
 }

@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { api } from "@/igniter.client"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/client/components/ui/card"
 import { Loader2, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/client/components/ui/button"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
+import Image from "next/image"
+import Link from "next/link"
 
 export function LoginVerifyMagicClient() {
   const router = useRouter()
@@ -62,8 +63,6 @@ export function LoginVerifyMagicClient() {
           }
 
           // Notificar a aba original (OTP) que o login foi feito via magic link
-          // Se conseguir notificar, fecha esta aba (a original redireciona)
-          // Se não (sem BroadcastChannel ou sem aba original), redireciona aqui mesmo
           let notifiedOriginalTab = false
           try {
             const bc = new BroadcastChannel('quayer-auth')
@@ -74,9 +73,7 @@ export function LoginVerifyMagicClient() {
 
           setTimeout(() => {
             if (notifiedOriginalTab) {
-              // Tentar fechar esta aba — só funciona se foi aberta via JS/link
               window.close()
-              // Fallback: se não fechou (restrição do browser), redireciona
               window.location.href = redirectPath
             } else {
               window.location.href = redirectPath
@@ -108,54 +105,69 @@ export function LoginVerifyMagicClient() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-xl">Verificação de Login</CardTitle>
-          <CardDescription>
-            {status === 'verifying' && 'Verificando seu link mágico...'}
-            {status === 'success' && 'Login realizado com sucesso!'}
-            {status === 'error' && 'Erro na verificação'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4">
-          {status === 'verifying' && (
-            <div role="status" aria-label="Verificando link mágico" className="flex flex-col items-center gap-4">
-              <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
-              <p className="text-sm text-muted-foreground">
-                Aguarde enquanto verificamos seu link...
-              </p>
-            </div>
-          )}
+    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <Link href="/login" className="flex items-center gap-2 self-start font-medium">
+          <Image
+            src="/logo.svg"
+            alt="Quayer"
+            width={120}
+            height={28}
+            style={{ height: "auto" }}
+            priority
+          />
+        </Link>
 
-          {status === 'success' && (
-            <>
-              <CheckCircle2 className="h-12 w-12 text-green-600 dark:text-green-400" aria-hidden="true" />
-              <p className="text-sm text-center">
-                Login realizado com sucesso!<br />
-                Redirecionando para o dashboard...
-              </p>
-            </>
-          )}
+        <div className="flex flex-col gap-8">
+          {/* Header */}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+              {status === 'verifying' && 'Verificando login...'}
+              {status === 'success' && 'Login realizado!'}
+              {status === 'error' && 'Erro na verificação'}
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {status === 'verifying' && 'Aguarde enquanto verificamos seu link...'}
+              {status === 'success' && 'Redirecionando para o dashboard...'}
+              {status === 'error' && error}
+            </p>
+          </div>
 
-          {status === 'error' && (
-            <>
-              <XCircle className="h-12 w-12 text-destructive" aria-hidden="true" />
-              <p className="text-sm text-center text-destructive">
-                {error}
-              </p>
-              <div className="flex flex-col gap-2 w-full">
+          {/* Status */}
+          <div className="flex flex-col items-center gap-4">
+            {status === 'verifying' && (
+              <div role="status" aria-label="Verificando link mágico" className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-gray-400" aria-hidden="true" />
+                <span className="sr-only">Verificando...</span>
+              </div>
+            )}
+
+            {status === 'success' && (
+              <div className="flex flex-col items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
+                  <CheckCircle2 className="h-6 w-6 text-green-400" aria-hidden="true" />
+                </div>
+                <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-hidden="true" />
+                <span className="sr-only">Redirecionando...</span>
+              </div>
+            )}
+
+            {status === 'error' && (
+              <div className="flex flex-col items-center gap-4 w-full">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/20">
+                  <XCircle className="h-6 w-6 text-red-400" aria-hidden="true" />
+                </div>
                 <Button
                   onClick={() => router.push('/login')}
-                  className="w-full"
+                  className="w-full min-h-[44px] bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
                 >
                   Fazer login novamente
                 </Button>
               </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

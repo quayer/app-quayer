@@ -5,13 +5,6 @@ import { useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/client/components/ui/card"
-import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -23,7 +16,7 @@ import {
   InputOTPSlot,
 } from "@/client/components/ui/input-otp"
 import { Alert, AlertDescription } from "@/client/components/ui/alert"
-import { Loader2 } from "lucide-react"
+import { Loader2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { api } from "@/igniter.client"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
@@ -340,105 +333,111 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   }
 
   return (
-    <Card className={cn("", className)} {...props}>
-      <CardHeader className="text-center">
-        <CardTitle className="text-xl flex items-center justify-center gap-2">
-          {phone ? (
-            <>
-              Código via
-              <span className="inline-flex items-center gap-1 font-semibold">
-                <WhatsAppIcon className="h-5 w-5 text-[#25D366]" />
-                WhatsApp
-              </span>
-            </>
-          ) : 'Verificação por Email'}
-        </CardTitle>
-        <CardDescription>
+    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
+      {/* Header */}
+      <div className="space-y-2">
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white flex items-center gap-2">
+          Verificar código
+          {phone && <WhatsAppIcon className="h-5 w-5 text-[#25D366]" />}
+        </h1>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
           {phone
-            ? `Código enviado para ${formatPhoneDisplay(phone)}`
+            ? <>Enviado via <span className="text-[#25D366] font-medium">WhatsApp</span> para {formatPhoneDisplay(phone)}</>
             : `Enviamos um código de 6 dígitos para ${email || "seu email"}.`
           }
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit}>
-          <FieldGroup>
-            {error && (
-              <Alert variant="destructive" role="alert" aria-live="assertive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
+        </p>
+      </div>
 
-            <Field className="flex flex-col items-center space-y-2">
-              <FieldLabel htmlFor="otp" className="sr-only">
-                Código de verificação
-              </FieldLabel>
-              <div className="flex justify-center w-full">
-                <InputOTP
-                  id="otp"
-                  value={otp}
-                  onChange={setOtp}
-                  maxLength={6}
-                  disabled={isLoading || !identifier}
-                  autoFocus
-                  required
-                >
-                  <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border">
-                    <InputOTPSlot index={0} />
-                    <InputOTPSlot index={1} />
-                    <InputOTPSlot index={2} />
-                    <InputOTPSlot index={3} />
-                    <InputOTPSlot index={4} />
-                    <InputOTPSlot index={5} />
-                  </InputOTPGroup>
-                </InputOTP>
-              </div>
-              <FieldDescription className="text-center mt-2">
-                {phone ? 'Verifique suas mensagens do WhatsApp' : 'Verifique sua caixa de entrada'}
+      {/* Alerts */}
+      {error && (
+        <Alert variant="destructive" role="alert" aria-live="assertive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* OTP Form */}
+      <form onSubmit={handleSubmit}>
+        <FieldGroup>
+          <Field className="flex flex-col space-y-2">
+            <FieldLabel htmlFor="otp" className="sr-only">
+              Código de verificação
+            </FieldLabel>
+            <div className="w-full">
+              <InputOTP
+                id="otp"
+                value={otp}
+                onChange={setOtp}
+                maxLength={6}
+                disabled={isLoading || !identifier}
+                autoFocus
+                required
+                aria-required="true"
+                containerClassName="!w-full"
+              >
+                <InputOTPGroup className="!w-full gap-2">
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <InputOTPSlot
+                      key={i}
+                      index={i}
+                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-md !border !border-gray-200 dark:!border-gray-700 !bg-white dark:!bg-gray-800 !text-gray-900 dark:!text-white data-[active=true]:!border-gray-400 dark:data-[active=true]:!border-gray-500 data-[active=true]:!ring-gray-400/30 dark:data-[active=true]:!ring-gray-500/30"
+                    />
+                  ))}
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+            {!phone && (
+              <FieldDescription className="text-left mt-2 text-gray-500 dark:text-gray-400">
+                Verifique sua caixa de entrada
               </FieldDescription>
-            </Field>
+            )}
+          </Field>
 
-            <Button
-              type="submit"
-              className="w-full min-h-[44px]"
-              disabled={isLoading || otp.length !== 6}
-              aria-busy={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                  Verificando...
-                </>
-              ) : (
-                "Verificar código"
-              )}
-            </Button>
+          <Button
+            type="submit"
+            className={cn(
+              "w-full min-h-[44px] transition-colors",
+              otp.length === 6
+                ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+            )}
+            disabled={isLoading || otp.length !== 6}
+            aria-busy={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                Verificando...
+              </>
+            ) : (
+              "Verificar código"
+            )}
+          </Button>
 
-            <FieldDescription className="text-center">
-              {phone ? 'Não recebeu no WhatsApp?' : 'Não recebeu o código?'}{" "}
-              {canResend ? (
-                <button
-                  type="button"
-                  onClick={handleResend}
-                  className="min-h-[44px] min-w-[44px] inline-flex items-center text-primary underline underline-offset-4 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                >
-                  Reenviar
-                </button>
-              ) : (
-                <span className="text-muted-foreground" aria-live="polite" aria-atomic="true">
-                  Aguarde {countdown}s
-                </span>
-              )}
-            </FieldDescription>
+          <FieldDescription className="text-left text-gray-500 dark:text-gray-400">
+            {phone ? 'Não recebeu no WhatsApp?' : 'Não recebeu o código?'}{" "}
+            {canResend ? (
+              <button
+                type="button"
+                onClick={handleResend}
+                className="min-h-[44px] min-w-[44px] inline-flex items-center text-gray-900 dark:text-white underline underline-offset-4 hover:text-gray-700 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+              >
+                Reenviar
+              </button>
+            ) : (
+              <span className="text-gray-400 dark:text-gray-500" aria-live="polite" aria-atomic="true">
+                Aguarde {countdown}s
+              </span>
+            )}
+          </FieldDescription>
 
-            <FieldDescription className="text-center">
-              <Link href="/login" className="inline-flex min-h-[44px] items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
-                <span aria-hidden="true">←</span> Voltar
-              </Link>
-            </FieldDescription>
-          </FieldGroup>
-        </form>
-      </CardContent>
-    </Card>
+          <FieldDescription className="text-left">
+            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              Voltar
+            </Link>
+          </FieldDescription>
+        </FieldGroup>
+      </form>
+    </div>
   )
 }

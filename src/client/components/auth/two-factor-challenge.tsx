@@ -4,13 +4,6 @@ import { useState, useEffect, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/client/components/ui/card"
-import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -189,186 +182,194 @@ export function TwoFactorChallenge({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-2">
-            <ShieldCheck className="h-10 w-10 text-primary" aria-hidden="true" />
-          </div>
-          <CardTitle className="text-xl">Verificação em duas etapas</CardTitle>
-          <CardDescription>
-            {mode === "totp"
-              ? "Digite o código de 6 dígitos do seu aplicativo autenticador."
-              : "Digite um dos seus códigos de recuperação."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {mode === "totp" ? (
-            <form onSubmit={(e) => { e.preventDefault(); handleTotpSubmit(totpCode) }}>
-              <FieldGroup>
-                {error && (
-                  <Alert variant="destructive" role="alert" aria-live="assertive">
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
+    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
+      {/* Header */}
+      <div className="space-y-2 text-center">
+        <div className="flex justify-center mb-2">
+          <ShieldCheck className="h-10 w-10 text-gray-900 dark:text-white" aria-hidden="true" />
+        </div>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Verificação em duas etapas</h1>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          {mode === "totp"
+            ? "Digite o código de 6 dígitos do seu aplicativo autenticador."
+            : "Digite um dos seus códigos de recuperação."}
+        </p>
+      </div>
 
-                {warning && (
-                  <Alert>
-                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription>{warning}</AlertDescription>
-                  </Alert>
-                )}
+      {mode === "totp" ? (
+        <form onSubmit={(e) => { e.preventDefault(); handleTotpSubmit(totpCode) }}>
+          <FieldGroup>
+            {error && (
+              <Alert variant="destructive" role="alert" aria-live="assertive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-                <Field className="flex flex-col items-center space-y-2">
-                  <FieldLabel htmlFor="totp-code" className="sr-only">
-                    Código TOTP
-                  </FieldLabel>
-                  <div className="flex justify-center w-full">
-                    <InputOTP
-                      id="totp-code"
-                      value={totpCode}
-                      onChange={setTotpCode}
-                      maxLength={6}
-                      disabled={isLoading || attemptsRemaining <= 0}
-                      autoFocus
-                    >
-                      <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border">
-                        <InputOTPSlot index={0} />
-                        <InputOTPSlot index={1} />
-                        <InputOTPSlot index={2} />
-                        <InputOTPSlot index={3} />
-                        <InputOTPSlot index={4} />
-                        <InputOTPSlot index={5} />
-                      </InputOTPGroup>
-                    </InputOTP>
-                  </div>
-                </Field>
+            {warning && (
+              <Alert>
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                <AlertDescription>{warning}</AlertDescription>
+              </Alert>
+            )}
 
-                {attemptsRemaining < MAX_ATTEMPTS && attemptsRemaining > 0 && (
-                  <FieldDescription className="text-center text-amber-600 dark:text-amber-400">
-                    {attemptsRemaining} tentativa{attemptsRemaining !== 1 ? "s" : ""} restante{attemptsRemaining !== 1 ? "s" : ""}
-                  </FieldDescription>
-                )}
-
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isLoading || totpCode.length !== 6 || attemptsRemaining <= 0}
+            <Field className="flex flex-col items-center space-y-2">
+              <FieldLabel htmlFor="totp-code" className="sr-only">
+                Código TOTP
+              </FieldLabel>
+              <div className="flex justify-center w-full">
+                <InputOTP
+                  id="totp-code"
+                  value={totpCode}
+                  onChange={setTotpCode}
+                  maxLength={6}
+                  disabled={isLoading || attemptsRemaining <= 0}
+                  autoFocus
                 >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                      Verificando...
-                    </>
-                  ) : (
-                    "Verificar código"
-                  )}
-                </Button>
+                  <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border *:data-[slot=input-otp-slot]:border-gray-200 dark:*:data-[slot=input-otp-slot]:border-gray-700 *:data-[slot=input-otp-slot]:bg-white dark:*:data-[slot=input-otp-slot]:bg-gray-800 *:data-[slot=input-otp-slot]:text-gray-900 dark:*:data-[slot=input-otp-slot]:text-white">
+                    <InputOTPSlot index={0} />
+                    <InputOTPSlot index={1} />
+                    <InputOTPSlot index={2} />
+                    <InputOTPSlot index={3} />
+                    <InputOTPSlot index={4} />
+                    <InputOTPSlot index={5} />
+                  </InputOTPGroup>
+                </InputOTP>
+              </div>
+            </Field>
 
-                <FieldDescription className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => switchMode("recovery")}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                  >
-                    <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
-                    Perdeu acesso ao autenticador?
-                  </button>
-                </FieldDescription>
+            {attemptsRemaining < MAX_ATTEMPTS && attemptsRemaining > 0 && (
+              <FieldDescription className="text-center text-amber-600 dark:text-amber-400">
+                {attemptsRemaining} tentativa{attemptsRemaining !== 1 ? "s" : ""} restante{attemptsRemaining !== 1 ? "s" : ""}
+              </FieldDescription>
+            )}
 
-                <FieldDescription className="text-center">
-                  <button
-                    type="button"
-                    onClick={onCancel}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                    Voltar ao login
-                  </button>
-                </FieldDescription>
-              </FieldGroup>
-            </form>
-          ) : (
-            <form onSubmit={handleRecoverySubmit}>
-              <FieldGroup>
-                {error && (
-                  <Alert variant="destructive" role="alert" aria-live="assertive">
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
+            <Button
+              type="submit"
+              className={cn(
+                "w-full min-h-[44px] transition-colors",
+                totpCode.length === 6
+                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+              )}
+              disabled={isLoading || totpCode.length !== 6 || attemptsRemaining <= 0}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  Verificando...
+                </>
+              ) : (
+                "Verificar código"
+              )}
+            </Button>
 
-                {warning && (
-                  <Alert>
-                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription>{warning}</AlertDescription>
-                  </Alert>
-                )}
+            <FieldDescription className="text-center">
+              <button
+                type="button"
+                onClick={() => switchMode("recovery")}
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+              >
+                <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                Perdeu acesso ao autenticador?
+              </button>
+            </FieldDescription>
 
-                <Field>
-                  <FieldLabel htmlFor="recovery-code">Código de recuperação</FieldLabel>
-                  <Input
-                    id="recovery-code"
-                    type="text"
-                    placeholder="ex: a1b2c3d4"
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value)}
-                    disabled={isLoading || attemptsRemaining <= 0}
-                    autoFocus
-                    maxLength={20}
-                    className="font-mono text-center tracking-widest"
-                  />
-                  <FieldDescription>
-                    Use um dos 8 códigos gerados durante a configuração do 2FA.
-                  </FieldDescription>
-                </Field>
+            <FieldDescription className="text-center">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                Voltar ao login
+              </button>
+            </FieldDescription>
+          </FieldGroup>
+        </form>
+      ) : (
+        <form onSubmit={handleRecoverySubmit}>
+          <FieldGroup>
+            {error && (
+              <Alert variant="destructive" role="alert" aria-live="assertive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-                {attemptsRemaining < MAX_ATTEMPTS && attemptsRemaining > 0 && (
-                  <FieldDescription className="text-center text-amber-600 dark:text-amber-400">
-                    {attemptsRemaining} tentativa{attemptsRemaining !== 1 ? "s" : ""} restante{attemptsRemaining !== 1 ? "s" : ""}
-                  </FieldDescription>
-                )}
+            {warning && (
+              <Alert>
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                <AlertDescription>{warning}</AlertDescription>
+              </Alert>
+            )}
 
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isLoading || !recoveryCode.trim() || attemptsRemaining <= 0}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                      Verificando...
-                    </>
-                  ) : (
-                    "Verificar código de recuperação"
-                  )}
-                </Button>
+            <Field>
+              <FieldLabel htmlFor="recovery-code" className="text-sm font-medium text-gray-900 dark:text-gray-200">Código de recuperação</FieldLabel>
+              <Input
+                id="recovery-code"
+                type="text"
+                placeholder="ex: a1b2c3d4"
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                disabled={isLoading || attemptsRemaining <= 0}
+                autoFocus
+                maxLength={20}
+                className="font-mono text-center tracking-widest bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              />
+              <FieldDescription className="text-gray-500 dark:text-gray-400">
+                Use um dos 8 códigos gerados durante a configuração do 2FA.
+              </FieldDescription>
+            </Field>
 
-                <FieldDescription className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => switchMode("totp")}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                  >
-                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                    Usar código do autenticador
-                  </button>
-                </FieldDescription>
+            {attemptsRemaining < MAX_ATTEMPTS && attemptsRemaining > 0 && (
+              <FieldDescription className="text-center text-amber-600 dark:text-amber-400">
+                {attemptsRemaining} tentativa{attemptsRemaining !== 1 ? "s" : ""} restante{attemptsRemaining !== 1 ? "s" : ""}
+              </FieldDescription>
+            )}
 
-                <FieldDescription className="text-center">
-                  <button
-                    type="button"
-                    onClick={onCancel}
-                    className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                    Voltar ao login
-                  </button>
-                </FieldDescription>
-              </FieldGroup>
-            </form>
-          )}
-        </CardContent>
-      </Card>
+            <Button
+              type="submit"
+              className={cn(
+                "w-full min-h-[44px] transition-colors",
+                recoveryCode.trim()
+                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+              )}
+              disabled={isLoading || !recoveryCode.trim() || attemptsRemaining <= 0}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  Verificando...
+                </>
+              ) : (
+                "Verificar código de recuperação"
+              )}
+            </Button>
+
+            <FieldDescription className="text-center">
+              <button
+                type="button"
+                onClick={() => switchMode("totp")}
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                Usar código do autenticador
+              </button>
+            </FieldDescription>
+
+            <FieldDescription className="text-center">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                Voltar ao login
+              </button>
+            </FieldDescription>
+          </FieldGroup>
+        </form>
+      )}
     </div>
   )
 }
