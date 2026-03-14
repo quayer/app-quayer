@@ -238,47 +238,27 @@ export function LoginFormFinal({
   return (
     <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
       {/* Header */}
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-white">Bem-vindo de volta</h1>
-        <p className="text-gray-400">Entre com sua conta para continuar</p>
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Faça login no Quayer</h1>
+        <p className="text-gray-500 dark:text-gray-400">
+          Não tem conta?{" "}
+          <Link href="/signup" className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 rounded-sm">
+            Comece agora &rsaquo;
+          </Link>
+        </p>
       </div>
 
       <form onSubmit={handleOTPRequest}>
         <FieldGroup>
           {error && (
-            <Alert variant="destructive" role="alert" aria-live="assertive" className="border-red-500/50 bg-red-500/10 text-red-200">
+            <Alert variant="destructive" role="alert" aria-live="assertive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          {/* GOOGLE OAUTH — FIRST */}
+          {/* EMAIL / PHONE INPUT — FIRST */}
           <Field>
-            <Button
-              variant="outline"
-              type="button"
-              onClick={handleGoogleLogin}
-              disabled={isGoogleLoading || isLoading}
-              className="w-full min-h-[44px] bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 hover:text-gray-800"
-            >
-              {isGoogleLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                  Conectando...
-                </>
-              ) : (
-                <>
-                  <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
-                  Continuar com Google
-                </>
-              )}
-            </Button>
-          </Field>
-
-          <FieldSeparator className="text-gray-400 [&>span]:text-gray-400 [&>div]:border-gray-600">Ou continue com</FieldSeparator>
-
-          {/* EMAIL / PHONE INPUT */}
-          <Field>
-            <FieldLabel htmlFor="email" className="text-gray-300">Email ou Telefone</FieldLabel>
+            <FieldLabel htmlFor="email" className="text-gray-700 dark:text-gray-300">Email ou Telefone</FieldLabel>
             {/*
               Ambos inputs estão sempre no DOM — alternamos com hidden.
               Isso evita o flash de unmount/mount que causava delay.
@@ -292,14 +272,14 @@ export function LoginFormFinal({
                     aria-label="Selecionar país"
                     className={cn(
                       "flex items-center justify-center gap-1 h-9 !min-h-9 w-24 shrink-0 leading-none overflow-hidden",
-                      "border border-white/20 border-r-0 rounded-l-md px-2",
-                      "bg-white/10 hover:bg-white/15 text-white transition-colors",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent",
+                      "border border-gray-300 dark:border-gray-600 border-r-0 rounded-l-md px-2",
+                      "bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1",
                       "disabled:opacity-50 disabled:pointer-events-none"
                     )}
                   >
                     <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
-                    <span className="text-gray-300 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
+                    <span className="text-gray-600 dark:text-gray-300 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
                     <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" aria-hidden="true" />
                   </button>
                 </PopoverTrigger>
@@ -341,7 +321,7 @@ export function LoginFormFinal({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isLoading || isGoogleLoading}
-                className="flex-1 rounded-l-none border-l-0 shadow-none bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus-visible:ring-purple-500"
+                className="flex-1 rounded-l-none border-l-0 shadow-none bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:ring-purple-500"
               />
             </div>
             <Input
@@ -356,7 +336,7 @@ export function LoginFormFinal({
               disabled={isLoading || isGoogleLoading}
               autoFocus
               autoComplete="username webauthn"
-              className={cn("bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus-visible:ring-purple-500", isPhone && "hidden")}
+              className={cn("bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:ring-purple-500", isPhone && "hidden")}
             />
           </Field>
 
@@ -392,12 +372,30 @@ export function LoginFormFinal({
             </Button>
           </Field>
 
-          <FieldDescription className="text-center text-gray-400">
-            Não tem uma conta?{" "}
-            <Link href="/signup" className="text-white underline underline-offset-4 hover:text-purple-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent rounded-sm">
-              Cadastre-se
-            </Link>
-          </FieldDescription>
+          <FieldSeparator className="text-gray-400 dark:text-gray-500 [&>span]:text-gray-400 dark:[&>span]:text-gray-500 [&>div]:border-gray-300 dark:[&>div]:border-gray-700">ou</FieldSeparator>
+
+          {/* GOOGLE OAUTH — BELOW */}
+          <Field>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isGoogleLoading || isLoading}
+              className="w-full min-h-[44px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+            >
+              {isGoogleLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  Conectando...
+                </>
+              ) : (
+                <>
+                  <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
+                  Continuar com Google
+                </>
+              )}
+            </Button>
+          </Field>
         </FieldGroup>
       </form>
     </div>

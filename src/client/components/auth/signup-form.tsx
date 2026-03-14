@@ -164,53 +164,35 @@ export function SignupForm({
   return (
     <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
       {/* Header */}
-      <div className="text-center space-y-2">
-        <h1 className="text-2xl font-bold text-white">Crie sua conta</h1>
-        <p className="text-gray-400">Comece gratuitamente em segundos</p>
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Crie sua conta</h1>
+        <p className="text-gray-500 dark:text-gray-400">
+          Já tem conta?{" "}
+          <Link href="/login" className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 rounded-sm">
+            Faça login &rsaquo;
+          </Link>
+        </p>
       </div>
 
       {/* Alerts */}
       {error && (
-        <Alert variant="destructive" role="alert" aria-live="assertive" className="border-red-500/40 bg-red-500/10">
-          <AlertDescription className="text-red-300">{error}</AlertDescription>
+        <Alert variant="destructive" role="alert" aria-live="assertive">
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       {success && (
-        <Alert role="status" aria-live="polite" className="border-emerald-500/40 bg-emerald-500/10">
-          <AlertDescription className="text-emerald-400">{success}</AlertDescription>
+        <Alert role="status" aria-live="polite" className="border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10">
+          <AlertDescription className="text-emerald-700 dark:text-emerald-400">{success}</AlertDescription>
         </Alert>
       )}
 
-      {/* Google OAuth — First */}
-      <Button
-        type="button"
-        onClick={handleGoogleSignup}
-        disabled={isLoading || isGoogleLoading}
-        className="w-full bg-white text-gray-800 border border-gray-300 hover:bg-gray-50 min-h-[44px]"
-        aria-busy={isGoogleLoading}
-      >
-        {isGoogleLoading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-            Conectando...
-          </>
-        ) : (
-          <>
-            <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
-            Continuar com Google
-          </>
-        )}
-      </Button>
-
-      <FieldSeparator className="text-gray-400">Ou continue com email</FieldSeparator>
-
-      {/* Email/Phone Signup Form */}
+      {/* Email/Phone Signup Form — First */}
       <form onSubmit={handleEmailSignup}>
         <FieldGroup>
           {!isPhone && (
             <Field>
-              <FieldLabel htmlFor="name" className="text-gray-300">Nome completo</FieldLabel>
+              <FieldLabel htmlFor="name" className="text-gray-700 dark:text-gray-300">Nome completo</FieldLabel>
               <Input
                 id="name"
                 type="text"
@@ -221,13 +203,14 @@ export function SignupForm({
                 autoFocus
                 aria-invalid={!!nameError}
                 aria-describedby={nameError ? "name-error" : undefined}
+                className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
               {nameError && <FieldError id="name-error">{nameError}</FieldError>}
             </Field>
           )}
 
           <Field>
-            <FieldLabel htmlFor="email" className="text-gray-300">Email ou Telefone</FieldLabel>
+            <FieldLabel htmlFor="email" className="text-gray-700 dark:text-gray-300">Email ou Telefone</FieldLabel>
             {isPhone ? (
               <PhoneInput
                 ref={phoneInputRef}
@@ -249,10 +232,11 @@ export function SignupForm({
                 disabled={isLoading}
                 aria-invalid={!!emailError}
                 aria-describedby={emailError ? "email-error" : "email-desc"}
+                className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
             )}
             {emailError && <FieldError id="email-error">{emailError}</FieldError>}
-            <FieldDescription id="email-desc" className="text-gray-500">
+            <FieldDescription id="email-desc" className="text-gray-500 dark:text-gray-400">
               {isPhone ? 'Enviaremos um código via WhatsApp' : 'Enviaremos um código de login para seu email'}
             </FieldDescription>
           </Field>
@@ -290,13 +274,29 @@ export function SignupForm({
         </FieldGroup>
       </form>
 
-      {/* Login link */}
-      <p className="text-center text-sm text-gray-400">
-        Já tem uma conta?{" "}
-        <Link href="/login" className="inline-flex min-h-[44px] items-center text-white underline underline-offset-4 hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm">
-          Faça login
-        </Link>
-      </p>
+      <FieldSeparator className="text-gray-400 dark:text-gray-500 [&>span]:text-gray-400 dark:[&>span]:text-gray-500 [&>div]:border-gray-300 dark:[&>div]:border-gray-700">ou</FieldSeparator>
+
+      {/* Google OAuth — Below */}
+      <Button
+        type="button"
+        variant="outline"
+        onClick={handleGoogleSignup}
+        disabled={isLoading || isGoogleLoading}
+        className="w-full bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white min-h-[44px]"
+        aria-busy={isGoogleLoading}
+      >
+        {isGoogleLoading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            Conectando...
+          </>
+        ) : (
+          <>
+            <GoogleIcon className="mr-2 size-4" aria-hidden="true" />
+            Continuar com Google
+          </>
+        )}
+      </Button>
     </div>
   )
 }

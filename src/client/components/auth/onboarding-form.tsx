@@ -162,8 +162,8 @@ export function OnboardingForm({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-500/20">
             <Building2 className="h-6 w-6 text-purple-300" aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Preparando tudo...</h1>
-          <p className="text-gray-400">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Preparando tudo...</h1>
+          <p className="text-gray-500 dark:text-gray-400">
             Estamos configurando sua conta
           </p>
           <div className="flex justify-center pt-4">
@@ -180,8 +180,8 @@ export function OnboardingForm({
       <div className={cn("w-full max-w-sm mx-auto", className)} {...props}>
         <div className="space-y-6">
           <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold text-white">Configure sua conta</h1>
-            <p className="text-gray-400">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Configure sua conta</h1>
+            <p className="text-gray-500 dark:text-gray-400">
               Informe seus dados para começar
             </p>
           </div>
@@ -191,7 +191,7 @@ export function OnboardingForm({
               {/* firstName + lastName side by side */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field>
-                  <FieldLabel htmlFor="firstName" className="text-gray-300">Nome</FieldLabel>
+                  <FieldLabel htmlFor="firstName" className="text-gray-700 dark:text-gray-300">Nome</FieldLabel>
                   <Input
                     id="firstName"
                     type="text"
@@ -203,11 +203,11 @@ export function OnboardingForm({
                     minLength={2}
                     autoFocus
                     disabled={isLoading}
-                    className="border-white/10 bg-white/5 text-white placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                    className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="lastName" className="text-gray-300">Sobrenome</FieldLabel>
+                  <FieldLabel htmlFor="lastName" className="text-gray-700 dark:text-gray-300">Sobrenome</FieldLabel>
                   <Input
                     id="lastName"
                     type="text"
@@ -217,14 +217,14 @@ export function OnboardingForm({
                     required
                     aria-required="true"
                     disabled={isLoading}
-                    className="border-white/10 bg-white/5 text-white placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                    className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
                   />
                 </Field>
               </div>
 
               {/* companyName full width */}
               <Field>
-                <FieldLabel htmlFor="companyName" className="text-gray-300">Nome da empresa</FieldLabel>
+                <FieldLabel htmlFor="companyName" className="text-gray-700 dark:text-gray-300">Nome da empresa</FieldLabel>
                 <Input
                   id="companyName"
                   type="text"
@@ -235,7 +235,7 @@ export function OnboardingForm({
                   aria-required="true"
                   minLength={2}
                   disabled={isLoading}
-                  className="border-white/10 bg-white/5 text-white placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                  className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
                 />
               </Field>
 
@@ -258,13 +258,13 @@ export function OnboardingForm({
                 )}
               </Button>
 
-              <p className="text-xs text-gray-400 text-center leading-relaxed">
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center leading-relaxed">
                 Ao continuar, você concorda com os{" "}
-                <a href="/termos" target="_blank" className="text-purple-400 underline underline-offset-2 hover:text-purple-300">
+                <a href="/termos" target="_blank" className="text-purple-600 dark:text-purple-400 underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300">
                   Termos de Uso
                 </a>{" "}
                 e a{" "}
-                <a href="/privacidade" target="_blank" className="text-purple-400 underline underline-offset-2 hover:text-purple-300">
+                <a href="/privacidade" target="_blank" className="text-purple-600 dark:text-purple-400 underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300">
                   Política de Privacidade
                 </a>.
               </p>
@@ -282,8 +282,8 @@ export function OnboardingForm({
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
             <CheckCircle className="h-6 w-6 text-green-400" aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Tudo pronto!</h1>
-          <p className="text-gray-400">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tudo pronto!</h1>
+          <p className="text-gray-500 dark:text-gray-400">
             Sua conta foi configurada. Redirecionando...
           </p>
           <div className="flex justify-center pt-2">
