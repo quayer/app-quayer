@@ -14,7 +14,7 @@ import {
 } from "@/client/components/ui/field"
 import { Input } from "@/client/components/ui/input"
 import { Alert, AlertDescription } from "@/client/components/ui/alert"
-import { Loader2, Mail, Smartphone } from "lucide-react"
+import { Loader2, Mail, Smartphone, ArrowRight } from "lucide-react"
 import { GoogleIcon } from "@/client/components/ui/google-icon"
 import Link from "next/link"
 import { api } from "@/igniter.client"
@@ -162,14 +162,15 @@ export function SignupForm({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
+    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
       {/* Header */}
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Crie sua conta</h1>
-        <p className="text-gray-500 dark:text-gray-400">
+      <div className="space-y-2">
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Crie sua conta</h1>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
           Já tem conta?{" "}
-          <Link href="/login" className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 rounded-sm">
-            Faça login &rsaquo;
+          <Link href="/login" className="inline-flex items-center gap-0.5 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
+            Faça login
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </Link>
         </p>
       </div>
@@ -192,7 +193,7 @@ export function SignupForm({
         <FieldGroup>
           {!isPhone && (
             <Field>
-              <FieldLabel htmlFor="name" className="text-gray-700 dark:text-gray-300">Nome completo</FieldLabel>
+              <FieldLabel htmlFor="name" className="text-sm font-medium text-gray-900 dark:text-gray-200">Nome completo</FieldLabel>
               <Input
                 id="name"
                 type="text"
@@ -203,14 +204,14 @@ export function SignupForm({
                 autoFocus
                 aria-invalid={!!nameError}
                 aria-describedby={nameError ? "name-error" : undefined}
-                className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
               {nameError && <FieldError id="name-error">{nameError}</FieldError>}
             </Field>
           )}
 
           <Field>
-            <FieldLabel htmlFor="email" className="text-gray-700 dark:text-gray-300">Email ou Telefone</FieldLabel>
+            <FieldLabel htmlFor="email" className="text-sm font-medium text-gray-900 dark:text-gray-200">Email ou Telefone</FieldLabel>
             {isPhone ? (
               <PhoneInput
                 ref={phoneInputRef}
@@ -232,7 +233,7 @@ export function SignupForm({
                 disabled={isLoading}
                 aria-invalid={!!emailError}
                 aria-describedby={emailError ? "email-error" : "email-desc"}
-                className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
               />
             )}
             {emailError && <FieldError id="email-error">{emailError}</FieldError>}
@@ -254,7 +255,7 @@ export function SignupForm({
                 "w-full min-h-[44px] transition-colors",
                 email.trim()
                   ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
               )}
               aria-busy={isLoading}
             >
@@ -279,7 +280,7 @@ export function SignupForm({
         </FieldGroup>
       </form>
 
-      <FieldSeparator className="text-gray-400 dark:text-gray-500 [&>span]:text-gray-400 dark:[&>span]:text-gray-500 [&>div]:border-gray-300 dark:[&>div]:border-gray-700">ou</FieldSeparator>
+      <FieldSeparator className="text-gray-400 dark:text-gray-500 [&>span]:text-gray-400 dark:[&>span]:text-gray-500 [&>div]:border-gray-200 dark:[&>div]:border-gray-800">OU</FieldSeparator>
 
       {/* Google OAuth — Below */}
       <Button
@@ -287,7 +288,7 @@ export function SignupForm({
         variant="outline"
         onClick={handleGoogleSignup}
         disabled={isLoading || isGoogleLoading}
-        className="w-full bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white min-h-[44px]"
+        className="w-full bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white min-h-[44px]"
         aria-busy={isGoogleLoading}
       >
         {isGoogleLoading ? (

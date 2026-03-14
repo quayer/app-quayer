@@ -191,7 +191,7 @@ export function OnboardingForm({
               {/* firstName + lastName side by side */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field>
-                  <FieldLabel htmlFor="firstName" className="text-gray-700 dark:text-gray-300">Nome</FieldLabel>
+                  <FieldLabel htmlFor="firstName" className="text-sm font-medium text-gray-900 dark:text-gray-200">Nome</FieldLabel>
                   <Input
                     id="firstName"
                     type="text"
@@ -203,11 +203,11 @@ export function OnboardingForm({
                     minLength={2}
                     autoFocus
                     disabled={isLoading}
-                    className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                    className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-gray-400 dark:focus-visible:border-gray-500 focus-visible:ring-gray-400/30 dark:focus-visible:ring-gray-500/30"
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="lastName" className="text-gray-700 dark:text-gray-300">Sobrenome</FieldLabel>
+                  <FieldLabel htmlFor="lastName" className="text-sm font-medium text-gray-900 dark:text-gray-200">Sobrenome</FieldLabel>
                   <Input
                     id="lastName"
                     type="text"
@@ -217,14 +217,14 @@ export function OnboardingForm({
                     required
                     aria-required="true"
                     disabled={isLoading}
-                    className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                    className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-gray-400 dark:focus-visible:border-gray-500 focus-visible:ring-gray-400/30 dark:focus-visible:ring-gray-500/30"
                   />
                 </Field>
               </div>
 
               {/* companyName full width */}
               <Field>
-                <FieldLabel htmlFor="companyName" className="text-gray-700 dark:text-gray-300">Nome da empresa</FieldLabel>
+                <FieldLabel htmlFor="companyName" className="text-sm font-medium text-gray-900 dark:text-gray-200">Nome da empresa</FieldLabel>
                 <Input
                   id="companyName"
                   type="text"
@@ -235,7 +235,7 @@ export function OnboardingForm({
                   aria-required="true"
                   minLength={2}
                   disabled={isLoading}
-                  className="bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-purple-500 focus-visible:ring-purple-500/30"
+                  className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:border-gray-400 dark:focus-visible:border-gray-500 focus-visible:ring-gray-400/30 dark:focus-visible:ring-gray-500/30"
                 />
               </Field>
 
@@ -251,7 +251,7 @@ export function OnboardingForm({
                   "w-full min-h-[44px] transition-colors",
                   firstName.trim() && companyName.trim()
                     ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                    : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
                 )}
                 disabled={isLoading || !firstName.trim() || !companyName.trim()}
                 aria-busy={isLoading}
