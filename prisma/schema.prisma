@@ -17,7 +17,7 @@ model Organization {
   id           String  @id @default(uuid())
   name         String
   slug         String  @unique
-  document     String  @unique // CPF ou CNPJ
+  document     String? @unique // CPF ou CNPJ (nullable via migration make_document_optional)
   type         String // "pf" ou "pj"
   maxInstances Int     @default(1)
   maxUsers     Int     @default(1)
@@ -55,6 +55,9 @@ model Organization {
   supportEmail   String? // Email de suporte personalizado
   customDomain   String? // Domínio customizado
 
+  // Geo Alert (added via migration add_geo_alert_and_country_code)
+  geoAlertMode GeoAlertMode @default(off)
+
   // Provider Configuration (Quayer Managed vs Own UAZapi)
   providerType String  @default("quayer") // "quayer" (managed) or "uazapi" (own)
   uazapiUrl    String? // URL da API UAZapi personalizada
@@ -80,10 +83,11 @@ model Organization {
   chatSessions ChatSession[]
   calls        Call[]
   providers     OrganizationProvider[]
-  quickReplies QuickReply[]
-  customRoles     CustomRole[]
+  quickReplies  QuickReply[]
+  customRoles   CustomRole[]
   verifiedDomains VerifiedDomain[]
-  scimTokens      ScimToken[]
+  scimTokens    ScimToken[]
+  ipRules       IpRule[]
 
   @@index([document])
   @@index([slug])
@@ -167,6 +171,10 @@ model User {
   onboardingCompleted Boolean @default(false)
   lastOrganizationId  String?
 
+  // Phone (added via migration add_user_phone)
+  phone         String?
+  phoneVerified Boolean @default(false)
+
   // Two-Factor Authentication
   twoFactorEnabled Boolean @default(false)
 
@@ -193,11 +201,14 @@ model User {
   quickReplies       QuickReply[]   // Respostas rápidas criadas pelo usuário
   totpDevices        TotpDevice[]
   recoveryCodes      RecoveryCode[]
+  deviceSessions     DeviceSession[]
+  createdIpRules     IpRule[]       @relation("IpRuleCreatedBy")
 
   @@index([email])
   @@index([currentOrgId])
   @@index([role])
   @@index([resetToken])
+  @@index([phone])
 }
 
 // ============================================
@@ -933,6 +944,13 @@ enum SessionStartedBy {
 enum AutoPauseBehavior {
   CLOSE_SESSION // Encerra sessão imediatamente quando auto-pause expira
   WAIT_CUSTOMER // Aguarda cliente por X minutos, depois fecha
+}
+
+// Geo Alert Mode — added via migration add_geo_alert_and_country_code
+enum GeoAlertMode {
+  off     // Sem alerta
+  notify  // Notifica admin quando login de país novo
+  block   // Bloqueia login de país diferente do último
 }
 
 // ============================================
@@ -2088,6 +2106,64 @@ model RecoveryCode {
 
   @@index([userId])
   @@map("recovery_codes")
+}
+
+// ============================================
+// DEVICE SESSIONS (Trusted Devices / Session Tracking)
+// Added via migration add_device_sessions_and_ip_rules
+// ============================================
+
+model DeviceSession {
+  id           String    @id @default(uuid())
+  userId       String
+  deviceName   String?
+  ipAddress    String?
+  userAgent    String?
+  location     String?
+  countryCode  String?   // Added via migration add_geo_alert_and_country_code
+  lastActiveAt DateTime  @default(now())
+  isRevoked    Boolean   @default(false)
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRevoked])
+  @@index([lastActiveAt])
+  @@map("device_sessions")
+}
+
+// ============================================
+// IP RULES (Allow/Block Lists)
+// Added via migration add_device_sessions_and_ip_rules
+// ============================================
+
+enum IpRuleType {
+  ALLOW
+  BLOCK
+}
+
+model IpRule {
+  id             String      @id @default(uuid())
+  type           IpRuleType
+  ipAddress      String
+  description    String?
+  organizationId String?
+  createdById    String
+  isActive       Boolean     @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdBy    User           @relation("IpRuleCreatedBy", fields: [createdById], references: [id])
+
+  @@index([ipAddress])
+  @@index([type, isActive])
+  @@index([organizationId])
+  @@index([expiresAt])
+  @@map("ip_rules")
 }
 
 // ============================================
