@@ -4,35 +4,58 @@ import type { ReactNode } from 'react';
 
 export interface AuthShellProps {
   children: ReactNode;
+  /**
+   * Se exibe a imagem hero no lado direito em desktop (>= 1024px).
+   * Default true.
+   */
   showImage?: boolean;
   className?: string;
 }
 
+/**
+ * AuthShell — layout v3 das paginas de auth.
+ *
+ * Estrutura (espelha o padrao do layout v2 para manter posicionamento consistente):
+ * - Left panel: logo top-left + form centralizado verticalmente
+ * - Right panel: imagem hero full-bleed (sem texto, sem gradientes, sem marketing copy)
+ * - Mobile (<1024px): apenas left panel, imagem escondida
+ */
 export function AuthShell({ children, showImage = true, className = '' }: AuthShellProps) {
   return (
-    <div className={`min-h-screen grid md:grid-cols-2 ${className}`}>
-      {/* Left: form */}
-      <div className="flex flex-col items-center justify-center p-6 md:p-12 bg-ds-bg">
-        <div className="w-full max-w-md">
-          <Logo size={48} className="mb-8" />
-          {children}
-        </div>
-      </div>
+    <div className={`relative min-h-screen overflow-x-hidden ${className}`}>
+      <div className="flex min-h-screen">
+        {/* Left panel — form area */}
+        <main className="flex-1 flex flex-col min-h-screen bg-[#0a0d14]">
+          {/* Logo top-left (mesmo posicionamento do v2: px-8 pt-8 lg:px-12 lg:pt-10) */}
+          <div className="px-8 pt-8 lg:px-12 lg:pt-10">
+            <Logo size={32} variant="color" />
+          </div>
 
-      {/* Right: hero image */}
-      {showImage && (
-        <div className="relative hidden md:block bg-gray-50">
-          <Image
-            src="/images/auth/login-hero.webp"
-            alt=""
-            fill
-            priority
-            fetchPriority="high"
-            sizes="(max-width: 1280px) 50vw, 800px"
-            className="object-cover"
-          />
-        </div>
-      )}
+          {/* Form centralizado */}
+          <div className="flex-1 flex items-center justify-center px-8 py-12 lg:px-12 xl:px-24">
+            <div className="w-full max-w-md">{children}</div>
+          </div>
+        </main>
+
+        {/* Right panel — hero image (zero texto, zero gradient overlays) */}
+        {showImage && (
+          <aside
+            role="complementary"
+            aria-hidden="true"
+            className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden border-l border-white/[0.1]"
+          >
+            <Image
+              src="/images/auth/login-hero.webp"
+              alt=""
+              fill
+              priority
+              fetchPriority="high"
+              sizes="(max-width: 1280px) 42vw, 45vw"
+              className="object-cover"
+            />
+          </aside>
+        )}
+      </div>
     </div>
   );
 }
