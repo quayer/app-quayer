@@ -1,0 +1,66 @@
+{
+  "project": "app-quayer",
+  "branchName": "ralph/uazapi-bug-fixes",
+  "description": "Correções críticas de integração UAZAPI — bugs identificados via auditoria comparativa com a Postman Collection oficial (105 endpoints). Apenas correções, sem novas features.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Corrigir endpoints de envio de mensagens no MessagesController",
+      "description": "Como desenvolvedor, preciso corrigir o MessagesController que chama endpoints inexistentes no UAZAPI real (/message/send-text, /message/send-image, /message/send-file) para os corretos (/send/text, /send/media).",
+      "acceptanceCriteria": [
+        "Em src/features/messages/controllers/messages.controller.ts, atualizar sendText para chamar POST /send/text com body { number, text, linkPreview?, replyid?, delay? }",
+        "Atualizar sendImage para chamar POST /send/media com body { number, type: 'image', file, text?, delay? }",
+        "Atualizar sendFile para chamar POST /send/media com body { number, type: 'document', file, docName, text?, delay? }",
+        "Todos os endpoints usam header 'token: {instanceToken}' (não Authorization Bearer)",
+        "Remover qualquer uso de NEXT_PUBLIC_UAZAPI_BASE_URL — usar process.env.UAZAPI_URL (mesma baseUrl dos outros serviços)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Corrigir markAsRead para enviar array de IDs",
+      "description": "Como desenvolvedor, preciso corrigir o método markAsRead no adapter UAZAPI pois o endpoint /message/markread espera { id: string[] } (array) mas o adapter envia { id: string } (string simples), fazendo a operação falhar silenciosamente.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.adapter.ts, atualizar markAsRead para enviar body { id: [messageId] } ao chamar POST /message/markread",
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, verificar assinatura do método correspondente e corrigir se necessário",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Corrigir configuração de webhook — adicionar campos faltantes",
+      "description": "Como admin, a configuração de webhook via controller só aceita webhookUrl e events, mas o UAZAPI suporta campos adicionais (enabled, excludeMessages, addUrlEvents, addUrlTypesMessages) que estão sendo ignorados, causando configurações incompletas.",
+      "acceptanceCriteria": [
+        "Em src/features/instances/controllers/instances.controller.ts, atualizar o schema Zod de SetInstanceWebhook para incluir: enabled (boolean, optional, default true), excludeMessages (string[], optional), addUrlEvents (boolean, optional), addUrlTypesMessages (boolean, optional)",
+        "Passar esses campos no body da chamada ao UAZAPI",
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, garantir que configureInstanceWebhook aceita e repassa todos esses campos",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Remover src/lib/uaz/uaz.client.ts — cliente com padrões de URL incorretos",
+      "description": "Como desenvolvedor, preciso remover o arquivo src/lib/uaz/uaz.client.ts que usa padrões de URL incompatíveis com o UAZAPI real (ex: /instance/:id/connect em vez de /instance/connect, /instance/:id/send/text em vez de /send/text), prevenindo uso acidental de código quebrado.",
+      "acceptanceCriteria": [
+        "Buscar todas as importações de src/lib/uaz/uaz.client.ts no projeto",
+        "Se importado em algum arquivo: substituir pelo cliente correto em src/lib/providers/adapters/uazapi/uazapi.client.ts antes de deletar",
+        "Deletar src/lib/uaz/uaz.client.ts",
+        "Deletar diretório src/lib/uaz/ se ficar vazio após a remoção",
+        "Confirmar que nenhum import quebrado restou",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

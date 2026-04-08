@@ -1,0 +1,48 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/phone-input-v2",
+  "description": "PhoneInput v2 — substituir implementação manual por react-international-phone: (1) instalar react-international-phone; (2) reescrever PhoneInput com dropdown de seleção de país + formatação correta via AsYouType sem bug de re-formatação; (3) país default Brasil, fallback visual de bandeira emoji; (4) manter compatibilidade com looksLikePhone e normalizePhone do backend.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Instalar react-international-phone e corrigir bug AsYouType no PhoneInput",
+      "description": "Como desenvolvedor, quero instalar react-international-phone e reescrever o PhoneInput com dropdown de país e formatação correta, sem o bug que remove o DD ao re-formatar valor já formatado.",
+      "acceptanceCriteria": [
+        "Rodar: `npm install react-international-phone` no diretório do projeto",
+        "Reescrever src/client/components/ui/phone-input.tsx usando o hook `usePhoneInput` de `react-international-phone`",
+        "Layout: container relativo com botão dropdown de país à esquerda (mostra bandeira + código, ex: 🇧🇷 +55) + input de dígitos à direita",
+        "País default: 'br' (Brasil) quando value está vazio ou não tem código de país reconhecível",
+        "O componente mantém as props: `value: string`, `onChange: (value: string) => void`, `disabled?: boolean`, `autoFocus?: boolean`, `placeholder?: string`, `className?: string`, `id?: string`, `name?: string`, `autoComplete?: string`",
+        "Usar `React.forwardRef<HTMLInputElement, PhoneInputProps>` — ref aponta para o `<input>` interno",
+        "O dropdown de país deve listar países com bandeiras usando os dados do react-international-phone — ao selecionar, atualiza o prefixo no input",
+        "A função `looksLikePhone` nos forms usa `v.replace(/[\\s\\-\\(\\)\\+]/g, '')` — continua funcionando pois o value conterá apenas dígitos formatados",
+        "O `normalizePhone` no backend faz `phone.replace(/\\D/g, '')` → strip formatação — funciona com qualquer formato",
+        "BUG FIX: não usar `new AsYouType('BR').input(e.target.value)` diretamente no onChange — usar o hook `usePhoneInput` que gerencia estado internamente sem re-formatar valor já formatado",
+        "Manter `export const PhoneInput = React.forwardRef<...>(...)` e `PhoneInput.displayName = 'PhoneInput'`",
+        "Manter `export function detectCountry(value: string): CountryInfo` para retrocompatibilidade (usada em login-otp-form.tsx)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '11940636426', confirmar que formata como '(11) 94063-6426' com bandeira 🇧🇷 e que digitando mais dígitos NÃO perde o DD"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Instalado react-international-phone. Reescrito phone-input.tsx usando usePhoneInput hook + CountrySelector. Default country 'br'. forwardRef mantido. detectCountry exportado para retrocompat. AsYouType removido."
+    },
+    {
+      "id": "US-002",
+      "title": "Fix looksLikePhone para valores formatados com react-international-phone (E.164 ou nacional)",
+      "description": "Como sistema, quero garantir que looksLikePhone detecte corretamente números formatados pelo novo PhoneInput em login-form-final.tsx e signup-form.tsx.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-form-final.tsx: verificar se `looksLikePhone` ainda funciona com os valores produzidos pelo novo PhoneInput",
+        "Se react-international-phone produz E.164 como `+5511940636426`, atualizar looksLikePhone: `const clean = v.replace(/[^\\d]/g, ''); return clean.length >= 8`",
+        "Em src/client/components/auth/signup-form.tsx: mesma verificação e ajuste",
+        "O valor enviado ao backend via `body: { phone: email.trim() }` deve ser o número com prefixo (ex: '+5511940636426' ou '11940636426') — normalizePhone no backend strip tudo",
+        "Verificar também login-otp-form.tsx: se `detectCountry` ainda é chamado com o valor correto",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: no /login, digitar '11940636426', confirmar que botão muda para 'Continuar com WhatsApp' (looksLikePhone retorna true)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Verified: PhoneInput emits E.164 via usePhoneInput onChange. Updated looksLikePhone in login-form-final.tsx and signup-form.tsx to simpler `v.replace(/[^\\d]/g, '')` + `clean.length >= 8` — works with E.164, national, and formatted formats. detectCountry in phone-input.tsx still exported for backward compat. login-otp-form.tsx does not use detectCountry (only uses PhoneInput component directly)."
+    }
+  ]
+}

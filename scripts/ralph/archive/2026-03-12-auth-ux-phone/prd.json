@@ -1,0 +1,131 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-ux-phone",
+  "description": "Auth UX/UI — refinamento completo da jornada de login e cadastro: (1) componente PhoneInput com bandeira do país que muda conforme DD digitado, auto-formatação e DD Brasil automático; (2) login-form usa PhoneInput com transformação visual ao detectar telefone; (3) signup suporta telefone — cria usuário automaticamente no primeiro acesso via phone OTP; (4) signup-form com mesma UX do login.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Componente PhoneInput — bandeira do país, auto-formatação, DD automático",
+      "description": "Como desenvolvedor, preciso de um componente de input de telefone reutilizável que detecta o país pelo DD e mostra a bandeira.",
+      "acceptanceCriteria": [
+        "Criar src/client/components/ui/phone-input.tsx",
+        "O componente recebe props: `value: string`, `onChange: (value: string) => void`, `disabled?: boolean`, `autoFocus?: boolean`, `placeholder?: string`, `className?: string`",
+        "Mapa de países (DD → bandeira emoji + nome): '55'→🇧🇷Brasil, '1'→🇺🇸EUA, '54'→🇦🇷Argentina, '351'→🇵🇹Portugal, '44'→🇬🇧UK, '34'→🇪🇸Espanha, '52'→🇲🇽México, '57'→🇨🇴Colômbia, '56'→🇨🇱Chile, '49'→🇩🇪Alemanha, '33'→🇫🇷França, '39'→🇮🇹Itália, '81'→🇯🇵Japão, '86'→🇨🇳China",
+        "Função interna `detectCountry(digits: string)`: tenta prefixo de 3 dígitos primeiro, depois 2, depois 1 — retorna `{ flag, name }` ou `{ flag: '🇧🇷', name: 'Brasil' }` como padrão",
+        "Layout: div relativo com flag badge à esquerda (posição absoluta, pointer-events-none) + Input com padding-left suficiente para não sobrepor a bandeira",
+        "Flag badge mostra: emoji da bandeira (texto grande ~18px) + padding horizontal",
+        "Quando `value` muda, recalcula país e atualiza flag em tempo real via useMemo/useEffect",
+        "Se valor digitado não começa com '+' ou com dígitos suficientes, assume Brasil 🇧🇷",
+        "Input tem `type='tel'` e `inputMode='tel'`",
+        "Export nomeado: `export function PhoneInput(props: PhoneInputProps) { ... }`",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '+1' no campo e confirmar que a bandeira muda para 🇺🇸"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implemented at src/client/components/ui/phone-input.tsx. Uses useMemo for country detection. Detects by 3-digit, 2-digit, 1-digit prefix order. Default Brazil flag."
+    },
+    {
+      "id": "US-002",
+      "title": "Login form — PhoneInput com transformação visual ao digitar telefone",
+      "description": "Como usuário no login, quando começo a digitar um número de telefone, o campo se transforma visualmente mostrando a bandeira do país.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-form-final.tsx, adicionar import de PhoneInput e detectCountry",
+        "Adicionar state: `const [isPhone, setIsPhone] = useState(false)`",
+        "Em onChange do input: `setIsPhone(looksLikePhone(value))` — atualizar em tempo real conforme digita",
+        "Renderização condicional: se `isPhone` é true, renderizar `<PhoneInput value={email} onChange={setEmail} disabled={...} autoFocus={false} />` no lugar do `<Input>` atual",
+        "Se `isPhone` é false, renderizar o `<Input>` original com `type='text'` e `autoComplete='username webauthn'`",
+        "A transição entre Input e PhoneInput deve ser suave — manter o mesmo `value` (email state) em ambos",
+        "Placeholder do Input normal: 'email@exemplo.com ou +55 11 99999-9999'",
+        "Label permanece 'Email ou Telefone'",
+        "Botão de submit: se `isPhone`, mudar texto/ícone para `<Smartphone className='mr-2 h-4 w-4' /> Continuar com WhatsApp`; se email, manter `<Mail> Continuar com Email`",
+        "Importar Smartphone de lucide-react",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: abrir /login, digitar '11999999999', confirmar que bandeira 🇧🇷 aparece e botão muda para 'Continuar com WhatsApp'"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Updated login-form-final.tsx with isPhone state, conditional PhoneInput/Input, and Smartphone/Mail button switching."
+    },
+    {
+      "id": "US-003",
+      "title": "Backend — auto-criar usuário no primeiro acesso por telefone (email placeholder)",
+      "description": "Como sistema, quando um usuário faz login por telefone pela primeira vez (sem conta), devo criar a conta automaticamente.",
+      "acceptanceCriteria": [
+        "Em src/server/features/auth/controllers/auth.controller.ts, na action `verifyLoginOTPPhone`, mudar o comportamento quando usuário não existe",
+        "Substituir: `if (!user) return response.badRequest('Nenhuma conta com este número. Cadastre-se primeiro.')` por:",
+        "Se !user: criar novo usuário com `await db.user.create({ data: { email: null, phone: normalized, name: 'Usuário WhatsApp', role: 'user', emailVerified: null, phoneVerified: true, onboardingCompleted: false } })`",
+        "Verificar se `email` é `String?` no Prisma schema — se não for, adicionar `phone String? @unique` e migration para permitir email nulo para contas phone-only: `ALTER TABLE \"User\" ALTER COLUMN \"email\" DROP NOT NULL; DROP INDEX IF EXISTS \"User_email_key\"; CREATE UNIQUE INDEX IF NOT EXISTS \"User_email_key\" ON \"User\"(\"email\") WHERE \"email\" IS NOT NULL;`",
+        "Nota: se o schema já tem `email String @unique` (obrigatório), criar migration SQL manual e executar via `npx prisma db execute` ANTES de alterar o schema",
+        "Após criar usuário, continuar o fluxo normal: gerar tokens, setar cookies, retornar `needsOnboarding: true`",
+        "No retorno de sucesso: `needsOnboarding: !user.onboardingCompleted` (true para novos usuários → redireciona para /onboarding)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Auto-creates user with synthetic email (normalized_phone + '@phone.quayer.app') since email is required (String @unique) in schema. Uses hashPassword for random password. Renamed local var to createdUser to avoid shadowing. No schema migration needed as synthetic email satisfies constraint."
+    },
+    {
+      "id": "US-004",
+      "title": "Signup form — aceita email ou telefone com PhoneInput (mesmo padrão do login)",
+      "description": "Como usuário, quero poder me cadastrar com email ou número de telefone na tela de cadastro.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/signup-form.tsx, ler e entender o arquivo atual antes de modificar",
+        "Adicionar import de PhoneInput, looksLikePhone (copiar a função do login-form-final.tsx), Smartphone de lucide-react",
+        "Adicionar state: `const [isPhone, setIsPhone] = useState(false)`",
+        "Mudar o campo de email: `type='email'` → `type='text'` com `inputMode='email'`, remover `required`",
+        "Label do campo email: 'E-mail' → 'Email ou Telefone'",
+        "Placeholder: 'email@exemplo.com ou +55 11 99999-9999'",
+        "Em onChange do campo email: `setIsPhone(looksLikePhone(value))` — atualizar em tempo real",
+        "Renderização condicional igual ao login: se `isPhone`, usar `<PhoneInput>` no lugar do `<Input>` de email",
+        "Botão de submit: se `isPhone`, mostrar `<Smartphone> Cadastrar com WhatsApp`; senão `<Mail> Cadastrar com Email`",
+        "Em handleSubmit: se `looksLikePhone(email.trim())`: (1) chamar `POST /api/v1/auth/login-otp-phone` com `{ phone: email.trim() }` (mesmo endpoint do login — cria conta automaticamente); (2) se !res.ok: setError(data?.error?.message); (3) router.push('/login/verify?phone=' + encodeURIComponent(email.trim()))",
+        "Se não é phone: manter lógica atual (api.auth.signupOTP.mutate com name + email)",
+        "O campo name permanece obrigatório SOMENTE para email signup — para phone, nome vem depois no onboarding",
+        "Adicionar validação: se !isPhone e !name.trim(): mostrar erro 'Informe seu nome'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: abrir /signup, digitar '11999999999' no campo email, confirmar PhoneInput com bandeira 🇧🇷 e botão 'Cadastrar com WhatsApp'"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Updated signup-form.tsx with looksLikePhone, isPhone state, conditional PhoneInput/Input, hidden name field for phone, Smartphone button, and phone OTP submission flow."
+    },
+    {
+      "id": "US-005",
+      "title": "Onboarding — pedir nome quando usuário criado por telefone (sem nome)",
+      "description": "Como usuário que se cadastrou via WhatsApp, quero informar meu nome durante o onboarding.",
+      "acceptanceCriteria": [
+        "Em src/app/(auth)/onboarding/page.tsx ou src/client/components/auth/onboarding-form.tsx, verificar se user.name é 'Usuário WhatsApp' ou está vazio",
+        "Se sim: na PRIMEIRA etapa do onboarding, mostrar campo 'Seu nome' ANTES do campo da organização",
+        "Campo nome: `type='text'`, placeholder 'João Silva', obrigatório, mínimo 2 caracteres",
+        "Ao submeter: chamar endpoint que atualiza o nome do usuário (verificar se existe ação de update profile — se não existir, usar fetch direto para `/api/v1/auth/update-profile` ou buscar o endpoint correto no projeto)",
+        "Após salvar nome, continuar para próxima etapa do onboarding normalmente",
+        "Se user.name já é um nome real (diferente de 'Usuário WhatsApp'), pular essa etapa",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: confirmar que a etapa de nome aparece no onboarding"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Added 'name' step to onboarding-form.tsx. On mount, fetches /api/v1/auth/me — if name is 'Usuário WhatsApp' or empty, shows name collection step. Saves via PATCH /api/v1/auth/profile (existing endpoint). Then proceeds to welcome step."
+    },
+    {
+      "id": "US-006",
+      "title": "Login OTP verify — melhorar UX da tela de verificação para telefone",
+      "description": "Como usuário que enviou OTP por WhatsApp, quero uma tela de verificação mais clara e bonita.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-otp-form.tsx, quando `phone` está presente:",
+        "CardTitle: 'Verificação WhatsApp' em vez de 'Verificação'",
+        "CardDescription: mostrar `<PhoneInput value={phone} onChange={() => {}} disabled />` (display-only do número com bandeira) + texto 'Código enviado via WhatsApp 📱'",
+        "Importar PhoneInput no arquivo",
+        "O PhoneInput em modo display (disabled) deve parecer um badge/texto, não um input — adicionar classe `pointer-events-none opacity-100 border-0 bg-transparent p-0` ao wrapper quando disabled",
+        "FieldDescription dentro do form: 'Digite o código de 6 dígitos enviado para o WhatsApp' (em vez de 'enviado para seu email')",
+        "Link 'Não recebeu?' → 'Não recebeu no WhatsApp?' quando phone",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login/verify?phone=%2B5511999999999, confirmar PhoneInput com bandeira e texto 'WhatsApp'"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Updated login-otp-form.tsx: conditional CardTitle, PhoneInput in CardDescription for phone mode (with CSS to minimize input appearance), conditional FieldDescription and resend text."
+    }
+  ]
+}

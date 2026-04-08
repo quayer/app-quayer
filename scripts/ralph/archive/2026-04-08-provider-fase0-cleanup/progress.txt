@@ -1,0 +1,21 @@
+## Codebase Patterns
+
+- **Cookie name:** auth usa `accessToken` (não `access_token`) — setCookie em auth.controller.ts line ~89
+- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
+- **PhoneInput:** usa react-international-phone + usePhoneInput hook; forwardRef expondo ref do input nativo; `forceDialCode: true` mantém Brasil selecionado
+- **looksLikePhone:** `const clean = v.replace(/[^\d]/g, ""); return clean.length >= 8` — funciona com E.164 e nacional
+- **normalizePhone backend:** `phone.replace(/\D/g, "")` strip tudo — aceita qualquer formato
+- **UAZAPI_INSTANCE_TOKEN env:** fallback quando nenhuma connection no DB tem uazapiToken
+- **igniter schema:** regenerar manualmente quando CLI falha (ajv/dist/core error)
+- **apiFetch helper:** retorna response.json() raw — data.data é o array
+- **Git mmap workaround:** Use `git hash-object -w <file>` then `git update-index --add --cacheinfo` when `git add` fails
+- **Prisma migrate shadow DB issues:** When `prisma migrate dev` fails, create migration SQL manually and use `prisma migrate deploy`
+- **Prisma v7 datasource:** URL goes in `prisma.config.ts`, NOT in schema.prisma `datasource` block
+- **dev server:** roda em http://localhost:3000 — verificar com `curl -s http://localhost:3000/api/health`
+- **Auth paths:** Modulos auth estão em `src/server/core/` (NÃO `src/server/features/` que é path antigo)
+- **Auth passwordless only:** Endpoints `register`, `login`, `forgotPassword`, `resetPassword`, `changePassword` foram REMOVIDOS. Auth é 100% passwordless (OTP, Magic Link, OAuth, Passkeys)
+- **Admin sidebar:** 1 grupo colapsível "Administração" com 12 sub-items (não 4 grupos separados)
+- **Settings tabs:** 8 abas: Provedores, Email, IA, Concatenação, Autenticação, API Keys, Segurança, Sistema
+- **Endpoints count:** 35 auth + 6 device-sessions + 5 ip-rules + 6 permissions + 5 custom-roles = 57 total
+
+---

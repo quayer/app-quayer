@@ -1,0 +1,141 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/provider-fase0-cleanup",
+  "description": "Fase 0 - Limpeza e Fundacao: Remover Evolution/Baileys, apagar legacy adapter layer, corrigir BrokerType e schemas Zod",
+  "userStories": [
+    {
+      "id": "F0-001",
+      "title": "Remover Evolution e Baileys do BrokerType",
+      "description": "Remover 'evolution' e 'baileys' do tipo BrokerType e adicionar 'instagram'. O tipo final deve ser: 'uazapi' | 'cloudapi' | 'instagram'",
+      "acceptanceCriteria": [
+        "BrokerType em src/lib/providers/core/provider.types.ts deve ser: 'uazapi' | 'cloudapi' | 'instagram'",
+        "Remover comentario sobre Evolution/Baileys no docstring de provider.interface.ts",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Arquivo: src/lib/providers/core/provider.types.ts linha 43"
+    },
+    {
+      "id": "F0-002",
+      "title": "Atualizar schemas Zod de instancias",
+      "description": "Corrigir os enums de brokerType nos schemas Zod para incluir 'cloudapi' e 'instagram', removendo 'evolution' e 'baileys'",
+      "acceptanceCriteria": [
+        "createInstanceSchema.brokerType deve ser z.enum(['uazapi', 'cloudapi', 'instagram']).default('uazapi')",
+        "listInstancesSchema.brokerType deve ser z.enum(['uazapi', 'cloudapi', 'instagram']).optional()",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Arquivo: src/server/communication/instances/instances.schemas.ts linhas 27 e 103"
+    },
+    {
+      "id": "F0-003",
+      "title": "Atualizar api.types.ts",
+      "description": "Remover EVOLUTION e BAILEYS dos tipos providerType em api.types.ts, adicionar INSTAGRAM",
+      "acceptanceCriteria": [
+        "providerType deve ser: 'UAZAPI' | 'CLOUDAPI' | 'INSTAGRAM'",
+        "Todas as ocorrencias no arquivo atualizadas",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Arquivo: src/types/api.types.ts linhas 33 e 123"
+    },
+    {
+      "id": "F0-004",
+      "title": "Atualizar UI components que referenciam Baileys",
+      "description": "Atualizar labels nos modais de instancia que mostram 'UAZapi (Baileys)' para 'UAZapi (WhatsApp Web)'",
+      "acceptanceCriteria": [
+        "edit-instance-modal.tsx: label 'WHATSAPP_WEB' deve ser 'UAZapi (WhatsApp Web)' e fallback tambem",
+        "details-modal.tsx: mesma mudanca",
+        "Adicionar labels para WHATSAPP_CLOUD_API: 'Cloud API (Meta Oficial)' e INSTAGRAM_META: 'Instagram (Meta)'",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Arquivos: src/client/components/whatsapp/edit-instance-modal.tsx e details-modal.tsx"
+    },
+    {
+      "id": "F0-005",
+      "title": "Limpar webhook-validation.ts",
+      "description": "Remover evolutionWebhookSchema e o case 'evolution' do switch em webhook-validation.ts. Adicionar case 'cloudapi' e 'instagram' se nao existirem.",
+      "acceptanceCriteria": [
+        "evolutionWebhookSchema removido de webhook-validation.ts",
+        "case 'evolution' removido do switch",
+        "Export de evolutionWebhookSchema removido de src/lib/webhook/index.ts",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Arquivos: src/lib/webhook/webhook-validation.ts e src/lib/webhook/index.ts"
+    },
+    {
+      "id": "F0-006",
+      "title": "Limpar TODOs de Evolution no index.ts de providers",
+      "description": "Remover codigo comentado sobre Evolution adapter no index.ts de providers",
+      "acceptanceCriteria": [
+        "Linhas 35-39 (TODO + codigo comentado sobre Evolution) removidas de src/lib/providers/index.ts",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Arquivo: src/lib/providers/index.ts linhas 35-39"
+    },
+    {
+      "id": "F0-007",
+      "title": "Apagar legacy adapter layer completamente",
+      "description": "Remover os 3 arquivos do legacy adapter system e migrar qualquer referencia",
+      "acceptanceCriteria": [
+        "APAGAR: src/lib/providers/interfaces/provider-adapter.interface.ts",
+        "APAGAR: src/lib/providers/types/normalized.types.ts",
+        "APAGAR: src/lib/providers/adapters/uazapi.adapter.ts (legacy wrapper, NAO o novo em adapters/uazapi/)",
+        "APAGAR: src/lib/providers/orchestrator/provider.orchestrator.ts (legacy orchestrator)",
+        "Atualizar imports em qualquer arquivo que referenciava esses modulos",
+        "Se algum codigo depende de ProviderType ou IProviderAdapter, migrar para usar IWhatsAppProvider e BrokerType",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Arquivos referenciando legacy: src/lib/providers/orchestrator/provider.orchestrator.ts importa de interfaces/ e types/. O uazapi.adapter.ts (legacy) importa de interfaces/ e types/. Verificar se o orchestrator legacy e usado em algum lugar antes de apagar."
+    },
+    {
+      "id": "F0-008",
+      "title": "Atualizar connection.constants.ts",
+      "description": "Atualizar metadata dos providers: WHATSAPP_CLOUD_API disponivel, INSTAGRAM_META disponivel (coming soon -> available)",
+      "acceptanceCriteria": [
+        "WHATSAPP_CLOUD_API: available = true (ou equivalente no metadata)",
+        "INSTAGRAM_META: available = true",
+        "Remover qualquer referencia a WHATSAPP_BUSINESS_API se nao for usado",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Arquivo: src/server/communication/connections/connection.constants.ts"
+    },
+    {
+      "id": "F0-009",
+      "title": "Limpar referencia Evolution no webhook route",
+      "description": "Atualizar comentarios no webhook route handler que menciona Evolution e Baileys",
+      "acceptanceCriteria": [
+        "Comentarios em src/app/api/v1/webhooks/[provider]/route.ts atualizados para refletir providers reais: uazapi, cloudapi, instagram",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Arquivo: src/app/api/v1/webhooks/[provider]/route.ts linhas 5-6"
+    },
+    {
+      "id": "F0-010",
+      "title": "Limpar referencia Evolution no uaz.service.ts",
+      "description": "Remover comentario sobre 'Evolution API v2 format' no uaz.service.ts",
+      "acceptanceCriteria": [
+        "Comentario na linha 197 de src/lib/uaz/uaz.service.ts atualizado (remover mencao a Evolution)",
+        "Typecheck passa sem erros"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Arquivo: src/lib/uaz/uaz.service.ts"
+    }
+  ]
+}

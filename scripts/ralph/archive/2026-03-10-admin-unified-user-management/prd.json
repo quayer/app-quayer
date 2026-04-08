@@ -1,0 +1,205 @@
+{
+  "project": "app-quayer",
+  "branchName": "ralph/uazapi-integration-fixes-and-improvements",
+  "description": "Correções críticas de integração UAZAPI + novos endpoints expostos — baseado em auditoria comparativa entre a Postman Collection oficial (105 endpoints, 19 categorias) e a implementação atual do projeto.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Corrigir endpoints de envio de mensagens no MessagesController",
+      "description": "Como desenvolvedor, preciso corrigir o MessagesController que usa endpoints inexistentes no UAZAPI real (/message/send-text, /message/send-image, /message/send-file) para os corretos (/send/text, /send/media).",
+      "acceptanceCriteria": [
+        "Em src/features/messages/controllers/messages.controller.ts, atualizar sendText para chamar POST /send/text com body { number, text, linkPreview?, replyid?, delay? }",
+        "Atualizar sendImage para chamar POST /send/media com body { number, type: 'image', file, text?, delay? }",
+        "Atualizar sendFile para chamar POST /send/media com body { number, type: 'document', file, docName, text?, delay? }",
+        "Todos os endpoints usam header 'token: {instanceToken}' (não Authorization Bearer)",
+        "Remover qualquer uso de NEXT_PUBLIC_UAZAPI_BASE_URL — usar a mesma baseUrl configurada nos outros serviços (process.env.UAZAPI_URL)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Corrigir markAsRead para enviar array de IDs",
+      "description": "Como desenvolvedor, preciso corrigir o método markAsRead no adapter UAZAPI pois o endpoint /message/markread espera { id: string[] } (array) mas o adapter envia { id: string } (string simples).",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.adapter.ts, atualizar markAsRead para chamar POST /message/markread com body { id: [messageId] } (array)",
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, verificar e corrigir a assinatura do método se necessário",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Corrigir configuração de webhook — adicionar campos faltantes",
+      "description": "Como admin, preciso configurar webhooks com todas as opções suportadas pelo UAZAPI (enabled, excludeMessages, addUrlEvents, addUrlTypesMessages) mas o controller atual só aceita webhookUrl e events.",
+      "acceptanceCriteria": [
+        "Em src/features/instances/controllers/instances.controller.ts, atualizar SetInstanceWebhook schema para incluir: enabled (boolean, default true), excludeMessages (string[], optional, ex: ['isGroupYes']), addUrlEvents (boolean, optional), addUrlTypesMessages (boolean, optional)",
+        "Atualizar a chamada ao UAZAPI para passar todos esses campos no body",
+        "Atualizar src/lib/providers/adapters/uazapi/uazapi.client.ts configureInstanceWebhook para aceitar e passar esses campos",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Adicionar endpoint de edição de mensagem enviada",
+      "description": "Como usuário, quero poder editar o texto de uma mensagem que já foi enviada via WhatsApp.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar método editMessage(token: string, messageId: string, text: string) que chama POST /message/edit com body { id: messageId, text }",
+        "Em src/lib/providers/adapters/uazapi/uazapi.adapter.ts, adicionar método editMessage(instanceId: string, messageId: string, text: string)",
+        "Em src/features/messages/controllers/messages.controller.ts, adicionar action editMessage: POST com body { instanceId, messageId, text }",
+        "Validação Zod: instanceId uuid, messageId string, text string min 1 max 4096",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Adicionar verificação de existência de número no WhatsApp",
+      "description": "Como usuário, quero verificar se um ou mais números de telefone têm WhatsApp antes de enviar mensagens.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar método checkNumbers(token: string, numbers: string[]) que chama POST /chat/check com body { numbers: string[] }",
+        "Em src/features/messages/controllers/messages.controller.ts, adicionar action checkNumbers: POST com body { instanceId: string, numbers: string[] }",
+        "Retorna array de { number: string, exists: boolean, jid?: string }",
+        "Validação Zod: instanceId uuid, numbers array de strings, min 1 max 50 itens",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Adicionar controle de presença da instância (online/offline)",
+      "description": "Como usuário, quero controlar se minha instância WhatsApp aparece como online ou offline.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar método setInstancePresence(token: string, presence: 'available' | 'unavailable') que chama POST /instance/presence com body { presence }",
+        "Em src/features/instances/controllers/instances.controller.ts, adicionar action setPresence: POST /:id/presence com body { presence: 'available' | 'unavailable' }",
+        "Validação Zod: presence enum ['available', 'unavailable']",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Adicionar configurações de privacidade da instância",
+      "description": "Como usuário, quero visualizar e configurar as configurações de privacidade do WhatsApp (quem pode ver minha foto, status, última vez online, etc).",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar getPrivacySettings(token: string) chamando GET /instance/privacy",
+        "Adicionar setPrivacySettings(token: string, settings: PrivacySettings) chamando POST /instance/privacy com body { groupadd?, last?, status?, profile?, readreceipts?, online?, calladd? } — cada campo enum: 'all' | 'contacts' | 'contact_blacklist' | 'none'",
+        "Em src/features/instances/controllers/instances.controller.ts, adicionar action getPrivacy: GET /:id/privacy e setPrivacy: POST /:id/privacy",
+        "Validação Zod para cada campo opcional com enum correto",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Adicionar configurações de delay de mensagens da instância",
+      "description": "Como usuário, quero configurar o delay mínimo e máximo entre mensagens enviadas em sequência para parecerem mais naturais.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar setDelaySettings(token: string, msgDelayMin: number, msgDelayMax: number) chamando POST /instance/updateDelaySettings com body { msg_delay_min, msg_delay_max }",
+        "Em src/features/instances/controllers/instances.controller.ts, adicionar action setDelay: POST /:id/delay com body { msgDelayMin: number, msgDelayMax: number }",
+        "Validação Zod: msgDelayMin number min 0 max 60, msgDelayMax number min 0 max 300, msgDelayMax >= msgDelayMin",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Adicionar operações de gerenciamento de chat (pin, mute, archive, read)",
+      "description": "Como usuário, quero poder fixar, mutar, arquivar e marcar como lido/não lido um chat diretamente pelo sistema.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar: pinChat(token, number, pin: boolean) → POST /chat/pin; muteChat(token, number, muteEndTime: number) → POST /chat/mute (0=desmute, -1=sempre); archiveChat(token, number, archive: boolean) → POST /chat/archive; markChatRead(token, number, read: boolean) → POST /chat/read",
+        "Em src/features/messages/controllers/messages.controller.ts, adicionar actions: pinChat (POST, body { instanceId, chatId, pin }), muteChat (POST, body { instanceId, chatId, muteEndTime }), archiveChat (POST, body { instanceId, chatId, archive }), markChatRead (POST, body { instanceId, chatId, read })",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Adicionar gerenciamento de etiquetas (labels) do WhatsApp",
+      "description": "Como usuário, quero listar as etiquetas do WhatsApp, aplicar etiquetas a chats e criar/editar etiquetas.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar: getLabels(token) → GET /labels; setChatLabels(token, number, labelids: string[]) → POST /chat/labels; editLabel(token, labelid: string, name: string, color: number, del: boolean) → POST /label/edit",
+        "Em src/features/instances/controllers/instances.controller.ts, adicionar action getLabels: GET /:id/labels que retorna lista de etiquetas",
+        "Em src/features/messages/controllers/messages.controller.ts, adicionar action setChatLabels: POST com body { instanceId, chatId, labelIds: string[] }",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Adicionar CRM: edição de dados do lead (chat)",
+      "description": "Como usuário, quero editar os dados CRM de um contato diretamente no UAZAPI (nome, status, tags, notas, agente responsável).",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar editLead(token: string, chatId: string, data: LeadData) → POST /chat/editLead. LeadData: { id: string, lead_name?, lead_fullName?, lead_email?, lead_status?, lead_tags?: string[], lead_notes?, lead_disableChatBotUntil?: number, lead_isTicketOpen?: boolean, lead_assignedAgent_id?, lead_field01?, lead_field02?, lead_field03? }",
+        "Em src/features/contacts/controllers/ ou messages controller, adicionar action editLead: POST com body validado por Zod incluindo instanceId e campos do lead",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Adicionar configuração de chatbot e AI da instância",
+      "description": "Como usuário, quero configurar as opções do chatbot nativo do UAZAPI (ativar/desativar, chave OpenAI, comportamento de parada).",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar updateChatbotSettings(token: string, settings: ChatbotSettings) → POST /instance/updatechatbotsettings. ChatbotSettings: { openai_apikey?: string, chatbot_enabled?: boolean, chatbot_ignoreGroups?: boolean, chatbot_stopConversation?: string, chatbot_stopMinutes?: number, chatbot_stopWhenYouSendMsg?: number }",
+        "Em src/features/instances/controllers/instances.controller.ts, adicionar action updateChatbotSettings: POST /:id/chatbot-settings com body Zod validado",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Adicionar envio em massa (Sender) — simple e advanced",
+      "description": "Como usuário, quero disparar mensagens em massa para múltiplos números com controle de delay, fila e agendamento.",
+      "acceptanceCriteria": [
+        "Em src/lib/providers/adapters/uazapi/uazapi.client.ts, adicionar: senderSimple(token, data) → POST /sender/simple com body { numbers, type, text?, file?, folder?, delayMin, delayMax, info? }; senderAdvanced(token, data) → POST /sender/advanced com body { messages[], delayMin, delayMax, info? }; listSenderFolders(token) → GET /sender/listfolders; editSenderFolder(token, folderId, action: 'stop' | 'continue' | 'delete') → POST /sender/edit",
+        "Em src/features/messages/controllers/messages.controller.ts, adicionar actions: bulkSendSimple (POST, body { instanceId, numbers, type, text, delayMin, delayMax }), listBulkFolders (GET, query instanceId), stopBulkFolder (POST, body { instanceId, folderId, action })",
+        "Validação Zod: numbers array max 1000, type enum de tipos suportados, delayMin/Max validados",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Deprecar/remover src/lib/uaz/uaz.client.ts (cliente incorreto)",
+      "description": "Como desenvolvedor, preciso remover o arquivo src/lib/uaz/uaz.client.ts que usa padrões de URL incorretos incompatíveis com a UAZAPI real (usa /instance/:id/send/text em vez de /send/text), para evitar confusão e uso acidental.",
+      "acceptanceCriteria": [
+        "Verificar se src/lib/uaz/uaz.client.ts é importado em algum lugar do projeto (grep completo)",
+        "Se não for importado: deletar o arquivo e o diretório src/lib/uaz/ se ficar vazio",
+        "Se for importado: substituir cada uso pelo cliente correto em src/lib/providers/adapters/uazapi/uazapi.client.ts e depois deletar",
+        "Confirmar que nenhum import quebrado restou",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

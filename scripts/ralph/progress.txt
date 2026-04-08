@@ -1,142 +1,64 @@
 ## Codebase Patterns
 
-<!-- Patterns gerais do projeto que persistem entre releases. Stories-especificas vao abaixo. -->
+<!-- Patterns gerais do projeto. Stories-especificas entram abaixo. -->
 
 - **Auth modules path:** `src/server/core/auth/` (NAO `src/server/features/auth/` que e legado)
 - **Auth components:** `src/client/components/auth/` — login-otp-form.tsx, signup-otp-form.tsx, verify-email-form.tsx, two-factor-challenge.tsx, onboarding-form.tsx
 - **Cookie name:** auth usa `accessToken` (nao `access_token`)
 - **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
-- **Auth passwordless only:** endpoints `register`, `login`, `forgotPassword`, `resetPassword`, `changePassword` foram REMOVIDOS. Auth e 100% passwordless (OTP, Magic Link, OAuth, Passkeys)
+- **Auth passwordless only:** endpoints `register`, `login`, `forgotPassword`, `resetPassword`, `changePassword` foram REMOVIDOS do BACKEND. Mas as PAGINAS frontend `/register`, `/forgot-password`, `/reset-password/[token]`, `/login/verify-magic`, `/signup/verify-magic` ainda existem e sao candidatas a delete em Release 2.
 - **Padrao Igniter.js:** controller → actions (query/mutation) → handler com authProcedure({ required: true })
-- **Schema Prisma:** `prisma/schema.prisma` (ja sincronizado com DB real apos fase 1+2)
-- **dev server:** roda em http://localhost:3000 — verificar com `curl -s http://localhost:3000/api/health`
-- **Test dirs existentes:** `test/api/` e `test/e2e/` ja tem conteudo (admin-security) — NAO quebrar
-- **Igniter schema regen:** quando CLI falha com `ajv/dist/core error`, regenerar manualmente
-- **Prisma migrate:** usar `prisma migrate deploy` em CI; `prisma migrate dev` pode falhar em shadow DB
+- **Schema Prisma:** `prisma/schema.prisma`. Models: Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
+- **dev server:** http://localhost:3000 — `curl -s /api/health`
 - **Git mmap workaround:** repo em OneDrive as vezes corrompe pack — `git hash-object -w` + `git update-index --add --cacheinfo` como fallback
 
-## Infra ja existente (2026-04-08)
+## Infra de teste (criada em Release 1 — commits 3f12ac5 a 02f1201)
 
-Nao refazer. Reutilizar/referenciar nas stories correspondentes:
+**Pipeline de 5 camadas funcionando:**
+- Static (husky pre-commit + .github/workflows/static.yml)
+- Unit backend: `npm run test:unit` (66 cases)
+- Unit React: `npm run test:react` (33 cases GREEN verificado)
+- API Integration: `npm run test:api` (postgres :5433 via compose.test.yml, direct invocation via nextRouteHandlerAdapter, 17 cases)
+- Contract: `npx vitest --config vitest.config.contract.ts` (bootstrap mode, 3 cases)
+- E2E Playwright 3 projects (local/homol/prod) — prod NUNCA roda login real
 
-- `docs/infra/BASELINES.md` — baselines de infra (6 endpoints, 50 samples, p50/p95/p99 de TTFB). Auth-specific sera criado em US-101.
-- `docs/infra/ROLLBACK_RUNBOOK.md` — 10 cenarios de rollback (A-J), SLA 15min. Referenciar em US-112 e US-114.
-- `docs/infra/SYNTHETIC_MONITORING.md` — estrategia + MVP via GitHub Actions. Estender em US-109.
-- `docs/infra/HARDENING.md`, `HOMOL_SETUP.md`, `PROD_HARDENING_PLAN.md`, `SECRETS.md` — infra de prod e homol ja hardened.
-- `.github/workflows/synthetic-monitor.yml` — cron 5min, 6 endpoints, matrix strategy. Estender em US-109.
-- `.github/workflows/deploy-homol.yml` — workflow_dispatch, SSH key + CF tunnel. Usar como base para smoke-homol.yml (US-111).
-- `.github/workflows/deploy-production.yml` — migrado para SSH key. Usar como base para smoke-prod.yml (US-112).
-- `compose.homol.yml` — homol com cloudflared, postgres, redis, app.
-- `infra/prod/Caddyfile` — reverse proxy prod com Origin Cert.
-- `scripts/infra/capture-baselines.sh` — reproducible baseline capture. Adaptar em US-101.
-- `scripts/deploy.sh` — deploy rapido manual (`./scripts/deploy.sh homol|prod [branch]`).
+**CI workflows:** static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml (cron 5min).
 
-## Decisoes ja tomadas (nao redebater)
+**Helpers de teste importantes:**
+- `test/api/db.ts` — `withTransaction<T>(fn)` + `RollbackSentinel`
+- `test/e2e/auth/helpers.ts` — `getLatestOtp(email)` via lazy prisma import, `generateTestEmail()`
+- `prisma/seeds/test/auth-seed.ts` — 1 org + 2 users via upsert
 
-- **Branch strategy:** Release 1 roda em `ralph/testing-pipeline` (nova, a partir de main). PR-4 do indice resolvido.
-- **PR-1 (homol):** resolvido. `https://homol.quayer.com` operacional via Hetzner CX23 + CF Tunnel.
-- **PR-2 (synthetic):** MVP via GitHub Actions cron (nao Checkly/Datadog). Doc em docs/infra/SYNTHETIC_MONITORING.md.
-- **PR-3 (rollback):** runbook existe, drills pendentes (responsabilidade do usuario).
-- **PR-5 (baselines):** infra-level capturado. Auth-level e a US-101.
-- **Feature flag:** NAO aplica a Release 1 (apenas Release 3 usa NEXT_PUBLIC_AUTH_V3).
+**Docs:** docs/auth/BASELINES.md, TESTING_SETUP.md, TESTING_PATTERNS.md, CONTRACT_TESTING.md, COVERAGE.md, TEST_TIMINGS.md, SYNTHETIC_MONITORING.md. docs/CI_RULES.md. docs/infra/ROLLBACK_RUNBOOK.md + SECRETS.md.
 
-## Regras duras desta release
+**Skills:** .claude/skills/testing-pipeline.md, .claude/skills/release-checklist.md. CLAUDE.md com secoes Testing Pipeline + Release Process.
 
-- **FR-1:** Testes sao escritos contra o codigo ATUAL de auth, SEM refactor. Nao "melhorar" nada.
-- **FR-4:** Monitor sintetico NUNCA submete forms, faz login real, ou tem credenciais que deem acesso a dados de usuario.
-- **FR-6:** US-101 (baselines) antes de US-102 — sao criterio de sucesso.
-- Zero tipos `any` — TypeScript strict.
-- Zod em todos os inputs de API.
-- Rodar `npm run typecheck` antes de commit.
+## Known issues da Release 1 (pre-existentes, nao blockers)
+
+- **US-106B seed visibility:** controller usa prisma GLOBAL, rows de withTransaction invisiveis ao handler. Solucao futura: withCommittedSeed ou truncate strategy.
+- **US-108 bootstrap contract mode:** nao existem response Zod schemas. Contract tests usam shape snapshots locais.
+- **/signup prod flakiness 20%:** 2/10 curl timeouts em 21s — suspeita rate limit / Turnstile.
+
+## Decisoes desta release (Release 2 Phase A)
+
+- **Escopo reduzido:** apenas Phase A (US-201, 202, 203). Phases B/C/D BLOQUEADAS por muro de 14 dias de observacao.
+- **Branch:** `ralph/auth-cleanup-phase-a` (rodando em `ralph/auth-platform-hardening` por ora).
+- **Privacidade:** IP hashed (SHA256 com salt de IGNITER_APP_SECRET) antes de logar. Nunca logar email ou IP plaintext.
+- **5 rotas candidatas confirmadas existentes:**
+  1. `/register` — src/app/(auth)/register/page.tsx
+  2. `/forgot-password` — src/app/(auth)/forgot-password/page.tsx
+  3. `/reset-password/[token]` — src/app/(auth)/reset-password/[token]/
+  4. `/login/verify-magic` — src/app/(auth)/login/verify-magic/page.tsx + LoginVerifyMagicClient.tsx
+  5. `/signup/verify-magic` — src/app/(auth)/signup/verify-magic/page.tsx + SignupVerifyMagicClient.tsx
+
+## Regras duras
+
+- **FR-1 Release 1:** testes escritos contra codigo ATUAL, sem refactor.
+- **FR-1 Release 2:** nenhuma rota pode ser deletada sem 14 dias de observacao previa.
+- **Privacidade:** ipHashed sempre. Sem PII em logs.
+- **Zero any.** TypeScript strict.
+- **Zod em todos os inputs.**
 
 ---
 
 <!-- Iteracoes do Ralph entram abaixo desta linha -->
-
-## 2026-04-08 18:58 — Wave 1 (US-101, US-109, US-113, US-114) — commit 3f12ac5
-
-Executed in parallel via 4 dispatched agents (one per story). All file-disjoint, zero merge conflicts.
-
-### US-101 baselines auth
-- Created: docs/auth/BASELINES.md, docs/auth/baseline-queries.sql, scripts/infra/capture-auth-baselines.sh
-- Real p95 TTFB (10 samples each, 2026-04-08T18:54:43Z):
-  - /login 899ms (1 outlier skewing; p50 259ms — suspeita cold start Prisma pool)
-  - /signup 291ms (p50 254ms) — 2/10 curl timeouts 21s, suspeita rate-limit/Turnstile
-  - /login/verify 285ms, /signup/verify 288ms (estaveis)
-- Marcado como baseline v1 — nao ha historico pre 2026-04-08 (nginx default)
-- SQL queries de conversao/OTP rate como placeholder TODO (sem usuarios reais)
-
-### US-109 synthetic auth coverage
-- /login ja estava no matrix do synthetic-monitor.yml
-- Adicionado step gated por `if: matrix.target.name == 'prod-login'` que:
-  - Fetch body via curl
-  - Assert `grep -q "<form"` e `grep -qi "quayer"`
-  - Falha do grep falha o job (entra no fluxo de alerta existente)
-- docs/infra/SYNTHETIC_MONITORING.md ganhou secao "Auth coverage"
-- docs/auth/SYNTHETIC_MONITORING.md criado como pointer doc (~55 linhas)
-
-### US-113 skill testing-pipeline
-- .claude/skills/testing-pipeline.md (~210 linhas)
-- 5 camadas tabeladas, guia decisorio, 3 exemplos de mock compilaveis (igniter.client, authProcedure, Prisma), 7 entradas de troubleshooting
-- Referencia @/igniter.client, @/server/services/database, @/client/components/auth/login-form-final
-- Modelo: .claude/skills/auth.md
-
-### US-114 skill release-checklist
-- .claude/skills/release-checklist.md (131 linhas)
-- 5 grupos: codigo/testes, baselines, rollback, revisao humana, comunicacao
-- Gate de rollback: 5xx > 2%, p95 > 50%, 3 falhas synthetic, perda de dados
-- Template de post-mortem copy-paste
-- Referencia cenarios 3A-3J do ROLLBACK_RUNBOOK.md
-
-### Learnings
-- Multi-agent parallel com file-disjoint e extremamente eficiente (4 stories em 1 dispatch)
-- git commit mostra "0 insertions" por quirk de gitattributes mas arquivos foram criados OK (verificado com ls)
-- Rodar em ralph/auth-platform-hardening (nao ralph/testing-pipeline) — PR-4 do indice foi resolvido ha tempos como mixed branch
-- /signup em prod tem flakiness de 20% nos curl — investigar rate limit (provavel Turnstile ou middleware throttling); NAO e blocker mas merece ticket separado
----
-
-## 2026-04-08 — RELEASE 1 COMPLETE (Testing Pipeline)
-
-All 18 user stories passes:true. Executed in 5 waves via multi-agent parallel dispatch.
-
-### Wave summary
-- Wave 1 (commit 3f12ac5): US-101 baselines, US-109 synthetic auth, US-113 skill testing-pipeline, US-114 skill release-checklist
-- Wave 2 (commit dc707af): US-102 Vitest config, US-106A test DB infra, US-107A Playwright 3-projects
-- Wave 3 (commit ad85925): US-103 static analysis, US-104 unit backend (66 cases), US-105 unit React (33 cases GREEN)
-- Wave 4 (commit b318613): US-106B integration tests (17 cases), US-107B E2E specs (9 tests), US-108 contract tests (3 tests, bootstrap mode)
-- Wave 5 (commit 02f1201): US-106C CI test-api workflow, US-110 test:all script, US-111 smoke-homol, US-112 smoke-prod, US-115 CLAUDE.md
-
-### Test file counts created this release
-- Unit backend: 4 files, 66 cases
-- Unit React: 4 files, 33 cases (all passing verified)
-- Integration API: 4 files, 17 cases
-- Contract: 3 files, 3 tests
-- E2E auth: 3 specs, 4 tests
-- E2E smoke-prod: 1 spec, 5 tests
-- TOTAL: 19 files, 128 test cases
-
-### Workflows created this release
-- static.yml (typecheck + lint on PR)
-- test-api.yml (integration tests with ephemeral postgres)
-- smoke-homol.yml (triggers on Homol Deploy success)
-- smoke-prod.yml (triggers on Production Deploy success, read-only)
-
-### Known TODOs for next session
-1. Run `npm install` locally to pick up new devDeps: husky, lint-staged, @vitest/coverage-v8
-2. Run `npx husky init` or let `npm run prepare` fire via postinstall
-3. Run `bash scripts/test/db-up.sh` then `npm run test:api` to validate integration test infra end-to-end
-4. Run `npm run test:all` once and paste baseline into docs/auth/TEST_TIMINGS.md
-5. Resolve US-106B TODO: seed visibility — the controller uses global prisma, so rows created inside withTransaction are invisible. Either add a `withCommittedSeed` helper or switch tests to truncate strategy
-6. Run `npx playwright install --with-deps chromium` before running E2E
-7. Fill prisma/seeds/test/auth-seed.ts TODO placeholders with real password hash if needed
-8. US-108 bootstrap mode: create response Zod schemas in src/server/core/auth/auth.schemas.ts and replace local shape declarations
-9. Verify that the deploy-homol.yml name matches "Homol Deploy" (fixed during Wave 5) and deploy-production.yml matches "Production Deploy"
-10. Configure branch protection on main to require: static (typecheck + lint), test-api, smoke-prod
-
-### Learnings this session
-- Multi-agent parallel dispatch with file-disjoint stories scales beautifully — 4 stories done in the time of 1
-- Unicode surrogate errors happen when agents try to return very long ASCII responses that contain the repo path's emoji; mitigation: tell the agent "ASCII output, no absolute paths, under N words"
-- Having ONE agent own package.json per wave avoided all merge conflicts
-- Reading all existing files before writing new ones caught several pre-existing states (vitest.config.ts already existed, playwright config already existed, several auth test .tsx files already existed from earlier sessions)
-- The `git diff --cached --stat` showing "Bin 0 -> N bytes" with "0 insertions" is a gitattributes quirk on Windows — files ARE committed correctly (verified via git log and create mode entries)
----

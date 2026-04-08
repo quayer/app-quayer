@@ -1,0 +1,87 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/admin-fix-all-pages",
+  "description": "Admin pages bugfix + login UX fluida: (1) login sem delays — redirect imediato após envio OTP e após verificação; (2) admin/invitations — cookie name errado 'access_token' → 'accessToken'; (3) admin/sessions — igniter schema stale, sessions não está no schema gerado; (4) admin/security — sessions.filter crash quando fetch retorna objeto; (5) admin/notificacoes — JWT_SECRET no client, importar apenas hooks client-safe.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Login UX — redirect imediato, sem success screens nem delays",
+      "description": "Como usuário, quero que após digitar email e clicar 'Continuar com Email', seja redirecionado imediatamente para a página de verificação, sem esperar 1.5s nem ver mensagem de sucesso.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-form-final.tsx: remover `setSuccess(...)` e `setTimeout(() => router.push(...), 1500)`. Substituir pelo redirect imediato: `router.push('/login/verify?email=' + encodeURIComponent(email) + (isNewUser ? '&signup=true' : ''))`",
+        "Remover o state `success` e `setSuccess` e o Alert de sucesso do JSX (o Alert verde de '✉️ Código enviado para...')",
+        "Em src/client/components/auth/login-otp-form.tsx: remover o state `success`, remover `setSuccess(true)`, remover o bloco `if (success) { return (...) }` que renderiza 'Login realizado com sucesso! Redirecionando...'",
+        "Substituir por redirect imediato nos dois places onde `setSuccess(true)` aparece (email verify e phone verify): chamar diretamente `window.location.href = '/onboarding'` ou `'/admin'` ou `'/integracoes'` sem setTimeout",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: abrir /login, digitar email, clicar Continuar com Email — confirmar redirect imediato para /login/verify sem mensagem de sucesso"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Implemented 2026-03-12: removed success state, setSuccess calls, Alert de sucesso, setTimeout delays. Redirect now immediate in both login-form-final.tsx and login-otp-form.tsx."
+    },
+    {
+      "id": "US-002",
+      "title": "admin/invitations — fix cookie name 'access_token' → 'accessToken'",
+      "description": "Como admin, quero ver a lista de convites sem erro 'Token não encontrado', pois o cookie de auth se chama 'accessToken' não 'access_token'.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/invitations/actions.ts: substituir TODAS as ocorrências de `cookieStore.get('access_token')` por `cookieStore.get('accessToken')` — há 4 ocorrências (getInvitationsAction, resendInvitationAction, deleteInvitationAction, e uma 4ª função)",
+        "Verificar: o auth controller em src/server/features/auth/controllers/auth.controller.ts usa `response.setCookie('accessToken', ...)` — confirmar que o nome correto é 'accessToken'",
+        "Após fix, http://localhost:3000/admin/invitations deve carregar lista de convites sem erro",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Implemented 2026-03-12: replaced all 4 occurrences of cookieStore.get('access_token') with cookieStore.get('accessToken') in src/app/admin/invitations/actions.ts."
+    },
+    {
+      "id": "US-003",
+      "title": "admin/sessions — regenerar igniter schema para incluir sessionsController",
+      "description": "Como admin, quero ver a página de sessões sem crash 'Cannot read properties of undefined (reading list)', pois api.sessions está undefined porque o igniter.schema.ts está desatualizado.",
+      "acceptanceCriteria": [
+        "Verificar: `grep -c 'sessions' src/igniter.schema.ts` retorna 0 (schema stale)",
+        "Rodar: `npx igniter generate` (ou `npx @igniter-js/cli generate`) para regenerar igniter.schema.ts e igniter.client.ts com o sessionsController que já está no router",
+        "Se o comando falhar, verificar `node_modules/.bin/igniter` ou alternativas",
+        "Após regeneração: `grep -c 'sessions' src/igniter.schema.ts` deve retornar > 0",
+        "Typecheck passes (ignorar erros pré-existentes em device-sessions.controller.ts e outros arquivos não relacionados)",
+        "Verify in browser using dev-browser skill: navegar para /admin/sessions, confirmar que a página carrega sem erro"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "CLI falhou (ajv/dist/core não encontrado). Schema atualizado manualmente com sessions, audit, notifications, deviceSessions e ipRules. grep retorna 4 matches para 'sessions'."
+    },
+    {
+      "id": "US-004",
+      "title": "admin/security — fix sessions.filter is not a function",
+      "description": "Como admin, quero ver a página de segurança sem crash, pois o estado sessions recebe um objeto em vez de array quando a API retorna dados com shape inesperado.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/security/page.tsx, localizar onde `setSessions(...)` é chamado após o fetch de `/api/v1/device-sessions`",
+        "Adicionar guard: `setSessions(Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []))` — garantir que sessions SEMPRE seja um array",
+        "Verificar o helper `apiFetch` usado na página — confirmar se ele unwraps a resposta automaticamente (retorna `response.json()` direto ou apenas `response.json().data`)",
+        "Se `apiFetch` retorna a resposta raw `{ data: [...] }`, então `data.data` é o array correto",
+        "Se `apiFetch` já unwraps para retornar `data` diretamente, então o array está em `data` diretamente, não em `data.data`",
+        "Adicionar defensive `|| []` em todos os `sessions.filter` calls se necessário",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /admin/security, confirmar que a página carrega sem crash"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Implemented 2026-03-12: replaced setSessions(data.data || []) with Array.isArray guard — setSessions(Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []). Also applied same guard to setRules in loadRules. apiFetch returns raw JSON so data.data is the array when API wraps correctly; guard handles unexpected shapes."
+    },
+    {
+      "id": "US-005",
+      "title": "admin/notificacoes — fix JWT_SECRET no client (importar só hooks client-safe)",
+      "description": "Como admin, quero ver a página de notificações sem erro JWT_SECRET, pois um componente client está importando código server-only de @/lib/auth.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/notificacoes/NotificationsAdminPageClient.tsx: localizar `import { useAuth } from '@/lib/auth'` (ou similar import do barrel @/lib/auth)",
+        "Trocar para import direto do context client-safe: `import { useAuth } from '@/lib/auth/auth-context'` (sem passar pelo barrel que re-exporta JWT/bcrypt server-side)",
+        "Verificar se @/lib/auth/index.ts re-exporta funções que leem process.env.JWT_SECRET no nível de módulo — se sim, o barrel não deve ser importado em componentes 'use client'",
+        "Verificar se há outros imports de @/lib/auth (sem sufixo de arquivo) em outros componentes 'use client' no mesmo arquivo e corrigir",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /admin/notificacoes, confirmar que carrega sem erro JWT_SECRET no console"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implemented 2026-03-12: changed import { useAuth } from '@/lib/auth' to import { useAuth } from '@/lib/auth/auth-provider' in NotificationsAdminPageClient.tsx to avoid barrel pulling in JWT/bcrypt server-only code at module load time."
+    }
+  ]
+}

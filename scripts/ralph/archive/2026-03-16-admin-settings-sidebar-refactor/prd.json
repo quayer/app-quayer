@@ -1,0 +1,116 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/admin-settings-sidebar-refactor",
+  "description": "Admin Settings Refactor + Sidebar Collapsible + Org-Switching — critique and fix of 8 settings tabs, sidebar collapse, OAuth cleanup, ApiKeys as own tab, and admin org-switch unblock",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Sidebar admin colapsável com sub-grupos",
+      "description": "Como admin, quero poder colapsar toda a seção de administração no sidebar para ter mais espaço visual quando estou nas rotas de org (conversas, contatos).",
+      "acceptanceCriteria": [
+        "A seção admin é envolvida em um Collapsible shadcn/ui com label 'Administração' e ícone ChevronDown",
+        "Estado padrão: expandido (defaultOpen={true})",
+        "Quando colapsado, os 4 sub-grupos ficam ocultos",
+        "Os 4 sub-grupos internos e seus separadores são preservados quando expandido",
+        "O estado de colapso persiste via localStorage (key: admin-sidebar-collapsed)",
+        "Typecheck passa",
+        "Verificar no browser: colapsar/expandir funciona, estado persiste ao recarregar"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Arquivo: src/client/components/app-sidebar.tsx. Usar Collapsible, CollapsibleTrigger, CollapsibleContent de @/client/components/ui/collapsible (ou importar de radix-ui se não existir como componente separado). O bloco adminMenuGroups é renderizado nas linhas 171-192. Envolver os 4 NavMain + SidebarSeparators em CollapsibleContent. O CollapsibleTrigger deve ser um botão visível dentro de SidebarContent."
+    },
+    {
+      "id": "US-002",
+      "title": "Settings — substituir window.location.reload() por router.refresh()",
+      "description": "Como admin, quero que o botão Atualizar nas configurações recarregue os dados sem reload completo de página.",
+      "acceptanceCriteria": [
+        "window.location.reload() em src/app/admin/settings/page.tsx substituído por router.refresh()",
+        "useRouter já está importado no arquivo — apenas mudar o onClick",
+        "Typecheck passa"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Arquivo: src/app/admin/settings/page.tsx. Procurar por 'window.location.reload()' — está no onClick do Button de Atualizar (linha ~153). O useRouter está importado na linha 4. Trocar para router.refresh()."
+    },
+    {
+      "id": "US-003",
+      "title": "ApiKeys como tab própria no settings",
+      "description": "Como admin, quero encontrar o gerenciamento de API Keys como uma tab direta no settings, não enterrada dentro de Segurança.",
+      "acceptanceCriteria": [
+        "Nova tab 'API Keys' adicionada entre 'Segurança' e 'Sistema' no settings page",
+        "ApiKeysSettings removido de dentro de SecuritySettings e movido para TabsContent value='api-keys'",
+        "Import dinâmico dynamic() adicionado para ApiKeysSettings com TabSkeleton como fallback e ssr: false",
+        "Ícone: KeyRound de lucide-react (já está importado)",
+        "Tab label: 'API Keys'",
+        "SecuritySettings não quebra após remover o componente filho",
+        "Typecheck passa",
+        "Verificar no browser: tab API Keys aparece, CRUD de API keys funciona"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Arquivo settings page: src/app/admin/settings/page.tsx. ApiKeysSettings component: src/client/components/admin-settings/ApiKeysSettings.tsx. SecuritySettings: src/client/components/admin-settings/SecuritySettings.tsx — procurar import e render de ApiKeysSettings dentro deste arquivo e remover."
+    },
+    {
+      "id": "US-004",
+      "title": "OAuth — limpar UI fantasma de providers não implementados",
+      "description": "Como admin, quero que a aba OAuth mostre apenas o Google (funcional), sem UI enganosa de providers não implementados.",
+      "acceptanceCriteria": [
+        "GitHub, Microsoft e Apple: remover formulários de input desses providers",
+        "Substituir pelos 3 cards removidos por UM card 'Outros provedores' com Badge 'Em breve' e lista: GitHub, Microsoft, Apple como texto simples",
+        "Google continua funcionando normalmente (toggle, credenciais, redirect URI)",
+        "Typecheck passa",
+        "Verificar no browser: OAuth tab sem campos fantasma"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Arquivo: src/client/components/admin-settings/OAuthSettings.tsx. Os providers GitHub/Microsoft/Apple provavelmente têm seções de formulário com campos disabled. Substituir essas seções por um card informativo compacto."
+    },
+    {
+      "id": "US-005",
+      "title": "SystemInfo — confirmação antes de Inicializar Padrões",
+      "description": "Como admin, quero ser avisado com dialog de confirmação antes de reinicializar os padrões do sistema.",
+      "acceptanceCriteria": [
+        "Botão 'Inicializar Padrões' abre AlertDialog do shadcn/ui antes de executar",
+        "Dialog: título 'Reinicializar configurações padrão?', descrição 'Esta ação sobrescreve todas as configurações do sistema com os valores padrão e não pode ser desfeita.', botão Cancelar e botão Confirmar (variant destructive)",
+        "A mutation initializeDefaults só é chamada após confirmação",
+        "Typecheck passa",
+        "Verificar no browser: dialog abre ao clicar, só executa ao confirmar"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Arquivo: src/client/components/admin-settings/SystemInfo.tsx. Usar AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogCancel, AlertDialogAction de @/client/components/ui/alert-dialog."
+    },
+    {
+      "id": "US-006",
+      "title": "Admin pode trocar de organização via OrganizationSwitcher",
+      "description": "Como admin que também é membro de organização, quero poder trocar o contexto de organização para navegar corretamente nas rotas /conversas, /contatos.",
+      "acceptanceCriteria": [
+        "Em OrganizationSwitcher.tsx: remover guard 'if (!user || user.role === 'admin') return null' no useEffect que pula o carregamento de orgs",
+        "Remover guard 'if (!user || user.role === 'admin') return null' no return do render",
+        "Guard de 1 organização (organizations.length <= 1) é mantido — se admin tiver só 1 org, switcher não aparece",
+        "Backend não requer mudança — api.auth.switchOrganization já funciona para qualquer role",
+        "Typecheck passa",
+        "Verificar no browser: admin com múltiplas orgs vê o switcher no footer do sidebar"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Arquivo: src/client/components/organization-switcher.tsx. Guards estão nas linhas ~34-37 (useEffect early return) e ~94-96 (render early return). ATENÇÃO: verificar se (user as any).organizations é populado para admins — se não for, a lista ficará vazia e o guard de length<=1 vai ocultar o switcher de qualquer forma (comportamento correto para admin sem org)."
+    },
+    {
+      "id": "US-007",
+      "title": "Webhook settings — migrar de fetch direto para padrão Igniter",
+      "description": "Como desenvolvedor, quero que WebhookSettings use o mesmo padrão Igniter das outras 7 abas para consistência e type-safety.",
+      "acceptanceCriteria": [
+        "Verificar primeiro se existe endpoint Igniter para webhook settings (comparar com UAZapiSettings que usa system-settings.getByCategory)",
+        "Se existir: substituir fetch('/api/v1/system-settings/webhook') por api.systemSettings.getByCategory.useQuery({ category: 'webhook' }) ou equivalente",
+        "Se não existir: criar action handler no system-settings controller primeiro, depois migrar o frontend",
+        "Comportamento idêntico ao atual (mesmos campos, mesma validação, mesmos eventos disponíveis)",
+        "Typecheck passa"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Arquivo frontend: src/client/components/admin-settings/WebhookSettings.tsx. Para referência do padrão correto, ler: src/client/components/admin-settings/UAZapiSettings.tsx. Para o controller: src/server/features/system-settings/ — verificar se há getByCategory ou getWebhook disponível."
+    }
+  ]
+}

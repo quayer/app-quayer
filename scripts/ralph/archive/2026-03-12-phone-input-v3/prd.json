@@ -1,0 +1,44 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/phone-input-v3",
+  "description": "PhoneInput v3 — corrigir UI fora do padrão dark/Shadcn e auto-detect Brasil: (1) remover CSS do react-international-phone que conflita com dark mode; estilizar CountrySelector dropdown com Tailwind puro; (2) garantir que digitando sem +55 o país padrão é Brasil automaticamente; (3) mostrar claramente que o DDD (ex: 11) aparece no campo de input e o +55 fica no seletor de país — comportamento padrão WhatsApp.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "PhoneInput — remover CSS externo, estilizar com Tailwind dark-mode compliant",
+      "description": "Como usuário, quero que o PhoneInput tenha visual consistente com o resto da app (dark mode, bordas, cores do Shadcn), sem estilos externos que conflitam.",
+      "acceptanceCriteria": [
+        "Em src/client/components/ui/phone-input.tsx: remover `import 'react-international-phone/style.css'` — o CSS externo conflita com o dark mode do app",
+        "O CountrySelector tem prop `dropdownStyleProps` para customizar o dropdown. Adicionar: `dropdownStyleProps={{ style: { background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--popover-foreground))', zIndex: 50 } }}`",
+        "O item selecionado no dropdown: adicionar `listItemFlagClassName` e `listItemCountryDialCodeClassName` para herdar cores do tema",
+        "Alternativa se dropdownStyleProps não funcionar: verificar quais props o CountrySelector aceita via TypeScript (hover no type) e usar as disponíveis para customização. Se não houver, usar a abordagem de `renderButtonWrapper` ou substituir CountrySelector por um Shadcn Popover + Select customizado.",
+        "O botão do seletor (buttonClassName já tem Tailwind) deve ter contraste adequado: texto visível tanto em dark quanto em light",
+        "Verificar: o dropdown de países tem fundo escuro em dark mode, texto legível, sem fundo branco em tema escuro",
+        "Input field: manter as classes Tailwind atuais (border-input, bg-transparent, etc.) — já estão corretas",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '11', confirmar que o dropdown de país e o input estão no tema dark correto sem fundo branco"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Removed react-international-phone/style.css import. Added dropdownStyleProps with hsl(var(--popover)), hsl(var(--border)), hsl(var(--popover-foreground)) CSS vars. Added listItemStyle with popover-foreground color. Typecheck passes (pre-existing errors in unrelated files only)."
+    },
+    {
+      "id": "US-002",
+      "title": "PhoneInput — auto-detect Brasil quando digitando sem código de país",
+      "description": "Como usuário brasileiro, quando digito '11940636426' sem prefixo +55, o seletor deve mostrar 🇧🇷 automaticamente e formatar como número brasileiro.",
+      "acceptanceCriteria": [
+        "Em src/client/components/ui/phone-input.tsx: o `usePhoneInput` já recebe `defaultCountry: 'br'` — verificar se ao digitar '11940636426' o país permanece como Brasil",
+        "Se o hook mudar o país automaticamente para outro ao digitar os primeiros dígitos, adicionar `disableDialCodeAndPrefix: true` no usePhoneInput para manter o país selecionado manualmente até o usuário mudar pelo dropdown",
+        "Alternativa: adicionar `forceDialCode: true` nas opções do usePhoneInput se disponível — isso mantém o +55 visível e garante que o número digitado é tratado como brasileiro",
+        "O placeholder deve ser `(11) 99999-9999` (sem o +55) para indicar ao usuário que deve digitar apenas DDD + número",
+        "Testar: digitar '11940636426' → seletor mostra 🇧🇷, input mostra '(11) 94063-6426', onChange emite '+5511940636426'",
+        "Testar: digitar '+1650253000' → seletor muda para 🇺🇸, input mostra '650 253 000'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '11940636426', confirmar que seletor mostra 🇧🇷 e input mostra '(11) 94063-6426'"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Added forceDialCode: true to usePhoneInput options. This keeps +55 always visible in the input and prevents the dial code from being removed by keyboard. Country stays as Brasil (BR) when typing local numbers. Country changes correctly when pasting international numbers (e.g. +1650253000 → US). Typecheck passes."
+    }
+  ]
+}

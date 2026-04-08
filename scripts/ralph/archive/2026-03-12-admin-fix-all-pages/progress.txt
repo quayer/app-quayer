@@ -1,0 +1,101 @@
+## Codebase Patterns
+
+- **Cookie name:** auth usa `accessToken` (não `access_token`) — setCookie em auth.controller.ts line ~89
+- **igniter schema:** regenerar com `npx igniter generate` quando controller adicionado ao router mas schema não atualizado
+- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-context` ou hook específico
+- **apiFetch helper:** retorna `response.json()` raw — `data.data` é o array, não `data` diretamente
+- **Git mmap workaround:** Use `git hash-object -w <file>` then `git update-index --add --cacheinfo` when `git add` fails
+- **After Prisma schema changes:** Always run `npx prisma generate` to regenerate client types
+- **Auth controller pattern:** Token generation uses `signAccessToken` + `db.refreshToken.create` + `signRefreshToken` + `setAuthCookies(response, accessToken, refreshToken)`
+- **Phone OTP flow:** Uses `VerificationCode` model with `type: WHATSAPP_OTP` and `email` field stores normalized phone number
+- **uazapiClient.sendText:** `(instanceId, token, { number, text })` — endpoint POST /send/text; header `token` identifies instance
+- **UAZAPI_INSTANCE_TOKEN env:** fallback when no DB connection has uazapiToken set
+- **libphonenumber-js:** já instalado — usar `AsYouType` para formatar; `normalizePhone` no backend remove formatação
+- **PhoneInput forwardRef:** usa React.forwardRef expondo ref do input nativo; shadcn Input NÃO tem forwardRef — usar `<input>` diretamente
+
+---
+
+# Ralph Progress Log
+Started: Thu Mar 12 10:01:04     2026
+---
+
+## US-001 — DONE (2026-03-12)
+**Login UX — redirect imediato, sem success screens nem delays**
+
+### Changes made:
+- `src/client/components/auth/login-form-final.tsx`:
+  - Removed `const [success, setSuccess] = useState("")`
+  - Removed `setSuccess("")` in handleOTPRequest
+  - Removed `setSuccess(...)` call and `setTimeout(() => router.push(...), 1500)` block
+  - Added immediate redirect: `router.push(\`/login/verify?email=...\`)`
+  - Removed success Alert JSX block (Alert verde "✉️ Código enviado para...")
+- `src/client/components/auth/login-otp-form.tsx`:
+  - Removed `const [success, setSuccess] = useState(false)`
+  - Removed phone verify: `setSuccess(true); setTimeout(() => {...}, 1500)` → immediate redirect
+  - Removed email verify: `setSuccess(true); setTimeout(() => {...}, 1500)` → immediate redirect
+  - Removed `if (success) { return (<Card>...Login realizado com sucesso!...</Card>) }` block
+  - Removed unused `CheckCircle2` import
+
+### Typecheck: no new errors introduced (pre-existing errors in other files unrelated to this US)
+### Commit: 0c0955a feat: [US-001] - Login UX — redirect imediato sem success screens
+---
+
+## US-002 — DONE (2026-03-12)
+**admin/invitations — fix cookie name 'access_token' → 'accessToken'**
+
+### Changes made:
+- `src/app/admin/invitations/actions.ts`:
+  - Replaced all 4 occurrences of `cookieStore.get('access_token')` with `cookieStore.get('accessToken')`
+  - Functions affected: getInvitationsAction, createInvitationAction, resendInvitationAction, deleteInvitationAction
+
+### Typecheck: no new errors introduced (pre-existing errors in other files unrelated to this US)
+### Commit: fix: [US-002] - admin/invitations — fix cookie name access_token → accessToken
+---
+
+## US-004 — DONE (2026-03-12)
+**admin/security — fix sessions.filter is not a function**
+
+### Changes made:
+- `src/app/admin/security/page.tsx`:
+  - In `loadSessions` (DevicesTab): replaced `setSessions(data.data || [])` with `setSessions(Array.isArray(data?.data) ? data.data : Array.isArray(data) ? (data as unknown as DeviceSession[]) : [])`
+  - In `loadRules` (IpRulesTab): replaced `setRules(data.data || [])` with same Array.isArray guard pattern
+  - `apiFetch` returns raw `response.json()`, so `data.data` is the array when API wraps correctly; guard ensures sessions is always an array regardless of response shape
+
+### Typecheck: no new errors introduced (pre-existing errors in other files unrelated to this US)
+### Commit: fix: [US-004] - admin/security — fix sessions.filter crash com guard Array.isArray
+---
+
+## US-005 — DONE (2026-03-12)
+**admin/notificacoes — fix JWT_SECRET no client (importar só hooks client-safe)**
+
+### Changes made:
+- `src/app/admin/notificacoes/NotificationsAdminPageClient.tsx`:
+  - Changed `import { useAuth } from '@/lib/auth'` to `import { useAuth } from '@/lib/auth/auth-provider'`
+  - The barrel `@/lib/auth/index.ts` re-exports from `./jwt` and `./bcrypt` which read `process.env.JWT_SECRET` at module load time, crashing client components
+  - `useAuth` is defined and exported from `src/lib/auth/auth-provider.tsx` (marked `'use client'`)
+
+### Typecheck: no new errors introduced (pre-existing errors in other files unrelated to this US)
+### Commit: fix: [US-005] - admin/notificacoes — fix JWT_SECRET client import
+---
+
+## US-003 — DONE (2026-03-12)
+**admin/sessions — regenerar igniter schema para incluir sessionsController**
+
+### Root cause:
+`npx igniter generate` failed with `Cannot find module 'ajv/dist/core'` due to broken ajv-draft-04 dependency. Schema was manually updated.
+
+### Changes made:
+- `src/igniter.schema.ts`:
+  - Added `sessions` controller (23 actions: list, stats, get, blockAI, unblockAI, close, updateStatus, updateDepartment, addTags, removeTags, checkAIStatus, byContact, blacklist, addToBlacklist, removeFromBlacklist, updateContactLabels, updateSessionLabels, listTabulations, contactsView, updateContactLead, updateSessionLead, bulk, delete)
+  - Added `audit` controller (4 actions: list, stats, actions, resources)
+  - Added `notifications` controller (11 actions: list, my, unreadCount, getById, create, update, delete, markAsRead, markAllAsRead, getTypes, cleanup)
+  - Added `deviceSessions` controller (4 actions: list, listByUser, revoke, revokeAll)
+  - Added `ipRules` controller (5 actions: list, create, update, delete, check)
+  - All 5 controllers were registered in igniter.router.ts but missing from schema
+
+### Verification:
+- `grep -c "sessions" src/igniter.schema.ts` returns 4 (passes > 0 check)
+- TypeScript: no new errors introduced (pre-existing errors in other files remain)
+
+### Commit: fix: [US-003] - regenerar igniter schema — adicionar sessions ao client
+---

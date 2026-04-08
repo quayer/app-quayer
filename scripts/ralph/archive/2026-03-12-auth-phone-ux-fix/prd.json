@@ -1,0 +1,56 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-phone-ux-fix",
+  "description": "Auth Phone UX Fix — 3 correções na jornada de login/cadastro por telefone: (1) Fix 500 no endpoint loginOTPPhone: try/catch + fallback UAZAPI_INSTANCE_TOKEN; (2) Formatação do número com libphonenumber-js AsYouType enquanto digita; (3) Fix de foco perdido ao detectar telefone: forwardRef no PhoneInput + refocus nos forms.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix 500 em loginOTPPhone — try/catch + fallback env UAZAPI_INSTANCE_TOKEN",
+      "description": "Como sistema, quando o envio de WhatsApp OTP falha, devo retornar erro amigável em vez de crash 500.",
+      "acceptanceCriteria": [
+        "Em src/lib/uaz/whatsapp-otp.ts: após `database.connection.findFirst(...)`, se `!conn?.uazapiToken`, verificar `process.env.UAZAPI_INSTANCE_TOKEN` como fallback — se existir, usar esse token sem buscar DB; só lançar erro se ambos forem nulos",
+        "Em src/server/features/auth/controllers/auth.controller.ts, no handler `loginOTPPhone`: envolver `await sendWhatsAppOTP(normalized, code)` em try/catch — no catch: `console.error('[loginOTPPhone] sendWhatsAppOTP failed:', err); return response.badRequest('Serviço WhatsApp temporariamente indisponível. Tente fazer login com email.')`",
+        "curl -X POST http://localhost:3000/api/v1/auth/login-otp-phone -H 'Content-Type: application/json' -d '{\"phone\":\"5511940636426\"}' retorna 400 com mensagem legível em vez de 500 quando UAZAPI não está configurado",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "PhoneInput — formatação com libphonenumber-js AsYouType enquanto digita",
+      "description": "Como usuário, quero ver o número formatado (ex: (11) 94063-6426) enquanto digito, não sequência de números brutos.",
+      "acceptanceCriteria": [
+        "Em src/client/components/ui/phone-input.tsx: importar `AsYouType` de `libphonenumber-js` (já instalado no package.json)",
+        "No handler onChange do Input: usar `const formatter = new AsYouType('BR'); const formatted = formatter.input(e.target.value); onChange(formatted)` — formata enquanto digita",
+        "A detecção de país `detectCountry` já recebe o valor e faz `.replace(/^\\+/, '').replace(/\\D/g, '')` para extrair dígitos — funciona com valores formatados",
+        "A função `looksLikePhone` nos forms já faz `v.replace(/[\\s\\-\\(\\)\\+]/g, '')` para extrair dígitos puros — continua funcionando",
+        "O `normalizePhone` no backend (`phone.replace(/\\D/g, '')`) já remove formatação — o backend recebe e processa corretamente",
+        "Digitando '11940636426' o input exibe '(11) 94063-6426' com bandeira 🇧🇷",
+        "Digitando '+1 650 253 0000' o input exibe '+1 650 253 0000' com bandeira 🇺🇸",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '11940636426', confirmar que o número aparece formatado como '(11) 94063-6426' com bandeira 🇧🇷"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Fix foco perdido ao detectar telefone — forwardRef no PhoneInput + refocus nos forms",
+      "description": "Como usuário, quando o campo detecta que estou digitando telefone e muda para PhoneInput, não quero perder o foco e precisar clicar novamente.",
+      "acceptanceCriteria": [
+        "Em src/client/components/ui/phone-input.tsx: converter para `React.forwardRef<HTMLInputElement, PhoneInputProps>` — a ref deve ser passada para o `<Input>` interno: `<Input ref={ref} ...>`. Manter export nomeado: `export const PhoneInput = React.forwardRef<...>(...)`",
+        "Em src/client/components/auth/login-form-final.tsx: adicionar `import { useRef, useEffect } from 'react'` (se não importado); adicionar `const phoneInputRef = useRef<HTMLInputElement>(null)`; adicionar `useEffect(() => { if (isPhone && phoneInputRef.current) { phoneInputRef.current.focus() } }, [isPhone])`; passar `ref={phoneInputRef}` para o `<PhoneInput>`",
+        "Em src/client/components/auth/signup-form.tsx: mesmo padrão — `phoneInputRef`, `useEffect` para focar quando `isPhone` muda, `ref={phoneInputRef}` no `<PhoneInput>`",
+        "O Input interno do PhoneInput deve aceitar e repassar a ref corretamente (verificar se o componente `Input` de @/client/components/ui/input usa forwardRef — se não usar, passar `ref` diretamente ao elemento `<input>` HTML nativo dentro de Input)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, digitar '11' e confirmar que o foco permanece no campo após a bandeira 🇧🇷 aparecer — usuário não precisa clicar novamente"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+## Codebase Patterns
+
+- migrate.js usa pg diretamente (não prisma CLI) — evita dependência do effect/fast-check
+- **Git mmap workaround:** Use `git hash-object -w <file>` then `git update-index --add --cacheinfo 100644,<hash>,<path>` to stage files when `git add` fails with mmap error
+- **After Prisma schema changes:** Always run `npx prisma generate` to regenerate client types before typechecking
+- **Auth controller pattern:** Token generation uses `signAccessToken` + `db.refreshToken.create` + `signRefreshToken` + `setAuthCookies(response, accessToken, refreshToken)` — copy from `verifyLoginOTP` or `passkeyLoginVerify`
+- **Passkey challenge type:** `PasskeyChallenge.type` is a plain `String`, supports custom values like `'conditional'` in addition to `'registration'`/`'authentication'`
+- **Phone OTP flow:** Uses `VerificationCode` model with `type: 'WHATSAPP_OTP'` and `email` field stores normalized phone number
+- **uazapiClient.sendText:** `(instanceId, token, { number, text })` — instanceId unused in URL; endpoint is POST /send/text; header `token` identifies instance
+- **UAZAPI_INSTANCE_TOKEN env:** fallback when no DB connection has uazapiToken set
+- **libphonenumber-js:** já instalado — usar `AsYouType` para formatar; `normalizePhone` no backend remove formatação via replace(/\D/g, '')
+- **PhoneInput forwardRef:** usa React.forwardRef para expor ref do input interno; Input shadcn já tem forwardRef
+- **Igniter.js error handling:** usar `response.badRequest(message)` para retornar 400 com mensagem amigável; wrap sendWhatsAppOTP em try/catch
+
+---
+
+# Ralph Progress Log
+Started: Thu Mar 12 09:41:44     2026
+---
+
+## 2026-03-12 - US-001
+- What was implemented: Fix 500 em loginOTPPhone com try/catch + fallback env UAZAPI_INSTANCE_TOKEN
+- Files changed:
+  - `src/lib/uaz/whatsapp-otp.ts`: Added env fallback — `const token = conn?.uazapiToken ?? process.env.UAZAPI_INSTANCE_TOKEN ?? null`; replaced `conn.uazapiToken` with `token` in sendText call
+  - `src/server/features/auth/controllers/auth.controller.ts`: Wrapped `sendWhatsAppOTP` in try/catch at loginOTPPhone handler (~line 2350); catch returns `response.badRequest('Serviço WhatsApp temporariamente indisponível. Tente fazer login com email.')`
+- **Learnings for future iterations:**
+  - Pre-existing TS errors exist in `share.repository.ts` and `webhooks.controller.ts` (unrelated to auth) — don't be confused, they are pre-existing
+  - `git add` worked fine on this OneDrive setup — no mmap error occurred; standard `git add` is sufficient
+  - Files show as "Binary files differ" in git diff on Windows/OneDrive — this is normal, changes are real (file sizes changed)
+  - The `loginOTPPhone` handler is at line ~2331 in auth.controller.ts; the try/catch wraps only the `sendWhatsAppOTP` call, not DB operations
+---
+
+## 2026-03-12 - US-002
+- What was implemented: PhoneInput — formatação com libphonenumber-js AsYouType enquanto digita
+- Files changed:
+  - `src/client/components/ui/phone-input.tsx`: Added `import { AsYouType } from "libphonenumber-js"`; updated onChange handler to format with `new AsYouType('BR').input(e.target.value)` before calling `onChange(formatted)`
+  - `scripts/ralph/prd.json`: Set passes: true for US-002
+- **Learnings for future iterations:**
+  - `AsYouType('BR')` formats Brazilian numbers as `(11) 94063-6426`; if user types a `+` prefix, AsYouType detects the country automatically (e.g., `+1 650 253 0000` → 🇺🇸)
+  - `detectCountry` in phone-input strips formatting via `.replace(/^\+/, '').replace(/\D/g, '')` so it works correctly with formatted values
+  - Pre-existing TS errors in share.repository.ts and webhooks.controller.ts — not introduced by US-002
+---
+
+## 2026-03-12 - US-003
+- What was implemented: Fix foco perdido ao detectar telefone — forwardRef no PhoneInput + refocus nos forms
+- Files changed:
+  - `src/client/components/ui/phone-input.tsx`: Converted from named function to `React.forwardRef<HTMLInputElement, PhoneInputProps>`; replaced `<Input>` (shadcn) with native `<input>` so ref is passed directly; inlined Input's className styles; added `PhoneInput.displayName = 'PhoneInput'`; added `import React` (removed `Input` import)
+  - `src/client/components/auth/login-form-final.tsx`: Added `useRef` to existing react imports; added `const phoneInputRef = useRef<HTMLInputElement>(null)`; added `useEffect(() => { if (isPhone && phoneInputRef.current) { phoneInputRef.current.focus() } }, [isPhone])`; passed `ref={phoneInputRef}` to `<PhoneInput>`
+  - `src/client/components/auth/signup-form.tsx`: Same pattern — added `useEffect, useRef` imports; added `phoneInputRef`, `useEffect` to focus on `isPhone`, `ref={phoneInputRef}` on `<PhoneInput>`
+  - `scripts/ralph/prd.json`: Set passes: true for US-003
+- **Learnings for future iterations:**
+  - The shadcn `Input` component in this project does NOT use `React.forwardRef` — it uses spread `{...props}` which in React 19 can pass ref as a prop, but to guarantee ref forwarding with older React patterns, use native `<input>` directly inside the wrapper
+  - When converting a component to forwardRef, inline the className from the replaced component to keep the same visual appearance
+  - All pre-existing TS errors are in unrelated files (integracoes/, contatos/, ferramentas/) — the three modified files have zero TS errors
+---

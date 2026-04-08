@@ -1,302 +1,72 @@
 {
   "project": "Quayer",
-  "branchName": "ralph/testing-pipeline",
-  "description": "Testing Pipeline (Release 1 de 3) — Estabelecer rede de seguranca de testes em 5 camadas x 3 ambientes (local, homol, prod) contra o codigo ATUAL de auth. Zero mudanca funcional. Fundacao para Release 2 (cleanup) e Release 3 (rebrand). Fonte: tasks/prd-01-testing-pipeline.md",
+  "branchName": "ralph/auth-cleanup-phase-a",
+  "description": "Release 2 Fase A — Instrumentar rotas candidatas legadas com logging + static audit. SOMENTE Fase A executavel nesta sessao. Fases B/C/D bloqueadas por muro de 14 dias de observacao de trafego real em producao. Fonte: tasks/prd-02-auth-cleanup.md",
   "userStories": [
     {
-      "id": "US-101",
-      "title": "Baselines de auth em docs/auth/BASELINES.md",
-      "description": "Como engenheiro, preciso dos numeros atuais de performance e conversao do fluxo de auth para definir o criterio objetivo de 'nao regrediu' nas proximas releases.",
+      "id": "US-201",
+      "title": "Instrumentar 5 rotas candidatas com logging estruturado",
+      "description": "Como engenheiro, preciso de metricas de acesso real antes de decidir o que deletar. Cada rota candidata ganha log estruturado na entrada. Zero mudanca de comportamento funcional.",
       "acceptanceCriteria": [
-        "Criar docs/auth/BASELINES.md com snapshot datado (reutilizar metodologia de docs/infra/BASELINES.md que ja existe de 2026-04-08)",
-        "Incluir p50/p95/p99 de TTFB para /login, /signup, /login/verify, /signup/verify (minimo 10 amostras cada, adaptar scripts/infra/capture-baselines.sh)",
-        "Incluir nota sobre falta de dados historicos (nginx default estava servindo antes de 2026-04-08) e definir snapshot atual como baseline v1",
-        "Documentar queries SQL para conversao signup->onboarding e taxa OTP em docs/auth/baseline-queries.sql (TODO com placeholder se nao houver usuarios reais)",
-        "Listar fonte de cada numero (curl direto, SQL query, log)",
+        "Criar src/lib/auth/cleanup-audit-logger.ts exportando logCleanupAccess(payload) que grava JSON estruturado contendo: route, method, userAgent (request headers), referrer, ipHashed (SHA256 com salt de IGNITER_APP_SECRET), hasAuthCookie (bool, checa cookie accessToken), timestamp (ISO)",
+        "Usar console.info com prefixo '[cleanup-audit]' para garantir captura pelo log aggregator padrao (Vercel/Docker) sem infra nova",
+        "Instrumentar cada um dos 5 page.tsx candidatos — adicionar chamada ao logger no inicio da funcao server component (ou no layout se for client component):",
+        "  - src/app/(auth)/register/page.tsx",
+        "  - src/app/(auth)/forgot-password/page.tsx",
+        "  - src/app/(auth)/reset-password/[token]/page.tsx (ou layout.tsx se o page for client)",
+        "  - src/app/(auth)/login/verify-magic/page.tsx",
+        "  - src/app/(auth)/signup/verify-magic/page.tsx",
+        "Se a pagina e client component ('use client'), usar useEffect no primeiro render + fetch interno para POST /api/v1/internal/cleanup-audit OU server action",
+        "Preferir solucao server-side: mover logging para layout.tsx (server component) que engloba a rota, checando pathname",
+        "Verificar se existe endpoint backend correspondente (POST /api/v1/auth/forgot-password, /register, etc) — instrumentar tambem no handler se existir; se ja foi removido, anotar em comentario",
+        "Zero mudanca visual ou funcional — usuario nao percebe a instrumentacao",
+        "Logs saem em stdout no formato: [cleanup-audit] {\"route\":\"/register\",\"ts\":\"2026-04-08T...\",\"ipHashed\":\"abc123\",...}",
         "Typecheck passa"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 1 (commit 3f12ac5). docs/auth/BASELINES.md + baseline-queries.sql + capture-auth-baselines.sh. p95: /login 899ms (outlier, p50 259ms), /signup 291ms, /login/verify 285ms, /signup/verify 288ms. /signup teve 2/10 timeouts suspeitos (rate limit/Turnstile)."
+      "passes": false,
+      "notes": "Verificar primeiro se cada pagina e server ou client component. Se client, a estrategia muda. NAO mexer no igniter.client.ts. Evitar PII: ipHashed obrigatorio, nao logar email ou IP plaintext."
     },
     {
-      "id": "US-102",
-      "title": "Vitest + TypeScript strict configurado",
-      "description": "Como dev, preciso de Vitest rodando com path aliases do projeto e tipagem estrita, separado do codigo de producao.",
+      "id": "US-202",
+      "title": "Static audit — mapear todas referencias das 5 rotas candidatas",
+      "description": "Paralelo a medicao runtime, fazer grep completo do codebase e listar cada arquivo que referencia as rotas candidatas. Saida alimenta a decisao da Fase B.",
       "acceptanceCriteria": [
-        "vitest.config.ts na raiz com alias @/ resolvendo para src/",
-        "Diretorio test/ existe (pode ja ter conteudo parcial — validar e integrar sem quebrar)",
-        "Script npm run test:unit executa Vitest sobre test/unit/**/*.test.ts",
-        "tsconfig.test.json (ou include em tsconfig) cobre test/ com strict: true",
-        "docs/auth/TESTING_SETUP.md documenta a configuracao",
-        "Typecheck passa em codigo + testes",
-        "npm run test:unit roda sem erros de config (mesmo que zero testes ainda)"
+        "Criar docs/auth/CLEANUP_AUDIT.md com secao 'Static References' listando para cada uma das 5 rotas:",
+        "  - Arquivos frontend que fazem Link/router.push para a rota",
+        "  - Arquivos backend que fazem redirect para a rota",
+        "  - Templates de email (src/lib/email/, src/server/**/email*, prisma/**/email*) que mencionam a URL",
+        "  - Comentarios no codigo que mencionam a rota (grep por string '/register', '/forgot-password', etc)",
+        "  - Configs (next.config.js/ts, src/middleware.ts) que mencionam",
+        "  - Tests existentes (test/**) que cobrem a rota",
+        "Cada referencia recebe anotacao: KEEP (referencia valida que deve ser atualizada), UPDATE (link quebrado que precisa apontar pra alternativa), ou DELETE (pode sumir junto com a rota)",
+        "Secao 'Backend endpoints status' listando se o endpoint POST correspondente ainda existe: POST /api/v1/auth/register, forgot-password, reset-password (procurar em src/server/core/auth/)",
+        "Secao 'Dependencias componentes' — para cada rota, listar componentes em src/client/components/auth/ que SO ELA usa (candidatos a delete junto)",
+        "Typecheck passa (nao mexe em codigo)"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 2 (commit dc707af). vitest.config.ts ja existia com globals:true e happy-dom only; reescrito para dois projects (node + react via happy-dom). tsconfig.test.json novo. @vitest/coverage-v8 ^4.0.18 adicionado. Scripts test:unit, test:unit:watch, typecheck:test. Typecheck pass."
+      "passes": false,
+      "notes": "Puro grep + relatorio. Nao toca em codigo. Resultado deve permitir decisao clara na Fase B."
     },
     {
-      "id": "US-103",
-      "title": "Camada 1 — Static Analysis (husky + CI)",
-      "description": "Como dev, quero que typecheck + lint rodem automaticamente antes de commits e em cada PR no CI.",
+      "id": "US-203",
+      "title": "External references audit — emails transacionais e docs",
+      "description": "Garantir que emails transacionais e documentacao nao dependem das rotas candidatas.",
       "acceptanceCriteria": [
-        "Husky + lint-staged instalados e configurados no package.json",
-        "Pre-commit hook .husky/pre-commit roda tsc --noEmit + eslint nos arquivos staged",
-        ".github/workflows/static.yml roda em pull_request: typecheck full (tsc --noEmit) + lint full (eslint .)",
-        "Workflow falha bloqueia o job (documentar branch protection em docs/CI_RULES.md)",
-        "Tempo de execucao do workflow medido e anotado em docs/CI_RULES.md",
+        "Localizar todos os templates de email no projeto (grep por 'mailhog|sendEmail|EmailService|email.template|welcome|verification.email' em src/)",
+        "Para cada template encontrado, listar URLs hardcoded ou variaveis de URL",
+        "Adicionar ao docs/auth/CLEANUP_AUDIT.md secao 'External References' com:",
+        "  - Cada template de email e as rotas que referencia (se alguma)",
+        "  - Arquivos em docs/ que mencionam as rotas candidatas",
+        "  - README.md do projeto se mencionar",
+        "  - Landing page separada (se existir como pasta irma ao repo) — anotar TODO se nao for acessivel",
+        "  - SDK/apps mobile (se existirem) — anotar TODO se nao for acessivel",
+        "Recomendacao por referencia: ATUALIZAR_ANTES_DELETE (emails), ATUALIZAR_DEPOIS (docs), TODO_EXTERNO (fora do repo)",
         "Typecheck passa"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 3 (commit ad85925). husky ^9 + lint-staged ^15 adicionados. .husky/pre-commit roda npx lint-staged. lint-staged config: eslint --fix + tsc --noEmit (prettier dropped, nao esta em devDeps). .github/workflows/static.yml (typecheck + lint, node 22). docs/CI_RULES.md. Scripts: prepare=husky, lint ja existia."
-    },
-    {
-      "id": "US-104",
-      "title": "Camada 2 — Unit tests backend auth",
-      "description": "Como dev, quero cobertura de testes unitarios para a logica pura de auth existente, sem tocar no codigo de producao.",
-      "acceptanceCriteria": [
-        "test/unit/auth/otp.test.ts cobre geracao + validacao de OTP",
-        "test/unit/auth/jwt.test.ts cobre assinatura + verificacao de JWT",
-        "test/unit/auth/auth-procedure.test.ts com mocks de context validando authProcedure({ required: true })",
-        "test/unit/auth/zod-schemas.test.ts valida schemas Zod dos endpoints de auth (valid + invalid inputs)",
-        "Coverage reportado em docs/auth/COVERAGE.md como baseline (nao forcar numero minimo)",
-        "npm run test:unit passa com zero falhas",
-        "Typecheck passa"
-      ],
-      "priority": 4,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 3 (commit ad85925). 66 test cases em 4 arquivos: otp.test.ts (16), jwt.test.ts (19), auth-procedure.test.ts (7), zod-schemas.test.ts (24). Discovery: NAO existe src/lib/auth/otp.ts — generateOTPCode vive em bcrypt.ts; verificacao eh inline no controller contra VerificationCode table. auth-procedure mock eh complexo: mocks @/igniter, @/server/core/auth/repositories/auth.repository, @/lib/auth/permissions. docs/auth/COVERAGE.md placeholder."
-    },
-    {
-      "id": "US-105",
-      "title": "Camada 3 — Unit tests React auth components",
-      "description": "Como dev, quero testar os componentes de auth atuais para ter baseline antes do rebrand.",
-      "acceptanceCriteria": [
-        "Instalar @testing-library/react, @testing-library/user-event, happy-dom (se ja nao instalados)",
-        "Configurar vitest com environment happy-dom para testes React",
-        "test/unit/react/auth/LoginOtpForm.test.tsx cobre render + submit + erro de validacao",
-        "test/unit/react/auth/SignupOtpForm.test.tsx cobre render + submit",
-        "test/unit/react/auth/VerifyEmailForm.test.tsx cobre render + submit",
-        "test/unit/react/auth/TwoFactorChallenge.test.tsx cobre render + submit",
-        "Mocks de API via vi.mock('@/igniter.client') documentado em docs/auth/TESTING_PATTERNS.md",
-        "Script npm run test:react executa somente test/unit/react/**",
-        "Typecheck passa",
-        "Verify in browser using dev-browser skill (validar que os componentes continuam renderizando em runtime no /login e /signup)"
-      ],
-      "priority": 5,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 3 (commit ad85925). 33 test cases em 4 arquivos, 33/33 GREEN (agent rodou localmente). login-otp-form (9), signup-otp-form (7), verify-email-form (8), two-factor-challenge (9). Mocks criados: @/igniter.client (api.auth.<action>.mutate), next/navigation, TurnstileWidget, @/client/hooks/use-csrf-token, globalThis.fetch (TwoFactorChallenge usa fetch raw para /api/v1/auth/totp-*). input-otp lib renderiza div-slots em happy-dom — testes focam em render + button state. docs/auth/TESTING_PATTERNS.md recebeu 4 secoes de mock."
-    },
-    {
-      "id": "US-106A",
-      "title": "Camada 4a — Infra de teste de integracao (Postgres + seeds)",
-      "description": "Como dev, quero um Postgres isolado em Docker para rodar testes de integracao contra endpoints reais de auth.",
-      "acceptanceCriteria": [
-        "compose.test.yml cria servico postgres em porta 5433 (nao conflita com dev)",
-        "test/api/setup.ts roda prisma migrate deploy contra o DB de teste antes de cada suite",
-        "prisma/seeds/test/auth-seed.ts cria dados minimos: 1 org, 1 user confirmado, 1 user pendente",
-        "Estrategia de isolamento: cada teste dentro de transaction com rollback (documentar em docs/auth/TESTING_PATTERNS.md)",
-        "Helper test/api/db.ts expoe withTransaction(fn) para uso nos testes",
-        "Script npm run test:db:up sobe o postgres de teste",
-        "Typecheck passa"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 2 (commit dc707af). compose.test.yml (postgres:16-alpine :5433), scripts/test/db-up.sh + db-down.sh, prisma/seeds/test/auth-seed.ts (Organization type=pj, User emailVerified nullable; ha TODOs em password fields), test/api/db.ts (withTransaction + RollbackSentinel), test/api/setup.ts, docs/auth/TESTING_PATTERNS.md. package.json: test:db:up, test:db:down."
-    },
-    {
-      "id": "US-106B",
-      "title": "Camada 4b — Integration tests endpoints auth + contract snapshots",
-      "description": "Como dev, quero validar endpoints de auth contra um servidor real com banco isolado e snapshots de contrato.",
-      "acceptanceCriteria": [
-        "test/integration/auth/otp-request.test.ts cobre POST /api/v1/auth/otp/request (sucesso + rate limit + email invalido)",
-        "test/integration/auth/otp-verify.test.ts cobre POST /api/v1/auth/otp/verify (sucesso + otp invalido + expirado)",
-        "test/integration/auth/signup.test.ts cobre POST /api/v1/auth/signup",
-        "Snapshots de request/response em test/integration/auth/__snapshots__/ (toMatchSnapshot da vitest)",
-        "Script npm run test:api executa test/integration/**/*.test.ts",
-        "Typecheck passa",
-        "npm run test:api passa localmente contra postgres de teste"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 4 (commit b318613). 17 test cases, 4 files. Direct invocation via nextRouteHandlerAdapter (no test server). Routes: auth.loginOTP, auth.verifyLoginOTP, auth.signupOTP, auth.verifySignupOTP. 3 TODOs: seed visibility via withTransaction (controller usa prisma global), rate limit determinism, phone nao existe em signupOTPSchema."
-    },
-    {
-      "id": "US-106C",
-      "title": "Camada 4c — CI job para test:api",
-      "description": "Como dev, quero que o CI rode os testes de integracao com postgres efemero em cada PR.",
-      "acceptanceCriteria": [
-        ".github/workflows/test-api.yml roda em pull_request",
-        "Workflow sobe servico postgres (via GitHub Actions services)",
-        "Executa prisma migrate deploy + npm run test:api",
-        "Usa DATABASE_URL efemero apontando pro servico postgres do runner",
-        "Falha bloqueia o job",
-        "Tempo de execucao medido e anotado",
-        "Typecheck passa"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 5 (commit 02f1201). .github/workflows/test-api.yml com postgres:16-alpine service em :5433, migrate deploy + seed + vitest integration. 15min timeout. Dummy secrets CI-only. docs/CI_RULES.md appended."
-    },
-    {
-      "id": "US-107A",
-      "title": "Camada 5a — Playwright config 3 projects (local/homol/prod)",
-      "description": "Como dev, quero Playwright configurado com baseURL distinta por ambiente.",
-      "acceptanceCriteria": [
-        "playwright.config.ts com 3 projects: local (http://localhost:3000), homol (https://homol.quayer.com), prod (https://app.quayer.com)",
-        "Screenshots + traces habilitados on-failure",
-        "Artifacts salvos em test-results/",
-        "Script npm run test:e2e roda project local por padrao",
-        "Script npm run test:e2e:homol roda --project=homol",
-        "Playwright browsers instalados (chromium minimo)",
-        "Typecheck passa"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 2 (commit dc707af). playwright.config.ts mergeado com 3 projects. Prod tem testMatch=/smoke-prod\\.spec\\.ts$/ (nunca roda login/signup). Preservado fullyParallel=false, X-Test-Mode header. test/e2e/README.md criado. admin-security.spec.ts nao tocado — hardcoded localhost, continua funcionando sob --project=local. package.json: test:e2e:homol, test:e2e:prod. Playwright ^1.55.1 ja instalado."
-    },
-    {
-      "id": "US-107B",
-      "title": "Camada 5b — E2E specs auth (login/signup/redirects)",
-      "description": "Como dev, quero validar a jornada completa de auth em browser real.",
-      "acceptanceCriteria": [
-        "test/e2e/auth/login-otp-happy-path.spec.ts — navegar, preencher email, submeter, capturar OTP via Mailhog (local) ou endpoint interno, verificar",
-        "test/e2e/auth/signup-flow.spec.ts — fluxo completo de signup ate dashboard",
-        "test/e2e/auth/redirects.spec.ts — validar redirects do middleware (/ -> /login se nao-auth; /login -> /integracoes se auth)",
-        "Prod NAO roda login real — smoke apenas em US-112",
-        "Specs passam localmente contra dev server",
-        "Typecheck passa"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 4 (commit b318613). 9 test cases, 5 files. Form selectors: email-input, phone-input, name, submit regex. OTP capture via lazy prisma import querying VerificationCode. Runtime test.skip se DB unreachable. smoke-prod.spec.ts (5 read-only tests) na raiz de test/e2e/ para matchear project prod."
-    },
-    {
-      "id": "US-108",
-      "title": "Contract tests frontend ↔ backend",
-      "description": "Como dev, quero garantir que mudancas no payload de endpoints quebrem testes, nao o frontend em runtime.",
-      "acceptanceCriteria": [
-        "Para cada endpoint de auth usado pelo frontend, existe contract test em test/contract/auth/ que faz request real e valida response contra schema Zod importado do MESMO lugar que o frontend usa",
-        "Snapshots do shape salvos — campo novo = warning, campo removido = erro",
-        "docs/auth/CONTRACT_TESTING.md documenta o padrao",
-        "Script npm run test:contract executa apenas essa camada",
-        "Typecheck passa"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 4 (commit b318613). 3 test cases. Bootstrap snapshot mode — NAO existem response Zod schemas no projeto (apenas request). vitest.config.contract.ts separado. HTTP invocation via fetch. docs/auth/CONTRACT_TESTING.md."
-    },
-    {
-      "id": "US-109",
-      "title": "Monitoramento sintetico — estender cobertura auth",
-      "description": "Como dev, quero que o monitor sintetico ja existente cubra especificamente as rotas de auth.",
-      "acceptanceCriteria": [
-        "Verificar que .github/workflows/synthetic-monitor.yml ja cobre app.quayer.com/login (se nao cobrir, adicionar)",
-        "Adicionar verificacao de presenca de elementos-chave no HTML retornado (logo, form field de email)",
-        "NAO fazer login real, NAO usar credenciais, NAO usar OTP fixo",
-        "Atualizar docs/infra/SYNTHETIC_MONITORING.md apontando que rotas de auth estao cobertas",
-        "Criar docs/auth/SYNTHETIC_MONITORING.md como ponteiro pro doc de infra",
-        "Typecheck passa"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 1 (commit 3f12ac5). /login ja estava no matrix. Adicionado grep de <form e quayer no HTML body. docs/auth/SYNTHETIC_MONITORING.md pointer doc criado."
-    },
-    {
-      "id": "US-110",
-      "title": "Script npm run test:all com tempo medido",
-      "description": "Como dev, quero um unico comando que roda todas as camadas e reporta o tempo real.",
-      "acceptanceCriteria": [
-        "Script test:all no package.json executa em sequencia: lint, typecheck, test:unit, test:react, test:api, test:contract, test:e2e",
-        "Falha em qualquer camada interrompe execucao e reporta qual falhou",
-        "Tempo total de cada camada e total geral impresso ao final",
-        "docs/auth/TEST_TIMINGS.md documenta o tempo real medido (sem SLA arbitrario)",
-        "Se tempo > 10min, documentar estrategia de paralelizacao em docs/auth/TESTING_PERFORMANCE.md",
-        "Typecheck passa"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 5 (commit 02f1201). test:all substituido (era unit && api && e2e); agora chain: lint, typecheck, unit, react, api, contract, e2e. Cada layer wrapped com time -p. docs/auth/TEST_TIMINGS.md com baselines TBD e Windows note (Measure-Command fallback)."
-    },
-    {
-      "id": "US-111",
-      "title": "Smoke em homol apos deploy",
-      "description": "Como dev, quero que cada deploy em homol dispare E2E full automaticamente.",
-      "acceptanceCriteria": [
-        ".github/workflows/smoke-homol.yml disparada por workflow_run do deploy-homol.yml",
-        "Executa npm run test:e2e:homol",
-        "Usa credenciais via GitHub Secrets: HOMOL_TEST_EMAIL, HOMOL_TEST_PASSWORD (documentar em docs/infra/SECRETS.md)",
-        "Email de teste configurado em homol (mock provider ja setado — validar mecanismo de captura de OTP)",
-        "Falha dispara notificacao via DISCORD_WEBHOOK_URL (secret opcional — se nao setado, apenas log)",
-        "Typecheck passa"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 5 (commit 02f1201). .github/workflows/smoke-homol.yml, workflow_run em Homol Deploy success + workflow_dispatch manual. Roda playwright --project=homol. Discord webhook on failure. HOMOL_TEST_EMAIL secret. docs/infra/SECRETS.md appended."
-    },
-    {
-      "id": "US-112",
-      "title": "Smoke em producao apos deploy (read-only)",
-      "description": "Como dev, quero validacao automatica pos-deploy em prod sem tocar em dados reais.",
-      "acceptanceCriteria": [
-        ".github/workflows/smoke-prod.yml disparada por workflow_run do deploy-production.yml",
-        "Executa apenas verificacoes read-only: HTTP 200 em /login, /signup, /, /api/v1/health",
-        "Valida headers de seguranca (CSP, X-Frame-Options, Strict-Transport-Security)",
-        "NAO faz login, NAO submete forms, NAO cria contas",
-        "Falha em 2 runs consecutivos dispara alerta via DISCORD_WEBHOOK_URL",
-        "Documentado em docs/infra/ROLLBACK_RUNBOOK.md como primeiro passo de validacao pos-rollback",
-        "Typecheck passa"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 5 (commit 02f1201). .github/workflows/smoke-prod.yml, workflow_run em Production Deploy success. Roda playwright --project=prod (so matcha smoke-prod.spec.ts). Valida HSTS + X-Frame-Options/CSP. NUNCA fills forms/logs in. Discord ROLLBACK CANDIDATE label. docs/infra/ROLLBACK_RUNBOOK.md appended."
-    },
-    {
-      "id": "US-113",
-      "title": "Skill .claude/skills/testing-pipeline.md",
-      "description": "Como Claude Code, preciso de skill documentando as 5 camadas e quando usar cada uma.",
-      "acceptanceCriteria": [
-        ".claude/skills/testing-pipeline.md criada",
-        "Secoes: quando usar cada camada, comandos copiaveis, padroes de mock, troubleshooting comum",
-        "Exemplos com codigo REAL do projeto (imports de @/igniter.client etc), nao generico",
-        "Referencia docs/auth/TESTING_PATTERNS.md e docs/auth/TESTING_SETUP.md",
-        "Typecheck passa"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 1 (commit 3f12ac5). .claude/skills/testing-pipeline.md (210 linhas) — 5 camadas, exemplos reais com @/igniter.client, 7 entradas de troubleshooting. Modelo: .claude/skills/auth.md."
-    },
-    {
-      "id": "US-114",
-      "title": "Skill .claude/skills/release-checklist.md",
-      "description": "Como dev, preciso de checklist obrigatorio antes de qualquer release.",
-      "acceptanceCriteria": [
-        ".claude/skills/release-checklist.md criada",
-        "Checklist: pipeline verde em CI, smoke homol passou, baselines comparadas (vs docs/auth/BASELINES.md), rollback plan validado (docs/infra/ROLLBACK_RUNBOOK.md), PR revisado por humano, changelog atualizado",
-        "Gate de rollback com criterios objetivos (taxa erro > X%, p95 degradado > Y%, responsavel, comando)",
-        "Template de post-mortem em caso de rollback acionado",
-        "Typecheck passa"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 1 (commit 3f12ac5). .claude/skills/release-checklist.md (131 linhas) — 5 grupos de checklist, gate de rollback com criterios objetivos, template de post-mortem copy-paste. Referencia cenarios 3A-3J do ROLLBACK_RUNBOOK."
-    },
-    {
-      "id": "US-115",
-      "title": "Atualizar CLAUDE.md com secao Testing Pipeline",
-      "description": "Como Claude Code, preciso que CLAUDE.md referencie o novo pipeline.",
-      "acceptanceCriteria": [
-        "Nova secao 'Testing Pipeline' em CLAUDE.md com tabela das 5 camadas + comandos",
-        "Nova secao 'Release Process' apontando para .claude/skills/release-checklist.md",
-        "Regra explicita: 'nenhuma release de auth sem rodar npm run test:all verde'",
-        "Referencia .claude/skills/testing-pipeline.md na tabela de skills por modulo",
-        "Typecheck passa"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "DONE 2026-04-08 Wave 5 (commit 02f1201). CLAUDE.md +45 linhas. Secao Testing Pipeline (5 camadas table + test:db:up + synthetic), Release Process (gate obrigatorio + rollback criteria), row testing/ na skills table."
+      "passes": false,
+      "notes": "Similar ao US-202 mas focado em tudo que NAO e codigo fonte. Landing/mobile/docs externas sao TODOs — founder vai ter que revisar manualmente."
     }
   ]
 }
