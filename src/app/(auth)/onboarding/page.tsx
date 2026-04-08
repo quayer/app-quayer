@@ -1,25 +1,26 @@
-import { cookies } from "next/headers"
-import { LoginFormFinal } from "@/client/components/auth/login-form-final"
-import { LoginFormV3 } from "@/client/components/auth/login-form-v3"
+import { cookies } from 'next/headers'
+import { OnboardingForm } from "@/client/components/auth/onboarding-form"
+import { OnboardingV3 } from "@/client/components/auth/onboarding-v3"
 import { AuthShell } from "@/client/components/auth/auth-shell"
 import { isAuthV3Enabled } from "@/lib/feature-flags/auth-v3"
 
-export default async function LoginPage() {
+export default async function OnboardingPage() {
   const cookieStore = await cookies()
+  const seedId = cookieStore.get('accessToken')?.value ?? null
   const override = cookieStore.get('auth-v3-override')?.value ?? null
-  const v3 = isAuthV3Enabled(null, override)
+  const v3 = isAuthV3Enabled(seedId, override)
 
   if (v3) {
     return (
       <AuthShell>
-        <LoginFormV3 />
+        <OnboardingV3 />
       </AuthShell>
     )
   }
 
   return (
     <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
-      <LoginFormFinal />
+      <OnboardingForm />
     </div>
   )
 }

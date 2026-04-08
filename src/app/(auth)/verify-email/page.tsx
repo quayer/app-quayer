@@ -1,41 +1,35 @@
-'use client'
-
 import { Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import Image from "next/image"
-import Link from "next/link"
-import { VerifyEmailForm } from "@/client/components/auth/verify-email-form"
+import { cookies } from 'next/headers'
+import { VerifyEmailV3 } from "@/client/components/auth/verify-email-v3"
+import { AuthShell } from "@/client/components/auth/auth-shell"
+import { isAuthV3Enabled } from "@/lib/feature-flags/auth-v3"
+import { VerifyEmailV2Client } from "./verify-email-v2-client"
 
-function VerifyEmailContent() {
-  const searchParams = useSearchParams()
-  const email = searchParams.get('email')
+export default async function VerifyEmailPage() {
+  const cookieStore = await cookies()
+  const seedId = cookieStore.get('accessToken')?.value ?? null
+  const override = cookieStore.get('auth-v3-override')?.value ?? null
+  const v3 = isAuthV3Enabled(seedId, override)
 
-  return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <Link href="/login" className="flex items-center gap-2 self-start font-medium">
-          <Image
-            src="/logo.svg"
-            alt="Quayer"
-            width={120}
-            height={28}
-            priority
-          />
-        </Link>
-        <VerifyEmailForm email={email || undefined} />
-      </div>
+  const fallback = (
+    <div className="flex items-center justify-center min-h-screen">
+      <p className="text-gray-500 dark:text-gray-400">Carregando...</p>
     </div>
   )
-}
 
-export default function VerifyEmailPage() {
+  if (v3) {
+    return (
+      <Suspense fallback={fallback}>
+        <AuthShell>
+          <VerifyEmailV3 />
+        </AuthShell>
+      </Suspense>
+    )
+  }
+
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-500 dark:text-gray-400">Carregando...</p>
-      </div>
-    }>
-      <VerifyEmailContent />
+    <Suspense fallback={fallback}>
+      <VerifyEmailV2Client />
     </Suspense>
   )
 }
