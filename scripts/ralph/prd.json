@@ -1,72 +1,321 @@
 {
   "project": "Quayer",
-  "branchName": "ralph/auth-cleanup-phase-a",
-  "description": "Release 2 Fase A — Instrumentar rotas candidatas legadas com logging + static audit. SOMENTE Fase A executavel nesta sessao. Fases B/C/D bloqueadas por muro de 14 dias de observacao de trafego real em producao. Fonte: tasks/prd-02-auth-cleanup.md",
+  "branchName": "ralph/auth-rebrand-v3",
+  "description": "Release 3 — Auth Rebrand v3 com DS v3 (quayer-ds-v3.html) atras de feature flag NEXT_PUBLIC_AUTH_V3. Dual-render v2/v3, rollout gradual. SCOPO executavel: Phase A (infra) + B (paginas) + C (docs) + parte de D (a11y/review). BLOQUEADO nesta sessao: US-317 (perf em homol), US-319-322 (rollout precisa deploy prod + janelas 48h/7d/30d). Fonte: tasks/prd-03-auth-rebrand-v3.md",
   "userStories": [
     {
-      "id": "US-201",
-      "title": "Instrumentar 5 rotas candidatas com logging estruturado",
-      "description": "Como engenheiro, preciso de metricas de acesso real antes de decidir o que deletar. Cada rota candidata ganha log estruturado na entrada. Zero mudanca de comportamento funcional.",
+      "id": "US-301",
+      "title": "Feature flag NEXT_PUBLIC_AUTH_V3 (off/percentage/on)",
+      "description": "Como dev, preciso de um mecanismo para alternar v2/v3 sem redeploy, com hash deterministico por userId.",
       "acceptanceCriteria": [
-        "Criar src/lib/auth/cleanup-audit-logger.ts exportando logCleanupAccess(payload) que grava JSON estruturado contendo: route, method, userAgent (request headers), referrer, ipHashed (SHA256 com salt de IGNITER_APP_SECRET), hasAuthCookie (bool, checa cookie accessToken), timestamp (ISO)",
-        "Usar console.info com prefixo '[cleanup-audit]' para garantir captura pelo log aggregator padrao (Vercel/Docker) sem infra nova",
-        "Instrumentar cada um dos 5 page.tsx candidatos — adicionar chamada ao logger no inicio da funcao server component (ou no layout se for client component):",
-        "  - src/app/(auth)/register/page.tsx",
-        "  - src/app/(auth)/forgot-password/page.tsx",
-        "  - src/app/(auth)/reset-password/[token]/page.tsx (ou layout.tsx se o page for client)",
-        "  - src/app/(auth)/login/verify-magic/page.tsx",
-        "  - src/app/(auth)/signup/verify-magic/page.tsx",
-        "Se a pagina e client component ('use client'), usar useEffect no primeiro render + fetch interno para POST /api/v1/internal/cleanup-audit OU server action",
-        "Preferir solucao server-side: mover logging para layout.tsx (server component) que engloba a rota, checando pathname",
-        "Verificar se existe endpoint backend correspondente (POST /api/v1/auth/forgot-password, /register, etc) — instrumentar tambem no handler se existir; se ja foi removido, anotar em comentario",
-        "Zero mudanca visual ou funcional — usuario nao percebe a instrumentacao",
-        "Logs saem em stdout no formato: [cleanup-audit] {\"route\":\"/register\",\"ts\":\"2026-04-08T...\",\"ipHashed\":\"abc123\",...}",
+        "Criar src/lib/feature-flags/auth-v3.ts exportando isAuthV3Enabled(userId?: string): boolean",
+        "Valores aceitos em NEXT_PUBLIC_AUTH_V3: 'off' | 'percentage:N' (0-100) | 'on'",
+        "'off' retorna sempre false",
+        "'percentage:N' retorna true se hash(userId || cookieId) % 100 < N (hash SHA256 estavel)",
+        "'on' retorna sempre true",
+        "Cookie 'auth-v3-override=on' forca true (para QA)",
+        "Unit test em test/unit/feature-flags/auth-v3.test.ts validando distribuicao (N=10 em 10k amostras deve dar ~10%)",
+        "docs/auth/FEATURE_FLAGS.md documentando valores, uso e exemplo de rollout 0->10->50->100",
         "Typecheck passa"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "DONE 2026-04-08 (commit 278c1f0). cleanup-audit-logger.ts criado com SHA256 IP hashing. 3 rotas server-component instrumentadas inline (register, forgot-password, reset-password). 2 rotas client-component instrumentadas via layout.tsx wrapper (login/verify-magic, signup/verify-magic). Backend endpoints ja removidos — nenhuma instrumentacao backend necessaria. Typecheck zero erros."
+      "passes": false,
+      "notes": "Funciona em Server Components — aceita userId do cookie de session. Para usuarios anonimos usa cookieId (criar cookie quayer-cid se nao existir)."
     },
     {
-      "id": "US-202",
-      "title": "Static audit — mapear todas referencias das 5 rotas candidatas",
-      "description": "Paralelo a medicao runtime, fazer grep completo do codebase e listar cada arquivo que referencia as rotas candidatas. Saida alimenta a decisao da Fase B.",
+      "id": "US-302",
+      "title": "Copiar imagem hero para public/images/auth/",
+      "description": "Imagem da marca precisa estar acessivel via Next.js.",
       "acceptanceCriteria": [
-        "Criar docs/auth/CLEANUP_AUDIT.md com secao 'Static References' listando para cada uma das 5 rotas:",
-        "  - Arquivos frontend que fazem Link/router.push para a rota",
-        "  - Arquivos backend que fazem redirect para a rota",
-        "  - Templates de email (src/lib/email/, src/server/**/email*, prisma/**/email*) que mencionam a URL",
-        "  - Comentarios no codigo que mencionam a rota (grep por string '/register', '/forgot-password', etc)",
-        "  - Configs (next.config.js/ts, src/middleware.ts) que mencionam",
-        "  - Tests existentes (test/**) que cobrem a rota",
-        "Cada referencia recebe anotacao: KEEP (referencia valida que deve ser atualizada), UPDATE (link quebrado que precisa apontar pra alternativa), ou DELETE (pode sumir junto com a rota)",
-        "Secao 'Backend endpoints status' listando se o endpoint POST correspondente ainda existe: POST /api/v1/auth/register, forgot-password, reset-password (procurar em src/server/core/auth/)",
-        "Secao 'Dependencias componentes' — para cada rota, listar componentes em src/client/components/auth/ que SO ELA usa (candidatos a delete junto)",
-        "Typecheck passa (nao mexe em codigo)"
+        "Criar pasta public/images/auth/",
+        "Copiar imagem/Gemini_Generated_Image_ua01asua01asua01.png para public/images/auth/login-hero.png",
+        "Documentar em docs/auth/ASSETS.md: path, dimensoes (abrir o PNG e ler), intencao (hero da login), responsividade (some <768px)",
+        "Adicionar nota sobre conversao WebP (nao obrigatoria no Ralph — pode ficar como TODO)",
+        "Pasta imagem/ preservada, original nao deletado"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DONE 2026-04-08 (commit 278c1f0). docs/auth/CLEANUP_AUDIT.md criado. Counts: /register 8, /forgot-password 4, /reset-password 4, /login/verify-magic 6, /signup/verify-magic 4. CRITICAL: verify-magic routes NAO sao legacy — estao wired em email gen (auth.controller.ts:1279,1516,1559). Reclassificadas como STRONG KEEP. Soh 3 candidatos validos: /register, /forgot-password, /reset-password. Surpresas: test/e2e/onboarding-flow.spec.ts:27 navega para /register (mascarado por redirect); SecuritySettings.tsx:293 menciona /api/v1/auth/register removido."
+      "passes": false,
+      "notes": "Windows bash: use cp. Versao WebP otimizada pode ficar como TODO — conversao manual ou com sharp."
     },
     {
-      "id": "US-203",
-      "title": "External references audit — emails transacionais e docs",
-      "description": "Garantir que emails transacionais e documentacao nao dependem das rotas candidatas.",
+      "id": "US-303",
+      "title": "Extrair tokens DS v3 para globals.css + Tailwind + next/font",
+      "description": "Tokens do design system disponiveis, escopados ao layout de auth via [data-auth-v3].",
       "acceptanceCriteria": [
-        "Localizar todos os templates de email no projeto (grep por 'mailhog|sendEmail|EmailService|email.template|welcome|verification.email' em src/)",
-        "Para cada template encontrado, listar URLs hardcoded ou variaveis de URL",
-        "Adicionar ao docs/auth/CLEANUP_AUDIT.md secao 'External References' com:",
-        "  - Cada template de email e as rotas que referencia (se alguma)",
-        "  - Arquivos em docs/ que mencionam as rotas candidatas",
-        "  - README.md do projeto se mencionar",
-        "  - Landing page separada (se existir como pasta irma ao repo) — anotar TODO se nao for acessivel",
-        "  - SDK/apps mobile (se existirem) — anotar TODO se nao for acessivel",
-        "Recomendacao por referencia: ATUALIZAR_ANTES_DELETE (emails), ATUALIZAR_DEPOIS (docs), TODO_EXTERNO (fora do repo)",
-        "Typecheck passa"
+        "Ler quayer-ds-v3.html e extrair os tokens --p-*, --color-*, --space-*, --radius-*, --text-*, --gradient-*",
+        "Adicionar block [data-auth-v3='true'] { ... } em src/app/globals.css com todos os tokens — NAO aplicar globalmente",
+        "Estender tailwind.config.ts com tokens semanticos (cores, spacing, radius) usando os CSS vars",
+        "Importar fontes DM Sans + DM Mono via next/font/google apenas em src/app/(auth)/layout.tsx (nao no layout global)",
+        "next/font com subsets: ['latin'] e display: 'swap'",
+        "src/app/(auth)/layout.tsx seta data-auth-v3='true' no wrapper div condicionalmente via isAuthV3Enabled()",
+        "Typecheck + lint passam"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "DONE 2026-04-08 (commit 278c1f0). Appendado a CLEANUP_AUDIT.md. 9 email templates auditados — zero hardcode; magic-link URLs construidos runtime via appBaseUrl. 3 docs internos com refs. middleware.ts PUBLIC_PATHS lines 17/20/21 listam os 3 orphan routes (devem sair em Phase D). 6 TODOs externos para founder: landing, mobile, help center, SDK, marketing emails, partner docs."
+      "passes": false,
+      "notes": "Escopar via [data-auth-v3] e CRITICO — evita vazar estilos para dashboard. Validar que next/font nao bloqueia render em prod."
+    },
+    {
+      "id": "US-304",
+      "title": "Componentes DS v3 primitivos em src/client/components/ds/",
+      "description": "Biblioteca de componentes base do DS v3 com unit tests e showcase.",
+      "acceptanceCriteria": [
+        "Criar src/client/components/ds/ com: button.tsx, input.tsx, otp-input.tsx, logo.tsx, card.tsx, toast.tsx",
+        "button.tsx: variants primary/secondary/ghost, states default/hover/disabled/loading, forwardRef, Tipos Props exportados",
+        "input.tsx: label prop, helper, error, :focus-visible, forwardRef",
+        "otp-input.tsx: 6 digitos, auto-advance entre slots, paste aceita codigo completo, onComplete callback",
+        "logo.tsx: SVG inline com gradient --gradient-icon, aceita size prop",
+        "card.tsx: wrapper com radius + shadow tokens",
+        "toast.tsx: tipos info/success/error/warning, com dismiss",
+        "Cada componente tem unit test em test/unit/react/ds/*.test.tsx cobrindo render + interacoes basicas",
+        "Criar rota dev src/app/dev/ds-showcase/page.tsx que renderiza todos os componentes em todos os states (proteger com NODE_ENV !== 'production' no middleware ou redirect 404)",
+        "Zero any, tipagem estrita",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill (rota /dev/ds-showcase em 1440px)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Story grande — pode precisar de quebra adicional se agent ficar sem contexto. Storybook NAO esta instalado, usar rota dev."
+    },
+    {
+      "id": "US-305",
+      "title": "AuthShell component com imagem lateral",
+      "description": "Layout compartilhado que inclui imagem a direita em breakpoints grandes.",
+      "acceptanceCriteria": [
+        "Criar src/client/components/auth/auth-shell.tsx",
+        "Renderiza children (form) a esquerda",
+        "Lado direito: next/image com fill + object-cover apontando para /images/auth/login-hero.png",
+        "Priority=true no next/image (LCP)",
+        "ZERO texto sobre imagem",
+        "Responsivo: lado direito some em < 768px (class hidden md:block)",
+        "Aceita prop showImage (default true) para caso de alguma rota nao querer",
+        "Test React em test/unit/react/auth/auth-shell.test.tsx cobrindo render com e sem imagem",
+        "Typecheck passa",
+        "Verify in browser using dev-browser skill (1440px mostra imagem, 375px esconde)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Depende de US-302 (imagem em public/). LCP e critico — priority=true e fetchpriority='high' no next/image."
+    },
+    {
+      "id": "US-306",
+      "title": "/login v3 dual-render atras da flag",
+      "description": "Tela de login com DS v3 quando flag ativa.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/login/page.tsx verifica isAuthV3Enabled() no server component",
+        "Se ativo: renderiza novo <LoginFormV3 /> dentro de <AuthShell />",
+        "Se inativo: renderiza codigo atual sem mudanca",
+        "src/client/components/auth/login-form-v3.tsx novo — usa DS primitives (input, button, logo)",
+        "Form chama os MESMOS endpoints que v2 (api.auth.loginOTP.mutate)",
+        "Unit test em test/unit/react/auth/login-form-v3.test.tsx",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill (flag forcada via cookie)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Depende de US-301, 303, 304, 305. Nao mexer no componente v2 (login-form-final.tsx, login-otp-form.tsx)."
+    },
+    {
+      "id": "US-307",
+      "title": "/login/verify v3 dual-render",
+      "description": "Tela de verificacao OTP com DS v3.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/login/verify/page.tsx verifica flag",
+        "Se ativo: <LoginVerifyV3 /> dentro de AuthShell",
+        "Usa OtpInput do DS (6 digitos auto-advance)",
+        "Cooldown de reenvio visivel (60s)",
+        "Mesmos endpoints (api.auth.verifyLoginOTP.mutate)",
+        "Unit test do form v3",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Depende de 301, 303, 304, 305. Cooldown pode reutilizar logica de v2 se ja existir em use-otp-cooldown hook."
+    },
+    {
+      "id": "US-308",
+      "title": "/signup v3 dual-render",
+      "description": "Tela de signup com DS v3.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/signup/page.tsx verifica flag",
+        "Se ativo: <SignupFormV3 /> dentro de AuthShell",
+        "Fields: email + nome + checkbox de termos (Zod client-side)",
+        "Mesmos endpoints (api.auth.signupOTP.mutate)",
+        "Unit test",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Depende de 301, 303, 304, 305. Checkbox de termos obrigatorio (validar no Zod)."
+    },
+    {
+      "id": "US-309",
+      "title": "/signup/verify v3 dual-render",
+      "description": "Verificacao OTP pos-signup.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/signup/verify/page.tsx verifica flag",
+        "Se ativo: <SignupVerifyV3 /> dentro de AuthShell, padrao identico a US-307",
+        "Mesmos endpoints (api.auth.verifySignupOTP.mutate)",
+        "Unit test",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Pode reutilizar quase tudo de US-307 — extrair componente VerifyOtpFormV3 se fizer sentido."
+    },
+    {
+      "id": "US-310",
+      "title": "/verify-email v3 dual-render",
+      "description": "Pagina de verificacao de email com estados loading/success/error.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/verify-email/page.tsx verifica flag",
+        "Se ativo: <VerifyEmailV3 /> dentro de AuthShell",
+        "Estados visuais claros: loading (spinner), success (icon + CTA), error (mensagem + retry)",
+        "Usa OtpInput do DS se houver input manual",
+        "Unit test cobrindo os 3 estados",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Depende de 301, 303, 304, 305. Verificar se a pagina atual aceita token via query param ou body."
+    },
+    {
+      "id": "US-311",
+      "title": "/onboarding v3 dual-render",
+      "description": "Multi-step onboarding com DS v3.",
+      "acceptanceCriteria": [
+        "src/app/(auth)/onboarding/page.tsx verifica flag",
+        "Se ativo: <OnboardingV3 /> dentro de AuthShell",
+        "Progress indicator visivel (step N de M)",
+        "Mesmos endpoints (ler os que onboarding-form.tsx atual usa)",
+        "Unit test do novo componente",
+        "Typecheck + lint passam",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Depende de 301, 303, 304, 305. Ler onboarding-form.tsx primeiro para entender os steps."
+    },
+    {
+      "id": "US-312",
+      "title": "/google-callback — auditoria + decisao",
+      "description": "Validar se Google OAuth esta ativo antes de investir em redesign.",
+      "acceptanceCriteria": [
+        "Auditoria: grep src/server/core/auth por GOOGLE_CLIENT_ID, googleOAuth, oauth.google — status ativo ou inativo",
+        "Verificar docs/auth/CLEANUP_AUDIT.md se google-callback foi flagged como candidato a delete",
+        "Verificar .env.example se GOOGLE_CLIENT_ID esta listado como required ou optional",
+        "Decisao registrada em docs/auth/GOOGLE_OAUTH_STATUS.md:",
+        "  - SE ATIVO: dual-render basico (spinner + logo v3) + unit test",
+        "  - SE INATIVO: adicionar a lista de cleanup candidates em CLEANUP_AUDIT.md e NAO implementar v3",
+        "Typecheck passa"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Auditoria PRIMEIRO. Nao fazer trabalho visual antes de decidir."
+    },
+    {
+      "id": "US-313",
+      "title": "docs/auth/USER_JOURNEY.md com 4 jornadas Mermaid",
+      "description": "Documentar user journeys completas.",
+      "acceptanceCriteria": [
+        "docs/auth/USER_JOURNEY.md criado com 4 jornadas em Mermaid flowchart:",
+        "  1. Novo usuario (signup -> OTP verify -> onboarding -> integracoes)",
+        "  2. Usuario existente (login -> OTP verify -> integracoes)",
+        "  3. Google OAuth (se ativo — conditional section)",
+        "  4. Usuario sem org ativa (login -> needs onboarding -> onboarding)",
+        "Cada step documenta: rota, componente, endpoint, estados possiveis, proxima tela",
+        "Reflete o estado pos-cleanup (ignorando /register, /forgot-password, /reset-password)",
+        "Referencia .claude/skills/auth-pages.md"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Puro doc. Ler src/middleware.ts para entender redirects por estado."
+    },
+    {
+      "id": "US-314",
+      "title": "docs/auth/AUTH_FLOW.md tecnico + sequence diagram",
+      "description": "Fluxo tecnico de auth: OTP, JWT, session, middleware.",
+      "acceptanceCriteria": [
+        "docs/auth/AUTH_FLOW.md criado com:",
+        "  - Sequence diagram Mermaid: cliente -> /login -> OTP gerado -> email -> /login/verify -> JWT -> cookie -> /integracoes",
+        "  - OTP lifecycle: geracao, storage em VerificationCode, verify, expire",
+        "  - JWT: payload, signing (HS256), verification, refresh flow",
+        "  - Session: cookie accessToken, duracao, renovacao",
+        "  - Middleware: matcher, redirects por rota protegida",
+        "  - Lista de endpoints /api/v1/auth/* com payload de request/response (extraido de auth.controller.ts)",
+        "  - Secao Troubleshooting: OTP nao chega, JWT invalido, session expirada"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Puro doc. Ler auth.controller.ts + middleware.ts para fatos."
+    },
+    {
+      "id": "US-315",
+      "title": "Skill .claude/skills/auth-pages.md",
+      "description": "Skill separada de auth.md (backend) cobrindo as paginas frontend.",
+      "acceptanceCriteria": [
+        ".claude/skills/auth-pages.md criada",
+        "Secoes:",
+        "  - Rotas ativas (pos-cleanup): /login, /signup, /login/verify, /signup/verify, /verify-email, /onboarding, /login/verify-magic, /signup/verify-magic",
+        "  - Componentes DS v3 (lista de src/client/components/ds/*)",
+        "  - Componentes de auth por rota (quais componentes cada rota usa)",
+        "  - Feature flag NEXT_PUBLIC_AUTH_V3 e como ativar localmente",
+        "  - Como adicionar nova pagina de auth (template de server component + flag + dual-render)",
+        "  - Padrao de mock para testes (referencia docs/auth/TESTING_PATTERNS.md)",
+        "Referencia USER_JOURNEY, AUTH_FLOW, ASSETS",
+        "Exemplos de codigo REAL do projeto"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Separar claramente de auth.md que cobre backend (procedures, repository, controller)."
+    },
+    {
+      "id": "US-316",
+      "title": "Auditoria a11y dos componentes DS v3",
+      "description": "Verificar WCAG AA nos componentes criados em US-304 e paginas v3.",
+      "acceptanceCriteria": [
+        "Listar em docs/auth/A11Y_AUDIT.md cada componente DS v3 com findings:",
+        "  - button: label, focus visible, disabled aria, loading state",
+        "  - input: label explicito, aria-describedby para error, aria-invalid",
+        "  - otp-input: aria-label por slot, autocomplete one-time-code, aria-live para feedback",
+        "  - logo: aria-hidden ou aria-label conforme contexto",
+        "  - card: role se for interativo",
+        "  - toast: role=status ou role=alert por type, aria-live polite/assertive",
+        "Rodar manualmente: Tab funciona entre campos, Enter submete form, Esc fecha toast",
+        "Checar contraste de cores DS v3 (tokens --color-*) contra WCAG AA (4.5:1 texto normal, 3:1 texto grande)",
+        "Zero findings critical ou serious",
+        "findings medium/low viram TODOs",
+        "TODO: axe-core em CI sera adicionado em iteracao futura (US-316 parte b)"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Audit manual + contraste. Full axe-core em CI fica TODO."
+    },
+    {
+      "id": "US-318",
+      "title": "Code review aggregator das mudancas de Release 3",
+      "description": "Review estruturado das mudancas criadas pelas stories 301-316.",
+      "acceptanceCriteria": [
+        "Criar docs/auth/V3_CODE_REVIEW.md com review por area:",
+        "  - Feature flag (US-301): correctness, test coverage, edge cases",
+        "  - Assets (US-302): accessibility, performance",
+        "  - Tokens (US-303): CSS isolation, no leakage",
+        "  - Componentes DS (US-304): API design, tipagem, test coverage",
+        "  - AuthShell (US-305): LCP impact, responsividade",
+        "  - Paginas v3 (US-306-311): contract preservation, dual-render correctness",
+        "  - Docs (US-313-315): completude",
+        "Cada finding classificado: critical / high / medium / low / info",
+        "Critical/high: bloqueiam merge",
+        "Medium/low: viram TODOs no proprio arquivo",
+        "Referencia .claude/skills/release-checklist.md",
+        "NOTA: este eh review LLM-assisted — code-reviewer humano eh obrigatorio ANTES do merge (US-318 criterio real)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Review e documentacao — nao aprova merge por si so. Humano ainda e obrigatorio."
     }
   ]
 }

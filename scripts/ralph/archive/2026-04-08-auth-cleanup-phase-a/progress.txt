@@ -1,0 +1,64 @@
+## Codebase Patterns
+
+<!-- Patterns gerais do projeto. Stories-especificas entram abaixo. -->
+
+- **Auth modules path:** `src/server/core/auth/` (NAO `src/server/features/auth/` que e legado)
+- **Auth components:** `src/client/components/auth/` — login-otp-form.tsx, signup-otp-form.tsx, verify-email-form.tsx, two-factor-challenge.tsx, onboarding-form.tsx
+- **Cookie name:** auth usa `accessToken` (nao `access_token`)
+- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
+- **Auth passwordless only:** endpoints `register`, `login`, `forgotPassword`, `resetPassword`, `changePassword` foram REMOVIDOS do BACKEND. Mas as PAGINAS frontend `/register`, `/forgot-password`, `/reset-password/[token]`, `/login/verify-magic`, `/signup/verify-magic` ainda existem e sao candidatas a delete em Release 2.
+- **Padrao Igniter.js:** controller → actions (query/mutation) → handler com authProcedure({ required: true })
+- **Schema Prisma:** `prisma/schema.prisma`. Models: Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
+- **dev server:** http://localhost:3000 — `curl -s /api/health`
+- **Git mmap workaround:** repo em OneDrive as vezes corrompe pack — `git hash-object -w` + `git update-index --add --cacheinfo` como fallback
+
+## Infra de teste (criada em Release 1 — commits 3f12ac5 a 02f1201)
+
+**Pipeline de 5 camadas funcionando:**
+- Static (husky pre-commit + .github/workflows/static.yml)
+- Unit backend: `npm run test:unit` (66 cases)
+- Unit React: `npm run test:react` (33 cases GREEN verificado)
+- API Integration: `npm run test:api` (postgres :5433 via compose.test.yml, direct invocation via nextRouteHandlerAdapter, 17 cases)
+- Contract: `npx vitest --config vitest.config.contract.ts` (bootstrap mode, 3 cases)
+- E2E Playwright 3 projects (local/homol/prod) — prod NUNCA roda login real
+
+**CI workflows:** static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml (cron 5min).
+
+**Helpers de teste importantes:**
+- `test/api/db.ts` — `withTransaction<T>(fn)` + `RollbackSentinel`
+- `test/e2e/auth/helpers.ts` — `getLatestOtp(email)` via lazy prisma import, `generateTestEmail()`
+- `prisma/seeds/test/auth-seed.ts` — 1 org + 2 users via upsert
+
+**Docs:** docs/auth/BASELINES.md, TESTING_SETUP.md, TESTING_PATTERNS.md, CONTRACT_TESTING.md, COVERAGE.md, TEST_TIMINGS.md, SYNTHETIC_MONITORING.md. docs/CI_RULES.md. docs/infra/ROLLBACK_RUNBOOK.md + SECRETS.md.
+
+**Skills:** .claude/skills/testing-pipeline.md, .claude/skills/release-checklist.md. CLAUDE.md com secoes Testing Pipeline + Release Process.
+
+## Known issues da Release 1 (pre-existentes, nao blockers)
+
+- **US-106B seed visibility:** controller usa prisma GLOBAL, rows de withTransaction invisiveis ao handler. Solucao futura: withCommittedSeed ou truncate strategy.
+- **US-108 bootstrap contract mode:** nao existem response Zod schemas. Contract tests usam shape snapshots locais.
+- **/signup prod flakiness 20%:** 2/10 curl timeouts em 21s — suspeita rate limit / Turnstile.
+
+## Decisoes desta release (Release 2 Phase A)
+
+- **Escopo reduzido:** apenas Phase A (US-201, 202, 203). Phases B/C/D BLOQUEADAS por muro de 14 dias de observacao.
+- **Branch:** `ralph/auth-cleanup-phase-a` (rodando em `ralph/auth-platform-hardening` por ora).
+- **Privacidade:** IP hashed (SHA256 com salt de IGNITER_APP_SECRET) antes de logar. Nunca logar email ou IP plaintext.
+- **5 rotas candidatas confirmadas existentes:**
+  1. `/register` — src/app/(auth)/register/page.tsx
+  2. `/forgot-password` — src/app/(auth)/forgot-password/page.tsx
+  3. `/reset-password/[token]` — src/app/(auth)/reset-password/[token]/
+  4. `/login/verify-magic` — src/app/(auth)/login/verify-magic/page.tsx + LoginVerifyMagicClient.tsx
+  5. `/signup/verify-magic` — src/app/(auth)/signup/verify-magic/page.tsx + SignupVerifyMagicClient.tsx
+
+## Regras duras
+
+- **FR-1 Release 1:** testes escritos contra codigo ATUAL, sem refactor.
+- **FR-1 Release 2:** nenhuma rota pode ser deletada sem 14 dias de observacao previa.
+- **Privacidade:** ipHashed sempre. Sem PII em logs.
+- **Zero any.** TypeScript strict.
+- **Zod em todos os inputs.**
+
+---
+
+<!-- Iteracoes do Ralph entram abaixo desta linha -->

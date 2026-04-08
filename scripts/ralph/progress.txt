@@ -1,63 +1,65 @@
 ## Codebase Patterns
 
-<!-- Patterns gerais do projeto. Stories-especificas entram abaixo. -->
+- **Auth modules:** src/server/core/auth/ (backend), src/client/components/auth/ (frontend v2)
+- **Auth passwordless only:** endpoints register/login-password/forgot/reset REMOVIDOS; magic-link KEEP (wired em email gen auth.controller.ts:1279,1516,1559)
+- **Padrao Igniter:** controller -> actions (query/mutation) -> handler com authProcedure
+- **Schema Prisma:** models Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
+- **Cookie name:** auth usa accessToken (nao access_token)
+- **Client components:** NUNCA importar @/lib/auth (barrel) em 'use client' — usar @/lib/auth/auth-provider direto
 
-- **Auth modules path:** `src/server/core/auth/` (NAO `src/server/features/auth/` que e legado)
-- **Auth components:** `src/client/components/auth/` — login-otp-form.tsx, signup-otp-form.tsx, verify-email-form.tsx, two-factor-challenge.tsx, onboarding-form.tsx
-- **Cookie name:** auth usa `accessToken` (nao `access_token`)
-- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
-- **Auth passwordless only:** endpoints `register`, `login`, `forgotPassword`, `resetPassword`, `changePassword` foram REMOVIDOS do BACKEND. Mas as PAGINAS frontend `/register`, `/forgot-password`, `/reset-password/[token]`, `/login/verify-magic`, `/signup/verify-magic` ainda existem e sao candidatas a delete em Release 2.
-- **Padrao Igniter.js:** controller → actions (query/mutation) → handler com authProcedure({ required: true })
-- **Schema Prisma:** `prisma/schema.prisma`. Models: Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
-- **dev server:** http://localhost:3000 — `curl -s /api/health`
-- **Git mmap workaround:** repo em OneDrive as vezes corrompe pack — `git hash-object -w` + `git update-index --add --cacheinfo` como fallback
+## Infra de teste (Release 1 commits 3f12ac5..02f1201)
 
-## Infra de teste (criada em Release 1 — commits 3f12ac5 a 02f1201)
+5 camadas: static (husky+static.yml), unit backend (66 cases), unit react (33 GREEN), api integration (direct invocation via nextRouteHandlerAdapter, postgres :5433), contract (bootstrap mode), e2e playwright 3-projects.
+Helpers: test/api/db.ts (withTransaction+RollbackSentinel), test/e2e/auth/helpers.ts (getLatestOtp, generateTestEmail).
+Workflows CI: static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml.
+Skills: testing-pipeline.md, release-checklist.md. CLAUDE.md atualizado.
 
-**Pipeline de 5 camadas funcionando:**
-- Static (husky pre-commit + .github/workflows/static.yml)
-- Unit backend: `npm run test:unit` (66 cases)
-- Unit React: `npm run test:react` (33 cases GREEN verificado)
-- API Integration: `npm run test:api` (postgres :5433 via compose.test.yml, direct invocation via nextRouteHandlerAdapter, 17 cases)
-- Contract: `npx vitest --config vitest.config.contract.ts` (bootstrap mode, 3 cases)
-- E2E Playwright 3 projects (local/homol/prod) — prod NUNCA roda login real
+## Release 2 Phase A (commit 278c1f0)
 
-**CI workflows:** static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml (cron 5min).
+Instrumentacao de 5 rotas candidatas com logger src/lib/auth/cleanup-audit-logger.ts (SHA256 IP hash).
+**CRITICAL:** /login/verify-magic e /signup/verify-magic NAO sao legacy — wired em email gen. Reclassificadas STRONG KEEP.
+Soh 3 candidatos validos: /register, /forgot-password, /reset-password. BLOQUEADO 14d para decisao (Phase B).
+docs/auth/CLEANUP_AUDIT.md tem mapa completo de referencias.
 
-**Helpers de teste importantes:**
-- `test/api/db.ts` — `withTransaction<T>(fn)` + `RollbackSentinel`
-- `test/e2e/auth/helpers.ts` — `getLatestOtp(email)` via lazy prisma import, `generateTestEmail()`
-- `prisma/seeds/test/auth-seed.ts` — 1 org + 2 users via upsert
+## Release 3 — Auth Rebrand v3 (ATUAL)
 
-**Docs:** docs/auth/BASELINES.md, TESTING_SETUP.md, TESTING_PATTERNS.md, CONTRACT_TESTING.md, COVERAGE.md, TEST_TIMINGS.md, SYNTHETIC_MONITORING.md. docs/CI_RULES.md. docs/infra/ROLLBACK_RUNBOOK.md + SECRETS.md.
+**Prereqs confirmados:**
+- quayer-ds-v3.html existe na raiz (source do DS)
+- imagem/Gemini_Generated_Image_ua01asua01asua01.png existe (hero da login)
+- Storybook NAO instalado — usar rota dev /dev/ds-showcase
+- public/images/ NAO existe — criar em US-302
 
-**Skills:** .claude/skills/testing-pipeline.md, .claude/skills/release-checklist.md. CLAUDE.md com secoes Testing Pipeline + Release Process.
+**Arquivos que NAO devem ser tocados:**
+- src/igniter.client.ts, src/igniter.schema.ts (auto-generados)
+- src/client/components/auth/*v2* (codigo v2 atual — dual-render preserva)
+- Backend de auth (FR-3)
+- middleware.ts (exceto talvez adicionar /dev/ds-showcase protection)
 
-## Known issues da Release 1 (pre-existentes, nao blockers)
+**Escopo desta sessao:**
+- Executar: Phase A (301-305), Phase B (306-312), Phase C (313-315), Phase D parcial (316, 318)
+- BLOQUEADO: US-317 (perf em homol, precisa deploy), US-319-322 (rollout 0->10->50->100, precisa prod + janelas 48h/7d/30d)
 
-- **US-106B seed visibility:** controller usa prisma GLOBAL, rows de withTransaction invisiveis ao handler. Solucao futura: withCommittedSeed ou truncate strategy.
-- **US-108 bootstrap contract mode:** nao existem response Zod schemas. Contract tests usam shape snapshots locais.
-- **/signup prod flakiness 20%:** 2/10 curl timeouts em 21s — suspeita rate limit / Turnstile.
+**CSS isolation critica:** tokens v3 via [data-auth-v3="true"] — NAO global, evita vazar para dashboard.
+**LCP critico:** next/image do hero com priority=true.
+**next/font:** DM Sans + DM Mono apenas no layout de auth, nao global.
+**Dual-render:** paginas verificam isAuthV3Enabled() no server component e renderizam v2 OU v3.
+**Contract preservation:** formularios v3 chamam MESMOS endpoints que v2 (contract tests da Release 1 garantem).
 
-## Decisoes desta release (Release 2 Phase A)
+## Rotas ativas pos-cleanup (para Release 3)
 
-- **Escopo reduzido:** apenas Phase A (US-201, 202, 203). Phases B/C/D BLOQUEADAS por muro de 14 dias de observacao.
-- **Branch:** `ralph/auth-cleanup-phase-a` (rodando em `ralph/auth-platform-hardening` por ora).
-- **Privacidade:** IP hashed (SHA256 com salt de IGNITER_APP_SECRET) antes de logar. Nunca logar email ou IP plaintext.
-- **5 rotas candidatas confirmadas existentes:**
-  1. `/register` — src/app/(auth)/register/page.tsx
-  2. `/forgot-password` — src/app/(auth)/forgot-password/page.tsx
-  3. `/reset-password/[token]` — src/app/(auth)/reset-password/[token]/
-  4. `/login/verify-magic` — src/app/(auth)/login/verify-magic/page.tsx + LoginVerifyMagicClient.tsx
-  5. `/signup/verify-magic` — src/app/(auth)/signup/verify-magic/page.tsx + SignupVerifyMagicClient.tsx
+- /login, /login/verify, /login/verify-magic
+- /signup, /signup/verify, /signup/verify-magic
+- /verify-email
+- /onboarding
+- /google-callback (auditar em US-312)
 
 ## Regras duras
 
-- **FR-1 Release 1:** testes escritos contra codigo ATUAL, sem refactor.
-- **FR-1 Release 2:** nenhuma rota pode ser deletada sem 14 dias de observacao previa.
-- **Privacidade:** ipHashed sempre. Sem PII em logs.
-- **Zero any.** TypeScript strict.
-- **Zod em todos os inputs.**
+- Zero any, TypeScript strict
+- FR-3 Release 3: ZERO mudanca no backend de auth
+- Zod em todos os inputs client
+- Escopar tokens v3 via [data-auth-v3]
+- LCP image priority=true no hero
 
 ---
 

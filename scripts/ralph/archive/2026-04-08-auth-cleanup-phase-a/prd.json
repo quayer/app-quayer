@@ -1,0 +1,72 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-cleanup-phase-a",
+  "description": "Release 2 Fase A — Instrumentar rotas candidatas legadas com logging + static audit. SOMENTE Fase A executavel nesta sessao. Fases B/C/D bloqueadas por muro de 14 dias de observacao de trafego real em producao. Fonte: tasks/prd-02-auth-cleanup.md",
+  "userStories": [
+    {
+      "id": "US-201",
+      "title": "Instrumentar 5 rotas candidatas com logging estruturado",
+      "description": "Como engenheiro, preciso de metricas de acesso real antes de decidir o que deletar. Cada rota candidata ganha log estruturado na entrada. Zero mudanca de comportamento funcional.",
+      "acceptanceCriteria": [
+        "Criar src/lib/auth/cleanup-audit-logger.ts exportando logCleanupAccess(payload) que grava JSON estruturado contendo: route, method, userAgent (request headers), referrer, ipHashed (SHA256 com salt de IGNITER_APP_SECRET), hasAuthCookie (bool, checa cookie accessToken), timestamp (ISO)",
+        "Usar console.info com prefixo '[cleanup-audit]' para garantir captura pelo log aggregator padrao (Vercel/Docker) sem infra nova",
+        "Instrumentar cada um dos 5 page.tsx candidatos — adicionar chamada ao logger no inicio da funcao server component (ou no layout se for client component):",
+        "  - src/app/(auth)/register/page.tsx",
+        "  - src/app/(auth)/forgot-password/page.tsx",
+        "  - src/app/(auth)/reset-password/[token]/page.tsx (ou layout.tsx se o page for client)",
+        "  - src/app/(auth)/login/verify-magic/page.tsx",
+        "  - src/app/(auth)/signup/verify-magic/page.tsx",
+        "Se a pagina e client component ('use client'), usar useEffect no primeiro render + fetch interno para POST /api/v1/internal/cleanup-audit OU server action",
+        "Preferir solucao server-side: mover logging para layout.tsx (server component) que engloba a rota, checando pathname",
+        "Verificar se existe endpoint backend correspondente (POST /api/v1/auth/forgot-password, /register, etc) — instrumentar tambem no handler se existir; se ja foi removido, anotar em comentario",
+        "Zero mudanca visual ou funcional — usuario nao percebe a instrumentacao",
+        "Logs saem em stdout no formato: [cleanup-audit] {\"route\":\"/register\",\"ts\":\"2026-04-08T...\",\"ipHashed\":\"abc123\",...}",
+        "Typecheck passa"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). cleanup-audit-logger.ts criado com SHA256 IP hashing. 3 rotas server-component instrumentadas inline (register, forgot-password, reset-password). 2 rotas client-component instrumentadas via layout.tsx wrapper (login/verify-magic, signup/verify-magic). Backend endpoints ja removidos — nenhuma instrumentacao backend necessaria. Typecheck zero erros."
+    },
+    {
+      "id": "US-202",
+      "title": "Static audit — mapear todas referencias das 5 rotas candidatas",
+      "description": "Paralelo a medicao runtime, fazer grep completo do codebase e listar cada arquivo que referencia as rotas candidatas. Saida alimenta a decisao da Fase B.",
+      "acceptanceCriteria": [
+        "Criar docs/auth/CLEANUP_AUDIT.md com secao 'Static References' listando para cada uma das 5 rotas:",
+        "  - Arquivos frontend que fazem Link/router.push para a rota",
+        "  - Arquivos backend que fazem redirect para a rota",
+        "  - Templates de email (src/lib/email/, src/server/**/email*, prisma/**/email*) que mencionam a URL",
+        "  - Comentarios no codigo que mencionam a rota (grep por string '/register', '/forgot-password', etc)",
+        "  - Configs (next.config.js/ts, src/middleware.ts) que mencionam",
+        "  - Tests existentes (test/**) que cobrem a rota",
+        "Cada referencia recebe anotacao: KEEP (referencia valida que deve ser atualizada), UPDATE (link quebrado que precisa apontar pra alternativa), ou DELETE (pode sumir junto com a rota)",
+        "Secao 'Backend endpoints status' listando se o endpoint POST correspondente ainda existe: POST /api/v1/auth/register, forgot-password, reset-password (procurar em src/server/core/auth/)",
+        "Secao 'Dependencias componentes' — para cada rota, listar componentes em src/client/components/auth/ que SO ELA usa (candidatos a delete junto)",
+        "Typecheck passa (nao mexe em codigo)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). docs/auth/CLEANUP_AUDIT.md criado. Counts: /register 8, /forgot-password 4, /reset-password 4, /login/verify-magic 6, /signup/verify-magic 4. CRITICAL: verify-magic routes NAO sao legacy — estao wired em email gen (auth.controller.ts:1279,1516,1559). Reclassificadas como STRONG KEEP. Soh 3 candidatos validos: /register, /forgot-password, /reset-password. Surpresas: test/e2e/onboarding-flow.spec.ts:27 navega para /register (mascarado por redirect); SecuritySettings.tsx:293 menciona /api/v1/auth/register removido."
+    },
+    {
+      "id": "US-203",
+      "title": "External references audit — emails transacionais e docs",
+      "description": "Garantir que emails transacionais e documentacao nao dependem das rotas candidatas.",
+      "acceptanceCriteria": [
+        "Localizar todos os templates de email no projeto (grep por 'mailhog|sendEmail|EmailService|email.template|welcome|verification.email' em src/)",
+        "Para cada template encontrado, listar URLs hardcoded ou variaveis de URL",
+        "Adicionar ao docs/auth/CLEANUP_AUDIT.md secao 'External References' com:",
+        "  - Cada template de email e as rotas que referencia (se alguma)",
+        "  - Arquivos em docs/ que mencionam as rotas candidatas",
+        "  - README.md do projeto se mencionar",
+        "  - Landing page separada (se existir como pasta irma ao repo) — anotar TODO se nao for acessivel",
+        "  - SDK/apps mobile (se existirem) — anotar TODO se nao for acessivel",
+        "Recomendacao por referencia: ATUALIZAR_ANTES_DELETE (emails), ATUALIZAR_DEPOIS (docs), TODO_EXTERNO (fora do repo)",
+        "Typecheck passa"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). Appendado a CLEANUP_AUDIT.md. 9 email templates auditados — zero hardcode; magic-link URLs construidos runtime via appBaseUrl. 3 docs internos com refs. middleware.ts PUBLIC_PATHS lines 17/20/21 listam os 3 orphan routes (devem sair em Phase D). 6 TODOs externos para founder: landing, mobile, help center, SDK, marketing emails, partner docs."
+    }
+  ]
+}
