@@ -1,0 +1,358 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/admin-orgs-hardening",
+  "description": "Admin Organizations — Security Hardening & Quality Overhaul. Fixes 6 critical auth bypass vulns, secret leakage, data integrity issues, frontend bugs, A11Y, and code simplification.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Adicionar auth check em server actions de leitura",
+      "description": "Como admin, preciso que apenas admins acessem dados de organizacoes via server actions, para evitar que usuarios comuns listem membros, instancias e webhooks de qualquer org.",
+      "acceptanceCriteria": [
+        "listOrgMembersAction chama requireAdmin() antes de qualquer query",
+        "listUserOrgsAction chama requireAdmin() antes de qualquer query",
+        "listOrgInstancesAction chama requireAdmin() antes de qualquer query",
+        "listOrgWebhooksAction chama requireAdmin() antes de qualquer query",
+        "Cada action retorna { success: false, error: 'Unauthorized' } se nao-admin",
+        "Typecheck passa"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "CRITICAL security — deploy imediato. Arquivo: src/app/admin/actions.ts"
+    },
+    {
+      "id": "US-002",
+      "title": "Proteger getEnvDefaultsAction e remover secrets raw",
+      "description": "Como admin de sistema, preciso que secrets nao sejam retornados em texto claro, para evitar vazamento de API keys via browser devtools.",
+      "acceptanceCriteria": [
+        "getEnvDefaultsAction chama requireAdmin() como primeiro passo",
+        "Remover campos raw: openaiApiKey, adminToken (UAZAPI), googleClientId raw",
+        "Retornar APENAS versoes mascaradas (ex: sk-...abc para OpenAI)",
+        "Typecheck passa"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "CRITICAL security — API keys expostas. Arquivo: src/app/admin/actions.ts"
+    },
+    {
+      "id": "US-003",
+      "title": "Proteger actions de invitations",
+      "description": "Como admin, preciso que a listagem e gestao de convites seja restrita a admins.",
+      "acceptanceCriteria": [
+        "getInvitationsAction chama requireAdmin() como primeiro passo",
+        "createInvitationAction valida role do caller alem do bearer token",
+        "resendInvitationAction valida role do caller",
+        "deleteInvitationAction valida role do caller",
+        "Typecheck passa"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "CRITICAL security. Arquivo: src/app/admin/invitations/actions.ts"
+    },
+    {
+      "id": "US-004",
+      "title": "Sanitizar error messages para o client",
+      "description": "Como desenvolvedor, preciso que erros internos (Prisma, stack traces) nao vazem para o frontend.",
+      "acceptanceCriteria": [
+        "Criar helper sanitizeError(error) que retorna mensagem generica",
+        "Erros Prisma mapeados para mensagens user-friendly em portugues",
+        "Substituir todos os error.message diretos em actions.ts pelo helper",
+        "Substituir em invitations/actions.ts tambem",
+        "Typecheck passa"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "HIGH security — evita information disclosure. Arquivos: src/app/admin/actions.ts, src/app/admin/invitations/actions.ts"
+    },
+    {
+      "id": "US-005",
+      "title": "Rate limiting em server actions criticas",
+      "description": "Como admin de sistema, preciso de rate limiting para evitar brute-force em operacoes sensiveis.",
+      "acceptanceCriteria": [
+        "updateUserSystemRoleAction limitado a 10 calls/minuto por IP",
+        "createInvitationAction limitado a 20 calls/minuto por IP",
+        "createOrganizationAction limitado a 5 calls/minuto por IP",
+        "deleteOrganizationAction limitado a 5 calls/minuto por IP",
+        "Usar lib existente src/lib/rate-limit.ts ou src/lib/rate-limit/",
+        "Typecheck passa"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "HIGH security. Verificar API da lib de rate-limit existente antes de implementar."
+    },
+    {
+      "id": "US-006",
+      "title": "Protecao contra self-demotion e orfao de org",
+      "description": "Como admin, preciso de guard rails que impecam que o ultimo admin se demova ou que o ultimo master seja removido.",
+      "acceptanceCriteria": [
+        "updateUserSystemRoleAction: verificar se existe pelo menos 1 outro admin antes de demover",
+        "removeUserFromOrgAction: verificar se e o ultimo master antes de remover",
+        "updateUserOrgRoleAction: verificar se existe outro master antes de rebaixar",
+        "Retornar erro descritivo em cada caso",
+        "Typecheck passa"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "HIGH — data integrity. Arquivo: src/app/admin/actions.ts"
+    },
+    {
+      "id": "US-007",
+      "title": "Soft delete em removeUserFromOrgAction",
+      "description": "Como admin, preciso que remocao de membros seja soft delete para manter audit trail.",
+      "acceptanceCriteria": [
+        "removeUserFromOrgAction usa update({ isActive: false }) em vez de delete()",
+        "listOrgMembersAction filtra por isActive: true",
+        "Repository listMembers() filtra por isActive: true",
+        "Repository countMembers() filtra por isActive: true",
+        "Typecheck passa"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "HIGH — audit trail. Arquivos: src/app/admin/actions.ts, src/server/core/organizations/organizations.repository.ts"
+    },
+    {
+      "id": "US-008",
+      "title": "Criacao de org atomica com $transaction",
+      "description": "Como desenvolvedor, preciso que a criacao de org (3 ops DB) seja atomica para evitar dados orfaos.",
+      "acceptanceCriteria": [
+        "Controller create action wrapa em database.$transaction()",
+        "Dentro da transaction: criar org, criar UserOrganization, atualizar User.currentOrgId",
+        "Se qualquer passo falha, rollback completo",
+        "Typecheck passa"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "MEDIUM — data integrity. Arquivo: src/server/core/organizations/controllers/organizations.controller.ts"
+    },
+    {
+      "id": "US-009",
+      "title": "Filtrar isActive em queries de organizacao",
+      "description": "Como admin, preciso que orgs soft-deleted nao aparecam em listagens por default.",
+      "acceptanceCriteria": [
+        "listOrganizationsAction adiciona isActive: true no where por default",
+        "Repository list() default para isActive: true quando nao especificado",
+        "Repository listMembers() filtra isActive: true nos membros",
+        "Typecheck passa"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "MEDIUM — data consistency. Arquivos: src/app/admin/actions.ts, src/server/core/organizations/organizations.repository.ts"
+    },
+    {
+      "id": "US-010",
+      "title": "Slug com uniqueness check e fallback",
+      "description": "Como desenvolvedor, preciso que slugs de org sejam unicos para evitar constraint violations.",
+      "acceptanceCriteria": [
+        "generateSlug() verifica se slug ja existe no banco",
+        "Se existir, appenda sufixo numerico (ex: minha-org-2)",
+        "Fallback para ${slug}-${nanoid(6)} se esgotar tentativas",
+        "Typecheck passa"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "MEDIUM. Arquivo: src/server/core/organizations/organizations.repository.ts"
+    },
+    {
+      "id": "US-011",
+      "title": "Alinhar Zod schemas entre actions e controllers",
+      "description": "Como desenvolvedor, preciso que schemas de validacao sejam consistentes para evitar bypass.",
+      "acceptanceCriteria": [
+        "billingType usa z.enum(['free','basic','pro','enterprise']) nas actions",
+        "IDs validados como z.string().uuid() em todas as actions",
+        "Interface OrganizationData alinhada com enterprise no tipo billingType",
+        "Typecheck passa"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "MEDIUM — schema mismatch. Arquivos: src/app/admin/actions.ts, src/server/core/organizations/organizations.schemas.ts, organizations.interfaces.ts"
+    },
+    {
+      "id": "US-012",
+      "title": "Redirecionar listOrganizationsAction pelo controller",
+      "description": "Como desenvolvedor, preciso que a action use o controller em vez de Prisma direto.",
+      "acceptanceCriteria": [
+        "listOrganizationsAction chama api.organizations.list.query() em vez de database.findMany",
+        "Remover query Prisma duplicada da action",
+        "Paginacao e search continuam funcionando",
+        "Typecheck passa"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "MEDIUM — duplicated logic. Arquivo: src/app/admin/actions.ts"
+    },
+    {
+      "id": "US-013",
+      "title": "Dropdown de orgs mostra todas as organizacoes",
+      "description": "Como admin, preciso que o dropdown 'Adicionar a org' no UserManageModal mostre TODAS as orgs.",
+      "acceptanceCriteria": [
+        "Criar listAllOrganizationsAction que retorna todas as orgs (id + name)",
+        "UserManageModal busca lista completa ao abrir",
+        "Dropdown mostra todas as orgs disponiveis",
+        "Typecheck passa"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "MEDIUM — functional bug. Atualmente so mostra as 20 da pagina atual."
+    },
+    {
+      "id": "US-014",
+      "title": "Corrigir race conditions no OrgDetailDialog",
+      "description": "Como admin, preciso que abrir/fechar rapidamente o dialog nao cause dados stale.",
+      "acceptanceCriteria": [
+        "Implementar cancellation pattern (AbortController ou flag isMounted)",
+        "Ao fechar, requests in-flight ignorados ao resolver",
+        "useEffect deps corrigidos (comparar por org?.id)",
+        "Typecheck passa"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "MEDIUM — race condition. Arquivo: src/app/admin/organizations/components/OrgDetailDialog.tsx"
+    },
+    {
+      "id": "US-015",
+      "title": "Corrigir crashes e edge cases de frontend",
+      "description": "Como admin, preciso que a UI nao crasheie em dados inesperados.",
+      "acceptanceCriteria": [
+        "initials() trata string vazia e null (retorna '?' como fallback)",
+        "Progress bar trata maxInstances = 0 sem divisao por zero",
+        "billingType.toUpperCase() com optional chaining e fallback",
+        "Delete button desabilitado durante request (isDeleting state)",
+        "Typecheck passa",
+        "Verificar no browser usando dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "MEDIUM — crashes. Arquivos: OrgDetailDialog.tsx, page.tsx"
+    },
+    {
+      "id": "US-016",
+      "title": "Corrigir stale closures no UserManageModal",
+      "description": "Como desenvolvedor, preciso que useEffects tenham deps corretas.",
+      "acceptanceCriteria": [
+        "useEffect deps incluem funcoes chamadas ou usar useCallback",
+        "executeSystemRoleChange wrapped em try/catch para erros de rede",
+        "Optimistic updates com rollback correto em todos os cenarios",
+        "Typecheck passa"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "MEDIUM. Arquivo: src/app/admin/organizations/components/UserManageModal.tsx"
+    },
+    {
+      "id": "US-017",
+      "title": "Corrigir form state no EditOrganizationDialog",
+      "description": "Como admin, preciso que reabrir o dialog de edicao mostre dados frescos.",
+      "acceptanceCriteria": [
+        "useEffect depende de [organization, open]",
+        "Error state limpo ao abrir dialog",
+        "Form reseta para valores originais ao reabrir",
+        "Adicionar Loader2 spinner no botao submit",
+        "Typecheck passa",
+        "Verificar no browser usando dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "MEDIUM. Arquivo: src/app/admin/organizations/edit-organization-dialog.tsx"
+    },
+    {
+      "id": "US-018",
+      "title": "Tabela navegavel por teclado",
+      "description": "Como usuario de leitor de tela, preciso navegar a tabela de orgs via teclado.",
+      "acceptanceCriteria": [
+        "TableRow clicavel recebe tabIndex={0} e role='button'",
+        "onKeyDown: Enter e Space ativam handleOpenDetail",
+        "Focus ring visivel em linhas focadas",
+        "Typecheck passa",
+        "Verificar no browser usando dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "A11Y — WCAG 2.1 AA. Arquivo: src/app/admin/organizations/page.tsx"
+    },
+    {
+      "id": "US-019",
+      "title": "Aria-labels em botoes icon-only",
+      "description": "Como usuario de leitor de tela, preciso entender o proposito de cada botao.",
+      "acceptanceCriteria": [
+        "Botao Gerenciar: aria-label com nome do membro",
+        "Botao trash no UserManageModal: aria-label com nome da org",
+        "Botao X fechar invite: aria-label='Fechar formulario de convite'",
+        "Input disabled no EditDialog: aria-describedby linkado ao texto",
+        "Typecheck passa"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "A11Y. Arquivos: OrgDetailDialog.tsx, UserManageModal.tsx, edit-organization-dialog.tsx"
+    },
+    {
+      "id": "US-020",
+      "title": "Corrigir associacao de labels em selects",
+      "description": "Como usuario de leitor de tela, preciso que selects tenham labels associados.",
+      "acceptanceCriteria": [
+        "CreateDialog: Select de tipo recebe aria-label adequado",
+        "Tab counts mostram skeleton durante loading em vez de (0)",
+        "Todos os Select components tem aria-label ou htmlFor associado",
+        "Typecheck passa"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "A11Y. Arquivos: create-organization-dialog.tsx, OrgDetailDialog.tsx"
+    },
+    {
+      "id": "US-021",
+      "title": "Consolidar tipo Organization em arquivo unico",
+      "description": "Como desenvolvedor, preciso de uma unica fonte de verdade para o tipo Organization.",
+      "acceptanceCriteria": [
+        "Criar src/app/admin/organizations/types.ts com tipo canonico",
+        "Remover tipo duplicado de page.tsx e edit-organization-dialog.tsx",
+        "Todos os arquivos importam de types.ts",
+        "Typecheck passa"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Simplificacao. Tipo duplicado em 3 lugares atualmente."
+    },
+    {
+      "id": "US-022",
+      "title": "Reduzir useState com useReducer na page",
+      "description": "Como desenvolvedor, preciso que o state management seja mais previsivel.",
+      "acceptanceCriteria": [
+        "Delete state consolidado: deleteTarget: { id, name } | null",
+        "Pagination state consolidado em objeto",
+        "onSuccess callbacks usam referencia estavel",
+        "Typecheck passa"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Simplificacao. 12 useState -> ~6. Arquivo: page.tsx"
+    },
+    {
+      "id": "US-023",
+      "title": "Extrair hook de data fetching reutilizavel",
+      "description": "Como desenvolvedor, preciso eliminar as 3 funcoes load identicas no OrgDetailDialog.",
+      "acceptanceCriteria": [
+        "Criar hook useAsyncData<T>(fetcher, deps) com loading/data/error",
+        "OrgDetailDialog usa 3 instancias do hook",
+        "Hook inclui cancellation via AbortController",
+        "Reduzir de ~10 useState para ~3 hooks",
+        "Typecheck passa"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Simplificacao. Arquivo: OrgDetailDialog.tsx + novo hook"
+    },
+    {
+      "id": "US-024",
+      "title": "Eliminar import circular de tipo",
+      "description": "Como desenvolvedor, preciso remover imports de tipo que acoplam componentes ao page.tsx.",
+      "acceptanceCriteria": [
+        "OrgDetailDialog importa Organization de types.ts",
+        "UserManageModal importa Organization de types.ts",
+        "Nenhum componente em components/ importa de page.tsx",
+        "Typecheck passa"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Simplificacao. Depende de US-021 (criar types.ts primeiro)."
+    }
+  ]
+}

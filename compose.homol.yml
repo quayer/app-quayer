@@ -1,0 +1,196 @@
+# ==================================
+# 🧪 DOCKER COMPOSE - QUAYER HOMOL
+# ==================================
+# Stack auto-contida para homologação no servidor 167.235.139.140
+# Arquitetura: Cloudflare Tunnel (cloudflared) -> app:3000 -> postgres + redis
+#   - Sem nginx, sem porta exposta. cloudflared faz outbound para Cloudflare.
+#   - homol.quayer.com (CNAME -> tunnel) é resolvido pelo Cloudflare proxy.
+#   - Postgres + Redis isolados, sem expose externa.
+#
+# Comando: docker compose -f compose.homol.yml --env-file .env.homol up -d
+# Stop:    docker compose -f compose.homol.yml --env-file .env.homol down
+
+services:
+  # ==================================
+  # CLOUDFLARE TUNNEL
+  # ==================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: homol-quayer-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_HOMOL_TOKEN}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - homol-quayer-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:2000/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_IGNITER_API_URL: ${NEXT_PUBLIC_APP_URL}/
+        NEXT_PUBLIC_IGNITER_API_BASE_PATH: /api/v1
+    container_name: homol-quayer-app
+    image: quayer-app:homol
+    restart: unless-stopped
+    # Sem ports: tráfego entra via cloudflared na rede interna
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+
+      # Database (rede interna)
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@homol-quayer-postgres:5432/${DB_NAME}?schema=public
+      - DIRECT_DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@homol-quayer-postgres:5432/${DB_NAME}?schema=public
+
+      # Redis (rede interna)
+      - REDIS_URL=redis://homol-quayer-redis:6379
+      - REDIS_HOST=homol-quayer-redis
+      - REDIS_PORT=6379
+
+      # Auth
+      - JWT_SECRET=${JWT_SECRET}
+      - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+      # Igniter
+      - IGNITER_APP_NAME=quayer-homol
+      - NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_APP_URL}/
+      - NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
+      - IGNITER_JOBS_QUEUE_PREFIX=quayer-homol
+      - IGNITER_LOG_LEVEL=debug
+
+      # Email
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+
+      # WhatsApp
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_WEBHOOK_URL=${UAZAPI_WEBHOOK_URL}
+
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # Google OAuth (homol usa redirect URI próprio)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+
+      # Storage (homol pode usar bucket separado)
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-homol-media-whatsapp}
+      - SUPABASE_STORAGE_BUCKET_PROFILES=${SUPABASE_STORAGE_BUCKET_PROFILES:-homol-profile-pictures}
+      - SUPABASE_STORAGE_BUCKET_ATTACHMENTS=${SUPABASE_STORAGE_BUCKET_ATTACHMENTS:-homol-attachments}
+
+    depends_on:
+      homol-quayer-postgres:
+        condition: service_healthy
+      homol-quayer-redis:
+        condition: service_healthy
+    networks:
+      - homol-quayer-internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  homol-quayer-postgres:
+    image: postgres:15-alpine
+    container_name: homol-quayer-postgres
+    restart: unless-stopped
+    # Bind interno apenas — não exposto na máquina
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-quayer_homol}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-quayer_homol}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - /opt/quayer-homol/data/postgres:/var/lib/postgresql/data
+    networks:
+      - homol-quayer-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-quayer_homol}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c max_connections=100
+      -c effective_cache_size=512MB
+      -c maintenance_work_mem=32MB
+      -c work_mem=2MB
+
+  homol-quayer-redis:
+    image: redis:7-alpine
+    container_name: homol-quayer-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - /opt/quayer-homol/data/redis:/data
+    networks:
+      - homol-quayer-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save 300 10
+      --appendonly yes
+      --appendfsync everysec
+
+networks:
+  homol-quayer-internal:
+    driver: bridge
+    name: homol-quayer-internal

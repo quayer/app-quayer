@@ -1,0 +1,211 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-security-hardening",
+  "description": "Auth security hardening: CSRF protection, WhatsApp OTP rate-limiting, DeviceSession cleanup job, IP geolocation alerting per organization.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "CSRF Token — Geração e validação server-side",
+      "description": "As a developer, I want to generate and validate CSRF tokens server-side so that mutations are protected against cross-site request forgery.",
+      "acceptanceCriteria": [
+        "Criar utility src/lib/auth/csrf.ts com funções generateCsrfToken() e validateCsrfToken(token)",
+        "Token gerado com crypto.randomBytes(32).toString('hex')",
+        "Token armazenado em cookie httpOnly csrf_token (SameSite=Strict, Secure=true em prod)",
+        "Validação compara header X-CSRF-Token com o cookie",
+        "Token rotacionado a cada nova session (login/refresh)",
+        "Typecheck passes (npx tsc --noEmit)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "CSRF Token — Procedure de validação no Igniter",
+      "description": "As a developer, I want a reusable Igniter procedure that validates CSRF tokens so that I can protect any mutation endpoint.",
+      "acceptanceCriteria": [
+        "Criar csrfProcedure() em src/server/features/auth/procedures/csrf.procedure.ts",
+        "Procedure extrai token do header X-CSRF-Token e compara com cookie",
+        "Retorna 403 Forbidden com mensagem clara se token inválido/ausente",
+        "Procedure é composável com authProcedure() (pode usar ambos: use: [authProcedure(), csrfProcedure()])",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "CSRF Token — Integração no client (React)",
+      "description": "As a user, I want my forms to work seamlessly with CSRF protection so that I don't notice any difference in the UX.",
+      "acceptanceCriteria": [
+        "Hook useCsrfToken() em src/client/hooks/use-csrf-token.ts que lê o token do cookie e inclui no header das requests",
+        "Configurar o client Igniter/TanStack Query para enviar X-CSRF-Token automaticamente em todas as mutations",
+        "Endpoint GET /api/v1/auth/csrf retorna novo token (para SPA refresh)",
+        "Forms de login, register, OTP, delete org, e settings continuam funcionando normalmente",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "CSRF — Aplicar nos endpoints sensíveis",
+      "description": "As a developer, I want CSRF validation applied to all sensitive mutation endpoints so that the app is protected.",
+      "acceptanceCriteria": [
+        "csrfProcedure() adicionado nos controllers: Auth (login, register, verify-otp, magic-link, change-password, delete-account), Admin (delete organization, update settings, revoke sessions), Config (update AI settings, update email settings, manage API keys)",
+        "Endpoints de leitura (queries) NÃO têm CSRF (apenas mutations)",
+        "API keys externas (header X-API-Key) bypass CSRF (são stateless)",
+        "Typecheck passes",
+        "Testar manualmente: request sem CSRF token retorna 403"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Rate-limit no WhatsApp OTP — Backend",
+      "description": "As a developer, I want to rate-limit OTP sending via WhatsApp so that bad actors cannot spam phone numbers with messages.",
+      "acceptanceCriteria": [
+        "Criar rate limiter em src/lib/rate-limit/otp-rate-limit.ts",
+        "Limite por número de telefone: máximo 3 envios por 15 minutos",
+        "Limite por IP do client: máximo 5 envios por hora",
+        "Storage: Redis (chaves com TTL automático, pattern otp:phone:{number} e otp:ip:{ip})",
+        "Retornar 429 Too Many Requests com header Retry-After (segundos restantes)",
+        "Mensagem de erro user-friendly: Muitas tentativas. Tente novamente em X minutos.",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Rate-limit no WhatsApp OTP — Integração no auth controller",
+      "description": "As a developer, I want the rate limiter integrated in the OTP sending flow so that it blocks excessive requests before calling UAZAPI.",
+      "acceptanceCriteria": [
+        "Rate-limit check executado ANTES de chamar sendWhatsAppOTP() em auth.controller.ts",
+        "Se rate-limited, NÃO envia mensagem WhatsApp (economiza cota da UAZAPI)",
+        "Log de warning quando rate-limit é atingido (incluir IP e phone para auditoria)",
+        "Rate-limit NÃO se aplica a admins do sistema (role === admin)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Rate-limit no WhatsApp OTP — Feedback no frontend",
+      "description": "As a user, I want clear feedback when I've sent too many OTP requests so that I know to wait.",
+      "acceptanceCriteria": [
+        "Form de OTP mostra mensagem de erro com countdown: Tente novamente em X:XX",
+        "Botão Reenviar código desabilitado durante o cooldown",
+        "Timer baseado no header Retry-After da resposta 429",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Cleanup de DeviceSessions — BullMQ repeatable job",
+      "description": "As a developer, I want a scheduled job that cleans up old revoked device sessions so that the database stays lean.",
+      "acceptanceCriteria": [
+        "Criar job device-session-cleanup registrado no BullMQ via Igniter jobs adapter",
+        "Job roda como repeatable: a cada 24 horas (cron: 0 3 * * * — 3am)",
+        "Deleta registros de DeviceSession onde isRevoked = true AND revokedAt < now() - 30 days",
+        "Deleta registros de DeviceSession onde lastActiveAt < now() - 90 days (sessions abandonadas)",
+        "Log do total de registros deletados em cada execução",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Cleanup de DeviceSessions — Registro e monitoramento",
+      "description": "As a developer, I want the cleanup job to be visible in the admin dashboard so that admins can verify it's running.",
+      "acceptanceCriteria": [
+        "Job aparece na listagem de system info (/admin/settings)",
+        "Mostrar: última execução, próxima execução, total deletados na última run",
+        "Se job falhar, log de error com stack trace (sem retry infinito — max 3 retries)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "IP Geolocation — Serviço de lookup",
+      "description": "As a developer, I want an IP geolocation service so that I can determine the country of login requests.",
+      "acceptanceCriteria": [
+        "Criar src/lib/geocoding/ip-geolocation.ts",
+        "Usar API gratuita (ip-api.com free tier — sem chave necessária)",
+        "Cache resultado no Redis por 24h (chave geo:ip:{ip}, evita re-lookup)",
+        "Retornar: { country: string, countryCode: string, city?: string, region?: string }",
+        "Fallback gracioso: se API falhar, retornar { country: Unknown, countryCode: XX } (NÃO bloquear login)",
+        "IPs privados (127.0.0.1, 10.x, 192.168.x) retornam { country: Local, countryCode: LO } sem API call",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "IP Geolocation — Configuração por organização",
+      "description": "As an admin, I want to configure how my organization responds to logins from unusual locations.",
+      "acceptanceCriteria": [
+        "Adicionar campo geoAlertMode no model Organization do Prisma: off (default), notify, email, block",
+        "Migration Prisma gerada e aplicada",
+        "UI de configuração em /admin/settings (Security section)",
+        "Default para orgs existentes: off (não breaking)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Migration Prisma precisa de aprovação antes de aplicar"
+    },
+    {
+      "id": "US-012",
+      "title": "IP Geolocation — Detecção e resposta no login",
+      "description": "As a system, I want to detect when a user logs in from a new country and respond according to the org's configuration.",
+      "acceptanceCriteria": [
+        "No login bem-sucedido, comparar país do IP atual com países dos últimos 5 DeviceSession do usuário",
+        "Se país é novo: off=nada, notify=Notification para admins, email=notificar+email ao user, block=rejeitar 403",
+        "Salvar countryCode no DeviceSession (novo campo String?) para referência futura",
+        "NÃO bloquear se geolocation API falhar (fail-open)",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Adicionar countryCode na mesma migration do US-011"
+    },
+    {
+      "id": "US-013",
+      "title": "IP Geolocation — Notificação e log de auditoria",
+      "description": "As an admin, I want to see geolocation alerts in my notification panel and audit log.",
+      "acceptanceCriteria": [
+        "Alertas de geolocation aparecem em /admin/notificacoes com badge Segurança",
+        "Cada alerta mostra: usuário, email, IP, país, cidade (se disponível), timestamp",
+        "Registro no audit log (/admin/audit) com action LOGIN_GEO_ALERT",
+        "Admin pode marcar alerta como revisado (dismiss)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
