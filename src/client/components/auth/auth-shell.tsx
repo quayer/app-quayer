@@ -24,11 +24,16 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
   return (
     <div
       className={`relative min-h-screen overflow-x-hidden ${className}`}
-      style={{ fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' }}
+      style={{
+        fontFamily: 'var(--font-dm-sans), system-ui, sans-serif',
+        backgroundColor: 'var(--color-bg-base, #000000)',
+        color: 'var(--color-text-primary, #ffffff)',
+      }}
     >
       <div className="flex min-h-screen">
-        {/* Left panel — form area */}
-        <main className="flex-1 flex flex-col min-h-screen bg-[#0a0d14]">
+        {/* Left panel — form area. Background usa var(--color-bg-base)=#000000
+            do DS v3 quayer-ds-v3.html (nao mais o #0a0d14 do v2). */}
+        <main className="flex-1 flex flex-col min-h-screen" style={{ backgroundColor: 'var(--color-bg-base, #000000)' }}>
           {/* Logo top-left (mesmo posicionamento do v2: px-8 pt-8 lg:px-12 lg:pt-10) */}
           <div className="px-8 pt-8 lg:px-12 lg:pt-10">
             <Logo size={32} variant="color" />

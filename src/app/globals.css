@@ -494,3 +494,77 @@
     var(--p-amber-700) 100%
   );
 }
+
+/* ============================================================
+   Auth v3 — brand overrides para o LoginFormFinal (v2 form) quando
+   renderizado dentro do [data-auth-v3="true"] scope. Traz a paleta
+   amber do brand para estados primarios sem tocar no componente v2.
+   Fonte: quayer-ds-v3.html
+   ============================================================ */
+
+/* Background do panel do form = #000000 puro (v3), nao mais #0a0d14 (v2) */
+[data-auth-v3="true"] {
+  color: var(--color-text-primary);
+}
+
+/* Headline principal — branco solido com tracking v3 */
+[data-auth-v3="true"] h1 {
+  color: var(--color-text-primary);
+  font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Links dentro do form — amber hover */
+[data-auth-v3="true"] a {
+  transition: color 150ms ease;
+}
+[data-auth-v3="true"] a:hover {
+  color: var(--color-brand) !important;
+}
+
+/* Submit button primario (tailwind: bg-white text-[#0a0d14]) — quando
+   o form tem input valido o botao usa bg-white. Override com amber. */
+[data-auth-v3="true"] button[type="submit"].bg-white {
+  background-color: var(--color-brand) !important;
+  color: var(--color-text-inverse) !important;
+  box-shadow: var(--shadow-brand, 0 0 0 3px rgba(255,214,10,.20));
+}
+[data-auth-v3="true"] button[type="submit"].bg-white:hover {
+  background-color: var(--color-brand-hover) !important;
+}
+
+/* Focus rings — amber em todos os elementos interativos */
+[data-auth-v3="true"] button:focus-visible,
+[data-auth-v3="true"] input:focus-visible,
+[data-auth-v3="true"] [role="button"]:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* Inputs em estado disabled — usa color-text-disabled */
+[data-auth-v3="true"] input:disabled,
+[data-auth-v3="true"] button:disabled {
+  opacity: 0.5;
+}
+
+/* Separador "ou" — white/20 do v2 fica OK porque usa var(--color-border-default) conceptually */
+[data-auth-v3="true"] [role="separator"] {
+  border-color: var(--color-border-default);
+}
+
+/* Classe .auth-input usada pelo v2 form — herda bg/border v3 */
+[data-auth-v3="true"] .auth-input {
+  background-color: var(--color-bg-elevated) !important;
+  border-color: var(--color-border-default) !important;
+  color: var(--color-text-primary) !important;
+}
+[data-auth-v3="true"] .auth-input:focus,
+[data-auth-v3="true"] .auth-input:focus-visible {
+  border-color: var(--color-brand) !important;
+  box-shadow: 0 0 0 3px var(--color-brand-subtle) !important;
+}
+
+/* Texto uppercase label "EMAIL OU TELEFONE" usa color-text-tertiary */
+[data-auth-v3="true"] label.uppercase {
+  color: var(--color-text-tertiary);
+}
