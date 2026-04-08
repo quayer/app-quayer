@@ -20,13 +20,11 @@
 app.quayer.com {
 	import cf_origin_tls
 	import security_headers
-
 	reverse_proxy localhost:3000 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-Proto https
 	}
-
 	log {
 		output file /var/log/caddy/app.quayer.com.log
 		format json
@@ -36,13 +34,11 @@ app.quayer.com {
 flows.quayer.com {
 	import cf_origin_tls
 	import security_headers
-
 	reverse_proxy localhost:5678 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-Proto https
 	}
-
 	log {
 		output file /var/log/caddy/flows.quayer.com.log
 		format json
@@ -52,7 +48,15 @@ flows.quayer.com {
 chat.quayer.com {
 	import cf_origin_tls
 	import security_headers
-	respond "Chatwoot service temporarily unavailable" 503
+	reverse_proxy localhost:4000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+	log {
+		output file /var/log/caddy/chat.quayer.com.log
+		format json
+	}
 }
 
 supabase.quayer.com {
