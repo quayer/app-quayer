@@ -1,0 +1,180 @@
+name: Production Deploy
+
+# ============================================
+# DEPLOY: manual only -> ambiente 'production'
+# Auth: SSH key (ed25519) — NUNCA password
+# Para ativar aprovação manual:
+#   GitHub -> Settings -> Environments -> production
+#   -> Required reviewers -> add yourself
+# ============================================
+
+# NOTA: enquanto o projeto estiver em iteração rápida pré-clientes,
+# este workflow só roda manual via workflow_dispatch (igual ao deploy-homol).
+on:
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Build sem cache (mais lento)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # -------------------------------------------------------
+    # APROVACAO MANUAL: Configure no GitHub -> Settings ->
+    # Environments -> production -> Required reviewers
+    #
+    # SECRETS: este job usa SSH key (PROD_SSH_KEY) com user
+    # não-root (PROD_USER). Após validar o primeiro deploy
+    # com essa config, REMOVA do GitHub os secrets antigos:
+    #   - HOST
+    #   - USERNAME
+    #   - PASSWORD
+    # Eles não são mais usados e representam risco de credencial.
+    # -------------------------------------------------------
+    environment: production
+
+    steps:
+      - name: Deploy to Production Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 30m
+          script: |
+            set -e
+
+            APP_DIR="/opt/quayer"
+            COMPOSE_FILE="compose.yml"
+            NO_CACHE="${{ github.event.inputs.no_cache }}"
+            BACKUP_DIR="/opt/quayer/backups"
+
+            echo "=== Iniciando Deploy Quayer ==="
+
+            # 1. Verificar presenca do repositorio e .env
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "Repositorio nao encontrado. Clonando..."
+              rm -rf "$APP_DIR"
+              mkdir -p "$APP_DIR"
+              git clone --depth 1 --single-branch --branch main https://github.com/quayer/app-quayer.git "$APP_DIR"
+              cd "$APP_DIR"
+            else
+              cd "$APP_DIR"
+            fi
+
+            if [ ! -f .env ]; then
+              echo "ERRO CRITICO: .env nao encontrado em $APP_DIR"
+              exit 1
+            fi
+
+            if docker compose version > /dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
+
+            # 2. BACKUP do banco ANTES de qualquer mudanca
+            echo "Criando backup do banco de dados..."
+            mkdir -p "$BACKUP_DIR"
+            BACKUP_FILE="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S).sql.gz"
+
+            if docker inspect quayer-postgres > /dev/null 2>&1; then
+              DB_USER=$(grep '^DB_USER=' .env | cut -d= -f2 | tr -d '"')
+              DB_NAME=$(grep '^DB_NAME=' .env | cut -d= -f2 | tr -d '"')
+              DB_USER=${DB_USER:-quayer}
+              DB_NAME=${DB_NAME:-quayer}
+              if docker exec quayer-postgres pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$BACKUP_FILE"; then
+                echo "Backup criado: $BACKUP_FILE"
+              else
+                echo "Backup falhou (pode ser primeiro deploy) - continuando"
+                rm -f "$BACKUP_FILE"
+              fi
+            else
+              echo "Postgres nao esta rodando - sem backup (primeiro deploy?)"
+            fi
+
+            # Manter apenas os 7 backups mais recentes
+            ls -t "$BACKUP_DIR"/pre-deploy-*.sql.gz 2>/dev/null | tail -n +8 | xargs rm -f || true
+
+            # 3. Atualizar codigo
+            echo "Atualizando codigo..."
+            git fetch --depth 1 origin main
+            git reset --hard origin/main
+            git clean -fd -e .env -e data/ -e backups/
+            git pull origin main
+
+            # 4. Infraestrutura
+            docker network inspect supabase_default > /dev/null 2>&1 || docker network create supabase_default
+            docker system prune -af 2>/dev/null || true
+            docker builder prune -af 2>/dev/null || true
+            rm -rf /tmp/* 2>/dev/null || true
+            echo "Espaco disponivel: $(df -h / | tail -1 | awk '{print $4}')"
+
+            # 5. Build
+            echo "Construindo imagem..."
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_DOCKER_CLI_BUILD=1
+
+            if [ "$NO_CACHE" = "true" ]; then
+              $COMPOSE_CMD -f $COMPOSE_FILE build --no-cache app
+            else
+              $COMPOSE_CMD -f $COMPOSE_FILE build --parallel app
+            fi
+
+            # 6. Deploy
+            echo "Subindo aplicacao..."
+            $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans 2>/dev/null || true
+            docker rm -f quayer-redis quayer-postgres quayer-app 2>/dev/null || true
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
+
+            # 7. Health check robusto em loop (120s timeout)
+            echo "Aguardando health check (ate 120s)..."
+            MAX_WAIT=120
+            INTERVAL=10
+            ELAPSED=0
+            HEALTHY=false
+
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+              if [ "$STATUS" = "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              echo "  [${ELAPSED}s] Status: $STATUS - aguardando..."
+              sleep $INTERVAL
+              ELAPSED=$((ELAPSED + INTERVAL))
+            done
+
+            if [ "$HEALTHY" = "true" ]; then
+              echo "App HEALTHY apos ${ELAPSED}s!"
+            else
+              echo "FALHA: App nao ficou healthy em ${MAX_WAIT}s (status: $STATUS)"
+              docker logs quayer-app --tail 50
+
+              # Rollback do banco com ultimo backup
+              LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/pre-deploy-*.sql.gz 2>/dev/null | head -1)
+              if [ -n "$LATEST_BACKUP" ]; then
+                DB_USER=$(grep '^DB_USER=' .env | cut -d= -f2 | tr -d '"')
+                DB_NAME=$(grep '^DB_NAME=' .env | cut -d= -f2 | tr -d '"')
+                DB_USER=${DB_USER:-quayer}
+                DB_NAME=${DB_NAME:-quayer}
+                echo "Restaurando banco de: $LATEST_BACKUP"
+                if gunzip -c "$LATEST_BACKUP" | docker exec -i quayer-postgres psql -U "$DB_USER" "$DB_NAME"; then
+                  echo "Banco restaurado com sucesso!"
+                else
+                  echo "ROLLBACK FALHOU - intervencao manual necessaria"
+                fi
+              else
+                echo "Nenhum backup disponivel para rollback"
+              fi
+              exit 1
+            fi
+
+            # 8. Limpeza final
+            docker image prune -f || true
+            echo "=== Deploy concluido! https://app.quayer.com ==="
