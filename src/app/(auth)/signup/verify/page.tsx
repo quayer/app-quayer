@@ -2,7 +2,6 @@ import { Suspense } from 'react'
 import { cookies } from 'next/headers'
 import { isAuthV3Enabled } from '@/lib/feature-flags/auth-v3'
 import { AuthShell } from '@/client/components/auth/auth-shell'
-import { SignupVerifyV3 } from '@/client/components/auth/signup-verify-v3'
 import SignupVerifyV2Client from './SignupVerifyV2Client'
 
 export default async function SignupVerifyPage() {
@@ -15,7 +14,9 @@ export default async function SignupVerifyPage() {
     return (
       <Suspense fallback={null}>
         <AuthShell>
-          <SignupVerifyV3 />
+          <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
+            <SignupVerifyV2Client />
+          </div>
         </AuthShell>
       </Suspense>
     )

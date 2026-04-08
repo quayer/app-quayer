@@ -559,4 +559,23 @@
   [data-auth-v3="true"] label.uppercase {
     color: var(--color-text-tertiary) !important;
   }
+
+  /* Neutralize internal "chrome" (min-h-svh wrappers + duplicate logo Link)
+     que 3 V2Clients tem (SignupVerify, verify-email, google-callback).
+     Esses wrappers foram desenhados para renderizar standalone no v2 path.
+     Quando encapsulados em AuthShell, causam double chrome (dois logos,
+     altura total forcada duas vezes, padding top extra). Scoped fix aqui:
+     nao toca os componentes v2 (continuam funcionando standalone). */
+  [data-auth-v3="true"] .min-h-svh {
+    min-height: auto !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  /* Esconde Logo Link interno (Link wrapping Image com alt="Quayer") —
+     AuthShell ja provem o logo top-left do layout v3. Usa :has() selector
+     (supported Chrome 105+, Safari 15.4+, Firefox 121+). */
+  [data-auth-v3="true"] a:has(img[alt="Quayer"]) {
+    display: none !important;
+  }
 }

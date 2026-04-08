@@ -1,6 +1,5 @@
 import { Suspense } from 'react'
 import { cookies } from 'next/headers'
-import { VerifyEmailV3 } from "@/client/components/auth/verify-email-v3"
 import { AuthShell } from "@/client/components/auth/auth-shell"
 import { isAuthV3Enabled } from "@/lib/feature-flags/auth-v3"
 import { VerifyEmailV2Client } from "./verify-email-v2-client"
@@ -21,7 +20,9 @@ export default async function VerifyEmailPage() {
     return (
       <Suspense fallback={fallback}>
         <AuthShell>
-          <VerifyEmailV3 />
+          <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
+            <VerifyEmailV2Client />
+          </div>
         </AuthShell>
       </Suspense>
     )

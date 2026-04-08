@@ -1,6 +1,5 @@
 import { Suspense } from 'react'
 import { cookies } from 'next/headers'
-import { GoogleCallbackV3 } from '@/client/components/auth/google-callback-v3'
 import { AuthShell } from '@/client/components/auth/auth-shell'
 import { isAuthV3Enabled } from '@/lib/feature-flags/auth-v3'
 import { GoogleCallbackV2Client } from './google-callback-v2-client'
@@ -17,11 +16,16 @@ export default async function GoogleCallbackPage() {
     </div>
   )
 
+  // Decisao de arquitetura (2026-04-08):
+  // V3 renderiza o MESMO GoogleCallbackV2Client do v2 dentro do AuthShell v3.
+  // Tokens DS v3 aplicam via [data-auth-v3] scope no layout.
   if (v3) {
     return (
       <Suspense fallback={fallback}>
         <AuthShell>
-          <GoogleCallbackV3 />
+          <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
+            <GoogleCallbackV2Client />
+          </div>
         </AuthShell>
       </Suspense>
     )
