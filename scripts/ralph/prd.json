@@ -19,8 +19,8 @@
         "Typecheck passa"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Funciona em Server Components — aceita userId do cookie de session. Para usuarios anonimos usa cookieId (criar cookie quayer-cid se nao existir)."
+      "passes": true,
+      "notes": "DONE Wave 1 (commit f88a268). src/lib/feature-flags/auth-v3.ts isAuthV3Enabled com SHA256 hash estavel. Valores off|percentage:N|on. Override cookie auth-v3-override. 14 test cases incluindo distribution bounds (percentage:50 n=10k em [4500,5500]). docs/auth/FEATURE_FLAGS.md."
     },
     {
       "id": "US-302",
@@ -34,8 +34,8 @@
         "Pasta imagem/ preservada, original nao deletado"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Windows bash: use cp. Versao WebP otimizada pode ficar como TODO — conversao manual ou com sharp."
+      "passes": true,
+      "notes": "DONE Wave 1 (commit f88a268). public/images/auth/login-hero.png copiada (1952x2176, 6.81 MB — LCP CRITICAL TODO, precisa WebP <150KB antes de US-319). docs/auth/ASSETS.md com TODO de otimizacao."
     },
     {
       "id": "US-303",
@@ -51,8 +51,8 @@
         "Typecheck + lint passam"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Escopar via [data-auth-v3] e CRITICO — evita vazar estilos para dashboard. Validar que next/font nao bloqueia render em prod."
+      "passes": true,
+      "notes": "DONE Wave 1 (commit f88a268). ~125 tokens extraidos de quayer-ds-v3.html para [data-auth-v3=\"true\"] em globals.css. tailwind.config.ts criado com ds-* prefix. DM_Sans+DM_Mono via next/font/google no (auth)/layout.tsx. Layout agora async server component que le cookies e seta data-auth-v3 conditionalmente. --shadow-icon mantido como drop-shadow filter (CSS var only)."
     },
     {
       "id": "US-304",
@@ -73,8 +73,8 @@
         "Verify in browser using dev-browser skill (rota /dev/ds-showcase em 1440px)"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Story grande — pode precisar de quebra adicional se agent ficar sem contexto. Storybook NAO esta instalado, usar rota dev."
+      "passes": true,
+      "notes": "DONE Wave 1 (commit f88a268). 6 componentes DS primitivos em src/client/components/ds/ (button, input, otp-input, logo, card, toast). 25 tests total. /dev/ds-showcase route com notFound() em producao. Zero any, forwardRef onde aplicavel, Props types exportados."
     },
     {
       "id": "US-305",
