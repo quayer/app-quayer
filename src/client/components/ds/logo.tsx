@@ -1,47 +1,43 @@
-import * as React from 'react'
+import Image from 'next/image';
+import * as React from 'react';
 
 export interface LogoProps {
-  size?: number
-  className?: string
-  'aria-label'?: string
+  /**
+   * Altura em pixels. A largura e calculada automaticamente para preservar
+   * a proporcao original do logo (685x156 = aspect ~4.39:1).
+   */
+  size?: number;
+  className?: string;
+  'aria-label'?: string;
+  priority?: boolean;
 }
 
+// Proporcao do arquivo public/logo.svg (685 / 156)
+const LOGO_ASPECT_RATIO = 685 / 156;
+
+/**
+ * Quayer brand logo.
+ * Usa o SVG oficial em public/logo.svg (Q mark + wordmark).
+ * Server component — pode ser importado de qualquer lugar.
+ */
 export function Logo({
   size = 32,
   className,
-  'aria-label': ariaLabel,
+  'aria-label': ariaLabel = 'Quayer',
+  priority = false,
 }: LogoProps): React.ReactElement {
-  const titleId = ariaLabel ? 'ds-logo-title' : undefined
+  const width = Math.round(size * LOGO_ASPECT_RATIO);
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width={size}
+    <Image
+      src="/logo.svg"
+      alt={ariaLabel}
+      width={width}
       height={size}
-      viewBox="0 0 64 64"
+      priority={priority}
       className={className}
-      role={ariaLabel ? 'img' : undefined}
-      aria-hidden={ariaLabel ? undefined : true}
-      aria-labelledby={titleId}
-    >
-      {ariaLabel ? <title id={titleId}>{ariaLabel}</title> : null}
-      <defs>
-        <linearGradient id="ds-logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="var(--ds-p-400, #6366f1)" />
-          <stop offset="100%" stopColor="var(--ds-p-700, #4338ca)" />
-        </linearGradient>
-      </defs>
-      <circle cx="32" cy="32" r="30" fill="url(#ds-logo-gradient)" />
-      <text
-        x="32"
-        y="42"
-        textAnchor="middle"
-        fontSize="32"
-        fontWeight="700"
-        fill="#ffffff"
-        fontFamily="system-ui, sans-serif"
-      >
-        Q
-      </text>
-    </svg>
-  )
+      style={{ height: size, width }}
+    />
+  );
 }
+
+export default Logo;

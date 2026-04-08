@@ -27,9 +27,42 @@ export default async function AuthLayout({
   const override = cookieStore.get('auth-v3-override')?.value ?? null
   const authV3 = isAuthV3Enabled(seedId, override)
 
+  // ============================================================
+  // V3 layout — minimalist wrapper. Pages compose their own
+  // <AuthShell> which controls the full left/right split.
+  // Zero brand panel here, zero marketing copy. Design System v3
+  // tokens activate via data-auth-v3="true" on this root wrapper.
+  // ============================================================
+  if (authV3) {
+    return (
+      <div
+        data-auth-v3="true"
+        className={`${dmSans.variable} ${dmMono.variable} min-h-screen`}
+      >
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center min-h-screen" role="status">
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-8 w-8 rounded-full border-2 border-gray-300 border-t-gray-600 animate-spin" />
+                <span className="text-sm text-gray-500">Carregando...</span>
+              </div>
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      </div>
+    )
+  }
+
+  // ============================================================
+  // V2 layout — legacy, preserved exactly as it was. Contains
+  // the marketing brand panel with "Sua inteligência artificial..."
+  // copy on the right side. Will be removed in US-322 after 30d
+  // stable at flag on in production.
+  // ============================================================
   return (
     <div
-      {...(authV3 ? { 'data-auth-v3': 'true' } : {})}
       className={`${dmSans.variable} ${dmMono.variable} relative min-h-screen overflow-x-hidden bg-[#fafafa] dark:bg-[#0a0d14]`}
       style={{
         '--ring': 'oklch(0.708 0 0)',
@@ -69,7 +102,7 @@ export default async function AuthLayout({
           </div>
         </main>
 
-        {/* ── Brand Panel (right) ── */}
+        {/* ── Brand Panel (right) — V2 ONLY ── */}
         <div role="complementary" className="hidden lg:flex lg:w-[42%] xl:w-[45%] relative overflow-hidden border-l border-white/[0.1]">
           {/* Deep indigo background — clearly distinct from form panel */}
           <div className="absolute inset-0 bg-[#060c1e]" />
