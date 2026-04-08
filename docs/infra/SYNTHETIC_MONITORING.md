@@ -53,6 +53,24 @@ Workflow: `.github/workflows/synthetic-monitor.yml`
 | `chatwoot` | `https://chat.quayer.com/` | `302` (onboarding redirect) |
 | `supabase` | `https://supabase.quayer.com/` | `503` (Kong removido, Caddy retorna 503 — é o estado esperado) |
 
+### Auth coverage
+
+Além do status HTTP 200, o target `prod-login` (`https://app.quayer.com/login`) recebe uma verificação extra de presença de elementos no HTML:
+
+- O corpo da resposta deve conter um elemento `<form` (qualquer formulário — prova que a página renderizou algo interativo).
+- O corpo da resposta deve conter a substring `quayer` (case-insensitive — prova que é o app real, não uma página de erro da Cloudflare/WAF).
+
+Ambas as asserções são feitas com `curl -sL` + `grep` puro, sem dependências externas. Se qualquer asserção falhar, o job falha e o alerta Discord dispara.
+
+**Restrições invioláveis** deste check (já documentadas no workflow como comentário):
+
+- Nunca faz login real.
+- Nunca envia credenciais.
+- Nunca usa OTP fixo.
+- Nunca submete formulário — apenas `GET` do HTML.
+
+O time de auth tem um ponto de entrada próprio em [`docs/auth/SYNTHETIC_MONITORING.md`](../auth/SYNTHETIC_MONITORING.md), que aponta de volta para este documento como referência completa da estratégia.
+
 ### Conteúdo do workflow
 
 ```yaml

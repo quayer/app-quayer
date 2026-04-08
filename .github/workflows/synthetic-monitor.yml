@@ -50,6 +50,39 @@ jobs:
           fi
           echo "::notice::${{ matrix.target.name }} OK ($STATUS in ${TIME}s)"
 
+      # ---------------------------------------------------------------
+      # Auth page HTML presence check (only for prod-login)
+      #
+      # RULES — this step MUST respect these constraints at all times:
+      #   - NO real login (no credentials, no cookies, no session)
+      #   - NO credentials of any kind are sent or stored
+      #   - NO OTP fixo / hardcoded OTP
+      #   - NO form submission (only GET of the HTML body)
+      #
+      # Purpose: prove the /login page is the real Quayer app shell
+      # (not a Cloudflare error page, not a blank 200) by asserting:
+      #   1. the HTML contains a <form element
+      #   2. the HTML contains the substring "quayer" (case-insensitive)
+      # ---------------------------------------------------------------
+      - name: Verify login HTML contains form and brand
+        if: matrix.target.name == 'prod-login'
+        run: |
+          set -e
+          BODY=$(curl -sL \
+            --max-time 15 \
+            -A "QuayerSyntheticMonitor/1.0 (+github-actions)" \
+            "${{ matrix.target.url }}")
+
+          if ! echo "$BODY" | grep -q "<form"; then
+            echo "::error::prod-login HTML missing <form element — page may be broken or replaced by an error page"
+            exit 1
+          fi
+          if ! echo "$BODY" | grep -qi "quayer"; then
+            echo "::error::prod-login HTML does not contain 'quayer' substring — likely a Cloudflare/WAF error page"
+            exit 1
+          fi
+          echo "::notice::prod-login HTML OK (form present, brand present)"
+
       - name: Write log line
         if: always()
         run: |
