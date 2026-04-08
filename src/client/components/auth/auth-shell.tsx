@@ -45,12 +45,14 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
           </div>
         </main>
 
-        {/* Right panel — hero image (zero texto, zero gradient overlays) */}
+        {/* Right panel — hero image com mascara gradient na borda esquerda
+            para fundir com o painel #000000 sem costura visivel */}
         {showImage && (
           <aside
             role="complementary"
             aria-hidden="true"
-            className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden border-l border-white/[0.1]"
+            className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden"
+            style={{ backgroundColor: 'var(--color-bg-base, #000000)' }}
           >
             <Image
               src="/images/auth/login-hero.webp"
@@ -60,6 +62,17 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
               fetchPriority="high"
               sizes="(max-width: 1280px) 42vw, 45vw"
               className="object-cover"
+            />
+            {/* Mascara gradient esquerda: 0-25% preto puro, 25-50% fade,
+                50%-100% transparente. Esconde a costura com o painel do form
+                enquanto preserva sombra, reflexo do chao e feixes de luz. */}
+            <div
+              aria-hidden="true"
+              className="absolute inset-y-0 left-0 w-[50%] pointer-events-none"
+              style={{
+                background:
+                  'linear-gradient(to right, var(--color-bg-base, #000000) 0%, var(--color-bg-base, #000000) 25%, transparent 100%)',
+              }}
             />
           </aside>
         )}
