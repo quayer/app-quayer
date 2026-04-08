@@ -93,3 +93,10 @@ Se um dia automatizarmos cache purge ou DNS via API:
 - Prefixo de ambiente (`HOMOL_`, `PROD_`, `DEV_`) para evitar confusão
 - Secrets sensíveis (chaves privadas, tokens) **nunca** logados — usar `::add-mask::` se necessário
 - Rotação obrigatória a cada 90 dias para keys SSH e a cada incidente
+
+## Smoke Homol E2E Secrets (US-111)
+
+- `HOMOL_TEST_EMAIL` — dedicated test account email for E2E login in homol (not a real user)
+- `HOMOL_TEST_PASSWORD` — NOT USED (passwordless) — this secret is reserved for future non-passwordless flows. For OTP flows, the smoke-homol workflow relies on EMAIL_PROVIDER=mock and OTP capture via database or internal endpoint.
+
+Both secrets are optional. If missing, the smoke-homol workflow still runs but specs that require authentication will skip at runtime.

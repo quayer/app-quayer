@@ -613,3 +613,14 @@ ssh -i ~/.ssh/quayer_prod deploy@91.98.142.177 'sudo docker logs quayer-app --si
 ```
 
 Se todos retornam saudável, rollback concluído. Registrar o incidente no §6.
+
+## Smoke Validation After Rollback (US-112)
+
+After executing any rollback scenario (A-J), run `.github/workflows/smoke-prod.yml` manually via workflow_dispatch to validate the rolled-back version is serving correctly:
+
+1. Navigate to Actions tab on GitHub
+2. Select "Smoke Prod (read-only)"
+3. Click "Run workflow" on main branch
+4. Verify all 5 smoke checks pass: home 200, login has form, signup has form, api/v1/health 200, security headers present
+
+If smoke fails after rollback, escalate immediately — rollback target may be corrupted.

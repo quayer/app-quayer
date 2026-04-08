@@ -1,0 +1,67 @@
+name: API Integration Tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: quayer_test
+          POSTGRES_PASSWORD: quayer_test
+          POSTGRES_DB: quayer_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U quayer_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      TEST_DATABASE_URL: postgresql://quayer_test:quayer_test@localhost:5433/quayer_test?schema=public
+      DATABASE_URL: postgresql://quayer_test:quayer_test@localhost:5433/quayer_test?schema=public
+      JWT_SECRET: test-jwt-secret-ci-only-not-for-prod
+      IGNITER_APP_SECRET: test-igniter-secret-ci-only
+      ENCRYPTION_KEY: test-encryption-key-ci-only-32ch
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci --legacy-peer-deps
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Prisma migrate deploy
+        run: npx prisma migrate deploy
+
+      - name: Seed test data
+        run: npx tsx prisma/seeds/test/auth-seed.ts
+
+      - name: Run integration tests
+        run: npx vitest run test/integration --config vitest.config.ts
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore

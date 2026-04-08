@@ -50,3 +50,17 @@ Both jobs have a 10-minute timeout. If they consistently exceed 5 minutes, consi
 1. A failing static check blocks merge.
 2. Do not bypass with admin merge unless explicitly authorized by the engineering lead.
 3. If the workflow itself is broken (not the code), open a PR to fix the workflow first.
+
+## API Integration Tests (US-106C)
+
+Workflow: `.github/workflows/test-api.yml`
+
+Triggers: pull_request on main/develop, push to main.
+
+Provisions ephemeral postgres:16-alpine via GitHub services on port 5433. Runs prisma migrate deploy + seed + vitest integration tests against `test/integration/`.
+
+Secrets: uses dummy test values for JWT_SECRET, IGNITER_APP_SECRET, ENCRYPTION_KEY. Real secrets NOT used in this job.
+
+Timeout: 15 minutes.
+
+Branch protection MUST require this job to pass before merge to main.

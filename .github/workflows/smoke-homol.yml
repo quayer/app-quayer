@@ -1,0 +1,49 @@
+name: Smoke Homol
+
+on:
+  workflow_run:
+    workflows: ["Homol Deploy"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E against homol
+        env:
+          HOMOL_TEST_EMAIL: ${{ secrets.HOMOL_TEST_EMAIL }}
+          HOMOL_TEST_PASSWORD: ${{ secrets.HOMOL_TEST_PASSWORD }}
+        run: npx playwright test --project=homol
+
+      - name: Upload playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-homol-report
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Notify Discord on failure
+        if: failure() && secrets.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -sS -H "Content-Type: application/json" \
+            -d '{"content":"Smoke HOMOL FAILED on commit '"${{ github.sha }}"'"}' \
+            "${{ secrets.DISCORD_WEBHOOK_URL }}" || true
