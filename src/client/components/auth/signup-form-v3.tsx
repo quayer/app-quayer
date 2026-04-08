@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useRouter } from 'next/navigation'
 import { z } from 'zod'
 import { Button } from '@/client/components/ds/button'
+import { Checkbox } from '@/client/components/ds/checkbox'
 import { Input } from '@/client/components/ds/input'
 import { api } from '@/igniter.client'
 
@@ -101,20 +102,13 @@ export function SignupFormV3(): React.ReactElement {
         required
       />
 
-      <label className="flex items-start gap-2 text-ds-sm text-ds-fg">
-        <input
-          type="checkbox"
-          checked={acceptedTerms}
-          onChange={(e) => setAcceptedTerms(e.target.checked)}
-          disabled={loading}
-          aria-invalid={errors.acceptedTerms ? true : undefined}
-          className="mt-1"
-        />
-        <span>Aceito os termos de uso e a politica de privacidade</span>
-      </label>
-      {errors.acceptedTerms ? (
-        <span className="text-ds-sm text-ds-danger">{errors.acceptedTerms}</span>
-      ) : null}
+      <Checkbox
+        label="Aceito os termos de uso e a politica de privacidade"
+        checked={acceptedTerms}
+        onChange={(e) => setAcceptedTerms(e.target.checked)}
+        disabled={loading}
+        error={errors.acceptedTerms}
+      />
 
       <Button type="submit" variant="primary" loading={loading} disabled={!acceptedTerms || loading}>
         Criar conta

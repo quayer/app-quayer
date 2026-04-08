@@ -50,7 +50,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           {...rest}
         />
         {error ? (
-          <span id={errorId} className="text-ds-sm text-ds-danger">
+          <span id={errorId} role="alert" aria-live="polite" className="text-ds-sm text-ds-danger">
             {error}
           </span>
         ) : helper ? (

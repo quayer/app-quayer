@@ -23,12 +23,12 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
       {showImage && (
         <div className="relative hidden md:block bg-gray-50">
           <Image
-            src="/images/auth/login-hero.png"
+            src="/images/auth/login-hero.webp"
             alt=""
             fill
             priority
             fetchPriority="high"
-            sizes="(max-width: 768px) 0vw, 50vw"
+            sizes="(max-width: 1280px) 50vw, 800px"
             className="object-cover"
           />
         </div>

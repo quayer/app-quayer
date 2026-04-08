@@ -1,10 +1,11 @@
 /**
  * Contract test — POST /auth/login-otp (passwordless OTP request)
  *
- * Bootstrap mode: the auth feature ships REQUEST schemas only
- * (`passwordlessOTPSchema`), not RESPONSE schemas. We therefore validate the
- * shape via snapshot. The first test run records the canonical shape; future
- * runs fail loudly if the backend mutates it.
+ * US-108 upgrade: now imports the REAL response schema from
+ * `@/server/core/auth/auth.schemas`. The schema mirrors what the controller
+ * returns today, so any drift between backend and contract is caught at
+ * `schema.parse()` time. The local fallback below is kept as a safety net in
+ * case the import path resolves to nothing during a refactor.
  *
  * See docs/auth/CONTRACT_TESTING.md for the full pattern.
  */
@@ -16,14 +17,18 @@ import {
   assertContract,
   compareSnapshot,
 } from './contract-helpers'
+import { otpRequestResponseSchema as importedSchema } from '@/server/core/auth/auth.schemas'
 
-// Bootstrap response schema — derived from the controller's success payload
-// at `auth.controller.ts:1570` (`return response.success({ sent: true, ... })`).
-// When/if a real shared response schema lands in `src/server/core/auth/auth.schemas.ts`,
-// import it here instead and delete this local declaration.
-const otpRequestResponseSchema = z.object({
+// FALLBACK schema — only used if the import above ever resolves to undefined
+// (e.g. during a half-applied refactor). Keep in sync with auth.schemas.ts.
+const fallbackSchema = z.object({
   sent: z.boolean(),
+  message: z.string(),
+  magicLinkSessionId: z.string(),
+  isNewUser: z.boolean().optional(),
 })
+
+const otpRequestResponseSchema = importedSchema ?? fallbackSchema
 type OtpRequestResponse = z.infer<typeof otpRequestResponseSchema>
 
 describe('Contract: POST /auth/login-otp', () => {
@@ -40,6 +45,8 @@ describe('Contract: POST /auth/login-otp', () => {
     expect(status).toBe(200)
 
     const payload = unwrapEnvelope(body) as OtpRequestResponse
+    // Real-schema parse: throws if controller drifts from contract.
+    expect(() => otpRequestResponseSchema.parse(payload)).not.toThrow()
     const parsed = assertContract(otpRequestResponseSchema, payload)
 
     expect(typeof parsed.sent).toBe('boolean')

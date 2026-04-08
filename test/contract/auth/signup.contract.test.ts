@@ -1,8 +1,11 @@
 /**
  * Contract test — POST /auth/signup-otp
  *
- * Verifies the response shape of the signup OTP request endpoint.
- * Bootstrap mode: see docs/auth/CONTRACT_TESTING.md.
+ * US-108 upgrade: imports the REAL response schema from
+ * `@/server/core/auth/auth.schemas` (`signupResponseSchema`). The local
+ * fallback is retained as a safety net during refactors.
+ *
+ * See docs/auth/CONTRACT_TESTING.md for the full pattern.
  */
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
@@ -12,14 +15,16 @@ import {
   assertContract,
   compareSnapshot,
 } from './contract-helpers'
+import { signupResponseSchema as importedSchema } from '@/server/core/auth/auth.schemas'
 
-// Bootstrap response schema — derived from `auth.controller.ts:1284`:
-//   `return response.success({ sent: true, message: 'Código enviado para seu email' });`
-// Replace with a real shared schema when one is added.
-const signupOtpResponseSchema = z.object({
+// FALLBACK schema — only used if the import above ever resolves to undefined.
+// Keep in sync with auth.schemas.ts.
+const fallbackSchema = z.object({
   sent: z.boolean(),
-  message: z.string().optional(),
+  message: z.string(),
 })
+
+const signupOtpResponseSchema = importedSchema ?? fallbackSchema
 type SignupOtpResponse = z.infer<typeof signupOtpResponseSchema>
 
 describe('Contract: POST /auth/signup-otp', () => {
@@ -40,6 +45,8 @@ describe('Contract: POST /auth/signup-otp', () => {
     }
 
     const payload = unwrapEnvelope(body) as SignupOtpResponse
+    // Real-schema parse: throws if controller drifts from contract.
+    expect(() => signupOtpResponseSchema.parse(payload)).not.toThrow()
     const parsed = assertContract(signupOtpResponseSchema, payload)
     expect(parsed.sent).toBe(true)
 

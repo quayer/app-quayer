@@ -37,6 +37,13 @@ Files: src/app/globals.css, tailwind.config.ts, src/app/(auth)/layout.tsx
 - [MEDIUM] DM_Mono weight array should match actual usage -- prune unused weights to save bytes
 - Severity: PASS with medium TODOs
 
+#### Tailwind v4 config investigation (resolved)
+- Stack: tailwindcss ^4 via `@tailwindcss/postcss` (postcss.config.mjs).
+- globals.css uses CSS-first setup: `@import "tailwindcss" source(none)` + `@source "../../src"` + `@theme inline { ... }`.
+- Finding: `tailwind.config.ts` was NOT being read. Tailwind v4 does not auto-load JS/TS configs; it requires an explicit `@config` directive. Without it, all `ds-*` color/spacing/radius/font/shadow utilities (89 occurrences across 17 files: `src/client/components/ds/*`, `src/client/components/auth/*-v3.tsx`, `src/app/dev/ds-showcase/*`) would not resolve at build time.
+- Action taken: added `@config "../../tailwind.config.ts";` to `src/app/globals.css` (right after the `@source` line). Minimal, non-breaking change. `tailwind.config.ts` retained as-is.
+- Result: `ds-*` utilities now resolve through the JS config, which maps them to the CSS vars defined under `[data-auth-v3="true"]`. Existing v2 utilities (bg-background, text-foreground, etc.) remain driven by the `@theme inline` block and are unaffected.
+
 ### US-304 DS primitives
 Files: src/client/components/ds/{button,input,otp-input,logo,card,toast}.tsx, test/unit/react/ds/*, src/app/dev/ds-showcase/page.tsx
 

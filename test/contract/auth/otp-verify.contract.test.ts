@@ -8,7 +8,13 @@
  * frontend contract as the success path. The frontend uses the same envelope
  * structure to render the "código inválido" UI.
  *
- * Bootstrap mode: see docs/auth/CONTRACT_TESTING.md.
+ * US-108 upgrade: the SUCCESS schema is now imported from
+ * `@/server/core/auth/auth.schemas` (`otpVerifyResponseSchema`) so any
+ * future success-branch tests can `.parse()` against the real contract. The
+ * error-envelope schema below remains local because Igniter error wrapping
+ * is independent of the auth feature.
+ *
+ * See docs/auth/CONTRACT_TESTING.md.
  */
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
@@ -17,10 +23,28 @@ import {
   assertContract,
   compareSnapshot,
 } from './contract-helpers'
+import { otpVerifyResponseSchema as importedSuccessSchema } from '@/server/core/auth/auth.schemas'
 
-// Bootstrap error envelope schema — Igniter wraps errors as
-// `{ error: { code, message } }` (or similar). We accept either an `error`
-// key or the success envelope, since both must remain stable.
+// FALLBACK success schema — only used if the import above ever resolves to
+// undefined. Keep in sync with auth.schemas.ts.
+const fallbackSuccessSchema = z.object({
+  needsOnboarding: z.boolean(),
+  user: z.object({
+    id: z.string(),
+    email: z.string().email(),
+    name: z.string().nullable(),
+    role: z.string(),
+    currentOrgId: z.string().nullable(),
+    organizationRole: z.string().optional(),
+  }),
+})
+
+// Exported for any future success-branch tests that seed a real OTP code.
+export const otpVerifySuccessSchema = importedSuccessSchema ?? fallbackSuccessSchema
+
+// Igniter wraps errors as `{ error: { code, message } }` (or similar). We
+// accept either an `error` key or the success envelope, since both must
+// remain stable.
 const otpVerifyErrorSchema = z.object({
   error: z
     .object({

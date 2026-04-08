@@ -74,6 +74,54 @@ should be created inside `withTransaction` so it never leaks across tests.
 `withTransaction`. The only legitimate use of the raw `testPrisma` client is
 the vitest setup file, which needs to disconnect on teardown.
 
+## `withCommittedSeed` vs `withTransaction`
+
+`withTransaction` is great when the test owns the prisma client it writes
+through — the test passes `tx` directly into a repository call. But auth
+controllers (and most Igniter handlers) use the **global** `prisma` client,
+which lives in a different connection than `tx`. Rows seeded inside
+`withTransaction` are invisible to those handlers until the (always rolled
+back) transaction commits. The success branch of the controller therefore
+returns `404 / invalid code`, and tests can only assert response shape.
+
+`withCommittedSeed(seedFn, testFn, cleanupFn)` solves this by writing the
+seed with the global `testPrisma` client (no transaction) so the handler
+under test can see the rows. Cleanup runs in a `finally` block, so even a
+failed assertion still resets the DB.
+
+| Situation                                                              | Use                  |
+|------------------------------------------------------------------------|----------------------|
+| Test calls a repository directly and threads `tx` through              | `withTransaction`    |
+| Test invokes an Igniter action whose handler uses the global `prisma`  | `withCommittedSeed`  |
+| Test only needs to assert response shape on the **error** branch       | `withTransaction`    |
+| Test needs to assert DB state after the handler ran                    | `withCommittedSeed`  |
+
+```typescript
+import { withCommittedSeed, testPrisma } from '@/../test/api/db';
+
+it('returns the seeded user from /auth/me', async () => {
+  await withCommittedSeed(
+    async () => {
+      const user = await testPrisma.user.create({
+        data: { email: 'visible@test.local', name: 'Visible' },
+      });
+      return { userId: user.id };
+    },
+    async ({ userId }) => {
+      const res = await callAction('GET /api/v1/auth/me', { /* headers */ });
+      expect(res.data.user.id).toBe(userId);
+    },
+    async ({ userId }) => {
+      await testPrisma.user.delete({ where: { id: userId } });
+    },
+  );
+});
+```
+
+The trade-off is speed: `withCommittedSeed` runs explicit `DELETE`s instead
+of a free rollback, so prefer `withTransaction` whenever the code-under-test
+can accept a `tx` parameter.
+
 ## Mocking Igniter client in React tests
 
 React component tests live under `test/unit/react/**/*.test.tsx` and run in
