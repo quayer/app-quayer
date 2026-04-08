@@ -22,7 +22,10 @@ export interface AuthShellProps {
  */
 export function AuthShell({ children, showImage = true, className = '' }: AuthShellProps) {
   return (
-    <div className={`relative min-h-screen overflow-x-hidden ${className}`}>
+    <div
+      className={`relative min-h-screen overflow-x-hidden ${className}`}
+      style={{ fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' }}
+    >
       <div className="flex min-h-screen">
         {/* Left panel — form area */}
         <main className="flex-1 flex flex-col min-h-screen bg-[#0a0d14]">

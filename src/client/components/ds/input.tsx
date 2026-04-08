@@ -8,20 +8,12 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   error?: string
 }
 
-let inputUid = 0
-function useUid(prefix: string): string {
-  const ref = React.useRef<string | null>(null)
-  if (ref.current === null) {
-    inputUid += 1
-    ref.current = `${prefix}-${inputUid}`
-  }
-  return ref.current
-}
-
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   function Input({ label, helper, error, id, className = '', ...rest }, ref) {
-    const uid = useUid('ds-input')
-    const inputId = id ?? uid
+    // React.useId fornece id estavel entre server e client (React 18+).
+    // Nunca usar counter global (causa hydration mismatch em SSR).
+    const reactId = React.useId()
+    const inputId = id ?? reactId
     const helperId = `${inputId}-helper`
     const errorId = `${inputId}-error`
     const describedBy = error ? errorId : helper ? helperId : undefined
