@@ -101,17 +101,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
-# Copy pg and all sub-dependencies (required by prisma/migrate.js at runtime)
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg ./node_modules/pg
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-pool ./node_modules/pg-pool
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pgpass ./node_modules/pgpass
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-types ./node_modules/pg-types
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-array ./node_modules/postgres-array
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-bytea ./node_modules/postgres-bytea
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-date ./node_modules/postgres-date
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres-interval ./node_modules/postgres-interval
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pg-protocol ./node_modules/pg-protocol
+# Install pg fresh in runner stage — resolves all transitive deps correctly
+# (migrate.js uses pg directly and needs the full dependency tree)
+USER root
+RUN npm install --omit=dev --ignore-scripts --no-save --prefix /app pg@8 \
+    && chown -R nextjs:nodejs /app/node_modules/pg /app/node_modules/pg-* /app/node_modules/postgres-* /app/node_modules/xtend /app/node_modules/pg-int8 /app/node_modules/split2 2>/dev/null || true
+USER nextjs
 
 # Copy prisma schema (for migrations if needed)
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
