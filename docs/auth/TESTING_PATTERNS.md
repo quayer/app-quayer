@@ -73,3 +73,88 @@ should be created inside `withTransaction` so it never leaks across tests.
 **Rule of thumb:** if the code lives under `test/api/`, it goes through
 `withTransaction`. The only legitimate use of the raw `testPrisma` client is
 the vitest setup file, which needs to disconnect on teardown.
+
+## Mocking Igniter client in React tests
+
+React component tests live under `test/unit/react/**/*.test.tsx` and run in
+the `react` Vitest project (happy-dom). Auth components import the typed
+client as `import { api } from '@/igniter.client'` — that module is
+auto-generated and should never be edited, so tests stub it via `vi.mock`.
+
+Always declare the mock at the top of the file (hoisted by Vitest) and
+**before** importing the component under test:
+
+```typescript
+import { vi } from 'vitest'
+
+const verifyLoginOTPMutate = vi.fn()
+
+vi.mock('@/igniter.client', () => ({
+  api: {
+    auth: {
+      verifyLoginOTP: { mutate: (...args: unknown[]) => verifyLoginOTPMutate(...args) },
+      // add only the actions the component actually calls
+    },
+  },
+}))
+
+import { LoginOTPForm } from '@/client/components/auth/login-otp-form'
+```
+
+The shape must match the dotted path the component uses (`api.auth.X.mutate`
+or `api.X.Y.useQuery`). Look it up in the component source — do not guess.
+Reset between tests with `beforeEach(() => vi.clearAllMocks())`.
+
+For components that call `fetch` directly (e.g. `TwoFactorChallenge` hits
+`/api/v1/auth/totp-challenge`), stub `globalThis.fetch` instead:
+
+```typescript
+const fetchSpy = vi.fn()
+beforeEach(() => {
+  fetchSpy = vi.fn()
+  globalThis.fetch = fetchSpy as unknown as typeof fetch
+})
+```
+
+## Mocking Next.js navigation
+
+Any component that imports from `next/navigation` (`useRouter`,
+`useSearchParams`, `usePathname`) needs a hoisted mock or the hook will throw
+outside the App Router runtime:
+
+```typescript
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(''),
+  usePathname: () => '/',
+}))
+```
+
+`next/link` does **not** need a mock — it works fine in happy-dom.
+
+## Mocking Cloudflare Turnstile
+
+`SignupOTPForm` renders `<TurnstileWidget />` which loads the Cloudflare
+challenge script. Stub it with a no-op that issues a fake token so the form
+becomes interactive:
+
+```typescript
+vi.mock('@/client/components/auth/turnstile-widget', () => ({
+  TurnstileWidget: ({ onSuccess }: { onSuccess: (token: string) => void }) => {
+    setTimeout(() => onSuccess('test-token'), 0)
+    return null
+  },
+}))
+```
+
+## Mocking the CSRF helper
+
+`LoginOTPForm` imports `getCsrfHeaders` from `@/client/hooks/use-csrf-token`.
+That hook reads from a `<meta>` tag that does not exist in happy-dom. Stub it:
+
+```typescript
+vi.mock('@/client/hooks/use-csrf-token', () => ({
+  getCsrfHeaders: () => ({ 'x-csrf-token': 'test-token' }),
+  useCsrfToken: () => ({ token: 'test-token', isLoading: false }),
+}))
+```

@@ -47,7 +47,11 @@
     "test:db:down": "bash scripts/test/db-down.sh",
     "test:e2e:homol": "playwright test --project=homol",
     "test:e2e:prod": "playwright test --project=prod",
-    "test:react": "vitest run test/unit/react --config vitest.config.ts"
+    "test:react": "vitest run test/unit/react --config vitest.config.ts",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": ["eslint --fix", "bash -c 'tsc --noEmit -p tsconfig.json'"]
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -188,6 +192,8 @@
     "eslint": "^10.0.3",
     "eslint-config-next": "^16.1.6",
     "happy-dom": "^20.8.3",
+    "husky": "^9",
+    "lint-staged": "^15",
     "msw": "^2.11.3",
     "playwright": "^1.55.1",
     "prisma": "^7.4.2",
