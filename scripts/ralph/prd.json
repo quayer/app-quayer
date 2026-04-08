@@ -24,8 +24,8 @@
         "Typecheck passa"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Verificar primeiro se cada pagina e server ou client component. Se client, a estrategia muda. NAO mexer no igniter.client.ts. Evitar PII: ipHashed obrigatorio, nao logar email ou IP plaintext."
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). cleanup-audit-logger.ts criado com SHA256 IP hashing. 3 rotas server-component instrumentadas inline (register, forgot-password, reset-password). 2 rotas client-component instrumentadas via layout.tsx wrapper (login/verify-magic, signup/verify-magic). Backend endpoints ja removidos — nenhuma instrumentacao backend necessaria. Typecheck zero erros."
     },
     {
       "id": "US-202",
@@ -45,8 +45,8 @@
         "Typecheck passa (nao mexe em codigo)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Puro grep + relatorio. Nao toca em codigo. Resultado deve permitir decisao clara na Fase B."
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). docs/auth/CLEANUP_AUDIT.md criado. Counts: /register 8, /forgot-password 4, /reset-password 4, /login/verify-magic 6, /signup/verify-magic 4. CRITICAL: verify-magic routes NAO sao legacy — estao wired em email gen (auth.controller.ts:1279,1516,1559). Reclassificadas como STRONG KEEP. Soh 3 candidatos validos: /register, /forgot-password, /reset-password. Surpresas: test/e2e/onboarding-flow.spec.ts:27 navega para /register (mascarado por redirect); SecuritySettings.tsx:293 menciona /api/v1/auth/register removido."
     },
     {
       "id": "US-203",
@@ -65,8 +65,8 @@
         "Typecheck passa"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Similar ao US-202 mas focado em tudo que NAO e codigo fonte. Landing/mobile/docs externas sao TODOs — founder vai ter que revisar manualmente."
+      "passes": true,
+      "notes": "DONE 2026-04-08 (commit 278c1f0). Appendado a CLEANUP_AUDIT.md. 9 email templates auditados — zero hardcode; magic-link URLs construidos runtime via appBaseUrl. 3 docs internos com refs. middleware.ts PUBLIC_PATHS lines 17/20/21 listam os 3 orphan routes (devem sair em Phase D). 6 TODOs externos para founder: landing, mobile, help center, SDK, marketing emails, partner docs."
     }
   ]
 }
