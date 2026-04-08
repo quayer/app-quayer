@@ -93,8 +93,8 @@
         "Verify in browser using dev-browser skill (1440px mostra imagem, 375px esconde)"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "Depende de US-302 (imagem em public/). LCP e critico — priority=true e fetchpriority='high' no next/image."
+      "passes": true,
+      "notes": "DONE Wave 2 — auth-shell.tsx server component, bg-ds-bg + bg-gray-50 fallback, next/image priority=true. 3 tests."
     },
     {
       "id": "US-306",
@@ -111,8 +111,8 @@
         "Verify in browser using dev-browser skill (flag forcada via cookie)"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "Depende de US-301, 303, 304, 305. Nao mexer no componente v2 (login-form-final.tsx, login-otp-form.tsx)."
+      "passes": true,
+      "notes": "DONE Wave 3 — login-form-v3.tsx + dual-render page.tsx. api.auth.loginOTP.mutate({body:{email}}). 4 tests."
     },
     {
       "id": "US-307",
@@ -129,8 +129,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Depende de 301, 303, 304, 305. Cooldown pode reutilizar logica de v2 se ja existir em use-otp-cooldown hook."
+      "passes": true,
+      "notes": "DONE Wave 3 — login-verify-v3.tsx + LoginVerifyV2Client extracted. 60s cooldown useState+useEffect. api.auth.verifyLoginOTP.mutate({body:{email,code}}). 4 tests."
     },
     {
       "id": "US-308",
@@ -146,8 +146,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "Depende de 301, 303, 304, 305. Checkbox de termos obrigatorio (validar no Zod)."
+      "passes": true,
+      "notes": "DONE Wave 3 — signup-form-v3.tsx + dual-render. email+name+acceptedTerms (terms checkbox validated via Zod literal). api.auth.signupOTP.mutate({body:{email,name}}) — acceptedTerms nao enviado (backend nao espera). 4 tests."
     },
     {
       "id": "US-309",
@@ -162,8 +162,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": "Pode reutilizar quase tudo de US-307 — extrair componente VerifyOtpFormV3 se fizer sentido."
+      "passes": true,
+      "notes": "DONE Wave 3 — signup-verify-v3.tsx + SignupVerifyV2Client extracted. api.auth.verifySignupOTP → /onboarding. 4 tests."
     },
     {
       "id": "US-310",
@@ -179,8 +179,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Depende de 301, 303, 304, 305. Verificar se a pagina atual aceita token via query param ou body."
+      "passes": true,
+      "notes": "DONE Wave 3 — verify-email-v3.tsx (3 states: loading/success/error, auto-verify via token searchParam) + verify-email-v2-client extracted. api.auth.verifyEmail.mutate. 7 tests."
     },
     {
       "id": "US-311",
@@ -196,8 +196,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "Depende de 301, 303, 304, 305. Ler onboarding-form.tsx primeiro para entender os steps."
+      "passes": true,
+      "notes": "DONE Wave 3 — onboarding-v3.tsx simplificado (2 steps vs v2 1-step — TODO product review). PATCH /api/v1/auth/profile + createOrganizationAction. 6 tests."
     },
     {
       "id": "US-312",
@@ -213,8 +213,8 @@
         "Typecheck passa"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": "Auditoria PRIMEIRO. Nao fazer trabalho visual antes de decidir."
+      "passes": true,
+      "notes": "DONE Wave 4 — SCENARIO A: Google OAuth ACTIVE confirmado (env vars presentes, backend handler auth.controller.ts:919, UI buttons em login-form-final.tsx:387 e signup-form.tsx:294). google-callback-v3.tsx criado com spinner + Logo + reuso de TwoFactorChallenge. google-callback-v2-client extracted. 5 tests. docs/auth/GOOGLE_OAUTH_STATUS.md."
     },
     {
       "id": "US-313",
@@ -231,8 +231,8 @@
         "Referencia .claude/skills/auth-pages.md"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "Puro doc. Ler src/middleware.ts para entender redirects por estado."
+      "passes": true,
+      "notes": "DONE Wave 4 — docs/auth/USER_JOURNEY.md (107 linhas, 4 Mermaid flowcharts: novo usuario, existente, magic link, sem org ativa). Cada step com rota+componente+endpoint+estados."
     },
     {
       "id": "US-314",
@@ -249,8 +249,8 @@
         "  - Secao Troubleshooting: OTP nao chega, JWT invalido, session expirada"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "Puro doc. Ler auth.controller.ts + middleware.ts para fatos."
+      "passes": true,
+      "notes": "DONE Wave 4 — docs/auth/AUTH_FLOW.md (113 linhas). Sequence diagram login. JWT HS256, access 15m, refresh 7d, magic 10m, 2FA 5m. OTP plaintext em VerificationCode e TempUser, TTL 10-15m. 19 endpoints documentados. PUBLIC_PATHS+PROTECTED+ONBOARDING+ADMIN listados de middleware.ts. 4 TODOs marcados."
     },
     {
       "id": "US-315",
@@ -269,8 +269,8 @@
         "Exemplos de codigo REAL do projeto"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Separar claramente de auth.md que cobre backend (procedures, repository, controller)."
+      "passes": true,
+      "notes": "DONE Wave 4 — .claude/skills/auth-pages.md (89 linhas). Separada de auth.md (backend). Tabela de rotas ativas, DS primitives, feature flag usage, template de nova pagina."
     },
     {
       "id": "US-316",
@@ -291,8 +291,8 @@
         "TODO: axe-core em CI sera adicionado em iteracao futura (US-316 parte b)"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "Audit manual + contraste. Full axe-core em CI fica TODO."
+      "passes": true,
+      "notes": "DONE Wave 4 — docs/auth/A11Y_AUDIT.md. WCAG 2.1 AA audit dos DS + v3 components. ARIA verificado em source: button aria-busy, input aria-invalid+describedby, otp-input role=group+aria-label per slot, toast role conditional, logo conditional aria-hidden, auth-shell alt empty+priority. 0 critical, 0 serious, 2 moderate TODOs (contrast ratios, form error aggregation). TODO axe-core CI."
     },
     {
       "id": "US-318",
@@ -314,8 +314,8 @@
         "NOTA: este eh review LLM-assisted — code-reviewer humano eh obrigatorio ANTES do merge (US-318 criterio real)"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": "Review e documentacao — nao aprova merge por si so. Humano ainda e obrigatorio."
+      "passes": true,
+      "notes": "DONE Wave 4 — docs/auth/V3_CODE_REVIEW.md aggregator LLM-assisted. 1 CRITICAL: login-hero.png 6.81 MB precisa virar WebP < 150KB antes de US-319. Medium: Tailwind v4 config.ts talvez dead code, onboarding simplification precisa product review. Human review gate documentado."
     }
   ]
 }
