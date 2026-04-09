@@ -1,12 +1,32 @@
-'use client'
+"use client"
 
-import * as React from 'react'
-import { Bot, Send, Loader2, Wrench, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react'
+import * as React from "react"
+import {
+  AlertCircle,
+  ArrowUp,
+  Bot,
+  ChevronDown,
+  Loader2,
+  Mic,
+  RefreshCw,
+  Square,
+  User,
+  Wrench,
+} from "lucide-react"
 
-import { Button } from '@/client/components/ui/button'
-import { Textarea } from '@/client/components/ui/textarea'
+import { Avatar, AvatarFallback } from "@/client/components/ui/avatar"
+import { Button } from "@/client/components/ui/button"
+import { Card } from "@/client/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/client/components/ui/collapsible"
+import { Textarea } from "@/client/components/ui/textarea"
+import { useAppTokens } from "@/client/hooks/use-app-tokens"
+import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
 
-import type { ChatMessage } from './types'
+import type { ChatMessage } from "./types"
 
 interface ChatPanelProps {
   projectId: string
@@ -14,29 +34,27 @@ interface ChatPanelProps {
 }
 
 type ServerEvent =
-  | { type: 'text-delta'; text: string }
-  | { type: 'tool-call'; toolName: string; args: Record<string, unknown> }
-  | { type: 'tool-result'; toolName: string; result: unknown }
+  | { type: "text-delta"; text: string }
+  | { type: "tool-call"; toolName: string; args: Record<string, unknown> }
+  | { type: "tool-result"; toolName: string; result: unknown }
   | {
-      type: 'finish'
+      type: "finish"
       toolCalls?: Array<{
         toolName: string
         args: Record<string, unknown>
         result: unknown
       }>
     }
-  | { type: 'error'; message: string }
+  | { type: "error"; message: string }
 
-const T = {
-  bg: 'var(--color-bg-base, #000000)', surface: 'var(--color-bg-surface, #060402)',
-  tp: 'var(--color-text-primary, #ffffff)', ts: 'var(--color-text-secondary, rgba(255,255,255,0.65))',
-  tt: 'var(--color-text-tertiary, rgba(255,255,255,0.45))', brand: 'var(--color-brand, #FFD60A)', ink: '#0a0a0a',
-  bs: 'var(--color-border-subtle, rgba(255,255,255,0.06))', bd: 'var(--color-border-default, rgba(255,255,255,0.12))',
-  font: 'var(--font-dm-sans, ui-sans-serif, system-ui, sans-serif)', danger: '#ef4444',
-} as const
+interface ToolCallView {
+  toolName: string
+  args: unknown
+  result?: unknown
+}
 
-function createId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+function createId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
   }
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -50,17 +68,34 @@ function prettyJson(value: unknown): string {
   }
 }
 
+/**
+ * ChatPanel — workspace chat com Builder AI.
+ *
+ * Visual: shadcn Avatar / Card / Collapsible + tokens reativos via
+ * useAppTokens (mesma paleta da home + sidebar). Composer no rodapé
+ * espelha o input da home (textarea + mic + send circular amber).
+ *
+ * Streaming: SSE parser custom mantido (backend não emite AI SDK
+ * data stream protocol — usar useChat exigiria custom transport ou
+ * refactor do backend; trade-off documentado).
+ */
 export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
+  const { tokens } = useAppTokens()
+
+  // ── State ──────────────────────────────────────────────────────
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages)
-  const [input, setInput] = React.useState('')
+  const [input, setInput] = React.useState("")
   const [isStreaming, setIsStreaming] = React.useState(false)
-  const [streamingText, setStreamingText] = React.useState('')
+  const [streamingText, setStreamingText] = React.useState("")
   const [streamingToolCalls, setStreamingToolCalls] = React.useState<
-    Array<{ toolName: string; args: unknown; result?: unknown }>
+    ToolCallView[]
   >([])
   const [error, setError] = React.useState<string | null>(null)
-  const [lastUserMessage, setLastUserMessage] = React.useState<string | null>(null)
+  const [lastUserMessage, setLastUserMessage] = React.useState<string | null>(
+    null,
+  )
 
+  // ── Refs / scroll ──────────────────────────────────────────────
   const scrollRef = React.useRef<HTMLDivElement | null>(null)
   const autoScrollRef = React.useRef(true)
 
@@ -85,24 +120,36 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // SSE parser — multi-event chunks, partial events, multi-line data.
+  // ── Speech-to-text (reuse home's hook) ─────────────────────────
+  const appendTranscript = React.useCallback((text: string) => {
+    setInput((prev) => (prev ? `${prev} ${text}`.trim() : text.trim()))
+  }, [])
+  const {
+    isSupported: speechSupported,
+    isListening,
+    start: startRecording,
+    stop: stopRecording,
+  } = useSpeechToText({ lang: "pt-BR", onFinalTranscript: appendTranscript })
+  const toggleRecording = () => (isListening ? stopRecording() : startRecording())
+
+  // ── SSE parser (preserved) ─────────────────────────────────────
   const parseSseBuffer = React.useCallback(
     (buffer: string): { events: ServerEvent[]; rest: string } => {
       const events: ServerEvent[] = []
-      const parts = buffer.split('\n\n')
-      const rest = parts.pop() ?? ''
+      const parts = buffer.split("\n\n")
+      const rest = parts.pop() ?? ""
       for (const raw of parts) {
         if (!raw.trim()) continue
         const dataLines: string[] = []
-        for (const line of raw.split('\n')) {
-          if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+        for (const line of raw.split("\n")) {
+          if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart())
         }
         if (dataLines.length === 0) continue
-        const payload = dataLines.join('\n')
+        const payload = dataLines.join("\n")
         try {
           events.push(JSON.parse(payload) as ServerEvent)
         } catch (err) {
-          console.error('[chat-panel] SSE parse failed', err, payload)
+          console.error("[chat-panel] SSE parse failed", err, payload)
         }
       }
       return { events, rest }
@@ -110,6 +157,7 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
     [],
   )
 
+  // ── Send ───────────────────────────────────────────────────────
   const sendMessage = React.useCallback(
     async (content: string) => {
       const trimmed = content.trim()
@@ -121,25 +169,25 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
 
       const userMessage: ChatMessage = {
         id: createId(),
-        role: 'user',
+        role: "user",
         content: trimmed,
         createdAt: new Date().toISOString(),
       }
       setMessages((prev) => [...prev, userMessage])
-      setInput('')
+      setInput("")
       setIsStreaming(true)
-      setStreamingText('')
+      setStreamingText("")
       setStreamingToolCalls([])
 
-      let accText = ''
-      const toolCalls: Array<{ toolName: string; args: unknown; result?: unknown }> = []
+      let accText = ""
+      const toolCalls: ToolCallView[] = []
 
       try {
         const response = await fetch(
           `/api/v1/builder/projects/${projectId}/chat/message`,
           {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content: trimmed }),
           },
         )
@@ -149,7 +197,7 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
 
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
-        let buffer = ''
+        let buffer = ""
         let finished = false
 
         while (!finished) {
@@ -160,48 +208,49 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
           buffer = rest
 
           for (const event of events) {
-            if (event.type === 'text-delta') {
+            if (event.type === "text-delta") {
               accText += event.text
               setStreamingText(accText)
-            } else if (event.type === 'tool-call') {
+            } else if (event.type === "tool-call") {
               toolCalls.push({ toolName: event.toolName, args: event.args })
               setStreamingToolCalls([...toolCalls])
-            } else if (event.type === 'tool-result') {
+            } else if (event.type === "tool-result") {
               for (let i = toolCalls.length - 1; i >= 0; i--) {
                 if (
-                  toolCalls[i].toolName === event.toolName &&
-                  toolCalls[i].result === undefined
+                  toolCalls[i]!.toolName === event.toolName &&
+                  toolCalls[i]!.result === undefined
                 ) {
-                  toolCalls[i] = { ...toolCalls[i], result: event.result }
+                  toolCalls[i] = { ...toolCalls[i]!, result: event.result }
                   break
                 }
               }
               setStreamingToolCalls([...toolCalls])
-            } else if (event.type === 'finish') {
+            } else if (event.type === "finish") {
               const finalToolCalls =
                 event.toolCalls && event.toolCalls.length > 0
                   ? event.toolCalls
                   : toolCalls
               const assistantMessage: ChatMessage = {
                 id: createId(),
-                role: 'assistant',
+                role: "assistant",
                 content: accText,
-                toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+                toolCalls:
+                  finalToolCalls.length > 0 ? finalToolCalls : undefined,
                 createdAt: new Date().toISOString(),
               }
               setMessages((prev) => [...prev, assistantMessage])
-              setStreamingText('')
+              setStreamingText("")
               setStreamingToolCalls([])
               finished = true
-            } else if (event.type === 'error') {
-              setError(event.message || 'Erro ao processar mensagem')
+            } else if (event.type === "error") {
+              setError(event.message || "Erro ao processar mensagem")
               finished = true
             }
             if (finished) break
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Erro desconhecido ao enviar')
+        setError(err instanceof Error ? err.message : "Erro desconhecido")
       } finally {
         setIsStreaming(false)
       }
@@ -209,13 +258,16 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
     [isStreaming, parseSseBuffer, projectId],
   )
 
-  const handleSubmit = React.useCallback(() => void sendMessage(input), [input, sendMessage])
+  const handleSubmit = React.useCallback(
+    () => void sendMessage(input),
+    [input, sendMessage],
+  )
 
   const handleRetry = React.useCallback(() => {
     if (!lastUserMessage) return
     setMessages((prev) => {
       for (let i = prev.length - 1; i >= 0; i--) {
-        if (prev[i].role === 'user' && prev[i].content === lastUserMessage) {
+        if (prev[i]!.role === "user" && prev[i]!.content === lastUserMessage) {
           return prev.slice(0, i)
         }
       }
@@ -226,7 +278,7 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         handleSubmit()
       }
@@ -234,213 +286,441 @@ export function ChatPanel({ projectId, initialMessages }: ChatPanelProps) {
     [handleSubmit],
   )
 
-  const charCount = input.length
-  const isEmpty = messages.length === 0 && !isStreaming
+  const canSubmit = input.trim().length > 0 && !isStreaming
+  const isEmpty = messages.length === 0 && !streamingText && !error
 
+  // ── Render ─────────────────────────────────────────────────────
   return (
-    <div className="flex h-full min-h-0 flex-col" style={{ backgroundColor: T.bg, color: T.tp, fontFamily: T.font }}>
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto px-4 py-6 md:px-6">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5">
-          {isEmpty ? <EmptyState /> : null}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
-          ))}
-          {isStreaming && (streamingText || streamingToolCalls.length > 0) ? (
-            <MessageBubble
-              streaming
-              message={{
-                id: 'streaming',
-                role: 'assistant',
-                content: streamingText,
-                toolCalls: streamingToolCalls.length > 0 ? streamingToolCalls : undefined,
-                createdAt: new Date().toISOString(),
-              }}
-            />
-          ) : null}
-          {isStreaming && !streamingText && streamingToolCalls.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm" style={{ color: T.ts }}>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Pensando...
-            </div>
-          ) : null}
-          {error ? (
-            <div
-              className="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"
-              style={{ borderColor: 'rgba(239,68,68,0.35)', backgroundColor: 'rgba(239,68,68,0.08)', color: T.danger }}
-            >
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="flex-1">
-                <p className="font-medium">Erro ao processar mensagem</p>
-                <p className="text-xs" style={{ color: 'rgba(239,68,68,0.8)' }}>
-                  {error}
-                </p>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Messages scrollable area */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 py-6 md:px-6"
+      >
+        {isEmpty ? (
+          <EmptyState tokens={tokens} />
+        ) : (
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+            {messages.map((m) => (
+              <MessageBubble key={m.id} message={m} tokens={tokens} />
+            ))}
+
+            {/* Streaming assistant bubble */}
+            {(streamingText || streamingToolCalls.length > 0) && (
+              <StreamingBubble
+                text={streamingText}
+                toolCalls={streamingToolCalls}
+                tokens={tokens}
+              />
+            )}
+
+            {/* Inline error */}
+            {error && (
+              <div
+                className="flex items-start gap-3 rounded-lg border p-3"
+                style={{
+                  borderColor: "rgba(239,68,68,0.30)",
+                  backgroundColor: "rgba(239,68,68,0.06)",
+                }}
+                role="alert"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                <div className="flex-1 text-[13px]" style={{ color: tokens.textPrimary }}>
+                  <p className="font-medium">{error}</p>
+                  {lastUserMessage && (
+                    <Button
+                      type="button"
+                      onClick={handleRetry}
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 h-7 gap-1.5 text-[11px]"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Tentar novamente
+                    </Button>
+                  )}
+                </div>
               </div>
-              {lastUserMessage ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleRetry}
-                  className="h-7 gap-1 text-xs"
-                  style={{ borderColor: 'rgba(239,68,68,0.35)', backgroundColor: 'transparent', color: T.danger }}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  Tentar novamente
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <div className="sticky bottom-0 border-t px-4 py-4 md:px-6" style={{ borderColor: T.bs, backgroundColor: T.bg }}>
-        <div className="mx-auto max-w-3xl">
-          <div
-            className="flex items-end gap-2 rounded-2xl border px-3 py-2 transition-shadow focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
-            style={{ borderColor: T.bd, backgroundColor: T.surface }}
-          >
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Descreva o que você quer criar... (Ctrl+Enter para enviar)"
-              rows={1}
-              disabled={isStreaming}
-              className="max-h-48 min-h-[40px] flex-1 resize-none border-0 bg-transparent p-2 text-sm shadow-none focus-visible:ring-0"
-              style={{ color: T.tp, fontFamily: T.font }}
-            />
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isStreaming || input.trim().length === 0}
-              className="h-10 w-10 shrink-0 rounded-xl p-0 disabled:opacity-40"
-              style={{ backgroundColor: T.brand, color: T.ink }}
-              aria-label="Enviar mensagem"
-            >
-              {isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
+            )}
           </div>
-          {charCount > 800 ? (
-            <div className="mt-1.5 text-right text-[11px]" style={{ color: T.tt }}>
-              {charCount} caracteres
+        )}
+      </div>
+
+      {/* ───── Composer (mesmo pattern da home) ───── */}
+      <div className="px-4 pb-4 pt-2 md:px-6">
+        <div
+          className="mx-auto w-full max-w-2xl rounded-2xl border transition-all focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
+          style={{
+            backgroundColor: tokens.bgSurface,
+            borderColor: tokens.borderStrong,
+            boxShadow: tokens.shadow,
+          }}
+        >
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Continue a conversa com o Builder…"
+            rows={2}
+            disabled={isStreaming}
+            className="min-h-[48px] resize-none border-0 bg-transparent text-[15px] leading-relaxed shadow-none focus-visible:ring-0"
+            style={{ color: tokens.textPrimary }}
+          />
+
+          <div className="flex items-center justify-between gap-2 px-3 pb-3">
+            <span
+              className="px-2 text-[11px]"
+              style={{ color: tokens.textTertiary }}
+            >
+              <kbd
+                className="rounded px-1.5 py-0.5 font-mono text-[10px]"
+                style={{
+                  backgroundColor: tokens.hoverBg,
+                  color: tokens.textSecondary,
+                }}
+              >
+                ⌘
+              </kbd>{" "}
+              +{" "}
+              <kbd
+                className="rounded px-1.5 py-0.5 font-mono text-[10px]"
+                style={{
+                  backgroundColor: tokens.hoverBg,
+                  color: tokens.textSecondary,
+                }}
+              >
+                Enter
+              </kbd>{" "}
+              para enviar
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              {speechSupported && (
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  disabled={isStreaming}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50"
+                  style={{
+                    borderColor: isListening
+                      ? "rgba(239,68,68,0.45)"
+                      : tokens.border,
+                    backgroundColor: isListening
+                      ? "rgba(239,68,68,0.12)"
+                      : "transparent",
+                    color: isListening ? "#ef4444" : tokens.textPrimary,
+                  }}
+                  aria-label={isListening ? "Parar gravação" : "Gravar áudio"}
+                  aria-pressed={isListening}
+                >
+                  {isListening ? (
+                    <Square
+                      className="h-3.5 w-3.5 animate-pulse"
+                      fill="currentColor"
+                    />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className="flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-30"
+                style={{
+                  backgroundColor: canSubmit
+                    ? tokens.brand
+                    : tokens.hoverBg,
+                  color: canSubmit
+                    ? tokens.textInverse
+                    : tokens.textTertiary,
+                  boxShadow: canSubmit
+                    ? "0 4px 12px -2px rgba(255,214,10,0.35)"
+                    : "none",
+                }}
+                aria-label="Enviar mensagem"
+              >
+                {isStreaming ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                )}
+              </button>
             </div>
-          ) : null}
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-function EmptyState() {
+// ─────────────────────────────────────────────────────────────────
+// Sub-components
+// ─────────────────────────────────────────────────────────────────
+
+function EmptyState({
+  tokens,
+}: {
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+}) {
   return (
-    <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border" style={{ borderColor: T.bd, backgroundColor: T.surface }}>
-        <Bot className="h-6 w-6" style={{ color: T.brand }} />
+    <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-3 text-center">
+      <div
+        className="flex h-14 w-14 items-center justify-center rounded-2xl"
+        style={{
+          backgroundColor: tokens.brandSubtle,
+          color: tokens.brand,
+        }}
+      >
+        <Bot className="h-6 w-6" />
       </div>
-      <div className="max-w-sm space-y-1.5">
-        <h3 className="text-base font-medium" style={{ color: T.tp }}>
-          Pronto para construir
-        </h3>
-        <p className="text-sm" style={{ color: T.ts }}>
-          Descreva o que você quer criar e pressione Enter
-        </p>
-      </div>
+      <h3
+        className="text-base font-semibold"
+        style={{ color: tokens.textPrimary }}
+      >
+        Pronto para construir
+      </h3>
+      <p
+        className="max-w-sm text-[13px]"
+        style={{ color: tokens.textSecondary }}
+      >
+        Converse com o Builder pra criar, editar e publicar seu agente de
+        WhatsApp.
+      </p>
     </div>
   )
 }
 
-function MessageBubble({ message, streaming = false }: { message: ChatMessage; streaming?: boolean }) {
-  if (message.role === 'system_banner') {
+function MessageBubble({
+  message,
+  tokens,
+}: {
+  message: ChatMessage
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+}) {
+  if (message.role === "user") {
     return (
-      <div className="mx-auto max-w-md text-center text-xs" style={{ color: T.tt }}>
+      <div className="flex flex-row-reverse items-start gap-3">
+        <Avatar className="h-8 w-8 shrink-0">
+          <AvatarFallback
+            style={{
+              backgroundColor: tokens.brand,
+              color: tokens.textInverse,
+            }}
+          >
+            <User className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+        <Card
+          className="max-w-[85%] border-0 px-4 py-2.5 text-[14px] leading-relaxed shadow-none"
+          style={{
+            backgroundColor: tokens.brand,
+            color: tokens.textInverse,
+            borderRadius: "16px 16px 4px 16px",
+          }}
+        >
+          {message.content}
+        </Card>
+      </div>
+    )
+  }
+
+  if (message.role === "system_banner") {
+    return (
+      <div
+        className="mx-auto rounded-full px-3 py-1 text-center text-[11px]"
+        style={{
+          backgroundColor: tokens.hoverBg,
+          color: tokens.textTertiary,
+        }}
+      >
         {message.content}
       </div>
     )
   }
-  const isUser = message.role === 'user'
-  const bubbleStyle: React.CSSProperties = isUser
-    ? { backgroundColor: T.brand, color: T.ink }
-    : { backgroundColor: 'transparent', borderColor: T.bs, color: T.tp }
-  const bubbleClass = isUser
-    ? 'max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed'
-    : 'max-w-[95%] rounded-2xl rounded-bl-md border px-4 py-2.5 text-sm leading-relaxed'
+
+  // assistant
   return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser ? (
-        <div
-          className="mr-2 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border"
-          style={{ borderColor: T.bs, backgroundColor: T.surface }}
+    <div className="flex items-start gap-3">
+      <Avatar className="h-8 w-8 shrink-0">
+        <AvatarFallback
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            color: tokens.brand,
+          }}
         >
-          <Bot className="h-3.5 w-3.5" style={{ color: T.brand }} />
-        </div>
-      ) : null}
-      <div className={bubbleClass} style={bubbleStyle}>
-        {message.content ? (
-          <p className="whitespace-pre-wrap break-words">
+          <Bot className="h-4 w-4" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {message.content && (
+          <div
+            className="max-w-[95%] whitespace-pre-wrap text-[14px] leading-relaxed"
+            style={{ color: tokens.textPrimary }}
+          >
             {message.content}
-            {streaming ? (
-              <span className="ml-0.5 inline-block animate-pulse" style={{ color: T.brand }} aria-hidden>
-                ▊
-              </span>
-            ) : null}
-          </p>
-        ) : streaming ? (
-          <span className="inline-block animate-pulse" style={{ color: T.brand }} aria-hidden>
-            ▊
-          </span>
-        ) : null}
-        {message.toolCalls && message.toolCalls.length > 0 ? (
-          <div className="mt-3 flex flex-col gap-1.5">
-            {message.toolCalls.map((tc, idx) => (
-              <ToolCallCard key={idx} toolCall={tc} />
-            ))}
           </div>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-function ToolSection({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.tt }}>
-        {label}
-      </p>
-      <pre
-        className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded p-2 font-mono text-[11px]"
-        style={{ backgroundColor: T.bg, color: T.ts, border: `1px solid ${T.bs}` }}
-      >
-        {prettyJson(value)}
-      </pre>
-    </div>
-  )
-}
-
-function ToolCallCard({ toolCall }: { toolCall: { toolName: string; args: unknown; result?: unknown } }) {
-  const pending = toolCall.result === undefined
-  return (
-    <details className="group rounded-lg border text-xs" style={{ borderColor: T.bs, backgroundColor: T.surface }}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2" style={{ color: T.ts }}>
-        <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
-        <Wrench className="h-3 w-3 shrink-0" style={{ color: T.brand }} />
-        <span className="font-mono" style={{ color: T.tp }}>
-          {toolCall.toolName}
-        </span>
-        {pending ? (
-          <span className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wide" style={{ color: T.brand }}>
-            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-            executando
-          </span>
-        ) : (
-          <span className="ml-auto text-[10px] uppercase tracking-wide" style={{ color: T.tt }}>
-            concluído
-          </span>
         )}
-      </summary>
-      <div className="space-y-2 border-t px-3 py-2" style={{ borderColor: T.bs }}>
-        <ToolSection label="args" value={toolCall.args} />
-        {toolCall.result !== undefined ? <ToolSection label="result" value={toolCall.result} /> : null}
+        {message.toolCalls?.map((tc, i) => (
+          <ToolCallCard
+            key={`${message.id}-tc-${i}`}
+            toolName={tc.toolName}
+            args={tc.args}
+            result={tc.result}
+            tokens={tokens}
+          />
+        ))}
       </div>
-    </details>
+    </div>
+  )
+}
+
+function StreamingBubble({
+  text,
+  toolCalls,
+  tokens,
+}: {
+  text: string
+  toolCalls: ToolCallView[]
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <Avatar className="h-8 w-8 shrink-0">
+        <AvatarFallback
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            color: tokens.brand,
+          }}
+        >
+          <Bot className="h-4 w-4" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {text && (
+          <div
+            className="max-w-[95%] whitespace-pre-wrap text-[14px] leading-relaxed"
+            style={{ color: tokens.textPrimary }}
+          >
+            {text}
+            <span
+              className="ml-0.5 inline-block animate-pulse"
+              style={{ color: tokens.brand }}
+              aria-hidden
+            >
+              ▊
+            </span>
+          </div>
+        )}
+        {toolCalls.map((tc, i) => (
+          <ToolCallCard
+            key={`stream-tc-${i}`}
+            toolName={tc.toolName}
+            args={tc.args}
+            result={tc.result}
+            tokens={tokens}
+            streaming={tc.result === undefined}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ToolCallCard({
+  toolName,
+  args,
+  result,
+  tokens,
+  streaming = false,
+}: {
+  toolName: string
+  args: unknown
+  result?: unknown
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+  streaming?: boolean
+}) {
+  return (
+    <Collapsible>
+      <Card
+        className="border p-0 shadow-none"
+        style={{
+          backgroundColor: tokens.bgSurface,
+          borderColor: tokens.divider,
+        }}
+      >
+        <CollapsibleTrigger
+          className="group flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors"
+          style={{ color: tokens.textSecondary }}
+        >
+          <Wrench
+            className="h-3 w-3 shrink-0"
+            style={{ color: tokens.brand }}
+          />
+          <span
+            className="font-mono"
+            style={{ color: tokens.textPrimary }}
+          >
+            {toolName}
+          </span>
+          {streaming ? (
+            <span className="flex items-center gap-1" style={{ color: tokens.textTertiary }}>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              executando
+            </span>
+          ) : (
+            <span style={{ color: tokens.textTertiary }}>concluído</span>
+          )}
+          <ChevronDown
+            className="ml-auto h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
+            style={{ color: tokens.textTertiary }}
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div
+            className="border-t px-3 py-2"
+            style={{ borderColor: tokens.divider }}
+          >
+            <div
+              className="mb-1 text-[10px] font-semibold uppercase tracking-wider"
+              style={{ color: tokens.textTertiary }}
+            >
+              Argumentos
+            </div>
+            <pre
+              className="overflow-x-auto rounded p-2 text-[11px]"
+              style={{
+                backgroundColor: tokens.bgBase,
+                color: tokens.textSecondary,
+              }}
+            >
+              {prettyJson(args)}
+            </pre>
+            {result !== undefined && (
+              <>
+                <div
+                  className="mb-1 mt-2 text-[10px] font-semibold uppercase tracking-wider"
+                  style={{ color: tokens.textTertiary }}
+                >
+                  Resultado
+                </div>
+                <pre
+                  className="overflow-x-auto rounded p-2 text-[11px]"
+                  style={{
+                    backgroundColor: tokens.bgBase,
+                    color: tokens.textSecondary,
+                  }}
+                >
+                  {prettyJson(result)}
+                </pre>
+              </>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   )
 }
