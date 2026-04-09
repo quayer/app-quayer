@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { BuilderSidebar } from './builder-sidebar'
+import { SidebarProvider } from '@/client/components/ui/sidebar'
 import { getBuilderSidebarData } from '@/server/ai-module/builder/get-sidebar-data'
 
 /**
@@ -31,9 +32,18 @@ export async function AppShell({ children }: { children: ReactNode }) {
         recentProjects={recentProjects}
         isSuperAdmin={isSuperAdmin}
       />
-      <main className="flex min-h-screen flex-1 flex-col min-w-0">
-        {children}
-      </main>
+      {/*
+        Compat: legacy child pages (admin/*, ferramentas/*, integracoes/*)
+        still use shadcn <SidebarTrigger> in their headers. Wrapping in
+        SidebarProvider gives them the context they expect, even though
+        no actual shadcn <Sidebar> is rendered. The trigger becomes a
+        no-op button — harmless until pages are refactored.
+      */}
+      <SidebarProvider className="flex-1 !min-h-0 !w-auto">
+        <main className="flex min-h-screen flex-1 flex-col min-w-0">
+          {children}
+        </main>
+      </SidebarProvider>
     </div>
   )
 }
