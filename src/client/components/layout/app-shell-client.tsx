@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
+import { useTheme } from "next-themes"
 import { PanelLeft } from "lucide-react"
 import { BuilderSidebar } from "./builder-sidebar"
 import { SidebarProvider } from "@/client/components/ui/sidebar"
@@ -38,6 +39,10 @@ export function AppShellClient({
 }: AppShellClientProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+  const { resolvedTheme } = useTheme()
+  const isLight = hydrated && resolvedTheme === "light"
+  const mainBg = isLight ? "#FFFFFF" : "#000000"
+  const mainText = isLight ? "#1A0800" : "#FFFFFF"
 
   // Carrega estado persistido após hidratação + registra atalho ⌘B
   useEffect(() => {
@@ -86,8 +91,8 @@ export function AppShellClient({
       data-app-v3="true"
       className="flex min-h-screen"
       style={{
-        backgroundColor: "#000000",
-        color: "#ffffff",
+        backgroundColor: mainBg,
+        color: mainText,
         fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >

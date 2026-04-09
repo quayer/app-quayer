@@ -2,15 +2,19 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useTheme } from "next-themes"
+import { useEffect, useState } from "react"
 import {
   Home,
   MessageSquareText,
   BookOpen,
   MoreHorizontal,
+  Moon,
   PanelLeft,
   Plus,
   Settings,
   Shield,
+  Sun,
   ChevronRight,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
@@ -43,25 +47,63 @@ const PRIMARY_NAV: NavItem[] = [
   { href: "/recursos", label: "Recursos", icon: BookOpen },
 ]
 
-// ─── Tokens locais — hierarquia explícita de tons ────────────────────
-// Sidebar fica 1 nível acima do main bg (elevated). Isso cria
-// separação visual óbvia sem precisar de borda pesada.
-const SIDEBAR_BG = "#0B0704"      // --color-bg-elevated (slight warm dark)
-const SIDEBAR_BORDER = "rgba(255,255,255,0.14)"
-const DIVIDER = "rgba(255,255,255,0.10)"
+// ─── Tokens por tema ─────────────────────────────────────────────
+// Hierarquia explícita de tons — cada tema tem seus próprios valores
+// pra garantir separação visual em ambos dark e light.
 
-const TEXT_PRIMARY = "#FFFFFF"    // 100% — headings, active
-const TEXT_SECONDARY = "rgba(255,255,255,0.72)"  // nav items idle
-const TEXT_TERTIARY = "rgba(255,255,255,0.48)"   // labels, icons idle
-const TEXT_DISABLED = "rgba(255,255,255,0.32)"
+interface SidebarTokens {
+  bg: string
+  border: string
+  divider: string
+  textPrimary: string
+  textSecondary: string
+  textTertiary: string
+  hoverBg: string
+  activeBg: string
+  activeText: string
+  activeBorder: string
+  brand: string
+  brandDim: string
+  ctaBorder: string
+  kbdBg: string
+  kbdText: string
+}
 
-const HOVER_BG = "rgba(255,255,255,0.06)"
-const ACTIVE_BG = "rgba(255,214,10,0.14)"
-const ACTIVE_TEXT = "#FFE566"     // amber 300 (mais claro que #FFD60A pra pop sobre bg escuro)
-const ACTIVE_BORDER = "rgba(255,214,10,0.55)"
+const DARK_TOKENS: SidebarTokens = {
+  bg: "#0B0704",              // elevated (1 passo acima do main #000)
+  border: "rgba(255,255,255,0.14)",
+  divider: "rgba(255,255,255,0.10)",
+  textPrimary: "#FFFFFF",
+  textSecondary: "rgba(255,255,255,0.72)",
+  textTertiary: "rgba(255,255,255,0.48)",
+  hoverBg: "rgba(255,255,255,0.06)",
+  activeBg: "rgba(255,214,10,0.14)",
+  activeText: "#FFE566",       // amber 300 brighter
+  activeBorder: "rgba(255,214,10,0.55)",
+  brand: "#FFD60A",
+  brandDim: "rgba(255,214,10,0.55)",
+  ctaBorder: "rgba(255,255,255,0.16)",
+  kbdBg: "rgba(255,255,255,0.08)",
+  kbdText: "rgba(255,255,255,0.48)",
+}
 
-const BRAND = "#FFD60A"
-const BRAND_DIM = "rgba(255,214,10,0.55)"
+const LIGHT_TOKENS: SidebarTokens = {
+  bg: "#FAFAF7",              // off-white warm (DS v3 inverse)
+  border: "rgba(26,8,0,0.12)",
+  divider: "rgba(26,8,0,0.08)",
+  textPrimary: "#1A0800",      // text-inverse (dark red-black)
+  textSecondary: "rgba(26,8,0,0.65)",
+  textTertiary: "rgba(26,8,0,0.42)",
+  hoverBg: "rgba(26,8,0,0.04)",
+  activeBg: "rgba(255,145,0,0.12)",   // orange-ish pra não queimar os olhos como amber puro
+  activeText: "#B8540A",       // amber dark pra light bg
+  activeBorder: "rgba(184,84,10,0.55)",
+  brand: "#B8540A",            // dark amber (WCAG AA sobre #FAFAF7)
+  brandDim: "rgba(184,84,10,0.55)",
+  ctaBorder: "rgba(26,8,0,0.18)",
+  kbdBg: "rgba(26,8,0,0.06)",
+  kbdText: "rgba(26,8,0,0.55)",
+}
 
 /**
  * BuilderSidebar — hierarquia tonal explícita
@@ -84,6 +126,15 @@ export function BuilderSidebar({
   onToggle,
 }: BuilderSidebarProps) {
   const pathname = usePathname()
+  const { resolvedTheme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  // Antes da hidratação, usa dark default pra evitar flash.
+  // Depois, escolhe baseado no tema resolvido (system → light/dark).
+  const isLight = mounted && resolvedTheme === "light"
+  const tokens: SidebarTokens = isLight ? LIGHT_TOKENS : DARK_TOKENS
+
   const visibleProjects = recentProjects.slice(0, MAX_VISIBLE_PROJECTS)
   const hasMoreProjects = recentProjects.length > MAX_VISIBLE_PROJECTS
   const hasAnyProjects = recentProjects.length > 0
@@ -91,21 +142,23 @@ export function BuilderSidebar({
   const isActive = (href: string, exact = false): boolean =>
     exact ? pathname === href : pathname?.startsWith(href) ?? false
 
+  const toggleTheme = () => setTheme(isLight ? "dark" : "light")
+
   return (
     <aside
       className="hidden lg:flex lg:w-[252px] lg:shrink-0 lg:flex-col"
       aria-label="Navegação do Quayer"
       style={{
-        backgroundColor: SIDEBAR_BG,
-        color: TEXT_PRIMARY,
-        borderRight: `1px solid ${SIDEBAR_BORDER}`,
+        backgroundColor: tokens.bg,
+        color: tokens.textPrimary,
+        borderRight: `1px solid ${tokens.border}`,
         fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
       {/* Header — logo + toggle */}
       <div
         className="flex h-16 items-center justify-between px-5"
-        style={{ borderBottom: `1px solid ${DIVIDER}` }}
+        style={{ borderBottom: `1px solid ${tokens.divider}` }}
       >
         <Link
           href="/"
@@ -119,14 +172,14 @@ export function BuilderSidebar({
             type="button"
             onClick={onToggle}
             className="flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-            style={{ color: TEXT_TERTIARY }}
+            style={{ color: tokens.textTertiary }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = HOVER_BG
-              e.currentTarget.style.color = TEXT_PRIMARY
+              e.currentTarget.style.backgroundColor = tokens.hoverBg
+              e.currentTarget.style.color = tokens.textPrimary
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.backgroundColor = "transparent"
-              e.currentTarget.style.color = TEXT_TERTIARY
+              e.currentTarget.style.color = tokens.textTertiary
             }}
             aria-label="Ocultar sidebar"
             title="Ocultar (⌘B)"
@@ -142,32 +195,32 @@ export function BuilderSidebar({
           href="/"
           className="group flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-[13px] font-medium transition-all"
           style={{
-            borderColor: "rgba(255,255,255,0.16)",
-            color: TEXT_PRIMARY,
+            borderColor: tokens.ctaBorder,
+            color: tokens.textPrimary,
             backgroundColor: "transparent",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = HOVER_BG
-            e.currentTarget.style.borderColor = BRAND_DIM
+            e.currentTarget.style.backgroundColor = tokens.hoverBg
+            e.currentTarget.style.borderColor = tokens.brandDim
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.backgroundColor = "transparent"
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)"
+            e.currentTarget.style.borderColor = tokens.ctaBorder
           }}
         >
           <span className="flex items-center gap-2">
             <Plus
               className="h-4 w-4"
               strokeWidth={2.5}
-              style={{ color: BRAND }}
+              style={{ color: tokens.brand }}
             />
             Nova conversa
           </span>
           <kbd
             className="pointer-events-none hidden rounded px-1.5 font-mono text-[10px] sm:inline-flex"
             style={{
-              color: TEXT_TERTIARY,
-              backgroundColor: "rgba(255,255,255,0.08)",
+              color: tokens.kbdText,
+              backgroundColor: tokens.kbdBg,
             }}
           >
             ⌘K
@@ -187,6 +240,7 @@ export function BuilderSidebar({
                   icon={item.icon}
                   label={item.label}
                   active={isActive(item.href, item.exact)}
+                  tokens={tokens}
                 />
               </li>
             ))}
@@ -202,7 +256,7 @@ export function BuilderSidebar({
             <div
               className="flex items-center justify-between px-3.5 pb-2 pt-2"
               style={{
-                borderTop: `1px solid ${DIVIDER}`,
+                borderTop: `1px solid ${tokens.divider}`,
                 marginLeft: "6px",
                 marginRight: "6px",
                 paddingTop: "14px",
@@ -211,7 +265,7 @@ export function BuilderSidebar({
               <h3
                 id="sidebar-recents-label"
                 className="text-[10px] font-bold uppercase tracking-[0.16em]"
-                style={{ color: TEXT_TERTIARY }}
+                style={{ color: tokens.textTertiary }}
               >
                 Recentes
               </h3>
@@ -219,14 +273,14 @@ export function BuilderSidebar({
                 <Link
                   href="/projetos"
                   className="flex h-6 w-6 items-center justify-center rounded-md transition-colors"
-                  style={{ color: TEXT_TERTIARY }}
+                  style={{ color: tokens.textTertiary }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = HOVER_BG
-                    e.currentTarget.style.color = TEXT_PRIMARY
+                    e.currentTarget.style.backgroundColor = tokens.hoverBg
+                    e.currentTarget.style.color = tokens.textPrimary
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = "transparent"
-                    e.currentTarget.style.color = TEXT_TERTIARY
+                    e.currentTarget.style.color = tokens.textTertiary
                   }}
                   aria-label="Ver todos os projetos"
                   title={`Ver todos (${recentProjects.length})`}
@@ -247,6 +301,7 @@ export function BuilderSidebar({
                       name={project.name}
                       dotColor={statusStyle.dot}
                       active={active}
+                      tokens={tokens}
                     />
                   </li>
                 )
@@ -258,12 +313,12 @@ export function BuilderSidebar({
                 <Link
                   href="/projetos"
                   className="inline-flex items-center gap-1 text-[11px] transition-colors"
-                  style={{ color: TEXT_TERTIARY }}
+                  style={{ color: tokens.textTertiary }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.color = TEXT_PRIMARY
+                    e.currentTarget.style.color = tokens.textPrimary
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.color = TEXT_TERTIARY
+                    e.currentTarget.style.color = tokens.textTertiary
                   }}
                 >
                   Ver todos ({recentProjects.length})
@@ -278,13 +333,14 @@ export function BuilderSidebar({
       {/* Footer */}
       <div
         className="flex flex-col gap-0.5 p-2"
-        style={{ borderTop: `1px solid ${DIVIDER}` }}
+        style={{ borderTop: `1px solid ${tokens.divider}` }}
       >
         <NavLink
           href="/user/seguranca"
           icon={Settings}
           label="Configurações"
           active={isActive("/user/seguranca")}
+          tokens={tokens}
         />
         {isSuperAdmin && (
           <NavLink
@@ -292,8 +348,46 @@ export function BuilderSidebar({
             icon={Shield}
             label="Admin"
             active={isActive("/admin")}
+            tokens={tokens}
           />
         )}
+
+        {/* Theme toggle — última row do footer */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors"
+          style={{
+            backgroundColor: "transparent",
+            color: tokens.textSecondary,
+            borderLeft: "2px solid transparent",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = tokens.hoverBg
+            e.currentTarget.style.color = tokens.textPrimary
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "transparent"
+            e.currentTarget.style.color = tokens.textSecondary
+          }}
+          aria-label={isLight ? "Mudar para tema escuro" : "Mudar para tema claro"}
+          title={isLight ? "Tema escuro" : "Tema claro"}
+        >
+          {isLight ? (
+            <Moon
+              className="h-4 w-4 shrink-0"
+              strokeWidth={2}
+              style={{ color: tokens.textTertiary }}
+            />
+          ) : (
+            <Sun
+              className="h-4 w-4 shrink-0"
+              strokeWidth={2}
+              style={{ color: tokens.textTertiary }}
+            />
+          )}
+          {isLight ? "Tema escuro" : "Tema claro"}
+        </button>
       </div>
     </aside>
   )
@@ -309,17 +403,19 @@ function NavLink({
   icon: Icon,
   label,
   active,
+  tokens,
 }: {
   href: string
   icon: typeof Home
   label: string
   active: boolean
+  tokens: SidebarTokens
 }) {
   const baseStyle = {
-    color: active ? ACTIVE_TEXT : TEXT_SECONDARY,
-    backgroundColor: active ? ACTIVE_BG : "transparent",
+    color: active ? tokens.activeText : tokens.textSecondary,
+    backgroundColor: active ? tokens.activeBg : "transparent",
     borderLeft: active
-      ? `2px solid ${ACTIVE_BORDER}`
+      ? `2px solid ${tokens.activeBorder}`
       : "2px solid transparent",
   }
 
@@ -330,14 +426,14 @@ function NavLink({
       style={baseStyle}
       onMouseEnter={(e) => {
         if (!active) {
-          e.currentTarget.style.backgroundColor = HOVER_BG
-          e.currentTarget.style.color = TEXT_PRIMARY
+          e.currentTarget.style.backgroundColor = tokens.hoverBg
+          e.currentTarget.style.color = tokens.textPrimary
         }
       }}
       onMouseLeave={(e) => {
         if (!active) {
           e.currentTarget.style.backgroundColor = "transparent"
-          e.currentTarget.style.color = TEXT_SECONDARY
+          e.currentTarget.style.color = tokens.textSecondary
         }
       }}
       aria-current={active ? "page" : undefined}
@@ -346,7 +442,7 @@ function NavLink({
         className="h-4 w-4 shrink-0"
         strokeWidth={active ? 2.5 : 2}
         style={{
-          color: active ? ACTIVE_TEXT : TEXT_TERTIARY,
+          color: active ? tokens.activeText : tokens.textTertiary,
         }}
       />
       {label}
@@ -359,33 +455,35 @@ function RecentProjectLink({
   name,
   dotColor,
   active,
+  tokens,
 }: {
   href: string
   name: string
   dotColor: string
   active: boolean
+  tokens: SidebarTokens
 }) {
   return (
     <Link
       href={href}
       className="flex items-center gap-2.5 rounded-md px-3.5 py-1.5 text-[13px] transition-colors"
       style={{
-        backgroundColor: active ? ACTIVE_BG : "transparent",
-        color: active ? ACTIVE_TEXT : TEXT_SECONDARY,
+        backgroundColor: active ? tokens.activeBg : "transparent",
+        color: active ? tokens.activeText : tokens.textSecondary,
         borderLeft: active
-          ? `2px solid ${ACTIVE_BORDER}`
+          ? `2px solid ${tokens.activeBorder}`
           : "2px solid transparent",
       }}
       onMouseEnter={(e) => {
         if (!active) {
-          e.currentTarget.style.backgroundColor = HOVER_BG
-          e.currentTarget.style.color = TEXT_PRIMARY
+          e.currentTarget.style.backgroundColor = tokens.hoverBg
+          e.currentTarget.style.color = tokens.textPrimary
         }
       }}
       onMouseLeave={(e) => {
         if (!active) {
           e.currentTarget.style.backgroundColor = "transparent"
-          e.currentTarget.style.color = TEXT_SECONDARY
+          e.currentTarget.style.color = tokens.textSecondary
         }
       }}
     >
