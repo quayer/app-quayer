@@ -11,25 +11,15 @@
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Button } from '@/client/components/ui/button'
 import { Card, CardContent } from '@/client/components/ui/card'
-import type { WorkspaceProject, ProjectStatus } from '@/client/components/projetos/types'
+import type { WorkspaceProject } from '@/client/components/projetos/types'
+import {
+  PROJECT_STATUS_LABEL,
+  PROJECT_STATUS_STYLE,
+} from '@/lib/project-status'
 
 interface OverviewTabProps {
   project: WorkspaceProject
   onSwitchToChat?: () => void
-}
-
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  draft: 'Rascunho',
-  production: 'Em producao',
-  paused: 'Pausado',
-  archived: 'Arquivado',
-}
-
-const STATUS_CLASSES: Record<ProjectStatus, string> = {
-  production: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  draft: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  paused: 'bg-red-500/10 text-red-600 border-red-500/20',
-  archived: 'bg-muted text-muted-foreground border-border',
 }
 
 export function OverviewTab({ project, onSwitchToChat }: OverviewTabProps) {
@@ -67,9 +57,9 @@ export function OverviewTab({ project, onSwitchToChat }: OverviewTabProps) {
           </p>
         </div>
         <span
-          className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-xs font-medium ${STATUS_CLASSES[status]}`}
+          className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-xs font-medium ${PROJECT_STATUS_STYLE[status].className}`}
         >
-          {STATUS_LABEL[status]}
+          {PROJECT_STATUS_LABEL[status]}
         </span>
       </div>
 

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { Metadata } from 'next'
 import { ArrowLeft } from 'lucide-react'
-import { getDatabase } from '@/server/services/database'
+import { listOrgProjects } from '@/server/features/builder-projects/queries'
 import { ProjetosList } from '@/client/components/projetos/projetos-list'
 import { Button } from '@/client/components/ui/button'
 
@@ -27,22 +27,7 @@ export default async function ProjetosPage() {
     redirect('/')
   }
 
-  const db = getDatabase()
-  const projects = await db.builderProject.findMany({
-    where: {
-      organizationId: orgId,
-      archivedAt: null,
-    },
-    orderBy: { updatedAt: 'desc' },
-    select: {
-      id: true,
-      name: true,
-      type: true,
-      status: true,
-      updatedAt: true,
-      aiAgentId: true,
-    },
-  })
+  const projects = await listOrgProjects(orgId)
 
   return (
     <div className="min-h-screen bg-background">

@@ -1,6 +1,6 @@
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { getDatabase } from '@/server/services/database'
+import { listRecentProjects } from '@/server/features/builder-projects/queries'
 import { AppShell } from '@/client/components/layout/app-shell'
 import { HomePage } from '@/client/components/home/home-page'
 
@@ -21,36 +21,7 @@ export default async function RootPage() {
     redirect('/login')
   }
 
-  let recentProjects: Array<{
-    id: string
-    name: string
-    status: string
-    type: string
-  }> = []
-
-  if (orgId) {
-    try {
-      const db = getDatabase() as unknown as {
-        builderProject?: {
-          findMany: (args: unknown) => Promise<
-            Array<{ id: string; name: string; status: string; type: string }>
-          >
-        }
-      }
-      if (db.builderProject && typeof db.builderProject.findMany === 'function') {
-        const projects = await db.builderProject.findMany({
-          where: { organizationId: orgId, archivedAt: null },
-          orderBy: { updatedAt: 'desc' },
-          take: 7,
-          select: { id: true, name: true, status: true, type: true },
-        })
-        recentProjects = projects
-      }
-    } catch {
-      // Silent fallback — Turbopack dev cache pode servir um PrismaClient stale.
-      // Degrada para lista vazia em vez de crashar o render.
-    }
-  }
+  const recentProjects = orgId ? await listRecentProjects(orgId) : []
 
   return (
     <AppShell>

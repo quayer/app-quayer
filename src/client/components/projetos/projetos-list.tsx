@@ -6,8 +6,11 @@ import { Search, FolderOpen } from 'lucide-react'
 import { Input } from '@/client/components/ui/input'
 import { Card, CardContent } from '@/client/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/client/components/ui/tabs'
-
-type ProjectStatus = 'draft' | 'production' | 'paused' | 'archived'
+import {
+  PROJECT_STATUS_LABEL,
+  PROJECT_STATUS_STYLE,
+} from '@/lib/project-status'
+import type { ProjectStatus } from '@/client/components/projetos/types'
 
 export interface ProjetoItem {
   id: string
@@ -23,25 +26,6 @@ interface ProjetosListProps {
 }
 
 type FilterKey = 'todos' | 'ativos' | 'drafts' | 'arquivados'
-
-const STATUS_BADGE: Record<ProjectStatus, { label: string; className: string }> = {
-  production: {
-    label: 'Ativo',
-    className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-  },
-  draft: {
-    label: 'Rascunho',
-    className: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-  },
-  paused: {
-    label: 'Pausado',
-    className: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20',
-  },
-  archived: {
-    label: 'Arquivado',
-    className: 'bg-muted text-muted-foreground border-border',
-  },
-}
 
 const GROUP_ORDER: Array<{ key: ProjectStatus; title: string }> = [
   { key: 'production', title: 'Produção' },
@@ -183,7 +167,8 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                 </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {items.map((project) => {
-                    const badge = STATUS_BADGE[project.status]
+                    const badgeClassName = PROJECT_STATUS_STYLE[project.status].className
+                    const badgeLabel = PROJECT_STATUS_LABEL[project.status]
                     return (
                       <Card
                         key={project.id}
@@ -204,9 +189,9 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                               {project.name}
                             </h3>
                             <span
-                              className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium ${badge.className}`}
+                              className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium ${badgeClassName}`}
                             >
-                              {badge.label}
+                              {badgeLabel}
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground">

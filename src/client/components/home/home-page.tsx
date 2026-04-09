@@ -12,6 +12,11 @@ import {
   Sparkles,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
+import {
+  PROJECT_STATUS_LABEL,
+  getProjectStatusStyle,
+} from "@/lib/project-status"
+import type { ProjectStatus } from "@/client/components/projetos/types"
 
 interface Project {
   id: string
@@ -25,27 +30,6 @@ interface HomePageProps {
 }
 
 type Tab = "learn" | "my-projects" | "team-projects"
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Rascunho",
-  production: "Ativo",
-  paused: "Pausado",
-  archived: "Arquivado",
-}
-
-const STATUS_STYLE: Record<
-  string,
-  { bg: string; color: string; dot: string }
-> = {
-  production: { bg: "rgba(34,197,94,0.12)", color: "#4ade80", dot: "#22c55e" },
-  draft: { bg: "rgba(255,214,10,0.12)", color: "#FFD60A", dot: "#FFD60A" },
-  paused: { bg: "rgba(239,68,68,0.12)", color: "#f87171", dot: "#ef4444" },
-  archived: {
-    bg: "rgba(255,255,255,0.06)",
-    color: "rgba(255,255,255,0.5)",
-    dot: "rgba(255,255,255,0.35)",
-  },
-}
 
 const MODELS = [
   { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic" },
@@ -464,8 +448,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
   return (
     <div className="flex flex-col gap-2">
       {projects.slice(0, 6).map((project) => {
-        const statusStyle =
-          STATUS_STYLE[project.status] ?? STATUS_STYLE.archived!
+        const statusStyle = getProjectStatusStyle(project.status)
         return (
           <a
             key={project.id}
@@ -514,7 +497,8 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
                 className="h-1.5 w-1.5 rounded-full"
                 style={{ backgroundColor: statusStyle.dot }}
               />
-              {STATUS_LABEL[project.status] ?? project.status}
+              {PROJECT_STATUS_LABEL[project.status as ProjectStatus] ??
+                project.status}
             </span>
           </a>
         )

@@ -1,7 +1,10 @@
 import { headers } from 'next/headers'
 import { redirect, notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import { getDatabase } from '@/server/services/database'
+import {
+  getProjectDetail,
+  getInitialMessages,
+} from '@/server/features/builder-projects/queries'
 import { Workspace } from '@/client/components/projetos/workspace'
 import type {
   ChatMessage,
@@ -40,50 +43,14 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
     redirect('/')
   }
 
-  // ------------------------------------------------------------------
-  // Fetch project scoped to active org + soft-delete aware.
-  // ------------------------------------------------------------------
-  const db = getDatabase()
-  const project = await db.builderProject.findFirst({
-    where: {
-      id,
-      organizationId: orgId,
-      archivedAt: null,
-    },
-    include: {
-      aiAgent: {
-        select: {
-          id: true,
-          name: true,
-          systemPrompt: true,
-          provider: true,
-          model: true,
-        },
-      },
-    },
-  })
+  // Project + first 50 chat messages via shared data-access layer.
+  const project = await getProjectDetail(id, orgId)
 
   if (!project) {
     notFound()
   }
 
-  // ------------------------------------------------------------------
-  // Fetch last 50 messages for the 1:1 conversation attached to this project.
-  // ------------------------------------------------------------------
-  const rawMessages = await db.builderProjectMessage.findMany({
-    where: {
-      conversation: { projectId: id },
-    },
-    orderBy: { createdAt: 'asc' },
-    take: 50,
-    select: {
-      id: true,
-      role: true,
-      content: true,
-      toolCalls: true,
-      createdAt: true,
-    },
-  })
+  const rawMessages = await getInitialMessages(id, 50)
 
   // Cast Prisma output into the stable ChatMessage contract.
   const initialMessages: ChatMessage[] = rawMessages
