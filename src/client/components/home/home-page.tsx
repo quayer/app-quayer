@@ -541,7 +541,7 @@ export function HomePage({
               <TabButton
                 active={activeTab === "my-projects"}
                 onClick={() => setActiveTab("my-projects")}
-                label="Meus Projetos"
+                label="Conversas"
                 badge={recentProjects.length}
               />
               <TabButton

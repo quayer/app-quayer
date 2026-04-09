@@ -69,10 +69,10 @@ function matchesFilter(status: ProjectStatus, filter: FilterKey): boolean {
 }
 
 const EMPTY_LABEL: Record<FilterKey, string> = {
-  todos: 'Nenhum projeto ainda',
-  ativos: 'Nenhum projeto ativo ainda',
+  todos: 'Nenhuma conversa ainda',
+  ativos: 'Nenhuma conversa ativa ainda',
   drafts: 'Nenhum rascunho ainda',
-  arquivados: 'Nenhum projeto arquivado ainda',
+  arquivados: 'Nenhuma conversa arquivada ainda',
 }
 
 export function ProjetosList({ projects }: ProjetosListProps) {
@@ -108,9 +108,9 @@ export function ProjetosList({ projects }: ProjetosListProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">Meus Projetos</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Conversas</h1>
         <p className="text-sm text-muted-foreground">
-          Gerencie agentes, campanhas e automações criadas no Builder.
+          Cada conversa com o Builder cria um agente de WhatsApp.
         </p>
       </div>
 
@@ -123,7 +123,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por nome..."
             className="pl-9"
-            aria-label="Buscar projetos"
+            aria-label="Buscar conversas"
           />
         </div>
 
@@ -142,7 +142,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 py-16 text-center">
           <FolderOpen className="mb-3 h-10 w-10 text-muted-foreground" />
           <p className="text-sm font-medium">
-            {query ? 'Nenhum projeto encontrado' : EMPTY_LABEL[filter]}
+            {query ? 'Nenhuma conversa encontrada' : EMPTY_LABEL[filter]}
           </p>
           {query && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -162,7 +162,8 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                     {title}
                   </h2>
                   <span className="text-xs text-muted-foreground">
-                    {items.length} {items.length === 1 ? 'projeto' : 'projetos'}
+                    {items.length}{' '}
+                    {items.length === 1 ? 'conversa' : 'conversas'}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">

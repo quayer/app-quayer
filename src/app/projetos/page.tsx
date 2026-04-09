@@ -8,7 +8,7 @@ import { ProjetosList } from '@/client/components/projetos/projetos-list'
 import { Button } from '@/client/components/ui/button'
 
 export const metadata: Metadata = {
-  title: 'Meus Projetos | Quayer',
+  title: 'Conversas | Quayer',
 }
 
 export const dynamic = 'force-dynamic'
