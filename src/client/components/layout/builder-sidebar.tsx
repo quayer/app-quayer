@@ -59,7 +59,7 @@ export function BuilderSidebar({
             onClick={onToggle}
             className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-white/5"
             style={{
-              color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
             }}
             aria-label="Ocultar sidebar"
             title="Ocultar (⌘B)"
@@ -125,7 +125,7 @@ export function BuilderSidebar({
                   href={`/projetos/${project.id}`}
                   className="flex items-center gap-2 rounded-md px-3.5 py-1.5 text-[13px] transition-colors hover:bg-white/5"
                   style={{
-                    color: "var(--color-text-secondary, rgba(255,255,255,0.65))",
+                    color: "var(--color-text-secondary, rgba(255,255,255,0.85))",
                   }}
                 >
                   <StatusDot status={project.status} />
@@ -200,7 +200,7 @@ function FooterLink({
     <Link
       href={href}
       className="flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors hover:bg-white/5"
-      style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.65))" }}
+      style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.85))" }}
     >
       <Icon
         className="h-3.5 w-3.5 shrink-0"

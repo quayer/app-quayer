@@ -9,6 +9,12 @@ interface AppShellClientProps {
   recentProjects: Array<{ id: string; name: string; status: string }>
   isSuperAdmin: boolean
   children: ReactNode
+  /**
+   * Sidebar override. Quando presente, substitui a BuilderSidebar padrão.
+   * O wrapper ainda recebe o `onToggle` via contexto através de React cloneElement.
+   * Usado por /admin/* pra renderizar AdminNav como única sidebar.
+   */
+  sidebarOverride?: ReactNode
 }
 
 const STORAGE_KEY = "quayer.sidebar.collapsed"
@@ -17,32 +23,30 @@ const STORAGE_KEY = "quayer.sidebar.collapsed"
  * AppShellClient — camada client do AppShell.
  *
  * Responsável por:
- *  - Estado de colapso da BuilderSidebar (persistido em localStorage)
- *  - Botão flutuante pra reabrir a sidebar quando ela está colapsada
+ *  - Estado de colapso da sidebar (persistido em localStorage)
+ *  - Botão flutuante pra reabrir a sidebar quando colapsada
+ *  - Atalho ⌘B / Ctrl+B pra toggle
  *  - Wrapper SidebarProvider (compat com páginas legadas que têm
  *    <SidebarTrigger> no header)
+ *  - Suporte a sidebar override (admin usa AdminNav em vez de BuilderSidebar)
  */
 export function AppShellClient({
   recentProjects,
   isSuperAdmin,
   children,
+  sidebarOverride,
 }: AppShellClientProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [hydrated, setHydrated] = useState(false)
 
-  // Carrega estado persistido após hidratação
+  // Carrega estado persistido após hidratação + registra atalho ⌘B
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved === "true") setCollapsed(true)
-    } catch {
-      // localStorage indisponível — ignora
-    }
+    } catch {}
     setHydrated(true)
-  }, [])
 
-  // Atalho ⌘B / Ctrl+B pra toggle
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "b" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
@@ -69,31 +73,13 @@ export function AppShellClient({
     })
   }
 
-  // Evita flash durante hidratação (se usuário tinha colapsado)
-  if (!hydrated) {
-    return (
-      <div
-        data-app-v3="true"
-        className="flex min-h-screen"
-        style={{
-          backgroundColor: "var(--color-bg-base, #000000)",
-          color: "var(--color-text-primary, #ffffff)",
-          fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
-        }}
-      >
-        <BuilderSidebar
-          recentProjects={recentProjects}
-          isSuperAdmin={isSuperAdmin}
-          onToggle={toggle}
-        />
-        <SidebarProvider className="flex-1 !min-h-0 !w-auto">
-          <main className="flex min-h-screen flex-1 flex-col min-w-0">
-            {children}
-          </main>
-        </SidebarProvider>
-      </div>
-    )
-  }
+  const sidebar = sidebarOverride ?? (
+    <BuilderSidebar
+      recentProjects={recentProjects}
+      isSuperAdmin={isSuperAdmin}
+      onToggle={toggle}
+    />
+  )
 
   return (
     <div
@@ -105,17 +91,12 @@ export function AppShellClient({
         fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
-      {!collapsed && (
-        <BuilderSidebar
-          recentProjects={recentProjects}
-          isSuperAdmin={isSuperAdmin}
-          onToggle={toggle}
-        />
-      )}
+      {/* Durante hidratação OU quando não-colapsado, renderiza sidebar.
+          suppressHydrationWarning pro caso de o estado inicial ser colapsado. */}
+      {(!hydrated || !collapsed) && sidebar}
 
       <SidebarProvider className="relative flex-1 !min-h-0 !w-auto">
-        {/* Floating show-sidebar button when collapsed */}
-        {collapsed && (
+        {hydrated && collapsed && (
           <button
             type="button"
             onClick={toggle}

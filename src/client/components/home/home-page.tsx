@@ -1,22 +1,25 @@
 "use client"
 
-import { useState, useTransition, useRef } from "react"
+import { useCallback, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowUp,
-  AudioLines,
   Bot,
   ChevronDown,
   Loader2,
+  Mic,
   Paperclip,
   Sparkles,
+  Square,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
+import { ClaudeIcon, CodexIcon } from "@/client/components/ds/model-icons"
 import {
   PROJECT_STATUS_LABEL,
   getProjectStatusStyle,
 } from "@/lib/project-status"
 import type { ProjectStatus } from "@/client/components/projetos/types"
+import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
 
 interface Project {
   id: string
@@ -31,23 +34,49 @@ interface HomePageProps {
 
 type Tab = "learn" | "my-projects" | "team-projects"
 
-const MODELS = [
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic" },
-  { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "anthropic" },
-  { id: "gpt-4o", name: "GPT-4o", provider: "openai" },
+interface ModelOption {
+  id: string
+  label: string
+  icon: typeof ClaudeIcon
+}
+
+const MODELS: ModelOption[] = [
+  { id: "claude", label: "Claude", icon: ClaudeIcon },
+  { id: "codex", label: "Codex", icon: CodexIcon },
 ]
 
 export function HomePage({ recentProjects }: HomePageProps) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [prompt, setPrompt] = useState("")
-  const [selectedModel, setSelectedModel] = useState(MODELS[0]!)
+  const [selectedModel, setSelectedModel] = useState<ModelOption>(MODELS[0]!)
   const [modelOpen, setModelOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>(
     recentProjects.length > 0 ? "my-projects" : "learn",
   )
+
+  // Web Speech API — transcrição ao vivo pro textarea
+  const appendTranscript = useCallback((text: string) => {
+    setPrompt((prev) => (prev ? `${prev} ${text}`.trim() : text.trim()))
+  }, [])
+
+  const {
+    isSupported: speechSupported,
+    isListening,
+    start: startRecording,
+    stop: stopRecording,
+    error: speechError,
+  } = useSpeechToText({
+    lang: "pt-BR",
+    onFinalTranscript: appendTranscript,
+  })
+
+  const toggleRecording = () => {
+    if (isListening) stopRecording()
+    else startRecording()
+  }
 
   const submit = () => {
     const trimmed = prompt.trim()
@@ -63,17 +92,38 @@ export function HomePage({ recentProjects }: HomePageProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: trimmed, type: "ai_agent" }),
         })
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as {
-            message?: string
-          }
-          throw new Error(data.message ?? "Erro ao criar projeto")
+
+        // Igniter retorna formatos distintos:
+        //  - Success: { success, data: { projectId, ... }, message }
+        //  - Error:   { error: { code, message, data? } }
+        const body = (await res.json().catch(() => null)) as
+          | {
+              success?: boolean
+              data?: { projectId?: string; conversationId?: string }
+              message?: string
+              error?: { code?: string; message?: string }
+            }
+          | null
+
+        if (!res.ok || !body) {
+          const msg =
+            body?.error?.message ??
+            body?.message ??
+            `HTTP ${res.status} — resposta vazia`
+          console.error("[home] create project failed:", {
+            status: res.status,
+            body,
+          })
+          throw new Error(msg)
         }
-        const data = (await res.json()) as {
-          data?: { projectId: string }
+
+        const projectId = body.data?.projectId
+        if (!projectId) {
+          console.error("[home] create project response missing projectId:", body)
+          throw new Error(
+            "Resposta inválida do servidor (projectId ausente).",
+          )
         }
-        const projectId = data.data?.projectId
-        if (!projectId) throw new Error("Resposta inválida do servidor")
         router.push(`/projetos/${projectId}`)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
@@ -217,20 +267,18 @@ export function HomePage({ recentProjects }: HomePageProps) {
                     type="button"
                     disabled={isPending}
                     onClick={() => setModelOpen((v) => !v)}
-                    className="flex h-9 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors hover:bg-white/5 disabled:opacity-50"
+                    aria-haspopup="listbox"
+                    aria-expanded={modelOpen}
+                    className="flex h-9 items-center gap-2 rounded-full border px-3 text-[13px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
                     style={{
                       borderColor:
-                        "var(--color-border-subtle, rgba(255,255,255,0.08))",
-                      color:
-                        "var(--color-text-secondary, rgba(255,255,255,0.85))",
+                        "var(--color-border-default, rgba(255,255,255,0.12))",
+                      color: "var(--color-text-primary, #ffffff)",
                     }}
                   >
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: "var(--color-brand, #FFD60A)" }}
-                    />
-                    {selectedModel.name}
-                    <ChevronDown className="h-3 w-3 opacity-60" />
+                    <selectedModel.icon size={14} />
+                    {selectedModel.label}
+                    <ChevronDown className="h-3 w-3 opacity-70" />
                   </button>
 
                   {modelOpen && (
@@ -241,48 +289,41 @@ export function HomePage({ recentProjects }: HomePageProps) {
                         onClick={() => setModelOpen(false)}
                       />
                       <div
-                        className="absolute bottom-11 left-0 z-20 min-w-[220px] overflow-hidden rounded-xl border p-1 shadow-xl"
+                        role="listbox"
+                        className="absolute bottom-11 left-0 z-20 min-w-[160px] overflow-hidden rounded-xl border p-1 shadow-xl"
                         style={{
-                          backgroundColor:
-                            "var(--color-bg-elevated, #0C0804)",
+                          backgroundColor: "var(--color-bg-elevated, #0C0804)",
                           borderColor:
-                            "var(--color-border-default, rgba(255,255,255,0.12))",
+                            "var(--color-border-default, rgba(255,255,255,0.14))",
+                          boxShadow:
+                            "0 12px 40px -12px rgba(0,0,0,0.8)",
                         }}
                       >
                         {MODELS.map((model) => {
                           const selected = model.id === selectedModel.id
+                          const Icon = model.icon
                           return (
                             <button
                               key={model.id}
                               type="button"
+                              role="option"
+                              aria-selected={selected}
                               onClick={() => {
                                 setSelectedModel(model)
                                 setModelOpen(false)
                               }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-white/5"
+                              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-white/5"
                               style={{
+                                backgroundColor: selected
+                                  ? "rgba(255,214,10,0.08)"
+                                  : "transparent",
                                 color: selected
                                   ? "var(--color-brand, #FFD60A)"
-                                  : "var(--color-text-secondary, rgba(255,255,255,0.85))",
+                                  : "var(--color-text-primary, #ffffff)",
                               }}
                             >
-                              <span
-                                className="h-1.5 w-1.5 rounded-full"
-                                style={{
-                                  backgroundColor: selected
-                                    ? "var(--color-brand, #FFD60A)"
-                                    : "rgba(255,255,255,0.25)",
-                                }}
-                              />
-                              <div className="flex-1">
-                                <div className="font-medium">{model.name}</div>
-                                <div
-                                  className="text-[11px] opacity-50"
-                                  style={{ textTransform: "capitalize" }}
-                                >
-                                  {model.provider}
-                                </div>
-                              </div>
+                              <Icon size={14} />
+                              {model.label}
                             </button>
                           )
                         })}
@@ -294,21 +335,43 @@ export function HomePage({ recentProjects }: HomePageProps) {
 
               {/* Right: audio + send */}
               <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={isPending}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
-                  style={{
-                    borderColor:
-                      "var(--color-border-subtle, rgba(255,255,255,0.08))",
-                    color:
-                      "var(--color-text-secondary, rgba(255,255,255,0.85))",
-                  }}
-                  aria-label="Entrada por áudio"
-                  title="Áudio (em breve)"
-                >
-                  <AudioLines className="h-4 w-4" />
-                </button>
+                {speechSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    disabled={isPending}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50"
+                    style={{
+                      borderColor: isListening
+                        ? "rgba(239,68,68,0.45)"
+                        : "var(--color-border-default, rgba(255,255,255,0.12))",
+                      backgroundColor: isListening
+                        ? "rgba(239,68,68,0.12)"
+                        : "transparent",
+                      color: isListening
+                        ? "#ef4444"
+                        : "var(--color-text-primary, #ffffff)",
+                    }}
+                    aria-label={
+                      isListening ? "Parar gravação" : "Gravar por áudio"
+                    }
+                    aria-pressed={isListening}
+                    title={
+                      isListening
+                        ? "Parar gravação"
+                        : "Falar em vez de digitar"
+                    }
+                  >
+                    {isListening ? (
+                      <Square
+                        className="h-3.5 w-3.5 animate-pulse"
+                        fill="currentColor"
+                      />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -338,9 +401,13 @@ export function HomePage({ recentProjects }: HomePageProps) {
             </div>
           </div>
 
-          {error && (
-            <p className="mt-3 text-center text-sm" style={{ color: "#ef4444" }}>
-              {error}
+          {(error || speechError) && (
+            <p
+              className="mt-3 text-center text-sm"
+              role="alert"
+              style={{ color: "#ef4444" }}
+            >
+              {error ?? speechError}
             </p>
           )}
 

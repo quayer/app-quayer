@@ -72,7 +72,7 @@ export function AdminNav() {
           href="/"
           className="flex items-center gap-1.5 text-xs transition-colors hover:underline"
           style={{
-            color: "var(--color-text-tertiary, rgba(255,255,255,0.5))",
+            color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
           }}
         >
           <ChevronLeft className="h-3 w-3" />
@@ -105,7 +105,7 @@ export function AdminNav() {
                       : "transparent",
                     color: isActive
                       ? "var(--color-brand, #FFD60A)"
-                      : "var(--color-text-secondary, rgba(255,255,255,0.65))",
+                      : "var(--color-text-secondary, rgba(255,255,255,0.85))",
                   }}
                 >
                   <Icon
@@ -113,7 +113,7 @@ export function AdminNav() {
                     style={{
                       color: isActive
                         ? "var(--color-brand, #FFD60A)"
-                        : "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+                        : "var(--color-text-tertiary, rgba(255,255,255,0.6))",
                     }}
                   />
                   {item.label}
