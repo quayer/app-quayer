@@ -41,7 +41,11 @@ export function AppShellClient({
   const [hydrated, setHydrated] = useState(false)
   const { resolvedTheme } = useTheme()
   const isLight = hydrated && resolvedTheme === "light"
-  const mainBg = isLight ? "#FFFFFF" : "#000000"
+  // DS v3 tokens:
+  //   --color-bg-base    #000000 (dark)
+  //   --color-bg-inverse #F5F2ED (light)
+  //   --color-text-inverse #1A0800
+  const mainBg = isLight ? "#F5F2ED" : "#000000"
   const mainText = isLight ? "#1A0800" : "#FFFFFF"
 
   // Carrega estado persistido após hidratação + registra atalho ⌘B

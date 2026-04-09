@@ -22,6 +22,7 @@ import {
 } from "@/lib/project-status"
 import type { ProjectStatus } from "@/client/components/projetos/types"
 import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
+import { useAppTokens } from "@/client/hooks/use-app-tokens"
 
 interface Project {
   id: string
@@ -74,6 +75,7 @@ export function HomePage({
   recentResources = [],
 }: HomePageProps) {
   const router = useRouter()
+  const { tokens } = useAppTokens()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prompt, setPrompt] = useState("")
@@ -196,8 +198,8 @@ export function HomePage({
     <div
       className="relative flex min-h-screen flex-col"
       style={{
-        backgroundColor: "var(--color-bg-base, #000000)",
-        color: "var(--color-text-primary, #ffffff)",
+        backgroundColor: tokens.bgBase,
+        color: tokens.textPrimary,
         fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
@@ -218,9 +220,9 @@ export function HomePage({
             <div
               className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium"
               style={{
-                borderColor: "var(--color-border-brand, rgba(255,214,10,0.25))",
-                backgroundColor: "var(--color-brand-muted, rgba(255,214,10,0.08))",
-                color: "var(--color-brand, #FFD60A)",
+                borderColor: tokens.brandBorder,
+                backgroundColor: tokens.brandSubtle,
+                color: tokens.brand,
                 minHeight: "36px",
               }}
               role="status"
@@ -234,7 +236,7 @@ export function HomePage({
                 className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
                 style={{
                   backgroundColor: "rgba(255,214,10,0.18)",
-                  color: "var(--color-brand, #FFD60A)",
+                  color: tokens.brand,
                 }}
               >
                 em breve
@@ -250,7 +252,7 @@ export function HomePage({
               style={{
                 letterSpacing: "-0.03em",
                 lineHeight: "1.05",
-                color: "var(--color-text-primary, #ffffff)",
+                color: tokens.textPrimary,
               }}
             >
               O que vamos criar hoje?
@@ -261,10 +263,10 @@ export function HomePage({
           <div
             className="rounded-2xl border transition-all focus-within:border-[rgba(255,214,10,0.45)] focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
             style={{
-              backgroundColor: "var(--color-bg-surface, #060402)",
+              backgroundColor: tokens.bgSurface,
               borderColor: error
                 ? "rgba(239,68,68,0.45)"
-                : "var(--color-border-strong, rgba(255,255,255,0.18))",
+                : tokens.borderStrong,
               boxShadow: "0 16px 48px -16px rgba(0,0,0,0.75)",
             }}
           >
@@ -283,7 +285,7 @@ export function HomePage({
               <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
                 style={{
                   borderColor:
-                    "var(--color-border-subtle, rgba(255,255,255,0.06))",
+                    tokens.divider,
                 }}
               >
                 <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -291,7 +293,7 @@ export function HomePage({
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
                     style={{
                       backgroundColor: "rgba(255,214,10,0.1)",
-                      color: "var(--color-brand, #FFD60A)",
+                      color: tokens.brand,
                     }}
                   >
                     <Paperclip className="h-3.5 w-3.5" />
@@ -299,7 +301,7 @@ export function HomePage({
                   <div className="min-w-0 flex-1">
                     <p
                       className="truncate text-[13px] font-medium"
-                      style={{ color: "var(--color-text-primary, #fff)" }}
+                      style={{ color: tokens.textPrimary }}
                     >
                       {attachedFile.name}
                     </p>
@@ -307,7 +309,7 @@ export function HomePage({
                       className="text-[11px]"
                       style={{
                         color:
-                          "var(--color-text-tertiary, rgba(255,255,255,0.6))",
+                          tokens.textTertiary,
                       }}
                     >
                       {formatFileSize(attachedFile.size)}
@@ -319,7 +321,7 @@ export function HomePage({
                   onClick={removeFile}
                   className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
                   style={{
-                    color: "var(--color-text-tertiary, rgba(255,255,255,0.6))",
+                    color: tokens.textTertiary,
                   }}
                   aria-label="Remover anexo"
                 >
@@ -341,7 +343,7 @@ export function HomePage({
               rows={3}
               disabled={isPending}
               className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-55 disabled:opacity-50"
-              style={{ color: "var(--color-text-primary, #ffffff)" }}
+              style={{ color: tokens.textPrimary }}
             />
 
             {/* Action row */}
@@ -356,14 +358,14 @@ export function HomePage({
                   className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
                   style={{
                     borderColor: attachedFile
-                      ? "var(--color-border-brand, rgba(255,214,10,0.35))"
-                      : "var(--color-border-default, rgba(255,255,255,0.12))",
+                      ? tokens.brandBorder
+                      : tokens.border,
                     backgroundColor: attachedFile
                       ? "rgba(255,214,10,0.08)"
                       : "transparent",
                     color: attachedFile
-                      ? "var(--color-brand, #FFD60A)"
-                      : "var(--color-text-primary, #ffffff)",
+                      ? tokens.brand
+                      : tokens.textPrimary,
                   }}
                   aria-label="Anexar arquivo"
                   title="Anexar imagem, PDF ou texto (até 10 MB)"
@@ -382,8 +384,8 @@ export function HomePage({
                     className="flex h-9 items-center gap-2 rounded-full border px-3 text-[13px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
                     style={{
                       borderColor:
-                        "var(--color-border-default, rgba(255,255,255,0.12))",
-                      color: "var(--color-text-primary, #ffffff)",
+                        tokens.border,
+                      color: tokens.textPrimary,
                     }}
                   >
                     <selectedModel.icon size={14} />
@@ -402,9 +404,9 @@ export function HomePage({
                         role="listbox"
                         className="absolute bottom-11 left-0 z-20 min-w-[160px] overflow-hidden rounded-xl border p-1 shadow-xl"
                         style={{
-                          backgroundColor: "var(--color-bg-elevated, #0C0804)",
+                          backgroundColor: tokens.bgElevated,
                           borderColor:
-                            "var(--color-border-default, rgba(255,255,255,0.14))",
+                            tokens.border,
                           boxShadow:
                             "0 12px 40px -12px rgba(0,0,0,0.8)",
                         }}
@@ -428,8 +430,8 @@ export function HomePage({
                                   ? "rgba(255,214,10,0.08)"
                                   : "transparent",
                                 color: selected
-                                  ? "var(--color-brand, #FFD60A)"
-                                  : "var(--color-text-primary, #ffffff)",
+                                  ? tokens.brand
+                                  : tokens.textPrimary,
                               }}
                             >
                               <Icon size={14} />
@@ -454,13 +456,13 @@ export function HomePage({
                     style={{
                       borderColor: isListening
                         ? "rgba(239,68,68,0.45)"
-                        : "var(--color-border-default, rgba(255,255,255,0.12))",
+                        : tokens.border,
                       backgroundColor: isListening
                         ? "rgba(239,68,68,0.12)"
                         : "transparent",
                       color: isListening
                         ? "#ef4444"
-                        : "var(--color-text-primary, #ffffff)",
+                        : tokens.textPrimary,
                     }}
                     aria-label={
                       isListening ? "Parar gravação" : "Gravar por áudio"
@@ -490,10 +492,10 @@ export function HomePage({
                   className="flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-30"
                   style={{
                     backgroundColor: canSubmit
-                      ? "var(--color-brand, #FFD60A)"
+                      ? tokens.brand
                       : "rgba(255,255,255,0.08)",
                     color: canSubmit
-                      ? "var(--color-text-inverse, #1A0800)"
+                      ? tokens.textInverse
                       : "rgba(255,255,255,0.4)",
                     boxShadow: canSubmit
                       ? "0 4px 12px -2px rgba(255,214,10,0.35)"
@@ -526,16 +528,15 @@ export function HomePage({
             <div
               className="absolute inset-x-0 top-1/2 h-px"
               style={{
-                background:
-                  "linear-gradient(to right, transparent, var(--color-border-subtle, rgba(255,255,255,0.08)) 20%, var(--color-border-subtle, rgba(255,255,255,0.08)) 80%, transparent)",
+                background: `linear-gradient(to right, transparent, ${tokens.divider} 20%, ${tokens.divider} 80%, transparent)`,
               }}
             />
             <div
               className="relative inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1"
               style={{
                 borderColor:
-                  "var(--color-border-subtle, rgba(255,255,255,0.1))",
-                backgroundColor: "var(--color-bg-base, #000)",
+                  tokens.divider,
+                backgroundColor: tokens.bgBase,
               }}
             >
               <TabButton
@@ -582,6 +583,7 @@ function LearnTab({
 }: {
   resources: ResourceTimelineItem[]
 }) {
+  const { tokens } = useAppTokens()
   if (resources.length === 0) {
     return (
       <EmptyState
@@ -612,7 +614,7 @@ function LearnTab({
                 className="absolute left-[9px] top-6 bottom-0 w-px"
                 style={{
                   backgroundColor:
-                    "var(--color-border-subtle, rgba(255,255,255,0.08))",
+                    tokens.divider,
                 }}
               />
             )}
@@ -620,14 +622,13 @@ function LearnTab({
               aria-hidden
               className="relative z-10 mt-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
               style={{
-                backgroundColor: "var(--color-bg-base, #000)",
-                border:
-                  "2px solid var(--color-border-brand, rgba(255,214,10,0.35))",
+                backgroundColor: tokens.bgBase,
+                border: `2px solid ${tokens.brandBorder}`,
               }}
             >
               <span
                 className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: "var(--color-brand, #FFD60A)" }}
+                style={{ backgroundColor: tokens.brand }}
               />
             </div>
             <Link
@@ -637,7 +638,7 @@ function LearnTab({
               <div className="mb-1 flex items-center gap-2">
                 <span
                   className="text-[10px] font-semibold uppercase tracking-[0.14em]"
-                  style={{ color: "var(--color-brand, #FFD60A)" }}
+                  style={{ color: tokens.brand }}
                 >
                   {resource.categoryLabel}
                 </span>
@@ -645,7 +646,7 @@ function LearnTab({
                   className="text-[10px]"
                   style={{
                     color:
-                      "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+                      tokens.textTertiary,
                   }}
                 >
                   · {formatted}
@@ -653,14 +654,14 @@ function LearnTab({
               </div>
               <h3
                 className="mb-1 text-[15px] font-semibold leading-snug transition-colors group-hover:underline"
-                style={{ color: "var(--color-text-primary, #fff)" }}
+                style={{ color: tokens.textPrimary }}
               >
                 {resource.title}
               </h3>
               <p
                 className="line-clamp-2 text-[13px] leading-[1.55]"
                 style={{
-                  color: "var(--color-text-secondary, rgba(255,255,255,0.75))",
+                  color: tokens.textSecondary,
                 }}
               >
                 {resource.description}
@@ -686,6 +687,7 @@ function TabButton({
   label: string
   badge: number
 }) {
+  const { tokens } = useAppTokens()
   return (
     <button
       type="button"
@@ -694,8 +696,8 @@ function TabButton({
       style={{
         backgroundColor: active ? "rgba(255,255,255,0.08)" : "transparent",
         color: active
-          ? "var(--color-text-primary, #ffffff)"
-          : "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+          ? tokens.textPrimary
+          : tokens.textTertiary,
       }}
     >
       {label}
@@ -704,11 +706,11 @@ function TabButton({
           className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold"
           style={{
             backgroundColor: active
-              ? "var(--color-brand, #FFD60A)"
+              ? tokens.brand
               : "rgba(255,255,255,0.12)",
             color: active
-              ? "var(--color-text-inverse, #1A0800)"
-              : "var(--color-text-secondary, rgba(255,255,255,0.7))",
+              ? tokens.textInverse
+              : tokens.textSecondary,
           }}
         >
           {badge}
@@ -719,6 +721,7 @@ function TabButton({
 }
 
 function MyProjectsTab({ projects }: { projects: Project[] }) {
+  const { tokens } = useAppTokens()
   if (projects.length === 0) {
     return (
       <EmptyState
@@ -739,16 +742,16 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
             href={`/projetos/${project.id}`}
             className="group flex items-center gap-4 rounded-xl border p-4 transition-all hover:-translate-y-0.5"
             style={{
-              backgroundColor: "var(--color-bg-surface, #060402)",
+              backgroundColor: tokens.bgSurface,
               borderColor:
-                "var(--color-border-default, rgba(255,255,255,0.1))",
+                tokens.border,
             }}
           >
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
               style={{
                 backgroundColor: "rgba(255,214,10,0.08)",
-                color: "var(--color-brand, #FFD60A)",
+                color: tokens.brand,
               }}
             >
               <Bot className="h-5 w-5" />
@@ -756,7 +759,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
             <div className="min-w-0 flex-1">
               <h3
                 className="truncate text-sm font-semibold"
-                style={{ color: "var(--color-text-primary, #ffffff)" }}
+                style={{ color: tokens.textPrimary }}
               >
                 {project.name}
               </h3>
@@ -764,7 +767,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
                 className="truncate text-xs"
                 style={{
                   color:
-                    "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+                    tokens.textTertiary,
                 }}
               >
                 Agente de WhatsApp
@@ -790,7 +793,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
       <a
         href="/projetos"
         className="mt-1 text-center text-xs transition-colors hover:underline"
-        style={{ color: "var(--color-brand, #FFD60A)" }}
+        style={{ color: tokens.brand }}
       >
         Ver todos os projetos →
       </a>
@@ -817,33 +820,34 @@ function EmptyState({
   title: string
   description: string
 }) {
+  const { tokens } = useAppTokens()
   return (
     <div
       className="flex flex-col items-center justify-center gap-3 rounded-2xl border py-14 text-center"
       style={{
-        backgroundColor: "var(--color-bg-surface, #060402)",
-        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
+        backgroundColor: tokens.bgSurface,
+        borderColor: tokens.divider,
       }}
     >
       <div
         className="flex h-12 w-12 items-center justify-center rounded-2xl"
         style={{
           backgroundColor: "rgba(255,214,10,0.08)",
-          color: "var(--color-brand, #FFD60A)",
+          color: tokens.brand,
         }}
       >
         <Icon className="h-5 w-5" />
       </div>
       <h3
         className="text-sm font-semibold"
-        style={{ color: "var(--color-text-primary, #ffffff)" }}
+        style={{ color: tokens.textPrimary }}
       >
         {title}
       </h3>
       <p
         className="max-w-sm text-xs"
         style={{
-          color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+          color: tokens.textTertiary,
         }}
       >
         {description}

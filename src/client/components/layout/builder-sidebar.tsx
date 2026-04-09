@@ -87,22 +87,25 @@ const DARK_TOKENS: SidebarTokens = {
   kbdText: "rgba(255,255,255,0.48)",
 }
 
+// Light tokens — alinhados com quayer-ds-v3.html:
+//   --color-bg-inverse:   #F5F2ED  (warm cream)
+//   --color-text-inverse: #1A0800  (dark brown-red)
 const LIGHT_TOKENS: SidebarTokens = {
-  bg: "#FAFAF7",              // off-white warm (DS v3 inverse)
-  border: "rgba(26,8,0,0.12)",
-  divider: "rgba(26,8,0,0.08)",
-  textPrimary: "#1A0800",      // text-inverse (dark red-black)
-  textSecondary: "rgba(26,8,0,0.65)",
-  textTertiary: "rgba(26,8,0,0.42)",
-  hoverBg: "rgba(26,8,0,0.04)",
-  activeBg: "rgba(255,145,0,0.12)",   // orange-ish pra não queimar os olhos como amber puro
-  activeText: "#B8540A",       // amber dark pra light bg
-  activeBorder: "rgba(184,84,10,0.55)",
-  brand: "#B8540A",            // dark amber (WCAG AA sobre #FAFAF7)
-  brandDim: "rgba(184,84,10,0.55)",
-  ctaBorder: "rgba(26,8,0,0.18)",
-  kbdBg: "rgba(26,8,0,0.06)",
-  kbdText: "rgba(26,8,0,0.55)",
+  bg: "#F5F2ED",              // DS v3 --color-bg-inverse
+  border: "rgba(26,8,0,0.14)",
+  divider: "rgba(26,8,0,0.10)",
+  textPrimary: "#1A0800",      // DS v3 --color-text-inverse
+  textSecondary: "rgba(26,8,0,0.68)",
+  textTertiary: "rgba(26,8,0,0.45)",
+  hoverBg: "rgba(26,8,0,0.05)",
+  activeBg: "rgba(232,64,0,0.10)",   // orange brand subtle
+  activeText: "#9A3D08",       // dark amber/orange — passa AAA em #F5F2ED
+  activeBorder: "rgba(154,61,8,0.55)",
+  brand: "#9A3D08",            // dark amber pra contraste em fundo claro
+  brandDim: "rgba(154,61,8,0.55)",
+  ctaBorder: "rgba(26,8,0,0.20)",
+  kbdBg: "rgba(26,8,0,0.07)",
+  kbdText: "rgba(26,8,0,0.60)",
 }
 
 /**
@@ -165,7 +168,7 @@ export function BuilderSidebar({
           className="flex items-center transition-opacity hover:opacity-90"
           aria-label="Quayer"
         >
-          <Logo size={24} variant="color" />
+          <Logo size={24} variant={isLight ? "light" : "color"} />
         </Link>
         {onToggle && (
           <button
