@@ -734,6 +734,15 @@
     display: none !important;
   }
 
+  /* Breadcrumbs legados das páginas /admin/*: cada uma tinha header
+     com 'Administração > X'. A AdminNav já dá contexto suficiente
+     (logo, tag 'Admin', item ativo). Esconder o primeiro <header>
+     direto dentro do main container. */
+  [data-app-v3="true"] main > header:first-child,
+  [data-app-v3="true"] main > div > header:first-child {
+    display: none !important;
+  }
+
   /* Cards legados ganham um leve destaque de borda e hover lift */
   [data-app-v3="true"] [data-slot="card"] {
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
