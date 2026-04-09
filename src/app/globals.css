@@ -604,68 +604,95 @@
    Envolvido em @layer utilities porque Tailwind v4 strippa regras raw.
    ============================================================ */
 @layer utilities {
+  /* Dark theme (default) — shadcn token overrides pra tom v3 */
   [data-app-v3="true"] {
-    /* Core surfaces */
-    --background: var(--color-bg-base);
-    --foreground: var(--color-text-primary);
-    --card: var(--color-bg-surface);
-    --card-foreground: var(--color-text-primary);
-    --popover: var(--color-bg-elevated);
-    --popover-foreground: var(--color-text-primary);
+    --background: #000000;
+    --foreground: #ffffff;
+    --card: #060402;
+    --card-foreground: #ffffff;
+    --popover: #0c0804;
+    --popover-foreground: #ffffff;
 
-    /* Brand → primary */
-    --primary: var(--color-brand);
-    --primary-foreground: var(--color-text-inverse);
+    --primary: #ffd60a;
+    --primary-foreground: #1a0800;
 
-    /* Neutral surfaces */
-    --secondary: var(--color-bg-elevated);
-    --secondary-foreground: var(--color-text-primary);
-    --muted: var(--color-bg-elevated);
-    --muted-foreground: var(--color-text-secondary);
-    --accent: var(--color-brand-subtle);
-    --accent-foreground: var(--color-brand);
+    --secondary: #0c0804;
+    --secondary-foreground: #ffffff;
+    --muted: #0c0804;
+    --muted-foreground: rgba(255, 255, 255, 0.72);
+    --accent: rgba(255, 214, 10, 0.12);
+    --accent-foreground: #ffd60a;
 
-    /* Status */
-    --destructive: var(--color-error);
+    --destructive: #ef4444;
     --destructive-foreground: #ffffff;
 
-    /* Borders + inputs + ring */
-    --border: var(--color-border-default);
-    --input: var(--color-border-default);
-    --ring: var(--color-brand);
+    --border: rgba(255, 255, 255, 0.12);
+    --input: rgba(255, 255, 255, 0.12);
+    --ring: #ffd60a;
 
-    /* Sidebar (shadcn internal — usado por SidebarProvider wrapper) */
-    --sidebar: var(--color-bg-base);
-    --sidebar-foreground: var(--color-text-primary);
-    --sidebar-primary: var(--color-brand);
-    --sidebar-primary-foreground: var(--color-text-inverse);
-    --sidebar-accent: var(--color-brand-subtle);
-    --sidebar-accent-foreground: var(--color-brand);
-    --sidebar-border: var(--color-border-subtle);
-    --sidebar-ring: var(--color-brand);
+    --sidebar: #0b0704;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #ffd60a;
+    --sidebar-primary-foreground: #1a0800;
+    --sidebar-accent: rgba(255, 214, 10, 0.10);
+    --sidebar-accent-foreground: #ffd60a;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-ring: #ffd60a;
 
-    /* Tipografia */
-    font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+    font-family: var(--font-sans), "DM Sans", system-ui, sans-serif;
   }
 
-  /* Tabelas legadas — herdam background transparente e border do tema */
+  /* Light theme — overrides quando html.light (next-themes) */
+  html:not(.dark) [data-app-v3="true"] {
+    --background: #f5f2ed;
+    --foreground: #1a0800;
+    --card: #ffffff;
+    --card-foreground: #1a0800;
+    --popover: #ffffff;
+    --popover-foreground: #1a0800;
+
+    --primary: #9a3d08;
+    --primary-foreground: #ffffff;
+
+    --secondary: #f5f2ed;
+    --secondary-foreground: #1a0800;
+    --muted: #eeeae3;
+    --muted-foreground: rgba(26, 8, 0, 0.65);
+    --accent: rgba(154, 61, 8, 0.10);
+    --accent-foreground: #9a3d08;
+
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+
+    --border: rgba(26, 8, 0, 0.14);
+    --input: rgba(26, 8, 0, 0.14);
+    --ring: #9a3d08;
+
+    --sidebar: #f5f2ed;
+    --sidebar-foreground: #1a0800;
+    --sidebar-primary: #9a3d08;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: rgba(154, 61, 8, 0.08);
+    --sidebar-accent-foreground: #9a3d08;
+    --sidebar-border: rgba(26, 8, 0, 0.10);
+    --sidebar-ring: #9a3d08;
+  }
+
+  /* Table e headings (não dependem de tema — usam vars) */
   [data-app-v3="true"] table {
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
   [data-app-v3="true"] thead {
-    color: var(--color-text-tertiary);
+    color: var(--muted-foreground);
   }
 
-  /* Inputs/textareas/selects nativos (não-shadcn) */
-  [data-app-v3="true"] input:not([type="checkbox"]):not([type="radio"]),
-  [data-app-v3="true"] textarea,
-  [data-app-v3="true"] select {
-    background-color: var(--color-bg-elevated);
-    color: var(--color-text-primary);
-    border-color: var(--color-border-default);
-  }
+  /* REMOVIDO: o override hardcoded de input/textarea/select que forçava
+     background-color: var(--color-bg-elevated) (sempre #0C0804 dark).
+     Agora cada componente controla seu próprio bg via useAppTokens
+     ou via classes shadcn que leem var(--input), var(--card), etc —
+     e essas vars JÁ SWAPPAM com tema acima. */
 
-  /* Scrollbar dark em navegadores WebKit */
+  /* Scrollbar — cores por tema via variables shadcn */
   [data-app-v3="true"] ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -674,11 +701,11 @@
     background: transparent;
   }
   [data-app-v3="true"] ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border);
     border-radius: 8px;
   }
   [data-app-v3="true"] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--muted-foreground);
   }
 
   /* Headings usam DM Sans automático */
