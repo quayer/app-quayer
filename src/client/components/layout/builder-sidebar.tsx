@@ -1,5 +1,20 @@
 import Link from "next/link"
-import { Plus, FolderKanban, Settings, Shield } from "lucide-react"
+import {
+  Plus,
+  FolderKanban,
+  Settings,
+  Shield,
+  MessagesSquare,
+  Plug,
+  Bot,
+  FileText,
+  Megaphone,
+  Wrench,
+  ShieldCheck,
+  ChevronDown,
+  Users,
+  Contact,
+} from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 
 interface BuilderSidebarProject {
@@ -14,13 +29,20 @@ interface BuilderSidebarProps {
 }
 
 /**
- * BuilderSidebar — US-020 + v3 design tokens
+ * BuilderSidebar — v3 design tokens
  *
- * Sidebar principal do Quayer Builder usada em TODAS as rotas autenticadas
- * via <AppShell>. Segue o DS v3 (quayer-ds-v3.html): fundo #000, texto branco,
- * DM Sans, acentos ambar/laranja.
+ * Sidebar principal do Quayer usada em TODAS as rotas autenticadas via
+ * <AppShell>. Segue o DS v3 (quayer-ds-v3.html): fundo #000, texto branco,
+ * DM Sans, acentos ambar.
  *
- * Visível apenas em telas >= lg (1024px). Mobile terá drawer em etapa futura.
+ * Seções:
+ *  - Hero: + Novo projeto (CTA amber)
+ *  - Meus projetos (últimos 7 builder projects)
+ *  - Workspace (links principais da operação)
+ *  - Admin (colapsível — só para super_admin)
+ *  - Footer: Segurança
+ *
+ * Visível apenas em telas >= lg (1024px). Mobile drawer = etapa futura.
  */
 export function BuilderSidebar({
   recentProjects,
@@ -35,11 +57,12 @@ export function BuilderSidebar({
       style={{
         backgroundColor: "var(--color-bg-base, #000000)",
         color: "var(--color-text-primary, #ffffff)",
-        borderRight: "1px solid var(--color-border-subtle, rgba(255,255,255,0.06))",
+        borderRight:
+          "1px solid var(--color-border-subtle, rgba(255,255,255,0.06))",
         fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
-      {/* Header — logo Q-bolt */}
+      {/* Header — logo */}
       <div className="flex h-16 items-center px-6">
         <Link
           href="/"
@@ -50,15 +73,16 @@ export function BuilderSidebar({
         </Link>
       </div>
 
-      {/* Novo projeto */}
-      <div className="px-4 pb-5 pt-2">
+      {/* CTA Novo projeto */}
+      <div className="px-4 pb-4 pt-1">
         <Link
           href="/"
           className="group flex h-11 w-full items-center justify-between gap-2 rounded-lg px-4 text-sm font-semibold transition-all"
           style={{
             backgroundColor: "var(--color-brand, #FFD60A)",
             color: "var(--color-text-inverse, #1A0800)",
-            boxShadow: "0 0 0 1px var(--color-border-brand-strong, rgba(255,214,10,0.35))",
+            boxShadow:
+              "0 0 0 1px var(--color-border-brand-strong, rgba(255,214,10,0.35))",
           }}
         >
           <span className="flex items-center gap-2">
@@ -78,21 +102,16 @@ export function BuilderSidebar({
         </Link>
       </div>
 
-      {/* Meus projetos */}
-      <div className="flex-1 overflow-y-auto px-2">
-        <div className="px-4 pb-2 pt-1">
-          <h3
-            className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-            style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.4))" }}
-          >
-            Meus projetos
-          </h3>
-        </div>
-
+      {/* Scrollable nav */}
+      <div className="flex-1 overflow-y-auto px-2 pb-2">
+        {/* Seção: Meus projetos */}
+        <SectionLabel>Meus projetos</SectionLabel>
         {visibleProjects.length === 0 ? (
           <p
-            className="px-4 py-2 text-xs"
-            style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.4))" }}
+            className="px-4 py-1.5 text-xs"
+            style={{
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+            }}
           >
             Nenhum projeto ainda.
           </p>
@@ -100,52 +119,209 @@ export function BuilderSidebar({
           <ul className="flex flex-col gap-0.5">
             {visibleProjects.map((project) => (
               <li key={project.id}>
-                <Link
+                <NavItem
                   href={`/projetos/${project.id}`}
-                  className="flex items-center gap-2.5 rounded-md px-4 py-2 text-sm transition-colors"
-                  style={{
-                    color: "var(--color-text-secondary, rgba(255,255,255,0.55))",
-                  }}
-                  onMouseEnter={undefined}
-                >
-                  <FolderKanban
-                    className="h-4 w-4 shrink-0"
-                    style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.4))" }}
-                  />
-                  <span className="truncate">{project.name}</span>
-                </Link>
+                  icon={FolderKanban}
+                  label={project.name}
+                />
               </li>
             ))}
           </ul>
         )}
-
-        <div className="px-4 pt-2">
+        <div className="px-4 pt-1 pb-3">
           <Link
             href="/projetos"
-            className="text-xs transition-colors"
-            style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.4))" }}
+            className="text-xs transition-colors hover:underline"
+            style={{
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+            }}
           >
             ver todos →
           </Link>
         </div>
+
+        {/* Seção: Workspace */}
+        <SectionLabel>Workspace</SectionLabel>
+        <ul className="flex flex-col gap-0.5 pb-3">
+          <li>
+            <NavItem
+              href="/conversas"
+              icon={MessagesSquare}
+              label="Conversas"
+            />
+          </li>
+          <li>
+            <NavItem
+              href="/contatos"
+              icon={Contact}
+              label="Contatos"
+            />
+          </li>
+          <li>
+            <NavItem href="/integracoes" icon={Plug} label="Conexões" />
+          </li>
+          <li>
+            <NavItem
+              href="/integracoes/agents"
+              icon={Bot}
+              label="Agentes IA"
+            />
+          </li>
+          <li>
+            <NavItem
+              href="/integracoes/settings/templates"
+              icon={FileText}
+              label="Templates"
+            />
+          </li>
+          <li>
+            <NavItem
+              href="/integracoes/settings/campaigns"
+              icon={Megaphone}
+              label="Campanhas"
+            />
+          </li>
+          <li>
+            <NavItem href="/ferramentas" icon={Wrench} label="Ferramentas" />
+          </li>
+        </ul>
+
+        {/* Seção: Admin (colapsível, só super) */}
+        {isSuperAdmin && (
+          <details
+            className="group pb-3"
+            style={{
+              borderTop:
+                "1px solid var(--color-border-subtle, rgba(255,255,255,0.06))",
+              paddingTop: "12px",
+              marginTop: "4px",
+            }}
+          >
+            <summary
+              className="flex cursor-pointer select-none items-center justify-between rounded-md px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors"
+              style={{
+                color: "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+                listStyle: "none",
+              }}
+            >
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="h-3 w-3" />
+                Admin
+              </span>
+              <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+            </summary>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              <li>
+                <NavItem href="/admin" icon={Shield} label="Dashboard" />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/organizations"
+                  icon={Users}
+                  label="Organizações"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/integracoes"
+                  icon={Plug}
+                  label="Conexões"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/sessions"
+                  icon={MessagesSquare}
+                  label="Sessões"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/invitations"
+                  icon={FileText}
+                  label="Convites"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/notificacoes"
+                  icon={Megaphone}
+                  label="Notificações"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/audit"
+                  icon={FileText}
+                  label="Auditoria"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/billing"
+                  icon={FileText}
+                  label="Cobrança"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/security"
+                  icon={Shield}
+                  label="Segurança"
+                />
+              </li>
+              <li>
+                <NavItem
+                  href="/admin/settings"
+                  icon={Settings}
+                  label="Configurações"
+                />
+              </li>
+            </ul>
+          </details>
+        )}
       </div>
 
-      {/* Footer — navegação secundária */}
+      {/* Footer — user settings */}
       <div
         className="mt-auto flex flex-col gap-0.5 border-t p-3"
-        style={{ borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))" }}
+        style={{
+          borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
+        }}
       >
-        <SidebarLink href="/user/seguranca" icon={Settings} label="Configurações" />
-        <SidebarLink href="/integracoes" icon={FolderKanban} label="Integrações" />
-        {isSuperAdmin && (
-          <SidebarLink href="/admin" icon={Shield} label="Admin" />
-        )}
+        <NavItem
+          href="/integracoes/settings"
+          icon={Settings}
+          label="Configurações da org"
+        />
+        <NavItem
+          href="/user/seguranca"
+          icon={Shield}
+          label="Minha segurança"
+        />
       </div>
     </aside>
   )
 }
 
-function SidebarLink({
+// ---------- helpers ----------
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-4 pb-1.5 pt-2">
+      <h3
+        className="text-[10px] font-semibold uppercase tracking-[0.12em]"
+        style={{
+          color: "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+        }}
+      >
+        {children}
+      </h3>
+    </div>
+  )
+}
+
+function NavItem({
   href,
   icon: Icon,
   label,
@@ -157,14 +333,18 @@ function SidebarLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors"
-      style={{ color: "var(--color-text-secondary, rgba(255,255,255,0.55))" }}
+      className="flex items-center gap-2.5 rounded-md px-4 py-2 text-sm transition-colors hover:bg-white/5"
+      style={{
+        color: "var(--color-text-secondary, rgba(255,255,255,0.55))",
+      }}
     >
       <Icon
-        className="h-4 w-4"
-        style={{ color: "var(--color-text-tertiary, rgba(255,255,255,0.4))" }}
+        className="h-4 w-4 shrink-0"
+        style={{
+          color: "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+        }}
       />
-      {label}
+      <span className="truncate">{label}</span>
     </Link>
   )
 }
