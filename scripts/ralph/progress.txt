@@ -1,66 +1,73 @@
-## Codebase Patterns
+# Ralph Progress — quayer-builder
 
-- **Auth modules:** src/server/core/auth/ (backend), src/client/components/auth/ (frontend v2)
-- **Auth passwordless only:** endpoints register/login-password/forgot/reset REMOVIDOS; magic-link KEEP (wired em email gen auth.controller.ts:1279,1516,1559)
-- **Padrao Igniter:** controller -> actions (query/mutation) -> handler com authProcedure
-- **Schema Prisma:** models Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
-- **Cookie name:** auth usa accessToken (nao access_token)
-- **Client components:** NUNCA importar @/lib/auth (barrel) em 'use client' — usar @/lib/auth/auth-provider direto
+**Branch:** `ralph/quayer-builder`
+**PRD:** `tasks/prd-quayer-builder.md`
+**Architecture:** `specs/home-chat-builder/architecture-v5.md`
+**Started:** 2026-04-08
 
-## Infra de teste (Release 1 commits 3f12ac5..02f1201)
+## Codebase patterns (reference before implementing)
 
-5 camadas: static (husky+static.yml), unit backend (66 cases), unit react (33 GREEN), api integration (direct invocation via nextRouteHandlerAdapter, postgres :5433), contract (bootstrap mode), e2e playwright 3-projects.
-Helpers: test/api/db.ts (withTransaction+RollbackSentinel), test/e2e/auth/helpers.ts (getLatestOtp, generateTestEmail).
-Workflows CI: static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml.
-Skills: testing-pipeline.md, release-checklist.md. CLAUDE.md atualizado.
+- **Auth modules:** `src/server/core/auth/` (backend), `src/client/components/auth/` (frontend v3 already done)
+- **AI agents:** `src/server/ai-module/ai-agents/` has CRUD + runtime + 6 builtin tools (transfer_to_human, pause_session, notify_team, schedule_callback, create_lead, search_contacts) — **Builder reuses 100%**
+- **Communication:** `src/server/communication/` has instances (QR + share link), campaigns, templates — reuse
+- **Igniter pattern:** controller → actions (query/mutation) → handler with `authProcedure`
+- **Prisma schema:** `prisma/schema.prisma` (migrations need founder approval)
+- **Cookie name:** auth uses `accessToken` (not `access_token`)
+- **Client components:** NEVER import `@/lib/auth` (barrel) in `use client` — use `@/lib/auth/auth-provider` direct
+- **Design tokens:** `quayer-ds-v3.html` is source of truth; tokens currently scoped in `[data-auth-v3="true"]` → US-017 migrates to `:root` global
+- **Testing pipeline (Release 1):** static, unit backend, unit react, api integration, contract, e2e playwright 3-projects
+- **Feature flags:** pattern established in Release 3 (`docs/auth/FEATURE_FLAGS.md`)
 
-## Release 2 Phase A (commit 278c1f0)
+## Key decisions from founder (do not re-debate)
 
-Instrumentacao de 5 rotas candidatas com logger src/lib/auth/cleanup-audit-logger.ts (SHA256 IP hash).
-**CRITICAL:** /login/verify-magic e /signup/verify-magic NAO sao legacy — wired em email gen. Reclassificadas STRONG KEEP.
-Soh 3 candidatos validos: /register, /forgot-password, /reset-password. BLOQUEADO 14d para decisao (Phase B).
-docs/auth/CLEANUP_AUDIT.md tem mapa completo de referencias.
+1. **Scope v1 = só Agente IA** (1A) — templates/ferramentas/campanhas vão pro backlog
+2. **Validação com users já feita** — pula fase de discovery
+3. **Tokens v3 globais** (3D) — migrar de `[data-auth-v3]` pra `:root`
+4. **Claude Sonnet default + fallback auto** (4C) — BYOK só enterprise
+5. **Design refactor completo** — fases J (/configuracoes/*) + K (/admin/*) fazem reskin visual seguindo padrão `(auth)/*`
+6. **Sticky versioning** (Opção C) — conversas ativas seguem versão antiga até silenciar 24h
+7. **Versões = só prompt** — não snapshot do agente inteiro
+8. **Builder AI = um agente Quayer** — vive em `ai-module/ai-agents` com tools especializadas
+9. **CRM off** — sidebar hidden, backend preservado (feature flag FEATURE_CRM_ENABLED default false)
+10. **Admin preservado** — todas as rotas `/admin/*` mantidas (user decision)
 
-## Release 3 — Auth Rebrand v3 (ATUAL)
+## Ralph rules (critical)
 
-**Prereqs confirmados:**
-- quayer-ds-v3.html existe na raiz (source do DS)
-- imagem/Gemini_Generated_Image_ua01asua01asua01.png existe (hero da login)
-- Storybook NAO instalado — usar rota dev /dev/ds-showcase
-- public/images/ NAO existe — criar em US-302
+- **1 story per iteration** — don't bundle multiple
+- **Stop immediately if story seems too big** — report it, don't half-complete
+- **Check `git status` before starting** — must be clean
+- **Run typecheck after every change** — `npx tsc --noEmit`
+- **Migrations need founder approval** — stop and ask before `prisma migrate`
+- **Never edit `src/igniter.client.ts` or `src/igniter.schema.ts`** — auto-generated
+- **UI stories:** verify in browser using dev-browser skill before marking passes=true
+- **Tests pass:** `npm run test:all` must be green before marking passes=true
+- **One iteration = one story** — if story has subtasks, split into multiple stories (update PRD)
 
-**Arquivos que NAO devem ser tocados:**
-- src/igniter.client.ts, src/igniter.schema.ts (auto-generados)
-- src/client/components/auth/*v2* (codigo v2 atual — dual-render preserva)
-- Backend de auth (FR-3)
-- middleware.ts (exceto talvez adicionar /dev/ds-showcase protection)
+## Current state
 
-**Escopo desta sessao:**
-- Executar: Phase A (301-305), Phase B (306-312), Phase C (313-315), Phase D parcial (316, 318)
-- BLOQUEADO: US-317 (perf em homol, precisa deploy), US-319-322 (rollout 0->10->50->100, precisa prod + janelas 48h/7d/30d)
+- Zero stories started.
+- Foundation phase (A) is first: schemas + endpoints.
+- Builder AI phase (B) depends on A.
+- Design Tokens phase (C) depends on A (US-017 is critical for all subsequent UI).
+- Frontend phase (D) depends on A, B, C.
+- Phase J and K (refactor) depend on C (tokens must be global first).
 
-**CSS isolation critica:** tokens v3 via [data-auth-v3="true"] — NAO global, evita vazar para dashboard.
-**LCP critico:** next/image do hero com priority=true.
-**next/font:** DM Sans + DM Mono apenas no layout de auth, nao global.
-**Dual-render:** paginas verificam isAuthV3Enabled() no server component e renderizam v2 OU v3.
-**Contract preservation:** formularios v3 chamam MESMOS endpoints que v2 (contract tests da Release 1 garantem).
+## Execution order (phases)
 
-## Rotas ativas pos-cleanup (para Release 3)
+1. **Phase A** (US-001 to US-007) — Schema + endpoints — 7 stories
+2. **Phase B** (US-008 to US-016) — Builder AI + tools — 9 stories
+3. **Phase C** (US-017 to US-019) — Design tokens global — 3 stories
+4. **Phase D** (US-020 to US-028) — Frontend Builder — 9 stories
+5. **Phase E** (US-029 to US-030) — Sticky versioning runtime — 2 stories
+6. **Phase F** (US-031 to US-033) — Mobile + A11y — 3 stories
+7. **Phase G** (US-034 to US-037) — Migration + cleanup — 4 stories
+8. **Phase H** (US-038 to US-039) — Feature flag + rollout — 2 stories
+9. **Phase I** (US-040 to US-043) — Tests — 4 stories
+10. **Phase J** (US-044 to US-055) — Refactor /configuracoes/* — 12 stories
+11. **Phase K** (US-056 to US-066) — Refactor /admin/* — 11 stories
 
-- /login, /login/verify, /login/verify-magic
-- /signup, /signup/verify, /signup/verify-magic
-- /verify-email
-- /onboarding
-- /google-callback (auditar em US-312)
-
-## Regras duras
-
-- Zero any, TypeScript strict
-- FR-3 Release 3: ZERO mudanca no backend de auth
-- Zod em todos os inputs client
-- Escopar tokens v3 via [data-auth-v3]
-- LCP image priority=true no hero
+**Total: 66 stories across 11 phases.**
 
 ---
 
-<!-- Iteracoes do Ralph entram abaixo desta linha -->
+## Iteration log (Ralph appends here after each story)

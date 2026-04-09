@@ -1,321 +1,1189 @@
 {
   "project": "Quayer",
-  "branchName": "ralph/auth-rebrand-v3",
-  "description": "Release 3 — Auth Rebrand v3 com DS v3 (quayer-ds-v3.html) atras de feature flag NEXT_PUBLIC_AUTH_V3. Dual-render v2/v3, rollout gradual. SCOPO executavel: Phase A (infra) + B (paginas) + C (docs) + parte de D (a11y/review). BLOQUEADO nesta sessao: US-317 (perf em homol), US-319-322 (rollout precisa deploy prod + janelas 48h/7d/30d). Fonte: tasks/prd-03-auth-rebrand-v3.md",
+  "branchName": "ralph/quayer-builder",
+  "description": "Quayer Builder MVP v1 — interface conversacional pra criar agentes IA (chat + preview estilo Claude Artifacts/v0.dev) + refactor de design v3 em todas as páginas /configuracoes/* e /admin/* seguindo padrão auth login. Reutiliza backend ai-module/ai-agents 100%. Source: tasks/prd-quayer-builder.md",
   "userStories": [
     {
-      "id": "US-301",
-      "title": "Feature flag NEXT_PUBLIC_AUTH_V3 (off/percentage/on)",
-      "description": "Como dev, preciso de um mecanismo para alternar v2/v3 sem redeploy, com hash deterministico por userId.",
+      "id": "US-001",
+      "title": "Schema: tabela projects polimórfica",
+      "description": "As a developer, I need a projects table to wrap ai_agent_configs with project metadata.",
       "acceptanceCriteria": [
-        "Criar src/lib/feature-flags/auth-v3.ts exportando isAuthV3Enabled(userId?: string): boolean",
-        "Valores aceitos em NEXT_PUBLIC_AUTH_V3: 'off' | 'percentage:N' (0-100) | 'on'",
-        "'off' retorna sempre false",
-        "'percentage:N' retorna true se hash(userId || cookieId) % 100 < N (hash SHA256 estavel)",
-        "'on' retorna sempre true",
-        "Cookie 'auth-v3-override=on' forca true (para QA)",
-        "Unit test em test/unit/feature-flags/auth-v3.test.ts validando distribuicao (N=10 em 10k amostras deve dar ~10%)",
-        "docs/auth/FEATURE_FLAGS.md documentando valores, uso e exemplo de rollout 0->10->50->100",
-        "Typecheck passa"
+        "Add Prisma model Project: id, organizationId, userId, type (enum 'ai_agent'), name, status (enum draft|production|paused|archived), aiAgentId (FK nullable), createdAt, updatedAt, archivedAt",
+        "Indexes: (organizationId, type, status), (userId, updatedAt desc), (archivedAt) where null",
+        "1:1 relation with AIAgentConfig via aiAgentId nullable FK",
+        "Generate and run migration successfully",
+        "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "DONE Wave 1 (commit f88a268). src/lib/feature-flags/auth-v3.ts isAuthV3Enabled com SHA256 hash estavel. Valores off|percentage:N|on. Override cookie auth-v3-override. 14 test cases incluindo distribution bounds (percentage:50 n=10k em [4500,5500]). docs/auth/FEATURE_FLAGS.md."
+      "passes": false,
+      "notes": "First schema change. Foundation for all subsequent stories. See tasks/prd-quayer-builder.md US-001."
     },
     {
-      "id": "US-302",
-      "title": "Copiar imagem hero para public/images/auth/",
-      "description": "Imagem da marca precisa estar acessivel via Next.js.",
+      "id": "US-002",
+      "title": "Schema: project_conversations and project_messages",
+      "description": "As a developer, I need tables to persist Builder AI conversation with context summary.",
       "acceptanceCriteria": [
-        "Criar pasta public/images/auth/",
-        "Copiar imagem/Gemini_Generated_Image_ua01asua01asua01.png para public/images/auth/login-hero.png",
-        "Documentar em docs/auth/ASSETS.md: path, dimensoes (abrir o PNG e ler), intencao (hero da login), responsividade (some <768px)",
-        "Adicionar nota sobre conversao WebP (nao obrigatoria no Ralph — pode ficar como TODO)",
-        "Pasta imagem/ preservada, original nao deletado"
+        "Add Prisma model ProjectConversation: id, projectId (unique 1:1), organizationId, userId, stateSummary (text), lastMessageAt, createdAt",
+        "Add Prisma model ProjectMessage: id, conversationId (FK), role (enum user|assistant|tool|system_banner), content (text), toolCalls (jsonb nullable), metadata (jsonb), createdAt",
+        "Index (conversationId, createdAt) on messages",
+        "Generate and run migration successfully",
+        "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "DONE Wave 1 (commit f88a268). public/images/auth/login-hero.png copiada (1952x2176, 6.81 MB — LCP CRITICAL TODO, precisa WebP <150KB antes de US-319). docs/auth/ASSETS.md com TODO de otimizacao."
+      "passes": false,
+      "notes": "Depends on US-001. See PRD US-002."
     },
     {
-      "id": "US-303",
-      "title": "Extrair tokens DS v3 para globals.css + Tailwind + next/font",
-      "description": "Tokens do design system disponiveis, escopados ao layout de auth via [data-auth-v3].",
+      "id": "US-003",
+      "title": "Schema: prompt_versions table",
+      "description": "As a developer, I need linear prompt versioning tied directly to ai_agent_configs.",
       "acceptanceCriteria": [
-        "Ler quayer-ds-v3.html e extrair os tokens --p-*, --color-*, --space-*, --radius-*, --text-*, --gradient-*",
-        "Adicionar block [data-auth-v3='true'] { ... } em src/app/globals.css com todos os tokens — NAO aplicar globalmente",
-        "Estender tailwind.config.ts com tokens semanticos (cores, spacing, radius) usando os CSS vars",
-        "Importar fontes DM Sans + DM Mono via next/font/google apenas em src/app/(auth)/layout.tsx (nao no layout global)",
-        "next/font com subsets: ['latin'] e display: 'swap'",
-        "src/app/(auth)/layout.tsx seta data-auth-v3='true' no wrapper div condicionalmente via isAuthV3Enabled()",
-        "Typecheck + lint passam"
+        "Add Prisma model PromptVersion: id, aiAgentId (FK), versionNumber (int), content (text), description (text optional), createdBy (enum chat|manual), publishedAt (nullable), publishedBy (nullable), createdAt",
+        "Unique constraint on (aiAgentId, versionNumber)",
+        "Helper method getNextVersionNumber(agentId) in repository",
+        "Generate and run migration",
+        "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "DONE Wave 1 (commit f88a268). ~125 tokens extraidos de quayer-ds-v3.html para [data-auth-v3=\"true\"] em globals.css. tailwind.config.ts criado com ds-* prefix. DM_Sans+DM_Mono via next/font/google no (auth)/layout.tsx. Layout agora async server component que le cookies e seta data-auth-v3 conditionalmente. --shadow-icon mantido como drop-shadow filter (CSS var only)."
+      "passes": false,
+      "notes": "See PRD US-003."
     },
     {
-      "id": "US-304",
-      "title": "Componentes DS v3 primitivos em src/client/components/ds/",
-      "description": "Biblioteca de componentes base do DS v3 com unit tests e showcase.",
+      "id": "US-004",
+      "title": "Schema: add pinnedAgentVersion to whatsapp_conversations",
+      "description": "As a developer, I need sticky versioning per conversation so deploying new agent versions doesn't break active client chats.",
       "acceptanceCriteria": [
-        "Criar src/client/components/ds/ com: button.tsx, input.tsx, otp-input.tsx, logo.tsx, card.tsx, toast.tsx",
-        "button.tsx: variants primary/secondary/ghost, states default/hover/disabled/loading, forwardRef, Tipos Props exportados",
-        "input.tsx: label prop, helper, error, :focus-visible, forwardRef",
-        "otp-input.tsx: 6 digitos, auto-advance entre slots, paste aceita codigo completo, onComplete callback",
-        "logo.tsx: SVG inline com gradient --gradient-icon, aceita size prop",
-        "card.tsx: wrapper com radius + shadow tokens",
-        "toast.tsx: tipos info/success/error/warning, com dismiss",
-        "Cada componente tem unit test em test/unit/react/ds/*.test.tsx cobrindo render + interacoes basicas",
-        "Criar rota dev src/app/dev/ds-showcase/page.tsx que renderiza todos os componentes em todos os states (proteger com NODE_ENV !== 'production' no middleware ou redirect 404)",
-        "Zero any, tipagem estrita",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill (rota /dev/ds-showcase em 1440px)"
+        "Identify correct WhatsApp conversations table in src/server/communication/ module",
+        "Add column pinnedAgentVersion (int nullable)",
+        "Index on (pinnedAgentVersion)",
+        "Backfill migration: set pinnedAgentVersion to current production version for existing conversations",
+        "Migration is reversible",
+        "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "DONE Wave 1 (commit f88a268). 6 componentes DS primitivos em src/client/components/ds/ (button, input, otp-input, logo, card, toast). 25 tests total. /dev/ds-showcase route com notFound() em producao. Zero any, forwardRef onde aplicavel, Props types exportados."
+      "passes": false,
+      "notes": "Sticky versioning. See PRD US-004."
     },
     {
-      "id": "US-305",
-      "title": "AuthShell component com imagem lateral",
-      "description": "Layout compartilhado que inclui imagem a direita em breakpoints grandes.",
+      "id": "US-005",
+      "title": "Endpoint POST /api/v1/projetos/novo",
+      "description": "As a frontend, I need an endpoint to create a new project + conversation from initial prompt.",
       "acceptanceCriteria": [
-        "Criar src/client/components/auth/auth-shell.tsx",
-        "Renderiza children (form) a esquerda",
-        "Lado direito: next/image com fill + object-cover apontando para /images/auth/login-hero.png",
-        "Priority=true no next/image (LCP)",
-        "ZERO texto sobre imagem",
-        "Responsivo: lado direito some em < 768px (class hidden md:block)",
-        "Aceita prop showImage (default true) para caso de alguma rota nao querer",
-        "Test React em test/unit/react/auth/auth-shell.test.tsx cobrindo render com e sem imagem",
-        "Typecheck passa",
-        "Verify in browser using dev-browser skill (1440px mostra imagem, 375px esconde)"
+        "Create src/server/ai-module/builder/builder.controller.ts (new module)",
+        "Endpoint POST /api/v1/projetos/novo via Igniter.js",
+        "Body Zod schema: { prompt: string (3-2000 chars), type: 'ai_agent' }",
+        "Creates Project with status 'draft' (no agent yet)",
+        "Creates ProjectConversation 1:1",
+        "Creates first ProjectMessage with user role + prompt",
+        "Uses authProcedure({ required: true }) + filters by organizationId",
+        "Returns { projectId, conversationId }",
+        "Unit test covers valid prompt, too-short prompt, no active org",
+        "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "DONE Wave 2 — auth-shell.tsx server component, bg-ds-bg + bg-gray-50 fallback, next/image priority=true. 3 tests."
+      "passes": false,
+      "notes": "See PRD US-005."
     },
     {
-      "id": "US-306",
-      "title": "/login v3 dual-render atras da flag",
-      "description": "Tela de login com DS v3 quando flag ativa.",
+      "id": "US-006",
+      "title": "Endpoint streaming POST /api/v1/projetos/[id]/chat/message",
+      "description": "As a frontend, I need a streaming endpoint for Builder AI chat messages with tool calling.",
       "acceptanceCriteria": [
-        "src/app/(auth)/login/page.tsx verifica isAuthV3Enabled() no server component",
-        "Se ativo: renderiza novo <LoginFormV3 /> dentro de <AuthShell />",
-        "Se inativo: renderiza codigo atual sem mudanca",
-        "src/client/components/auth/login-form-v3.tsx novo — usa DS primitives (input, button, logo)",
-        "Form chama os MESMOS endpoints que v2 (api.auth.loginOTP.mutate)",
-        "Unit test em test/unit/react/auth/login-form-v3.test.tsx",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill (flag forcada via cookie)"
+        "Endpoint Igniter.js with streaming response",
+        "Body Zod: { content: string }",
+        "Validates projectId belongs to user's organizationId",
+        "Calls agent-runtime.service.ts from ai-module/ai-agents with Builder AI config",
+        "Builder AI receives: stateSummary + last 10 messages + new message",
+        "Tool calls executed via ai-module runtime",
+        "Streams response chunks to client",
+        "After turn completes, updates stateSummary in project_conversations",
+        "Unit test covers basic flow",
+        "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "DONE Wave 3 — login-form-v3.tsx + dual-render page.tsx. api.auth.loginOTP.mutate({body:{email}}). 4 tests."
+      "passes": false,
+      "notes": "Core chat endpoint with Vercel AI SDK streaming. See PRD US-006."
     },
     {
-      "id": "US-307",
-      "title": "/login/verify v3 dual-render",
-      "description": "Tela de verificacao OTP com DS v3.",
+      "id": "US-007",
+      "title": "Endpoint POST /api/v1/projetos/[id]/publish",
+      "description": "As a user, I need to publish a prompt version as production atomically.",
       "acceptanceCriteria": [
-        "src/app/(auth)/login/verify/page.tsx verifica flag",
-        "Se ativo: <LoginVerifyV3 /> dentro de AuthShell",
-        "Usa OtpInput do DS (6 digitos auto-advance)",
-        "Cooldown de reenvio visivel (60s)",
-        "Mesmos endpoints (api.auth.verifyLoginOTP.mutate)",
-        "Unit test do form v3",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill"
+        "Endpoint Igniter.js mutation",
+        "Body Zod: { promptVersionId: string }",
+        "Validates version belongs to project",
+        "Updates ai_agent_configs.currentPromptVersionId",
+        "Updates projects.status = 'production'",
+        "Updates prompt_versions.publishedAt and publishedBy",
+        "Does NOT touch active conversations (sticky versioning handles)",
+        "Returns { version, publishedAt }",
+        "Unit test: valid publish + publishing version of another project must fail",
+        "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "DONE Wave 3 — login-verify-v3.tsx + LoginVerifyV2Client extracted. 60s cooldown useState+useEffect. api.auth.verifyLoginOTP.mutate({body:{email,code}}). 4 tests."
+      "passes": false,
+      "notes": "Deploy endpoint. See PRD US-007."
     },
     {
-      "id": "US-308",
-      "title": "/signup v3 dual-render",
-      "description": "Tela de signup com DS v3.",
+      "id": "US-008",
+      "title": "Builder AI — register as internal ai_agent",
+      "description": "As a developer, I need to register the Builder AI as a special internal agent in ai-module/ai-agents.",
       "acceptanceCriteria": [
-        "src/app/(auth)/signup/page.tsx verifica flag",
-        "Se ativo: <SignupFormV3 /> dentro de AuthShell",
-        "Fields: email + nome + checkbox de termos (Zod client-side)",
-        "Mesmos endpoints (api.auth.signupOTP.mutate)",
-        "Unit test",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill"
+        "Seed script creates ai_agent_configs record with type='builder' and visibility='internal'",
+        "Add 'builder' to type enum if not exists",
+        "Add 'internal' to visibility enum if not exists",
+        "System prompt file at src/server/ai-module/builder/prompts/builder-system-prompt.ts (base from architecture-v5.md sec 4.1)",
+        "Provider default: Claude Sonnet 4.5 via @ai-sdk/anthropic",
+        "Inline documentation explaining Builder IS a Quayer agent",
+        "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "DONE Wave 3 — signup-form-v3.tsx + dual-render. email+name+acceptedTerms (terms checkbox validated via Zod literal). api.auth.signupOTP.mutate({body:{email,name}}) — acceptedTerms nao enviado (backend nao espera). 4 tests."
+      "passes": false,
+      "notes": "The meta-agent. Key insight: Builder reuses the full ai-agents runtime. See PRD US-008."
     },
     {
-      "id": "US-309",
-      "title": "/signup/verify v3 dual-render",
-      "description": "Verificacao OTP pos-signup.",
+      "id": "US-009",
+      "title": "Builder tool: create_agent wrapper",
+      "description": "As the Builder AI, I need a tool that creates a new ai_agent via existing endpoint.",
       "acceptanceCriteria": [
-        "src/app/(auth)/signup/verify/page.tsx verifica flag",
-        "Se ativo: <SignupVerifyV3 /> dentro de AuthShell, padrao identico a US-307",
-        "Mesmos endpoints (api.auth.verifySignupOTP.mutate)",
-        "Unit test",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill"
+        "Tool handler at src/server/ai-module/builder/tools/create-agent.tool.ts",
+        "Zod params: { projectId, name, initialPrompt, modelProvider, instanceId (optional) }",
+        "Calls aiAgents.create.mutate() (existing endpoint)",
+        "Links new agent to project.aiAgentId",
+        "Creates first PromptVersion with initialPrompt",
+        "Returns { agentId, versionNumber: 1 }",
+        "Unit test mocks aiAgents.create and validates wiring",
+        "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "DONE Wave 3 — signup-verify-v3.tsx + SignupVerifyV2Client extracted. api.auth.verifySignupOTP → /onboarding. 4 tests."
+      "passes": false,
+      "notes": "See PRD US-009."
     },
     {
-      "id": "US-310",
-      "title": "/verify-email v3 dual-render",
-      "description": "Pagina de verificacao de email com estados loading/success/error.",
+      "id": "US-010",
+      "title": "Builder tool: update_agent_prompt wrapper",
+      "description": "As the Builder AI, I need to edit agent prompt creating new linear version (draft, not published).",
       "acceptanceCriteria": [
-        "src/app/(auth)/verify-email/page.tsx verifica flag",
-        "Se ativo: <VerifyEmailV3 /> dentro de AuthShell",
-        "Estados visuais claros: loading (spinner), success (icon + CTA), error (mensagem + retry)",
-        "Usa OtpInput do DS se houver input manual",
-        "Unit test cobrindo os 3 estados",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill"
+        "Tool handler at src/server/ai-module/builder/tools/update-agent-prompt.tool.ts",
+        "Zod params: { agentId, newPrompt, description (optional) }",
+        "Creates new PromptVersion with versionNumber = last + 1",
+        "Does NOT publish automatically (stays draft)",
+        "Returns { versionNumber, description }",
+        "Unit test covers: first version, version 5, non-existent agent",
+        "Typecheck passes"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "DONE Wave 3 — verify-email-v3.tsx (3 states: loading/success/error, auto-verify via token searchParam) + verify-email-v2-client extracted. api.auth.verifyEmail.mutate. 7 tests."
+      "passes": false,
+      "notes": "See PRD US-010."
     },
     {
-      "id": "US-311",
-      "title": "/onboarding v3 dual-render",
-      "description": "Multi-step onboarding com DS v3.",
+      "id": "US-011",
+      "title": "Builder tool: list_whatsapp_instances wrapper",
+      "description": "As the Builder AI, I need to list WhatsApp instances available in user's org.",
       "acceptanceCriteria": [
-        "src/app/(auth)/onboarding/page.tsx verifica flag",
-        "Se ativo: <OnboardingV3 /> dentro de AuthShell",
-        "Progress indicator visivel (step N de M)",
-        "Mesmos endpoints (ler os que onboarding-form.tsx atual usa)",
-        "Unit test do novo componente",
-        "Typecheck + lint passam",
-        "Verify in browser using dev-browser skill"
+        "Tool handler at src/server/ai-module/builder/tools/list-instances.tool.ts",
+        "Calls instances.list.query() from communication/instances",
+        "Filters by organizationId from context",
+        "Returns [{ id, name, phoneNumber, status }] with status values 'connected' | 'disconnected' | 'qr_pending'",
+        "Unit test covers orgs with 0, 1, N instances",
+        "Typecheck passes"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "DONE Wave 3 — onboarding-v3.tsx simplificado (2 steps vs v2 1-step — TODO product review). PATCH /api/v1/auth/profile + createOrganizationAction. 6 tests."
+      "passes": false,
+      "notes": "See PRD US-011."
     },
     {
-      "id": "US-312",
-      "title": "/google-callback — auditoria + decisao",
-      "description": "Validar se Google OAuth esta ativo antes de investir em redesign.",
+      "id": "US-012",
+      "title": "Builder tool: create_whatsapp_instance with QR inline",
+      "description": "As the Builder AI, I need to create new WhatsApp instance and return QR code inline for user to scan.",
       "acceptanceCriteria": [
-        "Auditoria: grep src/server/core/auth por GOOGLE_CLIENT_ID, googleOAuth, oauth.google — status ativo ou inativo",
-        "Verificar docs/auth/CLEANUP_AUDIT.md se google-callback foi flagged como candidato a delete",
-        "Verificar .env.example se GOOGLE_CLIENT_ID esta listado como required ou optional",
-        "Decisao registrada em docs/auth/GOOGLE_OAUTH_STATUS.md:",
-        "  - SE ATIVO: dual-render basico (spinner + logo v3) + unit test",
-        "  - SE INATIVO: adicionar a lista de cleanup candidates em CLEANUP_AUDIT.md e NAO implementar v3",
-        "Typecheck passa"
+        "Tool handler at src/server/ai-module/builder/tools/create-instance.tool.ts",
+        "Zod params: { name: string }",
+        "Calls instances.create.mutate() and instances.getQrCode.query()",
+        "Generates share link via /compartilhar/[token] (existing public route)",
+        "Returns { instanceId, qrCodeBase64, shareLink, expiresIn }",
+        "Frontend renders QR inline in chat",
+        "Unit test mocks calls and validates wiring",
+        "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "DONE Wave 4 — SCENARIO A: Google OAuth ACTIVE confirmado (env vars presentes, backend handler auth.controller.ts:919, UI buttons em login-form-final.tsx:387 e signup-form.tsx:294). google-callback-v3.tsx criado com spinner + Logo + reuso de TwoFactorChallenge. google-callback-v2-client extracted. 5 tests. docs/auth/GOOGLE_OAUTH_STATUS.md."
+      "passes": false,
+      "notes": "Reuses existing /compartilhar/[token]. See PRD US-012."
     },
     {
-      "id": "US-313",
-      "title": "docs/auth/USER_JOURNEY.md com 4 jornadas Mermaid",
-      "description": "Documentar user journeys completas.",
+      "id": "US-013",
+      "title": "Builder tool: attach_tool_to_agent wrapper",
+      "description": "As the Builder AI, I need to connect a builtin tool (transfer_to_human, etc) to an agent.",
       "acceptanceCriteria": [
-        "docs/auth/USER_JOURNEY.md criado com 4 jornadas em Mermaid flowchart:",
-        "  1. Novo usuario (signup -> OTP verify -> onboarding -> integracoes)",
-        "  2. Usuario existente (login -> OTP verify -> integracoes)",
-        "  3. Google OAuth (se ativo — conditional section)",
-        "  4. Usuario sem org ativa (login -> needs onboarding -> onboarding)",
-        "Cada step documenta: rota, componente, endpoint, estados possiveis, proxima tela",
-        "Reflete o estado pos-cleanup (ignorando /register, /forgot-password, /reset-password)",
-        "Referencia .claude/skills/auth-pages.md"
+        "Tool handler at src/server/ai-module/builder/tools/attach-tool.tool.ts",
+        "Zod params: { agentId, toolKey }",
+        "Validates toolKey is one of: transfer_to_human, pause_session, notify_team, schedule_callback, create_lead, search_contacts",
+        "Creates record in agent_tools table",
+        "Returns { attached: true, toolKey }",
+        "Unit test covers valid tool, invalid tool, duplicate",
+        "Typecheck passes"
       ],
       "priority": 13,
-      "passes": true,
-      "notes": "DONE Wave 4 — docs/auth/USER_JOURNEY.md (107 linhas, 4 Mermaid flowcharts: novo usuario, existente, magic link, sem org ativa). Cada step com rota+componente+endpoint+estados."
+      "passes": false,
+      "notes": "See PRD US-013."
     },
     {
-      "id": "US-314",
-      "title": "docs/auth/AUTH_FLOW.md tecnico + sequence diagram",
-      "description": "Fluxo tecnico de auth: OTP, JWT, session, middleware.",
+      "id": "US-014",
+      "title": "Builder tool: search_web via Tavily",
+      "description": "As the Builder AI, I need web search for research when building prompts.",
       "acceptanceCriteria": [
-        "docs/auth/AUTH_FLOW.md criado com:",
-        "  - Sequence diagram Mermaid: cliente -> /login -> OTP gerado -> email -> /login/verify -> JWT -> cookie -> /integracoes",
-        "  - OTP lifecycle: geracao, storage em VerificationCode, verify, expire",
-        "  - JWT: payload, signing (HS256), verification, refresh flow",
-        "  - Session: cookie accessToken, duracao, renovacao",
-        "  - Middleware: matcher, redirects por rota protegida",
-        "  - Lista de endpoints /api/v1/auth/* com payload de request/response (extraido de auth.controller.ts)",
-        "  - Secao Troubleshooting: OTP nao chega, JWT invalido, session expirada"
+        "Tool handler at src/server/ai-module/builder/tools/search-web.tool.ts",
+        "Integration with Tavily API (add @tavily/core or fetch-based)",
+        "Zod params: { query: string, maxResults: number default 3 }",
+        "Reads TAVILY_API_KEY from env",
+        "Returns [{ title, url, snippet }]",
+        "Rate limit per org: max 20 calls/day (store counter in Redis or DB)",
+        "Unit test mocks Tavily and validates wiring + rate limit",
+        "Typecheck passes"
       ],
       "priority": 14,
-      "passes": true,
-      "notes": "DONE Wave 4 — docs/auth/AUTH_FLOW.md (113 linhas). Sequence diagram login. JWT HS256, access 15m, refresh 7d, magic 10m, 2FA 5m. OTP plaintext em VerificationCode e TempUser, TTL 10-15m. 19 endpoints documentados. PUBLIC_PATHS+PROTECTED+ONBOARDING+ADMIN listados de middleware.ts. 4 TODOs marcados."
+      "passes": false,
+      "notes": "External API. See PRD US-014."
     },
     {
-      "id": "US-315",
-      "title": "Skill .claude/skills/auth-pages.md",
-      "description": "Skill separada de auth.md (backend) cobrindo as paginas frontend.",
+      "id": "US-015",
+      "title": "Builder tool: generate_prompt_anatomy",
+      "description": "As the Builder AI, I need to generate structured prompts based on brief and nicho.",
       "acceptanceCriteria": [
-        ".claude/skills/auth-pages.md criada",
-        "Secoes:",
-        "  - Rotas ativas (pos-cleanup): /login, /signup, /login/verify, /signup/verify, /verify-email, /onboarding, /login/verify-magic, /signup/verify-magic",
-        "  - Componentes DS v3 (lista de src/client/components/ds/*)",
-        "  - Componentes de auth por rota (quais componentes cada rota usa)",
-        "  - Feature flag NEXT_PUBLIC_AUTH_V3 e como ativar localmente",
-        "  - Como adicionar nova pagina de auth (template de server component + flag + dual-render)",
-        "  - Padrao de mock para testes (referencia docs/auth/TESTING_PATTERNS.md)",
-        "Referencia USER_JOURNEY, AUTH_FLOW, ASSETS",
-        "Exemplos de codigo REAL do projeto"
+        "Tool handler at src/server/ai-module/builder/tools/generate-prompt-anatomy.tool.ts",
+        "Zod params: { brief: string, nicho: enum 'advocacia'|'contabilidade'|'seguros'|'outro', objetivo: string }",
+        "Base template at src/server/ai-module/builder/templates/prompt-anatomy.ts with structure [Papel]+[Objetivo]+[Regras]+[Limitações]+[Formato de resposta]",
+        "Sub-call to LLM to fill template with nicho context",
+        "Returns { prompt: string in markdown }",
+        "Unit test covers 3 different nichos",
+        "Typecheck passes"
       ],
       "priority": 15,
-      "passes": true,
-      "notes": "DONE Wave 4 — .claude/skills/auth-pages.md (89 linhas). Separada de auth.md (backend). Tabela de rotas ativas, DS primitives, feature flag usage, template de nova pagina."
+      "passes": false,
+      "notes": "See PRD US-015."
     },
     {
-      "id": "US-316",
-      "title": "Auditoria a11y dos componentes DS v3",
-      "description": "Verificar WCAG AA nos componentes criados em US-304 e paginas v3.",
+      "id": "US-016",
+      "title": "Context auto-summary service",
+      "description": "As the Builder AI, I need automatic stateSummary updates after each turn to save tokens.",
       "acceptanceCriteria": [
-        "Listar em docs/auth/A11Y_AUDIT.md cada componente DS v3 com findings:",
-        "  - button: label, focus visible, disabled aria, loading state",
-        "  - input: label explicito, aria-describedby para error, aria-invalid",
-        "  - otp-input: aria-label por slot, autocomplete one-time-code, aria-live para feedback",
-        "  - logo: aria-hidden ou aria-label conforme contexto",
-        "  - card: role se for interativo",
-        "  - toast: role=status ou role=alert por type, aria-live polite/assertive",
-        "Rodar manualmente: Tab funciona entre campos, Enter submete form, Esc fecha toast",
-        "Checar contraste de cores DS v3 (tokens --color-*) contra WCAG AA (4.5:1 texto normal, 3:1 texto grande)",
-        "Zero findings critical ou serious",
-        "findings medium/low viram TODOs",
-        "TODO: axe-core em CI sera adicionado em iteracao futura (US-316 parte b)"
+        "Service at src/server/ai-module/builder/services/context-summary.service.ts",
+        "Method updateSummary(conversationId): fetches project state, generates ~500 token summary via LLM sub-call, saves to project_conversations.stateSummary",
+        "Called after each turn that changes state",
+        "Unit test mocks LLM and validates update",
+        "Typecheck passes"
       ],
       "priority": 16,
-      "passes": true,
-      "notes": "DONE Wave 4 — docs/auth/A11Y_AUDIT.md. WCAG 2.1 AA audit dos DS + v3 components. ARIA verificado em source: button aria-busy, input aria-invalid+describedby, otp-input role=group+aria-label per slot, toast role conditional, logo conditional aria-hidden, auth-shell alt empty+priority. 0 critical, 0 serious, 2 moderate TODOs (contrast ratios, form error aggregation). TODO axe-core CI."
+      "passes": false,
+      "notes": "Cost management. See PRD US-016."
     },
     {
-      "id": "US-318",
-      "title": "Code review aggregator das mudancas de Release 3",
-      "description": "Review estruturado das mudancas criadas pelas stories 301-316.",
+      "id": "US-017",
+      "title": "Migrate CSS tokens from [data-auth-v3] to global :root",
+      "description": "As a developer, I need to move DS v3 tokens from scoped to global so all pages inherit.",
       "acceptanceCriteria": [
-        "Criar docs/auth/V3_CODE_REVIEW.md com review por area:",
-        "  - Feature flag (US-301): correctness, test coverage, edge cases",
-        "  - Assets (US-302): accessibility, performance",
-        "  - Tokens (US-303): CSS isolation, no leakage",
-        "  - Componentes DS (US-304): API design, tipagem, test coverage",
-        "  - AuthShell (US-305): LCP impact, responsividade",
-        "  - Paginas v3 (US-306-311): contract preservation, dual-render correctness",
-        "  - Docs (US-313-315): completude",
-        "Cada finding classificado: critical / high / medium / low / info",
-        "Critical/high: bloqueiam merge",
-        "Medium/low: viram TODOs no proprio arquivo",
-        "Referencia .claude/skills/release-checklist.md",
-        "NOTA: este eh review LLM-assisted — code-reviewer humano eh obrigatorio ANTES do merge (US-318 criterio real)"
+        "Read quayer-ds-v3.html and identify all CSS custom properties",
+        "In src/app/globals.css: move all --color-*, --space-*, --radius-*, --text-*, --font-*, --shadow-* from [data-auth-v3='true'] to :root",
+        "Keep [data-auth-v3='true'] selector functional (tokens are inherited)",
+        "Update tailwind.config.ts if needed (variables already reference via var(--...))",
+        "Test no visual regression on (auth)/* existing pages (login, signup, verify-email)",
+        "Remove data-auth-v3='true' attribute from (auth)/layout.tsx",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 17,
-      "passes": true,
-      "notes": "DONE Wave 4 — docs/auth/V3_CODE_REVIEW.md aggregator LLM-assisted. 1 CRITICAL: login-hero.png 6.81 MB precisa virar WebP < 150KB antes de US-319. Medium: Tailwind v4 config.ts talvez dead code, onboarding simplification precisa product review. Human review gate documentado."
+      "passes": false,
+      "notes": "Critical foundation for all UI stories. See PRD US-017."
+    },
+    {
+      "id": "US-018",
+      "title": "Apply v3 tokens to / and /projetos/*",
+      "description": "As a user, I want new Builder pages (home, projetos) to follow same visual as auth v3.",
+      "acceptanceCriteria": [
+        "Home page (/) inherits global tokens automatically",
+        "Pages /projetos and /projetos/[id] also",
+        "New sidebar uses v3 tokens (background, text, borders)",
+        "Smoke test: open home, projetos, workspace in browser and verify colors/fonts match login v3",
+        "No token bleeding to /admin (admin gets v3 in US-019)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "See PRD US-018."
+    },
+    {
+      "id": "US-019",
+      "title": "Apply v3 tokens to /admin/* and /configuracoes/*",
+      "description": "As a user, I want consistent v3 visual across entire app including admin and configurations (passive inheritance).",
+      "acceptanceCriteria": [
+        "/admin/* routes inherit global tokens (should work automatically after US-017)",
+        "/configuracoes/* (new root) uses v3 tokens",
+        "Verify existing tables/forms/modals in admin don't break visually",
+        "If contrast issues or visual breaks, document as separate refactor (actual refactor in Phase K stories)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Passive inheritance only. Active refactoring happens in Phase J and K stories. See PRD US-019."
+    },
+    {
+      "id": "US-020",
+      "title": "New minimalist sidebar (Builder)",
+      "description": "As a user, I want simple sidebar with: + Novo projeto, Meus Projetos, Configurações, Admin (conditional).",
+      "acceptanceCriteria": [
+        "Component src/client/components/layout/builder-sidebar.tsx",
+        "Items: '+ Novo projeto' button with ⌘K shortcut, MEUS PROJETOS section showing 5-7 most recent + 'ver todos', divider, Configurações link, Admin link (conditional on user.role === 'super_admin')",
+        "Responsive: drawer in mobile (<768px), fixed in desktop (≥1024px)",
+        "Uses global v3 tokens",
+        "ARIA nav, keyboard navigation (Tab, Enter)",
+        "Unit test renders correctly",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (desktop and mobile viewport)"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "See PRD US-020."
+    },
+    {
+      "id": "US-021",
+      "title": "Home page /",
+      "description": "As a logged-in user, I want a home page with central prompt 'O que você quer criar hoje?' and recent projects grid below.",
+      "acceptanceCriteria": [
+        "Route src/app/page.tsx (replaces current redirect)",
+        "Component src/client/components/home/home-page.tsx",
+        "Layout: header with logo + profile, central 'O que você quer criar hoje?' heading, large textarea with placeholder, quick templates chips (🤖 Agente de vendas, Suporte, Captação), 'Continue de onde parou' section with 3-6 recent project cards, 'Ver todas criações →' link",
+        "Empty state for zero projects: educational message",
+        "Submit textarea: POST /api/v1/projetos/novo → redirect /projetos/[id]",
+        "Loading state with spinner during submit",
+        "Error state with toast + retry",
+        "Mobile-first (breakpoints 375, 768, 1024)",
+        "Uses global v3 tokens",
+        "Unit test render + click handlers",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "See PRD US-021."
+    },
+    {
+      "id": "US-022",
+      "title": "Projetos list page /projetos",
+      "description": "As a user, I want to see all my projects with status filters and search.",
+      "acceptanceCriteria": [
+        "Route src/app/projetos/page.tsx",
+        "Component src/client/components/projetos/projetos-list.tsx",
+        "Header with grid of cards",
+        "Each card: name, status badge, last updated, main metric",
+        "Filter tabs: Todos | Ativos | Drafts | Arquivados",
+        "Search by name",
+        "Auto grouping by status (Produção > Drafts > Pausados > Arquivados)",
+        "Click card → /projetos/[id]",
+        "Empty states per filter",
+        "Mobile layout (1 col <768px, 3 col ≥1024px)",
+        "Uses global v3 tokens",
+        "Unit test",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "See PRD US-022."
+    },
+    {
+      "id": "US-023",
+      "title": "Workspace /projetos/[id] shell layout",
+      "description": "As a user, I want to open a project with chat on left and preview on right, tabs at top of preview.",
+      "acceptanceCriteria": [
+        "Route src/app/projetos/[id]/page.tsx",
+        "Component src/client/components/projetos/workspace.tsx",
+        "Desktop (≥1024px): split 50/50 ChatPanel (left) | PreviewPanel (right)",
+        "Mobile (<768px): toggle buttons in header (💬 Chat | 🤖 Agente)",
+        "Sticky header: back arrow, inline-editable project name, status badge, ⋯ menu (archive, duplicate, rename)",
+        "Skeleton loading state",
+        "404 error state if project doesn't exist or not in org",
+        "URL params ?tab=overview|prompt|playground|deploy controls active tab",
+        "Uses global v3 tokens",
+        "Unit test",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (desktop, tablet, mobile viewports)"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Main workspace layout. See PRD US-023."
+    },
+    {
+      "id": "US-024",
+      "title": "ChatPanel with streaming via Vercel AI SDK",
+      "description": "As a user, I want a chat on left where I converse with Builder AI with real-time streaming.",
+      "acceptanceCriteria": [
+        "Component src/client/components/projetos/chat-panel.tsx",
+        "Uses Vercel AI SDK useChat hook pointing to US-006 endpoint",
+        "Messages rendered: user (right bubble), assistant (left bubble), tool calls (collapsible cards like Cursor)",
+        "Multi-line input at bottom with send button and ⌘+Enter shortcut",
+        "Streaming: tokens appear progressively",
+        "Auto-scroll to bottom on new message",
+        "Manual scroll preserves position if user scrolled up",
+        "Tool calls show: name, params (collapsible), result (after execution)",
+        "Error handling with inline 'Try again' button",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (create agent end-to-end)"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Uses @ai-sdk/react. See PRD US-024."
+    },
+    {
+      "id": "US-025",
+      "title": "PreviewPanel polymorphic + Overview tab",
+      "description": "As a user, I want to see the agent being built in right panel with Overview tab showing summary + quick actions.",
+      "acceptanceCriteria": [
+        "Component src/client/components/projetos/preview-panel.tsx",
+        "Renders tabs based on project.type (only ai_agent in v1)",
+        "Tabs for ai_agent: Overview | Prompt | Playground | Deploy",
+        "Overview tab shows: agent name, description, large status badge, summary metrics (placeholder if draft), quick actions [💬 Continue in chat] [🎮 Test playground] [🚀 Publish]",
+        "Empty state if agent not created yet: 'Aguardando Builder criar o agente...'",
+        "Uses v3 tokens",
+        "Unit test",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "See PRD US-025."
+    },
+    {
+      "id": "US-026",
+      "title": "Prompt tab with manual editor",
+      "description": "As a user, I want to edit the agent system prompt manually via form (alternative to chat).",
+      "acceptanceCriteria": [
+        "Prompt tab shows large textarea with editor (styled textarea in v1)",
+        "Loads current version content from prompt_versions",
+        "Auto-save with 2s debounce → creates new version (draft)",
+        "Indicator 'salvando...' / '✓ salvo há 1s'",
+        "Button 'Salvar checkpoint v5' creates explicit version with description",
+        "Button 'Continuar no chat' returns to chat preserving context",
+        "List of previous versions below editor (clickable timeline)",
+        "Click old version: modal with diff + rollback option",
+        "Uses v3 tokens",
+        "Unit test covers save and load",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "See PRD US-026."
+    },
+    {
+      "id": "US-027",
+      "title": "Playground tab (reuse existing)",
+      "description": "As a user, I want to test the agent in playground inside workspace, reusing /integracoes/agents/[id]/playground.",
+      "acceptanceCriteria": [
+        "Playground tab loads existing playground-client.tsx from ai-module/ai-agents",
+        "Refactor existing playground to be reusable component accepting agentId prop",
+        "Maintain current functionality: manual conversation, see responses, reset",
+        "Works inside workspace shell (no layout break)",
+        "Uses v3 tokens (may require small visual refactor)",
+        "Existing tests don't break",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": "See PRD US-027."
+    },
+    {
+      "id": "US-028",
+      "title": "Deploy tab",
+      "description": "As a user, I want to see deploy state, publish new version, and rollback.",
+      "acceptanceCriteria": [
+        "Deploy tab shows: 'Produção: v3 (publicada há 5 dias)' + 'Draft: v4 (não publicado)'",
+        "Collapsible v3 → v4 diff",
+        "Large 'Publicar v4' button (disabled if no draft)",
+        "'Histórico' section with published versions list + rollback per version",
+        "Publish flow: confirmation modal → POST /api/v1/projetos/[id]/publish → success toast → UI updates",
+        "Rollback flow: confirmation modal + publishes old version",
+        "Uses v3 tokens",
+        "Unit test covers publish + rollback",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "See PRD US-028."
+    },
+    {
+      "id": "US-029",
+      "title": "Runtime uses pinnedAgentVersion for active conversations",
+      "description": "As the system, when a message arrives for existing WhatsApp conversation, use pinned version (sticky); new conversations use current production.",
+      "acceptanceCriteria": [
+        "Edit agent-runtime.service.ts in ai-module/ai-agents",
+        "Method processMessage: lookup conversation in whatsapp_conversations",
+        "If pinnedAgentVersion is null: use agent.currentPromptVersionId and fill pinnedAgentVersion",
+        "If not null: use pinnedAgentVersion",
+        "Fetch corresponding PromptVersion for LLM call",
+        "Unit test covers: new conversation, existing with pin, existing without pin (edge case)",
+        "Typecheck passes"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": "See PRD US-029."
+    },
+    {
+      "id": "US-030",
+      "title": "BullMQ job expires pins of silenced conversations",
+      "description": "As the system, I need a job that periodically releases pins of conversations idle for >24h.",
+      "acceptanceCriteria": [
+        "Job at src/server/communication/jobs/expire-conversation-pins.job.ts",
+        "BullMQ repeatable (1x per hour)",
+        "Query: UPDATE whatsapp_conversations SET pinnedAgentVersion = NULL WHERE lastMessageAt < NOW() - INTERVAL '24 hours' AND pinnedAgentVersion IS NOT NULL",
+        "Logs number of expired conversations",
+        "Unit test simulates date mock scenarios",
+        "Typecheck passes"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": "See PRD US-030."
+    },
+    {
+      "id": "US-031",
+      "title": "Mobile layout for home and sidebar drawer",
+      "description": "As a mobile user, I want the Builder optimized for 375px.",
+      "acceptanceCriteria": [
+        "Home: single column, prompt textarea full-width, templates in horizontal scroll",
+        "Sidebar: drawer slide-in via hamburger icon top-left",
+        "Bottom nav sticky: 🏠 Home | 📂 Projetos | ⚙️ Config",
+        "Touch targets ≥ 44x44px",
+        "Tap highlight suppressed where appropriate",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (viewport 375x667)"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": "See PRD US-031."
+    },
+    {
+      "id": "US-032",
+      "title": "Mobile layout for workspace with toggle",
+      "description": "As a mobile user, I want to toggle between chat and preview in workspace via header buttons.",
+      "acceptanceCriteria": [
+        "In /projetos/[id] mobile, header has 2 toggle buttons: 💬 Chat | 🤖 Agente",
+        "Default 💬 Chat active (fullscreen in mobile)",
+        "Toggle to 🤖 Agente: hides chat, shows preview fullscreen",
+        "Preview tabs horizontal scroll in mobile",
+        "Touch gestures don't conflict with chat scroll",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (mobile viewport)"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": "See PRD US-032."
+    },
+    {
+      "id": "US-033",
+      "title": "Accessibility WCAG AA - ARIA + keyboard nav",
+      "description": "As a screen reader or keyboard-only user, I want to navigate entire Builder without mouse.",
+      "acceptanceCriteria": [
+        "All new components have correct ARIA roles and labels",
+        "Sidebar: role='navigation' aria-label='Menu principal'",
+        "Chat: role='log' aria-live='polite' on messages container",
+        "Tabs: role='tablist', role='tab', aria-selected",
+        "Forms: aria-required, aria-invalid, aria-describedby for errors",
+        "Modals: role='dialog' aria-modal='true' with focus trap",
+        "Keyboard nav functional: Tab/Shift+Tab, Enter activates, Esc closes modals, arrows navigate tabs",
+        "Focus visible ring (v3 tokens) on all focusable elements",
+        "Skip link at top: 'Pular pra conteúdo principal'",
+        "Audit with @axe-core/playwright in E2E - zero critical/serious violations",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill (navigate with keyboard only)"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": "See PRD US-033."
+    },
+    {
+      "id": "US-034",
+      "title": "308 redirects for old routes",
+      "description": "As a user with old bookmark, I want automatic redirect to new routes.",
+      "acceptanceCriteria": [
+        "Edit src/middleware.ts or next.config.ts to add redirects",
+        "/integracoes/agents → /projetos?type=ai_agent",
+        "/integracoes/agents/:id → /projetos/:id",
+        "/integracoes/agents/:id/playground → /projetos/:id?tab=playground",
+        "/integracoes/settings/organization → /configuracoes/organizacao",
+        "/integracoes/settings/roles → /configuracoes/roles",
+        "/integracoes/settings/billing → /configuracoes/billing",
+        "/integracoes/settings/invoices → /configuracoes/billing/faturas",
+        "/integracoes/settings/scim → /configuracoes/scim",
+        "/integracoes/settings/domains → /configuracoes/dominios",
+        "/integracoes/users → /configuracoes/membros",
+        "/integracoes/[instanceId]/settings → /configuracoes/canais/whatsapp/[id]",
+        "/integracoes/sessions → /configuracoes/canais/whatsapp/[id]?tab=sessoes",
+        "/integracoes → /configuracoes/canais/whatsapp",
+        "/organizacao → /configuracoes/organizacao",
+        "/user/seguranca → /configuracoes/perfil/seguranca",
+        "/ferramentas/chatwoot → /configuracoes/integracoes/chatwoot",
+        "/ferramentas/webhooks → /configuracoes/webhooks",
+        "/integracoes/admin/clients → /admin/organizations",
+        "All 308 (permanent, preserves HTTP method)",
+        "E2E test verifies 5 critical redirects",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": "See PRD US-034."
+    },
+    {
+      "id": "US-035",
+      "title": "Disable CRM from sidebar via feature flag",
+      "description": "As a user, I don't want CRM items (contatos, conversas) in v1 navigation.",
+      "acceptanceCriteria": [
+        "Feature flag FEATURE_CRM_ENABLED (env var) default false",
+        "Sidebar doesn't render links to /contatos or /conversas if flag off",
+        "Routes /contatos, /contatos/[id], /conversas, /conversas/[sessionId] still accessible via direct URL (not 404) — backend preserved",
+        "Tabs/menus inside other pages also conditional on flag",
+        "README documents: 'To reactivate CRM, set FEATURE_CRM_ENABLED=true'",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": "See PRD US-035."
+    },
+    {
+      "id": "US-036",
+      "title": "Delete legacy routes (register, forgot, reset)",
+      "description": "As code maintenance, I need to delete the 3 orphan routes from Release 2 Phase D.",
+      "acceptanceCriteria": [
+        "Delete src/app/(auth)/register/page.tsx (and layout/children)",
+        "Delete src/app/(auth)/forgot-password/page.tsx",
+        "Delete src/app/(auth)/reset-password/[token]/page.tsx",
+        "Add 308 redirects: /register → /signup, /forgot-password → /login, /reset-password/[token] → /login",
+        "Update docs/auth/CLEANUP_AUDIT.md marking Phase D complete",
+        "No broken references (grep verifies)",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": "See PRD US-036."
+    },
+    {
+      "id": "US-037",
+      "title": "Move /ferramentas/* to /configuracoes/*",
+      "description": "As part of reorganization, move integrations and webhooks pages to new home.",
+      "acceptanceCriteria": [
+        "Create src/app/configuracoes/integracoes/chatwoot/page.tsx — copy of ferramentas/chatwoot",
+        "Create src/app/configuracoes/webhooks/page.tsx — copy of ferramentas/webhooks",
+        "Quick replies become inline in agent workspace (no standalone in v1)",
+        "Delete src/app/ferramentas/ after copy",
+        "Update internal links",
+        "Apply v3 tokens",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": "See PRD US-037."
+    },
+    {
+      "id": "US-038",
+      "title": "Feature flag NEXT_PUBLIC_HOME_BUILDER",
+      "description": "As the team, I need a flag to control Builder rollout.",
+      "acceptanceCriteria": [
+        "Helper src/lib/feature-flags/home-builder.ts with isBuilderEnabled(userId?, overrideCookie?)",
+        "Reads NEXT_PUBLIC_HOME_BUILDER env: off | percentage:N | on",
+        "Cookie override builder-override=on|off for QA",
+        "Deterministic distribution via hash(userId) % 100 < N",
+        "src/app/page.tsx checks flag: if off redirect /integracoes (old behavior), if on renders new Builder home",
+        "Sidebar checks flag to decide new vs old navigation",
+        "Unit test covers: off, on, percentage:50 distribution, override cookie",
+        "Document in docs/auth/FEATURE_FLAGS.md",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": "See PRD US-038."
+    },
+    {
+      "id": "US-039",
+      "title": "Rollout plan and monitoring",
+      "description": "As ops, I need a gradual rollout plan and metrics.",
+      "acceptanceCriteria": [
+        "Create docs/builder/ROLLOUT_PLAN.md with: Phase 1 cookie override (founder), Phase 2 percentage:10, Phase 3 percentage:50, Phase 4 on, criteria to advance (error rate <1%, p95 <5s, NPS≥4), rollback criteria (error rate >5% or conversion drop >20%)",
+        "Analytics events instrumented: builder.project.created, builder.project.published, builder.chat.message_sent, builder.tool.called, builder.error",
+        "Internal dashboard or SQL query to monitor metrics",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": "See PRD US-039."
+    },
+    {
+      "id": "US-040",
+      "title": "Unit tests for Builder tools",
+      "description": "As a dev, I need test coverage on Builder AI tool wrappers.",
+      "acceptanceCriteria": [
+        "Each tool wrapper in src/server/ai-module/builder/tools/ has unit test in test/unit/builder/tools/",
+        "Mock internal endpoints called (aiAgents, instances)",
+        "Scenarios: success, validation failure, backend error",
+        "Coverage min 80% of tool lines",
+        "Tests run via npm run test:unit",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": "See PRD US-040."
+    },
+    {
+      "id": "US-041",
+      "title": "E2E happy path - create agent end-to-end",
+      "description": "As a dev, I need E2E that simulates user creating agent from scratch.",
+      "acceptanceCriteria": [
+        "Playwright test at test/e2e/builder/create-agent.spec.ts",
+        "Flow: login → / with flag on (cookie override) → type prompt → submit → redirect /projetos/[id] → verify chat with first Builder response (mock LLM) → answer via quick-reply chips → verify QR code inline (mock WA instance) → verify agent in preview → click Publicar → confirm modal → verify status=production",
+        "LLM mocked via fixtures (no hit to OpenAI/Anthropic)",
+        "Runs in CI via npm run test:e2e",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": "See PRD US-041."
+    },
+    {
+      "id": "US-042",
+      "title": "E2E mobile - responsive workspace",
+      "description": "As a dev, I need to validate workspace works on mobile viewport.",
+      "acceptanceCriteria": [
+        "Playwright test at test/e2e/builder/workspace-mobile.spec.ts",
+        "Uses test.use({ viewport: { width: 375, height: 667 } })",
+        "Verifies: chat/agent toggle works, sidebar drawer opens, touch targets ≥44px",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": "See PRD US-042."
+    },
+    {
+      "id": "US-043",
+      "title": "A11y audit with axe-core",
+      "description": "As a dev, I need automated accessibility audit on new pages.",
+      "acceptanceCriteria": [
+        "Playwright + @axe-core/playwright in test/e2e/builder/a11y.spec.ts",
+        "Tests pages: /, /projetos, /projetos/[id] (each tab)",
+        "Fails if critical or serious violations found",
+        "Moderate warnings become TODOs (non-blocking)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": "See PRD US-043."
+    },
+    {
+      "id": "US-044",
+      "title": "Shell layout /configuracoes/* with v3 pattern",
+      "description": "As a user, I want /configuracoes root with consistent v3 layout: secondary sidebar + header + breadcrumb.",
+      "acceptanceCriteria": [
+        "Create src/app/configuracoes/layout.tsx with shell wrapper",
+        "Internal layout: secondary sidebar on left (sub-sections list), content on right",
+        "Sticky header with breadcrumb 'Configurações › [sub-section]'",
+        "Background var(--color-bg) black, text var(--color-fg) white",
+        "Q-bolt + Quayer wordmark logo from quayer-ds-v3.html in main header (reuse BrandLogo component)",
+        "Secondary sidebar uses v3 tokens (bg-surface, borders, amber hover)",
+        "Educational empty state on /configuracoes root showing sub-sections",
+        "Mobile (<768px): sidebar becomes drawer, content fullscreen",
+        "A11y: ARIA landmarks nav + main",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": "Phase J starts. See PRD US-044."
+    },
+    {
+      "id": "US-045",
+      "title": "Refactor /configuracoes/organizacao to v3",
+      "description": "As admin, I want to edit org data in v3 visual (dark, amber, DM Sans).",
+      "acceptanceCriteria": [
+        "Migrate src/app/integracoes/settings/organization/page.tsx → src/app/configuracoes/organizacao/page.tsx",
+        "Form: name, logo upload, timezone, type (PF/PJ), CNPJ",
+        "Inputs use shadcn with v3 variant (bg-surface, border-subtle, amber focus ring)",
+        "Buttons variant primary amber for primary actions",
+        "Cards with radius + shadow tokens",
+        "Success/error messages with v3 variant",
+        "Preserves current functionality (edit, save, Zod validation)",
+        "308 redirect from old route",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": "See PRD US-045."
+    },
+    {
+      "id": "US-046",
+      "title": "Refactor /configuracoes/membros to v3",
+      "description": "As admin, I want to manage org members in table with v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes/users → /configuracoes/membros",
+        "Table: avatar, name, email, role, status, actions (edit, remove, resend invite)",
+        "Invite member button variant amber",
+        "Invite modal with form (email + role + optional message)",
+        "Empty state for zero members",
+        "Filter by role + search by name/email",
+        "Table with v3 tokens (bg-surface headers, row hover, divisors)",
+        "308 redirect from old route",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": "See PRD US-046."
+    },
+    {
+      "id": "US-047",
+      "title": "Refactor /configuracoes/roles to v3",
+      "description": "As admin, I want to manage custom RBAC roles in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes/settings/roles → /configuracoes/roles",
+        "List of roles with member count + permissions",
+        "Create/edit modal with grouped permissions checkboxes",
+        "Lock on builtin roles (admin, member)",
+        "Complete v3 visual",
+        "308 redirect from old route",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 47,
+      "passes": false,
+      "notes": "See PRD US-047."
+    },
+    {
+      "id": "US-048",
+      "title": "Refactor /configuracoes/scim and /configuracoes/dominios to v3",
+      "description": "As enterprise admin, I want to configure SCIM and verified domains in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes/settings/scim → /configuracoes/scim",
+        "Migrate /integracoes/settings/domains → /configuracoes/dominios",
+        "SCIM: endpoint URL, generated token with copy button, connection test",
+        "Domains: list + DNS verification (TXT records) + v3 status badges",
+        "308 redirects from old routes",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 48,
+      "passes": false,
+      "notes": "See PRD US-048."
+    },
+    {
+      "id": "US-049",
+      "title": "Refactor /configuracoes/billing and /faturas to v3",
+      "description": "As financial admin, I want to see plan, payment method, and invoice history in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes/settings/billing → /configuracoes/billing",
+        "Migrate /integracoes/settings/invoices → /configuracoes/billing/faturas",
+        "Current plan card with upgrade/downgrade CTA (amber)",
+        "Editable payment method",
+        "Invoices table with download (v3 tokens)",
+        "Semantic status badges (paid=green, pending=amber, overdue=red)",
+        "308 redirects",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 49,
+      "passes": false,
+      "notes": "See PRD US-049."
+    },
+    {
+      "id": "US-050",
+      "title": "Refactor /configuracoes/canais/whatsapp (list) to v3",
+      "description": "As a user, I want to see my connected WhatsApp instances in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes (root) → /configuracoes/canais/whatsapp",
+        "Grid of cards: name, phone number, status, metrics",
+        "Cards with v3 tokens (bg-surface, radius, shadow, hover border)",
+        "'+ Nova instância' CTA variant amber",
+        "Status badges (🟢/🔴/🟡)",
+        "Educational empty state",
+        "308 redirect",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 50,
+      "passes": false,
+      "notes": "See PRD US-050."
+    },
+    {
+      "id": "US-051",
+      "title": "Refactor /configuracoes/canais/whatsapp/[id] to v3",
+      "description": "As a user, I want to manage a specific WhatsApp instance in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /integracoes/[instanceId]/settings → /configuracoes/canais/whatsapp/[id]",
+        "Internal tabs: Config, QR Code, Sessões, Webhooks",
+        "Config tab: form with instance data (v3 visual)",
+        "QR Code tab: centered QR, expiration timer, regenerate button (auth v3 pattern)",
+        "Sessões tab (migrate /integracoes/sessions): active sessions table + actions",
+        "Webhooks tab: instance-specific webhook events",
+        "308 redirects",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 51,
+      "passes": false,
+      "notes": "See PRD US-051."
+    },
+    {
+      "id": "US-052",
+      "title": "Refactor /configuracoes/integracoes/chatwoot to v3",
+      "description": "As a user, I want to configure Chatwoot integration in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /ferramentas/chatwoot → /configuracoes/integracoes/chatwoot",
+        "Form: instance URL, access token, account ID, connection test",
+        "Connection status highlight (v3 badge)",
+        "Sync logs (last 10) in v3 table",
+        "308 redirect",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 52,
+      "passes": false,
+      "notes": "See PRD US-052."
+    },
+    {
+      "id": "US-053",
+      "title": "Refactor /configuracoes/webhooks to v3",
+      "description": "As dev/admin, I want to manage outbound webhooks in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /ferramentas/webhooks → /configuracoes/webhooks",
+        "List: URL, subscribed events, status, last execution",
+        "Create/edit modal with URL validation",
+        "Event editor (grouped checkboxes)",
+        "Inline test runner (fires test webhook)",
+        "Execution logs (last 20) in v3 table",
+        "308 redirect",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 53,
+      "passes": false,
+      "notes": "See PRD US-053."
+    },
+    {
+      "id": "US-054",
+      "title": "Refactor /configuracoes/perfil/seguranca to v3",
+      "description": "As a user, I want to manage my 2FA, WebAuthn, and devices in v3 visual.",
+      "acceptanceCriteria": [
+        "Migrate /user/seguranca → /configuracoes/perfil/seguranca",
+        "Sections: 2FA (TOTP), Passkeys (WebAuthn), Logged devices",
+        "2FA: QR code setup + validation input + recovery codes (v3 visual)",
+        "Passkeys: list + 'Add passkey' button (triggers WebAuthn)",
+        "Devices: active sessions with IP/device + 'End session' button",
+        "Complete v3 visual",
+        "308 redirect",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 54,
+      "passes": false,
+      "notes": "See PRD US-054."
+    },
+    {
+      "id": "US-055",
+      "title": "Visual regression tests for /configuracoes/*",
+      "description": "As a dev, I need to guarantee refactor didn't break anything visually.",
+      "acceptanceCriteria": [
+        "Playwright test at test/e2e/visual/configuracoes.spec.ts",
+        "Screenshots of each sub-page in 3 viewports (375, 768, 1440)",
+        "Comparison with baseline (first run defines baseline)",
+        "Fails if diff > 5% in critical regions (headers, cards, buttons)",
+        "Generates HTML report with visible diffs",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 55,
+      "passes": false,
+      "notes": "End of Phase J. See PRD US-055."
+    },
+    {
+      "id": "US-056",
+      "title": "Shell layout /admin/* in v3 pattern",
+      "description": "As super admin, I want /admin root with shell consistent with v3 app.",
+      "acceptanceCriteria": [
+        "Refactor src/app/admin/layout.tsx to v3 shell",
+        "Secondary sidebar lists 13 admin sub-routes",
+        "Sticky header with breadcrumb 'Admin › [sub-section]'",
+        "Black background, white text, Q-bolt logo",
+        "'Super Admin' badge highlighted in header (v3 visual)",
+        "Mobile: drawer",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 56,
+      "passes": false,
+      "notes": "Phase K starts. See PRD US-056."
+    },
+    {
+      "id": "US-057",
+      "title": "Refactor /admin dashboard to v3",
+      "description": "As super admin, I want a dashboard with global metrics in v3 visual.",
+      "acceptanceCriteria": [
+        "Metric cards: total orgs, total users, MRR, active agents, messages processed",
+        "Charts (line/bar) with v3 tokens (amber, black bg)",
+        "Recent events list (signup, deploy, etc)",
+        "v3 visual (cards, tables)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 57,
+      "passes": false,
+      "notes": "See PRD US-057."
+    },
+    {
+      "id": "US-058",
+      "title": "Refactor /admin/organizations to v3",
+      "description": "As super admin, I want to manage all orgs in v3 visual.",
+      "acceptanceCriteria": [
+        "Table: name, plan, users, status, created at, actions",
+        "Search + filters (plan, status, date)",
+        "Row click → org details",
+        "v3 visual (dark table, badges, buttons)",
+        "Merge with ex-/integracoes/admin/clients (308 redirect)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 58,
+      "passes": false,
+      "notes": "See PRD US-058."
+    },
+    {
+      "id": "US-059",
+      "title": "Refactor /admin/invitations and /admin/sessions to v3",
+      "description": "As super admin, I want to see pending invitations and active JWT sessions in v3 visual.",
+      "acceptanceCriteria": [
+        "/admin/invitations: list with actions (revoke, resend)",
+        "/admin/sessions: table of active JWTs with actions (revoke, view details)",
+        "v3 visual in both",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 59,
+      "passes": false,
+      "notes": "See PRD US-059."
+    },
+    {
+      "id": "US-060",
+      "title": "Refactor /admin/security (Central de Segurança) to v3",
+      "description": "As super admin, I want access to Security Center in v3 visual preserving recent hardening features.",
+      "acceptanceCriteria": [
+        "Maintain 100% of current features (alerts, IP rules, WAF config, audit trail)",
+        "Complete visual reskin to v3 (cards, badges, charts)",
+        "Semantic colors (🔴 critical, 🟡 warning, 🟢 ok) mapped to v3 tokens",
+        "Zero functional regression (smoke test)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 60,
+      "passes": false,
+      "notes": "CRITICAL: preserve security features. See PRD US-060."
+    },
+    {
+      "id": "US-061",
+      "title": "Refactor /admin/audit to v3",
+      "description": "As super admin, I want to see audit log in v3 visual.",
+      "acceptanceCriteria": [
+        "Table of audit events with filters (type, user, org, date range)",
+        "Expandable details per row",
+        "CSV export",
+        "v3 visual (dark table, filters panel)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 61,
+      "passes": false,
+      "notes": "See PRD US-061."
+    },
+    {
+      "id": "US-062",
+      "title": "Refactor /admin/notificacoes to v3",
+      "description": "As super admin, I want to manage system notifications in v3 visual.",
+      "acceptanceCriteria": [
+        "List of notification templates",
+        "Live preview editor",
+        "Send history",
+        "v3 visual",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 62,
+      "passes": false,
+      "notes": "See PRD US-062."
+    },
+    {
+      "id": "US-063",
+      "title": "Refactor /admin/integracoes to v3",
+      "description": "As super admin, I want to see global platform integrations in v3 visual.",
+      "acceptanceCriteria": [
+        "Grid of available integrations (Chatwoot, Stripe, SendGrid, SMTP, etc)",
+        "Global status of each",
+        "Global config (not per org)",
+        "v3 visual",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 63,
+      "passes": false,
+      "notes": "See PRD US-063."
+    },
+    {
+      "id": "US-064",
+      "title": "Refactor /admin/settings to v3",
+      "description": "As super admin, I want to manage platform settings in v3 visual.",
+      "acceptanceCriteria": [
+        "Sections: general, email (SMTP), auth (OAuth providers), rate limits, feature flags",
+        "v3 visual (forms, cards, tabs)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 64,
+      "passes": false,
+      "notes": "See PRD US-064."
+    },
+    {
+      "id": "US-065",
+      "title": "Refactor /admin/billing, /subscriptions, /invoices to v3",
+      "description": "As super admin financial, I want to see aggregated revenue, subscriptions, invoices in v3 visual.",
+      "acceptanceCriteria": [
+        "/admin/billing: MRR, ARR, churn, LTV dashboard with v3 charts",
+        "/admin/subscriptions: table of active/canceled/pending subscriptions",
+        "/admin/invoices: table of all issued invoices",
+        "Financial export (CSV/XLSX)",
+        "Complete v3 visual",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 65,
+      "passes": false,
+      "notes": "See PRD US-065."
+    },
+    {
+      "id": "US-066",
+      "title": "Visual regression tests for /admin/*",
+      "description": "As a dev, I need to guarantee admin refactor didn't break critical features.",
+      "acceptanceCriteria": [
+        "Playwright test at test/e2e/visual/admin.spec.ts",
+        "Screenshots of 13 sub-pages in viewport 1440 (admin is desktop-first)",
+        "Comparison with baseline",
+        "Functional E2E: execute 3 key flows (create org, revoke session, view audit log) to ensure refactor didn't break backend",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 66,
+      "passes": false,
+      "notes": "End of Phase K. Full PRD complete. See PRD US-066."
     }
   ]
 }
