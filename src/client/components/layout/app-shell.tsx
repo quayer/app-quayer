@@ -3,31 +3,37 @@ import { BuilderSidebar } from './builder-sidebar'
 import { getBuilderSidebarData } from '@/server/ai-module/builder/get-sidebar-data'
 
 /**
- * AppShell — Server Component que resolve os dados da sidebar
- * e renderiza o layout padrão do Quayer Builder.
+ * AppShell — Server Component. Layout padrão v3 do Quayer para TODAS as
+ * rotas autenticadas.
  *
- * Uso (dentro de um layout.tsx autenticado):
- *   export default async function MyLayout({ children }) {
- *     return <AppShell>{children}</AppShell>
- *   }
+ * - Fundo #000 (var(--color-bg-base)) e texto branco (var(--color-text-primary))
+ * - Fonte DM Sans
+ * - Sidebar fixa à esquerda em desktop (>= lg), oculta em mobile
+ * - `data-app-v3="true"` permite hooks CSS opt-in nas páginas filhas
  *
- * Responsabilidades:
- *  - Buscar projetos recentes + role do usuário via middleware headers
- *  - Renderizar <BuilderSidebar> à esquerda (oculta em mobile)
- *  - Renderizar conteúdo à direita num container flexível
- *
- * Mobile (< lg): sidebar oculta; usuário navega pelo header da página filha.
+ * Usado por layouts de /admin, /contatos, /conversas, /ferramentas,
+ * /integracoes, /projetos e a home /.
  */
 export async function AppShell({ children }: { children: ReactNode }) {
   const { recentProjects, isSuperAdmin } = await getBuilderSidebarData()
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div
+      data-app-v3="true"
+      className="flex min-h-screen"
+      style={{
+        backgroundColor: 'var(--color-bg-base, #000000)',
+        color: 'var(--color-text-primary, #ffffff)',
+        fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
+      }}
+    >
       <BuilderSidebar
         recentProjects={recentProjects}
         isSuperAdmin={isSuperAdmin}
       />
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex min-h-screen flex-1 flex-col min-w-0">
+        {children}
+      </main>
     </div>
   )
 }
