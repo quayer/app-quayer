@@ -583,3 +583,137 @@
     display: none !important;
   }
 }
+
+/* ============================================================
+   App v3 — shadcn token overrides para TODAS as páginas autenticadas
+   renderizadas dentro de <AppShell> (que adiciona data-app-v3="true").
+
+   Todas as classes Tailwind que dependem dos tokens shadcn
+   (bg-background, text-foreground, bg-card, border, etc.) recebem
+   automaticamente os valores v3 (preto, amber, DM Sans) sem precisar
+   tocar cada página. Páginas legadas (admin, integracoes, contatos,
+   conversas, ferramentas) imediatamente passam a seguir o design v3.
+
+   Fonte das cores v3: quayer-ds-v3.html + :root block no topo deste arquivo.
+   Envolvido em @layer utilities porque Tailwind v4 strippa regras raw.
+   ============================================================ */
+@layer utilities {
+  [data-app-v3="true"] {
+    /* Core surfaces */
+    --background: var(--color-bg-base);
+    --foreground: var(--color-text-primary);
+    --card: var(--color-bg-surface);
+    --card-foreground: var(--color-text-primary);
+    --popover: var(--color-bg-elevated);
+    --popover-foreground: var(--color-text-primary);
+
+    /* Brand → primary */
+    --primary: var(--color-brand);
+    --primary-foreground: var(--color-text-inverse);
+
+    /* Neutral surfaces */
+    --secondary: var(--color-bg-elevated);
+    --secondary-foreground: var(--color-text-primary);
+    --muted: var(--color-bg-elevated);
+    --muted-foreground: var(--color-text-secondary);
+    --accent: var(--color-brand-subtle);
+    --accent-foreground: var(--color-brand);
+
+    /* Status */
+    --destructive: var(--color-error);
+    --destructive-foreground: #ffffff;
+
+    /* Borders + inputs + ring */
+    --border: var(--color-border-default);
+    --input: var(--color-border-default);
+    --ring: var(--color-brand);
+
+    /* Sidebar (shadcn internal — usado por SidebarProvider wrapper) */
+    --sidebar: var(--color-bg-base);
+    --sidebar-foreground: var(--color-text-primary);
+    --sidebar-primary: var(--color-brand);
+    --sidebar-primary-foreground: var(--color-text-inverse);
+    --sidebar-accent: var(--color-brand-subtle);
+    --sidebar-accent-foreground: var(--color-brand);
+    --sidebar-border: var(--color-border-subtle);
+    --sidebar-ring: var(--color-brand);
+
+    /* Tipografia */
+    font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  }
+
+  /* Tabelas legadas — herdam background transparente e border do tema */
+  [data-app-v3="true"] table {
+    color: var(--color-text-primary);
+  }
+  [data-app-v3="true"] thead {
+    color: var(--color-text-tertiary);
+  }
+
+  /* Inputs/textareas/selects nativos (não-shadcn) */
+  [data-app-v3="true"] input:not([type="checkbox"]):not([type="radio"]),
+  [data-app-v3="true"] textarea,
+  [data-app-v3="true"] select {
+    background-color: var(--color-bg-elevated);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-default);
+  }
+
+  /* Scrollbar dark em navegadores WebKit */
+  [data-app-v3="true"] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Headings usam DM Sans automático */
+  [data-app-v3="true"] h1,
+  [data-app-v3="true"] h2,
+  [data-app-v3="true"] h3,
+  [data-app-v3="true"] h4 {
+    font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* Esconder o <SidebarTrigger> vestigial das páginas legadas — o
+     novo BuilderSidebar é sempre visível em desktop, não precisa de
+     botão de toggle. O componente ainda existe no DOM (evita crash
+     por useSidebar) mas fica invisível. */
+  [data-app-v3="true"] [data-sidebar="trigger"],
+  [data-app-v3="true"] button[data-slot="sidebar-trigger"] {
+    display: none !important;
+  }
+
+  /* Separadores verticais pequenos dos headers legados (ao lado do
+     trigger) também viram vestigiais — esconder o primeiro de cada
+     header. */
+  [data-app-v3="true"] header > div > [data-slot="separator-root"][data-orientation="vertical"],
+  [data-app-v3="true"] header > [data-slot="separator-root"][data-orientation="vertical"] {
+    display: none !important;
+  }
+
+  /* Cards legados ganham um leve destaque de borda e hover lift */
+  [data-app-v3="true"] [data-slot="card"] {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  }
+
+  /* Primary buttons (bg-primary) recebem sombra amber */
+  [data-app-v3="true"] button.bg-primary,
+  [data-app-v3="true"] [data-slot="button"].bg-primary {
+    box-shadow: 0 4px 14px -4px rgba(255, 214, 10, 0.35);
+  }
+
+  /* Links destacados */
+  [data-app-v3="true"] a.text-primary {
+    color: var(--color-brand) !important;
+  }
+}
