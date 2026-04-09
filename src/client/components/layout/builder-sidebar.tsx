@@ -6,7 +6,7 @@ import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
 import {
   Home,
-  MessageSquareText,
+  FolderKanban,
   BookOpen,
   MoreHorizontal,
   Moon,
@@ -19,11 +19,13 @@ import {
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { getProjectStatusStyle } from "@/lib/project-status"
+import { getProjectTypeMeta } from "@/lib/project-type"
 
 interface BuilderSidebarProject {
   id: string
   name: string
   status: string
+  type: string
 }
 
 interface BuilderSidebarProps {
@@ -43,7 +45,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "Início", icon: Home, exact: true },
-  { href: "/projetos", label: "Conversas", icon: MessageSquareText },
+  { href: "/projetos", label: "Meus projetos", icon: FolderKanban },
   { href: "/recursos", label: "Recursos", icon: BookOpen },
 ]
 
@@ -297,11 +299,13 @@ export function BuilderSidebar({
               {visibleProjects.map((project) => {
                 const active = pathname === `/projetos/${project.id}`
                 const statusStyle = getProjectStatusStyle(project.status)
+                const typeMeta = getProjectTypeMeta(project.type)
                 return (
                   <li key={project.id}>
                     <RecentProjectLink
                       href={`/projetos/${project.id}`}
                       name={project.name}
+                      typeIcon={typeMeta.icon}
                       dotColor={statusStyle.dot}
                       active={active}
                       tokens={tokens}
@@ -456,12 +460,14 @@ function NavLink({
 function RecentProjectLink({
   href,
   name,
+  typeIcon: TypeIcon,
   dotColor,
   active,
   tokens,
 }: {
   href: string
   name: string
+  typeIcon: typeof Home
   dotColor: string
   active: boolean
   tokens: SidebarTokens
@@ -469,7 +475,7 @@ function RecentProjectLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-2.5 rounded-md px-3.5 py-1.5 text-[13px] transition-colors"
+      className="group flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors"
       style={{
         backgroundColor: active ? tokens.activeBg : "transparent",
         color: active ? tokens.activeText : tokens.textSecondary,
@@ -490,12 +496,21 @@ function RecentProjectLink({
         }
       }}
     >
+      {/* Type icon (bot/megaphone/...) no lugar do antigo dot */}
+      <TypeIcon
+        className="h-3.5 w-3.5 shrink-0"
+        strokeWidth={active ? 2.5 : 2}
+        style={{
+          color: active ? tokens.activeText : tokens.textTertiary,
+        }}
+      />
+      <span className="truncate flex-1">{name}</span>
+      {/* Status dot à direita — pequeno indicador de produção/draft */}
       <span
         aria-hidden
         className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
         style={{ backgroundColor: dotColor }}
       />
-      <span className="truncate">{name}</span>
     </Link>
   )
 }

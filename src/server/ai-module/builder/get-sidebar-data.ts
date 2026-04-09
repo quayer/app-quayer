@@ -10,7 +10,12 @@ import { listRecentProjects } from '@/server/features/builder-projects/queries'
  * para lista vazia em qualquer erro (Turbopack stale client, etc).
  */
 export async function getBuilderSidebarData(): Promise<{
-  recentProjects: Array<{ id: string; name: string; status: string }>
+  recentProjects: Array<{
+    id: string
+    name: string
+    status: string
+    type: string
+  }>
   isSuperAdmin: boolean
 }> {
   try {
@@ -29,6 +34,7 @@ export async function getBuilderSidebarData(): Promise<{
         id: p.id,
         name: p.name,
         status: p.status,
+        type: p.type,
       })),
       isSuperAdmin,
     }

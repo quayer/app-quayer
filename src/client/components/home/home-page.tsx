@@ -491,12 +491,8 @@ export function HomePage({
                   disabled={!canSubmit}
                   className="flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-30"
                   style={{
-                    backgroundColor: canSubmit
-                      ? tokens.brand
-                      : "rgba(255,255,255,0.08)",
-                    color: canSubmit
-                      ? tokens.textInverse
-                      : "rgba(255,255,255,0.4)",
+                    backgroundColor: canSubmit ? tokens.brand : tokens.hoverBg,
+                    color: canSubmit ? tokens.textInverse : tokens.textTertiary,
                     boxShadow: canSubmit
                       ? "0 4px 12px -2px rgba(255,214,10,0.35)"
                       : "none",
@@ -542,7 +538,7 @@ export function HomePage({
               <TabButton
                 active={activeTab === "my-projects"}
                 onClick={() => setActiveTab("my-projects")}
-                label="Conversas"
+                label="Meus Projetos"
                 badge={recentProjects.length}
               />
               <TabButton
@@ -694,10 +690,8 @@ function TabButton({
       onClick={onClick}
       className="flex h-8 items-center gap-1.5 rounded-full px-4 text-[13px] font-medium transition-all"
       style={{
-        backgroundColor: active ? "rgba(255,255,255,0.08)" : "transparent",
-        color: active
-          ? tokens.textPrimary
-          : tokens.textTertiary,
+        backgroundColor: active ? tokens.hoverBg : "transparent",
+        color: active ? tokens.textPrimary : tokens.textTertiary,
       }}
     >
       {label}
@@ -705,12 +699,8 @@ function TabButton({
         <span
           className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold"
           style={{
-            backgroundColor: active
-              ? tokens.brand
-              : "rgba(255,255,255,0.12)",
-            color: active
-              ? tokens.textInverse
-              : tokens.textSecondary,
+            backgroundColor: active ? tokens.brand : tokens.hoverBg,
+            color: active ? tokens.textInverse : tokens.textSecondary,
           }}
         >
           {badge}
