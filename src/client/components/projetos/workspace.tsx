@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, Bot, MessageSquare, MoreVertical } from "lucide-react"
 
 import { Button } from "@/client/components/ui/button"
@@ -33,15 +32,6 @@ interface WorkspaceProps {
   initialMessages: ChatMessage[]
 }
 
-const VALID_TABS: PreviewTab[] = ["overview", "prompt", "playground", "deploy"]
-
-function parseTab(value: string | null): PreviewTab {
-  if (value && (VALID_TABS as string[]).includes(value)) {
-    return value as PreviewTab
-  }
-  return "overview"
-}
-
 /**
  * Workspace — split layout (chat à esquerda, preview à direita)
  *
@@ -55,8 +45,6 @@ function parseTab(value: string | null): PreviewTab {
  * Tema reativo via useAppTokens — mesmo padrão da home + sidebar.
  */
 export function Workspace({ project, initialMessages }: WorkspaceProps) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
   const { tokens } = useAppTokens()
 
   const [name, setName] = React.useState(project.name)
@@ -64,27 +52,19 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
   const [mobilePanel, setMobilePanel] = React.useState<"chat" | "preview">(
     "chat",
   )
+  // Tab state is LOCAL — using URL state triggered router.replace on
+  // every click, which cascaded into RSC navigation + AuthProvider
+  // re-fetch + network errors. For an instant-response split UI,
+  // local state is the right trade-off. Deep-linking to specific
+  // tabs is a future US.
+  const [activeTab, setActiveTab] = React.useState<PreviewTab>("overview")
 
   const status = getProjectStatusStyle(project.status)
   const statusLabel = PROJECT_STATUS_LABEL[project.status]
 
-  const activeTab = React.useMemo(
-    () => parseTab(searchParams.get("tab")),
-    [searchParams],
-  )
-
-  const handleTabChange = React.useCallback(
-    (tab: PreviewTab) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (tab === "overview") params.delete("tab")
-      else params.set("tab", tab)
-      const qs = params.toString()
-      router.replace(`/projetos/${project.id}${qs ? `?${qs}` : ""}`, {
-        scroll: false,
-      })
-    },
-    [project.id, router, searchParams],
-  )
+  const handleTabChange = React.useCallback((tab: PreviewTab) => {
+    setActiveTab(tab)
+  }, [])
 
   const handleNameSubmit = React.useCallback(
     (value: string) => {

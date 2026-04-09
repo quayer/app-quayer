@@ -1,45 +1,54 @@
-'use client'
+"use client"
 
-/**
- * PlaygroundTab — US-027
- *
- * Placeholder for the in-workspace playground. The existing full playground
- * lives at src/app/integracoes/agents/[id]/playground/playground-client.tsx
- * and should be adapted/embedded here in a future iteration.
- *
- * TODO: embed or port the existing playground-client.tsx with project.aiAgentId.
- */
-
-import { Card, CardContent } from '@/client/components/ui/card'
-import type { WorkspaceProject } from '@/client/components/projetos/types'
+import { Bot, Play } from "lucide-react"
+import { useAppTokens } from "@/client/hooks/use-app-tokens"
+import type { WorkspaceProject } from "@/client/components/projetos/types"
 
 interface PlaygroundTabProps {
   project: WorkspaceProject
 }
 
+/**
+ * PlaygroundTab — placeholder enquanto não portamos o playground real
+ * que existe em /integracoes/agents/[id]/playground/playground-client.tsx
+ */
 export function PlaygroundTab({ project }: PlaygroundTabProps) {
-  if (!project.aiAgent) {
-    return (
-      <div className="flex min-h-[300px] items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="p-6 text-center text-sm text-muted-foreground">
-            Aguardando o Builder criar o agente. Continue a conversa no chat.
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  const { tokens } = useAppTokens()
+
+  const icon = !project.aiAgent ? Bot : Play
+  const Icon = icon
+  const title = !project.aiAgent
+    ? "Aguardando o Builder"
+    : "Playground em desenvolvimento"
+  const description = !project.aiAgent
+    ? "Continue a conversa no chat para o Builder criar seu agente."
+    : "Em breve você poderá testar o agente aqui. Por enquanto, use o chat pra simular conversas."
 
   return (
-    <div className="flex min-h-[400px] items-center justify-center">
-      <Card className="max-w-md">
-        <CardContent className="p-8 text-center">
-          <h3 className="mb-2 text-base font-semibold">Playground em desenvolvimento</h3>
-          <p className="text-sm text-muted-foreground">
-            Em breve voce podera testar o agente aqui.
-          </p>
-        </CardContent>
-      </Card>
+    <div className="mx-auto flex min-h-[320px] max-w-md flex-col items-center justify-center gap-4 text-center">
+      <div
+        className="flex h-14 w-14 items-center justify-center rounded-2xl"
+        style={{
+          backgroundColor: tokens.brandSubtle,
+          color: tokens.brand,
+        }}
+      >
+        <Icon className="h-6 w-6" />
+      </div>
+      <div>
+        <h3
+          className="text-base font-semibold"
+          style={{ color: tokens.textPrimary }}
+        >
+          {title}
+        </h3>
+        <p
+          className="mx-auto mt-1 max-w-sm text-[13px]"
+          style={{ color: tokens.textSecondary }}
+        >
+          {description}
+        </p>
+      </div>
     </div>
   )
 }

@@ -1,46 +1,90 @@
-'use client'
+"use client"
 
 /**
- * PreviewPanel — US-025
+ * PreviewPanel — workspace direita (tabs do agente)
  *
- * Tabbed preview for a workspace project. Owns no state beyond what is
- * passed in via props — tab state lives in workspace.tsx (URL source of truth).
- *
- * Extension point: for v1 we always render the 4 AI-agent tabs. When other
- * project types are introduced, branch on project.type here to swap the tab
- * set (e.g. for 'crm_automation' render different tabs).
+ * Tema reativo via useAppTokens. Usa shadcn Tabs como base mas com
+ * estilização inline pra combinar com o tom v3 (tabs pill + active
+ * amber). Owns no state — tudo vem via props do workspace.
  */
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/client/components/ui/tabs'
-import type { PreviewPanelProps, PreviewTab } from '@/client/components/projetos/types'
-import { OverviewTab } from '@/client/components/projetos/tabs/overview-tab'
-import { PromptTab } from '@/client/components/projetos/tabs/prompt-tab'
-import { PlaygroundTab } from '@/client/components/projetos/tabs/playground-tab'
-import { DeployTab } from '@/client/components/projetos/tabs/deploy-tab'
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/client/components/ui/tabs"
+import { useAppTokens } from "@/client/hooks/use-app-tokens"
+import type {
+  PreviewPanelProps,
+  PreviewTab,
+} from "@/client/components/projetos/types"
 
-export function PreviewPanel({ project, activeTab, onTabChange }: PreviewPanelProps) {
-  // v1: always render the AI-agent tab set.
-  // TODO(builder-v2): branch on project.type to render different tab sets
-  // for other project types (e.g. crm_automation, workflow_builder, etc.)
+import { OverviewTab } from "@/client/components/projetos/tabs/overview-tab"
+import { PromptTab } from "@/client/components/projetos/tabs/prompt-tab"
+import { PlaygroundTab } from "@/client/components/projetos/tabs/playground-tab"
+import { DeployTab } from "@/client/components/projetos/tabs/deploy-tab"
+
+export function PreviewPanel({
+  project,
+  activeTab,
+  onTabChange,
+}: PreviewPanelProps) {
+  const { tokens } = useAppTokens()
+
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      style={{ backgroundColor: tokens.bgBase }}
+    >
       <Tabs
         value={activeTab}
         onValueChange={(v) => onTabChange(v as PreviewTab)}
-        className="flex h-full flex-col"
+        className="flex h-full min-h-0 flex-col"
       >
-        <div className="border-b px-4 py-3">
-          <TabsList className="w-full max-w-md">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="prompt">Prompt</TabsTrigger>
-            <TabsTrigger value="playground">Playground</TabsTrigger>
-            <TabsTrigger value="deploy">Deploy</TabsTrigger>
+        {/* Tab strip — sticky top, same divider style as header */}
+        <div
+          className="flex shrink-0 items-center px-4 py-3"
+          style={{ borderBottom: `1px solid ${tokens.divider}` }}
+        >
+          <TabsList
+            className="h-9 gap-1 border p-1"
+            style={{
+              backgroundColor: tokens.bgSurface,
+              borderColor: tokens.divider,
+            }}
+          >
+            {(
+              [
+                { value: "overview", label: "Visão geral" },
+                { value: "prompt", label: "Prompt" },
+                { value: "playground", label: "Playground" },
+                { value: "deploy", label: "Publicar" },
+              ] as const
+            ).map((tab) => (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="h-7 rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none"
+                style={{
+                  color:
+                    activeTab === tab.value
+                      ? tokens.brandText
+                      : tokens.textSecondary,
+                  backgroundColor:
+                    activeTab === tab.value ? tokens.brandSubtle : "transparent",
+                }}
+              >
+                {tab.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        {/* Tab content area — single scroll container */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <TabsContent value="overview" className="m-0 p-6">
-            <OverviewTab project={project} />
+            <OverviewTab project={project} onTabChange={onTabChange} />
           </TabsContent>
           <TabsContent value="prompt" className="m-0 p-6">
             <PromptTab project={project} />
