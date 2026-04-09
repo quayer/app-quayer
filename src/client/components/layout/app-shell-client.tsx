@@ -86,9 +86,9 @@ export function AppShellClient({
       data-app-v3="true"
       className="flex min-h-screen"
       style={{
-        backgroundColor: "var(--color-bg-base, #000000)",
-        color: "var(--color-text-primary, #ffffff)",
-        fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
+        backgroundColor: "#000000",
+        color: "#ffffff",
+        fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
       {/* Durante hidratação OU quando não-colapsado, renderiza sidebar.
