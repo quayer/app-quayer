@@ -8,11 +8,13 @@
  *   npm install ai @ai-sdk/openai @ai-sdk/anthropic
  */
 
-import { generateText, streamText, stepCountIs } from 'ai'
+import { generateText, streamText, stepCountIs, type ToolSet } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { database } from '@/server/services/database'
 import { getEnabledBuiltinTools, type ToolExecutionContext } from './tools/builtin-tools'
+import { BUILDER_RESERVED_NAME } from '@/server/ai-module/builder/builder.constants'
+import { buildBuilderToolset } from '@/server/ai-module/builder/tools'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -180,7 +182,7 @@ type PreparedAgentCall = {
   agentConfig: Awaited<ReturnType<typeof database.aIAgentConfig.findUnique>>
   promptVersion: Awaited<ReturnType<typeof getActivePrompt>>
   conversationHistory: Awaited<ReturnType<typeof buildConversationContext>>
-  tools: ReturnType<typeof getEnabledBuiltinTools>
+  tools: ToolSet
   model: ReturnType<typeof getModel>
   systemPrompt: string
   startTime: number
@@ -225,7 +227,32 @@ async function prepareAgentCall(
     connectionId: params.connectionId,
     organizationId: params.organizationId,
   }
-  const tools = getEnabledBuiltinTools(agentConfig.enabledTools, toolContext)
+  const tools: ToolSet = {
+    ...getEnabledBuiltinTools(agentConfig.enabledTools, toolContext),
+  }
+
+  // 4b. Builder meta-agent hook: when the active agent is the reserved Builder,
+  // merge in the 7 Builder tool factories so the meta-agent can actually act
+  // on the platform (create agents, attach tools, launch instances, etc.).
+  if (agentConfig.name === BUILDER_RESERVED_NAME) {
+    const conv = await database.builderProjectConversation.findUnique({
+      where: { id: params.sessionId },
+      select: { projectId: true },
+    })
+    if (!conv) {
+      throw new Error(
+        `Builder conversation ${params.sessionId} not found — cannot resolve projectId for Builder toolset`
+      )
+    }
+    Object.assign(
+      tools,
+      buildBuilderToolset({
+        projectId: conv.projectId,
+        organizationId: params.organizationId,
+        userId: params.contactId,
+      })
+    )
+  }
 
   // 5. Get LLM model instance
   const model = getModel(agentConfig.provider, agentConfig.model, params.apiKey)
