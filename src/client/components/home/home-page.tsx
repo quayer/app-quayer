@@ -125,33 +125,60 @@ export function HomePage({ recentProjects }: HomePageProps) {
         }}
       />
 
-      <div className="relative flex flex-1 flex-col items-center px-6 pt-20 pb-10">
-        <div className="w-full max-w-2xl">
-          {/* Top badge */}
-          <div className="mb-6 flex justify-center">
+      <div className="relative flex flex-1 flex-col items-center px-6 pt-24 pb-16">
+        <div className="w-full max-w-[640px]">
+          {/* Top badge — QuayerCLI tease */}
+          <div className="mb-8 flex justify-center">
             <button
               type="button"
-              className="group inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs transition-all hover:-translate-y-0.5"
+              className="group inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] font-medium transition-all hover:-translate-y-0.5"
               style={{
-                borderColor: "rgba(255,214,10,0.25)",
-                backgroundColor: "rgba(255,214,10,0.06)",
+                borderColor: "var(--color-border-brand, rgba(255,214,10,0.20))",
+                backgroundColor: "var(--color-brand-muted, rgba(255,214,10,0.08))",
                 color: "var(--color-brand, #FFD60A)",
               }}
+              aria-label="Build locally with QuayerCLI — em breve"
             >
-              <Sparkles className="h-3 w-3" />
-              Quayer Builder — crie agentes de WhatsApp conversando
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              <span>
+                Build locally with{" "}
+                <span style={{ fontWeight: 700 }}>QuayerCLI</span>
+              </span>
+              <span
+                className="ml-1 rounded-full border px-1.5 py-px text-[10px] uppercase tracking-[0.12em]"
+                style={{
+                  borderColor: "rgba(255,214,10,0.25)",
+                  color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+                }}
+              >
+                em breve
+              </span>
             </button>
           </div>
 
           {/* Big heading with logo mark */}
-          <div className="mb-8 flex items-center justify-center gap-4">
-            <Logo size={44} variant="color" showWordmark={false} />
+          <div className="mb-10 flex flex-col items-center gap-5 text-center">
+            <Logo size={52} variant="color" showWordmark={false} />
             <h1
-              className="text-center text-4xl font-bold tracking-tight sm:text-5xl"
-              style={{ letterSpacing: "-0.03em", lineHeight: 1.05 }}
+              className="text-[2.5rem] font-bold sm:text-[3rem]"
+              style={{
+                letterSpacing: "-0.03em",
+                lineHeight: "1.05",
+                color: "var(--color-text-primary, #ffffff)",
+              }}
             >
               O que vamos criar hoje?
             </h1>
+            <p
+              className="max-w-md text-[15px]"
+              style={{
+                color: "var(--color-text-secondary, rgba(255,255,255,0.55))",
+                lineHeight: "1.5",
+              }}
+            >
+              Descreva sua ideia e o Builder transforma em um agente de
+              WhatsApp funcional.
+            </p>
           </div>
 
           {/* Input card */}
@@ -400,7 +427,7 @@ function TabButton({
         backgroundColor: active ? "rgba(255,255,255,0.08)" : "transparent",
         color: active
           ? "var(--color-text-primary, #ffffff)"
-          : "var(--color-text-tertiary, rgba(255,255,255,0.5))",
+          : "var(--color-text-tertiary, rgba(255,255,255,0.55))",
       }}
     >
       {label}
@@ -470,7 +497,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
                 className="truncate text-xs"
                 style={{
                   color:
-                    "var(--color-text-tertiary, rgba(255,255,255,0.4))",
+                    "var(--color-text-tertiary, rgba(255,255,255,0.55))",
                 }}
               >
                 Agente de WhatsApp
@@ -558,7 +585,7 @@ function EmptyState({
       <p
         className="max-w-sm text-xs"
         style={{
-          color: "var(--color-text-tertiary, rgba(255,255,255,0.5))",
+          color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
         }}
       >
         {description}
