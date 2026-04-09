@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { Metadata } from 'next'
 import { ArrowLeft } from 'lucide-react'
-import { database } from '@/server/services/database'
+import { getDatabase } from '@/server/services/database'
 import { ProjetosList } from '@/client/components/projetos/projetos-list'
 import { Button } from '@/client/components/ui/button'
 
@@ -27,7 +27,8 @@ export default async function ProjetosPage() {
     redirect('/')
   }
 
-  const projects = await database.builderProject.findMany({
+  const db = getDatabase()
+  const projects = await db.builderProject.findMany({
     where: {
       organizationId: orgId,
       archivedAt: null,

@@ -1,7 +1,7 @@
 import { headers } from 'next/headers'
 import { redirect, notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import { database } from '@/server/services/database'
+import { getDatabase } from '@/server/services/database'
 import { Workspace } from '@/client/components/projetos/workspace'
 import type {
   ChatMessage,
@@ -43,7 +43,8 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
   // ------------------------------------------------------------------
   // Fetch project scoped to active org + soft-delete aware.
   // ------------------------------------------------------------------
-  const project = await database.builderProject.findFirst({
+  const db = getDatabase()
+  const project = await db.builderProject.findFirst({
     where: {
       id,
       organizationId: orgId,
@@ -69,7 +70,7 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
   // ------------------------------------------------------------------
   // Fetch last 50 messages for the 1:1 conversation attached to this project.
   // ------------------------------------------------------------------
-  const rawMessages = await database.builderProjectMessage.findMany({
+  const rawMessages = await db.builderProjectMessage.findMany({
     where: {
       conversation: { projectId: id },
     },
