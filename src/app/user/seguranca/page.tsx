@@ -34,6 +34,7 @@ import {
   AlertDialogTrigger,
 } from '@/client/components/ui/alert-dialog'
 import { toast } from 'sonner'
+import { getCsrfHeaders } from '@/client/hooks/use-csrf-token'
 
 // ============================================
 // Types
@@ -73,7 +74,7 @@ interface TotpSetupResponse {
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getCsrfHeaders(), ...options?.headers },
     ...options,
   })
   if (!res.ok) {
@@ -117,6 +118,50 @@ function getDeviceIcon(userAgent: string | null) {
 function isCurrentDevice(deviceUserAgent: string | null): boolean {
   if (!deviceUserAgent || typeof navigator === 'undefined') return false
   return navigator.userAgent === deviceUserAgent
+}
+
+// ============================================
+// Recovery Codes Grid (module-scope to prevent re-creation on each render)
+// ============================================
+
+interface RecoveryCodesGridProps {
+  codes: string[]
+  onCopy: (codes: string[]) => void
+  onDownload: (codes: string[]) => void
+}
+
+function RecoveryCodesGrid({ codes, onCopy, onDownload }: RecoveryCodesGridProps) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        {codes.map((code, i) => (
+          <div
+            key={i}
+            className="bg-muted rounded-md px-3 py-2 text-center font-mono text-sm tracking-wider"
+          >
+            {code}
+          </div>
+        ))}
+      </div>
+      <Alert>
+        <KeyRound className="h-4 w-4" />
+        <AlertDescription>
+          Guarde estes codigos em local seguro. Eles nao serao mostrados novamente.
+          Cada codigo so pode ser usado uma vez.
+        </AlertDescription>
+      </Alert>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={() => onCopy(codes)}>
+          <Copy className="h-4 w-4 mr-2" />
+          Copiar todos
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => onDownload(codes)}>
+          <Download className="h-4 w-4 mr-2" />
+          Download .txt
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 // ============================================
@@ -339,42 +384,6 @@ function TwoFactorSection() {
     }
   }
 
-  // ------- Recovery Codes Grid -------
-
-  function RecoveryCodesGrid({ codes }: { codes: string[] }) {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-2">
-          {codes.map((code, i) => (
-            <div
-              key={i}
-              className="bg-muted rounded-md px-3 py-2 text-center font-mono text-sm tracking-wider"
-            >
-              {code}
-            </div>
-          ))}
-        </div>
-        <Alert>
-          <KeyRound className="h-4 w-4" />
-          <AlertDescription>
-            Guarde estes codigos em local seguro. Eles nao serao mostrados novamente.
-            Cada codigo so pode ser usado uma vez.
-          </AlertDescription>
-        </Alert>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => handleCopyCodes(codes)}>
-            <Copy className="h-4 w-4 mr-2" />
-            Copiar todos
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleDownloadCodes(codes)}>
-            <Download className="h-4 w-4 mr-2" />
-            Download .txt
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   // ------- Loading -------
 
   if (isLoading) {
@@ -415,13 +424,13 @@ function TwoFactorSection() {
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10">
-                <ShieldCheck className="h-5 w-5 text-green-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 dark:bg-green-400/10">
+                <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
               </div>
               <div className="flex-1">
                 <CardTitle className="text-base flex items-center gap-2">
                   2FA Ativo
-                  <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/30">
+                  <Badge variant="outline" className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30">
                     Ativo
                   </Badge>
                 </CardTitle>
@@ -560,7 +569,7 @@ function TwoFactorSection() {
           {/* Step 3: Recovery Codes */}
           {setupStep === 3 && setupData && (
             <div className="space-y-4">
-              <RecoveryCodesGrid codes={setupData.recoveryCodes} />
+              <RecoveryCodesGrid codes={setupData.recoveryCodes} onCopy={handleCopyCodes} onDownload={handleDownloadCodes} />
               <DialogFooter>
                 <Button onClick={handleCloseSetup}>
                   Concluir
@@ -716,7 +725,7 @@ function TwoFactorSection() {
             </div>
           ) : (
             <div className="space-y-4">
-              <RecoveryCodesGrid codes={regenCodes} />
+              <RecoveryCodesGrid codes={regenCodes} onCopy={handleCopyCodes} onDownload={handleDownloadCodes} />
               <DialogFooter>
                 <Button onClick={() => { setRegenOpen(false); fetchDevices() }}>
                   Concluir
@@ -746,10 +755,23 @@ export default function SegurancaPage() {
       setError(null)
       const res = await fetch('/api/v1/device-sessions', { credentials: 'include' })
       if (!res.ok) throw new Error('Erro ao carregar dispositivos')
-      const json = await res.json()
-      setDevices(json.data || [])
+      const json = (await res.json()) as unknown
+      // Igniter pode retornar:
+      //  - { data: sessions[] } ou
+      //  - { data: { data: sessions[] } } (envelope de response.success) ou
+      //  - { success: true, data: sessions[] }
+      // Defensive unwrap até encontrar um array.
+      const unwrap = (value: unknown): DeviceSession[] => {
+        if (Array.isArray(value)) return value as DeviceSession[]
+        if (value && typeof value === 'object' && 'data' in value) {
+          return unwrap((value as { data: unknown }).data)
+        }
+        return []
+      }
+      setDevices(unwrap(json))
     } catch (err) {
       setError((err as Error).message)
+      setDevices([])
     } finally {
       setIsLoading(false)
     }
@@ -799,7 +821,9 @@ export default function SegurancaPage() {
     }
   }
 
-  const activeDevices = devices.filter(d => !d.isRevoked)
+  const activeDevices = Array.isArray(devices)
+    ? devices.filter((d) => !d.isRevoked)
+    : []
   const hasOtherActiveDevices = activeDevices.some(d => !isCurrentDevice(d.userAgent))
 
   return (
