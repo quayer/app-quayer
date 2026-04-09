@@ -3,13 +3,17 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Home,
+  FolderKanban,
+  MessageSquareText,
   BookOpen,
-  ChevronRight,
+  Search,
   MoreHorizontal,
   PanelLeft,
   Plus,
   Settings,
   Shield,
+  ChevronRight,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { getProjectStatusStyle } from "@/lib/project-status"
@@ -28,18 +32,31 @@ interface BuilderSidebarProps {
 
 const MAX_VISIBLE_PROJECTS = 3
 
+interface NavItem {
+  href: string
+  label: string
+  icon: typeof Home
+  exact?: boolean
+}
+
+const PRIMARY_NAV: NavItem[] = [
+  { href: "/", label: "Início", icon: Home, exact: true },
+  { href: "/projetos", label: "Projetos", icon: FolderKanban },
+  { href: "/conversas", label: "Conversas", icon: MessageSquareText },
+  { href: "/recursos", label: "Recursos", icon: BookOpen },
+]
+
 /**
- * BuilderSidebar — v3 design tokens
+ * BuilderSidebar — inspirada no v0 dev UI (Buscar / Início / Projetos /
+ * Conversas / Recursos). Segue DS v3 tokens.
  *
- * Sidebar principal do Quayer. Seções:
+ * Estrutura:
  *  - Logo + botão colapsar
- *  - CTA "+ Novo projeto" (amber)
- *  - Meus projetos (max 3 + "ver todos" menu se >3)
- *  - Navegação (Recursos)
+ *  - CTA "+ Nova conversa" (amber)
+ *  - Buscar (modal trigger, placeholder por enquanto)
+ *  - Nav primária (Início / Projetos / Conversas / Recursos)
+ *  - Recentes (último 3 projetos + "ver todos")
  *  - Footer (Configurações + Admin se super)
- *
- * Contraste: text-primary/secondary/tertiary via tokens v3.
- * Amber accent em hover state + active route (via usePathname).
  */
 export function BuilderSidebar({
   recentProjects,
@@ -50,6 +67,7 @@ export function BuilderSidebar({
   const visibleProjects = recentProjects.slice(0, MAX_VISIBLE_PROJECTS)
   const hasMoreProjects = recentProjects.length > MAX_VISIBLE_PROJECTS
   const hasAnyProjects = recentProjects.length > 0
+
   const isActive = (href: string, exact = false): boolean =>
     exact ? pathname === href : pathname?.startsWith(href) ?? false
 
@@ -62,7 +80,7 @@ export function BuilderSidebar({
         color: "var(--color-text-primary, #ffffff)",
         borderRight:
           "1px solid var(--color-border-subtle, rgba(255,255,255,0.08))",
-        fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
+        fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
       {/* Header — logo + toggle */}
@@ -90,7 +108,7 @@ export function BuilderSidebar({
         )}
       </div>
 
-      {/* CTA Novo projeto */}
+      {/* CTA Nova conversa */}
       <div className="px-3 pb-4 pt-1">
         <Link
           href="/"
@@ -103,7 +121,7 @@ export function BuilderSidebar({
         >
           <span className="flex items-center gap-2">
             <Plus className="h-3.5 w-3.5" strokeWidth={2.75} />
-            Novo projeto
+            Nova conversa
           </span>
           <kbd
             className="pointer-events-none hidden rounded px-1.5 font-mono text-[10px] font-medium sm:inline-flex"
@@ -117,20 +135,67 @@ export function BuilderSidebar({
         </Link>
       </div>
 
-      {/* Nav scrollable area */}
+      {/* Scrollable nav */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {/* Meus projetos — só se existirem */}
+        {/* Buscar (placeholder — vira command palette no futuro) */}
+        <button
+          type="button"
+          className="mb-2 flex w-full items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors hover:bg-white/5"
+          style={{
+            color: "var(--color-text-secondary, rgba(255,255,255,0.85))",
+          }}
+          aria-label="Buscar"
+          title="Buscar (⌘/)"
+        >
+          <Search
+            className="h-3.5 w-3.5 shrink-0"
+            style={{
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+            }}
+          />
+          <span className="flex-1 text-left">Buscar</span>
+          <kbd
+            className="rounded px-1.5 font-mono text-[10px]"
+            style={{
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+              backgroundColor: "rgba(255,255,255,0.06)",
+            }}
+          >
+            ⌘/
+          </kbd>
+        </button>
+
+        {/* Primary nav */}
+        <nav aria-label="Principal">
+          <ul className="flex flex-col">
+            {PRIMARY_NAV.map((item) => (
+              <li key={item.href}>
+                <NavLink
+                  href={item.href}
+                  icon={item.icon}
+                  label={item.label}
+                  active={isActive(item.href, item.exact)}
+                />
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        {/* Recentes */}
         {hasAnyProjects && (
-          <section className="mb-4" aria-labelledby="sidebar-projects-label">
+          <section
+            className="mt-5"
+            aria-labelledby="sidebar-recents-label"
+          >
             <div className="flex items-center justify-between px-3.5 pb-1.5 pt-1">
               <h3
-                id="sidebar-projects-label"
+                id="sidebar-recents-label"
                 className="text-[10px] font-semibold uppercase tracking-[0.14em]"
                 style={{
                   color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
                 }}
               >
-                Meus projetos
+                Recentes
               </h3>
               {hasMoreProjects && (
                 <Link
@@ -156,7 +221,7 @@ export function BuilderSidebar({
                   <li key={project.id}>
                     <Link
                       href={`/projetos/${project.id}`}
-                      className="flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors"
+                      className="flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors hover:bg-white/5"
                       style={{
                         backgroundColor: active
                           ? "rgba(255,214,10,0.08)"
@@ -195,31 +260,6 @@ export function BuilderSidebar({
             )}
           </section>
         )}
-
-        {/* Navegação */}
-        <section aria-labelledby="sidebar-nav-label">
-          <div className="px-3.5 pb-1.5 pt-1">
-            <h3
-              id="sidebar-nav-label"
-              className="text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style={{
-                color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
-              }}
-            >
-              Navegação
-            </h3>
-          </div>
-          <ul className="flex flex-col">
-            <li>
-              <NavLink
-                href="/recursos"
-                icon={BookOpen}
-                label="Recursos"
-                active={isActive("/recursos")}
-              />
-            </li>
-          </ul>
-        </section>
       </div>
 
       {/* Footer */}
@@ -258,14 +298,14 @@ function NavLink({
   active,
 }: {
   href: string
-  icon: typeof Settings
+  icon: typeof Home
   label: string
   active: boolean
 }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors hover:bg-white/5"
+      className="flex items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] font-medium transition-colors hover:bg-white/5"
       style={{
         backgroundColor: active ? "rgba(255,214,10,0.08)" : "transparent",
         color: active

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useRef, useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ArrowUp,
@@ -29,8 +30,17 @@ interface Project {
   type: string
 }
 
+interface ResourceTimelineItem {
+  slug: string
+  title: string
+  categoryLabel: string
+  description: string
+  publishedAt: string
+}
+
 interface HomePageProps {
   recentProjects: Project[]
+  recentResources?: ResourceTimelineItem[]
 }
 
 type Tab = "my-projects" | "team-projects"
@@ -59,7 +69,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function HomePage({ recentProjects }: HomePageProps) {
+export function HomePage({
+  recentProjects,
+  recentResources = [],
+}: HomePageProps) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -122,37 +135,47 @@ export function HomePage({ recentProjects }: HomePageProps) {
           body: JSON.stringify({ prompt: trimmed, type: "ai_agent" }),
         })
 
-        // Igniter retorna formatos distintos:
-        //  - Success: { success, data: { projectId, ... }, message }
-        //  - Error:   { error: { code, message, data? } }
-        const body = (await res.json().catch(() => null)) as
-          | {
-              success?: boolean
-              data?: { projectId?: string; conversationId?: string }
-              message?: string
-              error?: { code?: string; message?: string }
-            }
-          | null
+        // Captura raw text primeiro — evita perder diagnóstico quando
+        // o body está vazio ou não é JSON válido.
+        const rawText = await res.text()
+        let parsed: unknown = null
+        try {
+          parsed = rawText ? JSON.parse(rawText) : null
+        } catch {
+          parsed = null
+        }
 
-        if (!res.ok || !body) {
+        // Unwrap recursivo até achar um objeto com projectId OU error
+        type Envelope = {
+          data?: Envelope | { projectId?: string; conversationId?: string }
+          error?: { code?: string; message?: string }
+          message?: string
+          success?: boolean
+        }
+        const envelope = (parsed ?? {}) as Envelope
+        const projectId =
+          (envelope.data as { projectId?: string } | undefined)?.projectId ??
+          (
+            (envelope.data as Envelope | undefined)?.data as
+              | { projectId?: string }
+              | undefined
+          )?.projectId
+
+        if (!res.ok || envelope.error || !projectId) {
           const msg =
-            body?.error?.message ??
-            body?.message ??
-            `HTTP ${res.status} — resposta vazia`
+            envelope.error?.message ??
+            envelope.message ??
+            rawText ??
+            `HTTP ${res.status} ${res.statusText}`
           console.error("[home] create project failed:", {
             status: res.status,
-            body,
+            statusText: res.statusText,
+            rawText,
+            parsed,
           })
           throw new Error(msg)
         }
 
-        const projectId = body.data?.projectId
-        if (!projectId) {
-          console.error("[home] create project response missing projectId:", body)
-          throw new Error(
-            "Resposta inválida do servidor (projectId ausente).",
-          )
-        }
         router.push(`/projetos/${projectId}`)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
@@ -537,6 +560,118 @@ export function HomePage({ recentProjects }: HomePageProps) {
             )}
             {activeTab === "team-projects" && <TeamTab />}
           </div>
+
+          {/* Timeline de recursos — inline, sem CTA redirect */}
+          {recentResources.length > 0 && (
+            <section className="mt-16" aria-labelledby="home-resources-label">
+              <div className="mb-5 flex items-center gap-3">
+                <h2
+                  id="home-resources-label"
+                  className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+                  style={{
+                    color:
+                      "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+                  }}
+                >
+                  Últimos recursos da comunidade
+                </h2>
+                <div
+                  className="h-px flex-1"
+                  style={{
+                    background:
+                      "linear-gradient(to right, var(--color-border-subtle, rgba(255,255,255,0.08)), transparent)",
+                  }}
+                />
+              </div>
+              <ol className="flex flex-col">
+                {recentResources.map((resource, i) => {
+                  const date = new Date(resource.publishedAt)
+                  const formatted = new Intl.DateTimeFormat("pt-BR", {
+                    day: "2-digit",
+                    month: "short",
+                  }).format(date)
+                  const isLast = i === recentResources.length - 1
+                  return (
+                    <li
+                      key={resource.slug}
+                      className="relative flex gap-4 pb-6 last:pb-0"
+                    >
+                      {/* Timeline rail */}
+                      {!isLast && (
+                        <div
+                          aria-hidden
+                          className="absolute left-[9px] top-6 bottom-0 w-px"
+                          style={{
+                            backgroundColor:
+                              "var(--color-border-subtle, rgba(255,255,255,0.08))",
+                          }}
+                        />
+                      )}
+                      {/* Dot */}
+                      <div
+                        aria-hidden
+                        className="relative z-10 mt-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
+                        style={{
+                          backgroundColor: "var(--color-bg-base, #000)",
+                          border:
+                            "2px solid var(--color-border-brand, rgba(255,214,10,0.35))",
+                        }}
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{
+                            backgroundColor: "var(--color-brand, #FFD60A)",
+                          }}
+                        />
+                      </div>
+                      {/* Content */}
+                      <Link
+                        href={`/recursos/${resource.slug}`}
+                        className="group flex-1 rounded-lg p-3 transition-colors hover:bg-white/[0.02]"
+                      >
+                        <div className="mb-1 flex items-center gap-2">
+                          <span
+                            className="text-[10px] font-semibold uppercase tracking-[0.14em]"
+                            style={{
+                              color: "var(--color-brand, #FFD60A)",
+                            }}
+                          >
+                            {resource.categoryLabel}
+                          </span>
+                          <span
+                            className="text-[10px]"
+                            style={{
+                              color:
+                                "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+                            }}
+                          >
+                            · {formatted}
+                          </span>
+                        </div>
+                        <h3
+                          className="mb-1 text-[15px] font-semibold leading-snug transition-colors group-hover:underline"
+                          style={{
+                            color: "var(--color-text-primary, #fff)",
+                          }}
+                        >
+                          {resource.title}
+                        </h3>
+                        <p
+                          className="line-clamp-2 text-[13px] leading-[1.55]"
+                          style={{
+                            color:
+                              "var(--color-text-secondary, rgba(255,255,255,0.75))",
+                          }}
+                        >
+                          {resource.description}
+                        </p>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ol>
+            </section>
+          )}
         </div>
       </div>
     </div>

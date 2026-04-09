@@ -75,6 +75,12 @@
   --sidebar-ring: oklch(0.5 0 0);
 }
 
+:root {
+  /* Alias legado — componentes usam var(--font-dm-sans). Mapeia pro
+     var(--font-sans) que o next/font injeta via layout.tsx. */
+  --font-dm-sans: var(--font-sans);
+}
+
 @theme inline {
   --font-family-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   --font-family-display: var(--font-display), Georgia, "Times New Roman", serif;
