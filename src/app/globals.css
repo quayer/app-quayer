@@ -330,11 +330,15 @@
 }
 
 /* ============================================================ */
-/* Auth v3 Design System tokens — scoped to [data-auth-v3] only */
+/* Auth v3 Design System tokens — now GLOBAL (US-017)            */
+/* Moved from [data-auth-v3="true"] scope to :root so all app    */
+/* pages inherit them. The [data-auth-v3] attribute remains on   */
+/* the auth layout for legacy scoped overrides (see @layer       */
+/* utilities block below).                                       */
 /* Source: quayer-ds-v3.html                                     */
 /* ============================================================ */
 
-[data-auth-v3="true"] {
+:root {
   /* Primary palette — amber brand */
   --p-amber-50:  #FFFDE0;
   --p-amber-100: #FFE880;
