@@ -38,9 +38,6 @@ export async function getBuilderSidebarData(): Promise<{
     // Defensive: Turbopack dev cache pode servir um PrismaClient stale sem
     // o delegate `builderProject` registrado. Degrada silenciosamente.
     if (!db.builderProject || typeof db.builderProject.findMany !== 'function') {
-      console.warn(
-        '[getBuilderSidebarData] PrismaClient.builderProject unavailable — stale client? Returning empty sidebar.',
-      )
       return { recentProjects: [], isSuperAdmin }
     }
 
@@ -59,8 +56,7 @@ export async function getBuilderSidebarData(): Promise<{
       })),
       isSuperAdmin,
     }
-  } catch (err) {
-    console.error('[getBuilderSidebarData] Failed:', err)
+  } catch {
     return fallback
   }
 }

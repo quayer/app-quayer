@@ -30,21 +30,25 @@ export default async function RootPage() {
 
   if (orgId) {
     try {
-      const db = getDatabase()
-      const projects = await db.builderProject.findMany({
-        where: { organizationId: orgId, archivedAt: null },
-        orderBy: { updatedAt: 'desc' },
-        take: 7,
-        select: { id: true, name: true, status: true, type: true },
-      })
-      recentProjects = projects.map((p) => ({
-        id: p.id,
-        name: p.name,
-        status: p.status as string,
-        type: p.type as string,
-      }))
-    } catch (err) {
-      console.error('[RootPage] Failed to load recent projects:', err)
+      const db = getDatabase() as unknown as {
+        builderProject?: {
+          findMany: (args: unknown) => Promise<
+            Array<{ id: string; name: string; status: string; type: string }>
+          >
+        }
+      }
+      if (db.builderProject && typeof db.builderProject.findMany === 'function') {
+        const projects = await db.builderProject.findMany({
+          where: { organizationId: orgId, archivedAt: null },
+          orderBy: { updatedAt: 'desc' },
+          take: 7,
+          select: { id: true, name: true, status: true, type: true },
+        })
+        recentProjects = projects
+      }
+    } catch {
+      // Silent fallback — Turbopack dev cache pode servir um PrismaClient stale.
+      // Degrada para lista vazia em vez de crashar o render.
     }
   }
 
