@@ -42,7 +42,7 @@ export function GoogleCallbackV3(): React.ReactElement {
         window.location.href = '/onboarding'
         return
       }
-      window.location.href = result.user.role === 'admin' ? '/admin' : '/integracoes'
+      window.location.href = result.user.role === 'admin' ? '/admin' : '/'
     },
     [],
   )
@@ -72,7 +72,7 @@ export function GoogleCallbackV3(): React.ReactElement {
         }
 
         if (data?.user) {
-          let redirect = '/integracoes'
+          let redirect = '/'
           if (data.needsOnboarding || !data.user.currentOrgId) {
             redirect = '/onboarding'
           } else if (data.user.role === 'admin') {

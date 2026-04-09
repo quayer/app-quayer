@@ -70,7 +70,7 @@ export function LoginVerifyV3(): React.ReactElement {
         router.push('/admin')
         return
       }
-      router.push('/integracoes')
+      router.push('/')
     } catch (err) {
       setError(extractErrorMessage(err, 'Codigo invalido'))
     } finally {

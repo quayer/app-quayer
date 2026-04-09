@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo, useRef, memo } from "react"
 import { useRouter } from "next/navigation"
-import { startAuthentication } from '@simplewebauthn/browser'
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
@@ -13,14 +12,14 @@ import {
   FieldSeparator,
 } from "@/client/components/ui/field"
 import { Input } from "@/client/components/ui/input"
-import { Alert, AlertDescription } from "@/client/components/ui/alert"
 import { Loader2, Mail, Smartphone, ChevronsUpDown, Check, ArrowRight } from "lucide-react"
 import { GoogleIcon } from "@/client/components/ui/google-icon"
 import Link from "next/link"
 import { api } from "@/igniter.client"
+import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
 import { defaultCountries, parseCountry } from "react-international-phone"
-import Flags from "country-flag-icons/react/3x2"
+import * as Flags from "country-flag-icons/react/3x2"
 import { Popover, PopoverContent, PopoverTrigger } from "@/client/components/ui/popover"
 import {
   Command,
@@ -30,8 +29,10 @@ import {
   CommandItem,
   CommandList,
 } from "@/client/components/ui/command"
+import { startAuthentication } from '@simplewebauthn/browser'
+import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
+import { looksLikePhone } from "@/lib/utils/phone"
 
-/** Bandeira SVG fora do componente — evita recriação a cada render */
 const FlagIcon = memo(function FlagIcon({ iso2, className }: { iso2: string; className?: string }) {
   const code = iso2.toUpperCase() as keyof typeof Flags
   const Component = Flags[code]
@@ -39,17 +40,11 @@ const FlagIcon = memo(function FlagIcon({ iso2, className }: { iso2: string; cla
   return <Component className={className} />
 })
 
-/** Lista de países pré-computada (singleton) */
 const ALL_COUNTRIES = defaultCountries
   .map(c => { const p = parseCountry(c); return { iso2: p.iso2, dialCode: p.dialCode, name: p.name } })
   .sort((a, b) => a.name.localeCompare(b.name))
 
 const BR_COUNTRY = ALL_COUNTRIES.find(c => c.iso2 === "br")!
-
-function looksLikePhone(v: string): boolean {
-  const clean = v.replace(/[^\d]/g, '')
-  return clean.length >= 8
-}
 
 export function LoginFormFinal({
   className,
@@ -71,59 +66,60 @@ export function LoginFormFinal({
     [countryIso2]
   )
 
-  // Sticky: uma vez em phone mode, só sai se campo ficar quase vazio
   const isPhone = phoneMode || looksLikePhone(email)
 
-  // Entrar/sair do phone mode e transferir foco
   useEffect(() => {
     if (isPhone && !phoneMode) {
-      // Ativar phone mode sticky
       setPhoneMode(true)
-      // Strip dial code do STATE para evitar duplicação visual (+55 | 5511...)
       const digits = email.replace(/\D/g, '')
       const code = selectedCountry.dialCode
       if (digits.startsWith(code) && digits.length > code.length) {
         setEmail(digits.slice(code.length))
       }
-      // Transferir foco
       requestAnimationFrame(() => phoneInputRef.current?.focus())
     }
-    // Sair do phone mode quando campo quase vazio
     if (phoneMode && email.replace(/\D/g, '').length < 3) {
       setPhoneMode(false)
     }
   }, [email, isPhone, phoneMode, selectedCountry.dialCode])
 
   useEffect(() => {
+    const controller = new AbortController()
+    const { signal } = controller
+
     const runConditionalUI = async () => {
       try {
         const res = await fetch('/api/v1/auth/passkey/login/challenge', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include'
+          headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
+          credentials: 'include',
+          signal,
         })
         if (!res.ok) return
         const { data: optionsWithId } = await res.json()
         const authResp = await startAuthentication({ optionsJSON: optionsWithId, useBrowserAutofill: true })
         const verifyRes = await fetch('/api/v1/auth/passkey/login/verify-conditional', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
           credentials: 'include',
+          signal,
           body: JSON.stringify({ response: authResp, challengeId: optionsWithId.challengeId })
         })
         if (!verifyRes.ok) return
         const { data: result } = await verifyRes.json()
         if (result.needsOnboarding) router.push('/onboarding')
         else if (result.user?.role === 'admin') router.push('/admin')
-        else router.push('/integracoes')
+        else router.push('/')
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return
         console.debug('[Conditional UI]', err)
       }
     }
-    runConditionalUI()
-  }, [])
 
-  /** Auto-detecta país quando usuário digita prefixo com '+' */
+    runConditionalUI()
+    return () => controller.abort()
+  }, [router])
+
   useEffect(() => {
     const trimmed = email.trim()
     if (!trimmed.startsWith('+')) return
@@ -135,7 +131,6 @@ export function LoginFormFinal({
     }
   }, [email, countryIso2])
 
-  /** Normaliza para E.164 usando país selecionado */
   function normalizePhone(v: string): string {
     const trimmed = v.trim()
     const digits = trimmed.replace(/\D/g, '')
@@ -156,7 +151,7 @@ export function LoginFormFinal({
       const phone = normalizePhone(email.trim())
       const res = await fetch('/api/v1/auth/login-otp-phone', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
         credentials: 'include',
         body: JSON.stringify({ phone, 'cf-turnstile-response': turnstileToken })
       })
@@ -178,8 +173,8 @@ export function LoginFormFinal({
 
     try {
       const { data, error: apiError } = await api.auth.loginOTP.mutate({
-        body: { email, 'cf-turnstile-response': turnstileToken } as Record<string, string>
-      })
+        body: { email, 'cf-turnstile-response': turnstileToken }
+      } as Parameters<typeof api.auth.loginOTP.mutate>[0])
 
       if (apiError) {
         throw apiError
@@ -204,7 +199,7 @@ export function LoginFormFinal({
         errorMessage = e.message
       }
 
-      setError(errorMessage)
+      setError(translateAuthError(errorMessage))
     } finally {
       setIsLoading(false)
     }
@@ -235,35 +230,43 @@ export function LoginFormFinal({
     }
   }
 
+  const hasInput = email.trim().length > 0
+
   return (
-    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
-      {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Faça login no Quayer</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+    <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
+      {/* Header with staggered animation */}
+      <div className="space-y-3 animate-fade-in-up stagger-1">
+        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">
+          Faça login no Quayer
+        </h1>
+        <p className="text-[0.875rem] text-white/40 leading-relaxed">
           Não tem conta?{" "}
-          <Link href="/signup" className="inline-flex items-center gap-0.5 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
+          <Link
+            href="/signup"
+            className="inline-flex items-center gap-0.5 text-white hover:text-white/80 font-medium underline underline-offset-2 transition-colors"
+          >
             Comece agora
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </Link>
         </p>
       </div>
 
-      <form onSubmit={handleOTPRequest}>
+      <form onSubmit={handleOTPRequest} className="animate-fade-in-up stagger-2">
         <FieldGroup>
           {error && (
-            <Alert variant="destructive" role="alert" aria-live="assertive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+            <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
+              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
+              <p className="text-sm text-red-300" role="alert" aria-live="assertive">{error}</p>
+            </div>
           )}
 
-          {/* EMAIL / PHONE INPUT — FIRST */}
+          {/* Email / Phone input */}
           <Field>
-            <FieldLabel htmlFor="email" className="text-sm font-medium text-gray-900 dark:text-gray-200">Email ou Telefone</FieldLabel>
-            {/*
-              Ambos inputs estão sempre no DOM — alternamos com hidden.
-              Isso evita o flash de unmount/mount que causava delay.
-            */}
+            <FieldLabel htmlFor={isPhone ? "phone-input" : "email-input"} className="text-[0.8rem] font-medium text-white/50 uppercase tracking-wider">
+              Email ou Telefone
+            </FieldLabel>
+
+            {/* Phone mode */}
             <div className={cn("flex w-full items-stretch", !isPhone && "hidden")}>
               <Popover open={openCountry} onOpenChange={setOpenCountry}>
                 <PopoverTrigger asChild>
@@ -272,22 +275,19 @@ export function LoginFormFinal({
                     disabled={isLoading || isGoogleLoading}
                     aria-label="Selecionar país"
                     className={cn(
-                      "flex items-center justify-center gap-1 h-9 !min-h-9 w-24 shrink-0 leading-none overflow-hidden",
-                      "border border-gray-200 dark:border-gray-700 border-r-0 rounded-l-md px-2",
-                      "bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-1",
+                      "flex items-center justify-center gap-1 h-11 !min-h-11 w-24 shrink-0 leading-none overflow-hidden",
+                      "border border-white/[0.08] border-r-0 rounded-l-lg px-2",
+                      "bg-white/[0.04] hover:bg-white/[0.08] text-white transition-all duration-200",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-1",
                       "disabled:opacity-50 disabled:pointer-events-none"
                     )}
                   >
                     <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
-                    <span className="text-gray-600 dark:text-gray-300 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
-                    <ChevronsUpDown className="h-3 w-3 opacity-40 shrink-0" aria-hidden="true" />
+                    <span className="text-white/50 text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
+                    <ChevronsUpDown className="h-3 w-3 opacity-30 shrink-0" aria-hidden="true" />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent
-                  className="p-0 w-[min(320px,calc(100vw-2rem))]"
-                  align="start"
-                >
+                <PopoverContent className="p-0 w-[min(320px,calc(100vw-2rem))]" align="start">
                   <Command>
                     <CommandInput placeholder="Buscar país..." />
                     <CommandList className="max-h-56">
@@ -303,7 +303,7 @@ export function LoginFormFinal({
                             <FlagIcon iso2={c.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
                             <span className="flex-1 truncate text-sm">{c.name}</span>
                             <span className="text-muted-foreground text-xs ml-auto">+{c.dialCode}</span>
-                            {c.iso2 === countryIso2 && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                            {c.iso2 === countryIso2 && <Check className="h-3.5 w-3.5 shrink-0 text-white/60" />}
                           </CommandItem>
                         ))}
                       </CommandGroup>
@@ -313,8 +313,8 @@ export function LoginFormFinal({
               </Popover>
               <Input
                 ref={phoneInputRef}
-                id={isPhone ? "email" : undefined}
-                name={isPhone ? "email" : undefined}
+                id="phone-input"
+                name="phone"
                 type="text"
                 inputMode="tel"
                 tabIndex={isPhone ? 0 : -1}
@@ -322,12 +322,14 @@ export function LoginFormFinal({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isLoading || isGoogleLoading}
-                className="flex-1 rounded-l-none border-l-0 shadow-none bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500"
+                className="flex-1 h-11 rounded-l-none border-l-0 shadow-none auth-input"
               />
             </div>
+
+            {/* Email mode */}
             <Input
-              id={!isPhone ? "email" : undefined}
-              name={!isPhone ? "email" : undefined}
+              id="email-input"
+              name="email"
               type="text"
               inputMode="email"
               tabIndex={!isPhone ? 0 : -1}
@@ -338,7 +340,7 @@ export function LoginFormFinal({
               autoFocus
               autoComplete="username webauthn"
               aria-required="true"
-              className={cn("bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500", isPhone && "hidden")}
+              className={cn("h-11 auth-input", isPhone && "hidden")}
             />
           </Field>
 
@@ -347,15 +349,16 @@ export function LoginFormFinal({
             action="login"
           />
 
-          {/* SEND CODE BUTTON — neutral when empty, dark when has input */}
+          {/* Submit */}
           <Field>
             <Button
               type="submit"
+              variant="ghost"
               className={cn(
-                "w-full min-h-[44px] transition-colors",
-                email.trim()
-                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
+                hasInput
+                  ? "bg-white text-[#0a0d14] hover:bg-white/90 active:bg-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+                  : "bg-white/[0.06] text-white/30 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/40"
               )}
               disabled={isLoading || isGoogleLoading}
               aria-busy={isLoading}
@@ -379,16 +382,17 @@ export function LoginFormFinal({
             </Button>
           </Field>
 
-          <FieldSeparator className="text-gray-400 dark:text-gray-500 [&>span]:text-gray-400 dark:[&>span]:text-gray-500 [&>div]:border-gray-200 dark:[&>div]:border-gray-800">OU</FieldSeparator>
+          <FieldSeparator className="text-white/20 [&>span]:text-white/20 [&>div]:border-white/[0.06]">ou</FieldSeparator>
 
-          {/* GOOGLE OAUTH — BELOW */}
+          {/* Google OAuth */}
           <Field>
             <Button
-              variant="outline"
+              variant="ghost"
               type="button"
               onClick={handleGoogleLogin}
               disabled={isGoogleLoading || isLoading}
-              className="w-full min-h-[44px] bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+              aria-busy={isGoogleLoading}
+              className="w-full h-11 min-h-[44px] rounded-lg bg-white/[0.04] text-white/70 border border-white/[0.08] hover:bg-white/[0.08] hover:text-white hover:border-white/[0.15] transition-all duration-200"
             >
               {isGoogleLoading ? (
                 <>
@@ -405,6 +409,13 @@ export function LoginFormFinal({
           </Field>
         </FieldGroup>
       </form>
+
+      <p className="text-center text-[0.75rem] text-white/25 leading-relaxed animate-fade-in-up stagger-3">
+        Ao entrar, você concorda com os{" "}
+        <Link href="/termos" className="underline underline-offset-2 hover:text-white/40 transition-colors">Termos de Serviço</Link>
+        {" "}e a{" "}
+        <Link href="/privacidade" className="underline underline-offset-2 hover:text-white/40 transition-colors">Política de Privacidade</Link>.
+      </p>
     </div>
   )
 }

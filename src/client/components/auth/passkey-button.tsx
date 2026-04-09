@@ -89,7 +89,7 @@ export function PasskeyButton({
       } else if (result.user?.role === 'admin') {
         router.push('/admin')
       } else {
-        router.push('/integracoes')
+        router.push('/')
       }
     } catch (err: unknown) {
       const error = err as { name?: string; message?: string }

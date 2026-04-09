@@ -91,7 +91,7 @@ export function VerifyEmailV3(): React.ReactElement {
   }
 
   function onContinue(): void {
-    router.push('/integracoes')
+    router.push('/')
   }
 
   function onRetry(): void {

@@ -94,7 +94,7 @@ export function OnboardingV3(): React.ReactElement {
       const result = await createOrganizationAction(formData)
 
       if (result.success) {
-        router.push('/integracoes')
+        router.push('/')
         return
       }
 

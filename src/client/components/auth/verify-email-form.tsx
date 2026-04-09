@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
@@ -14,10 +14,10 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/client/components/ui/input-otp"
-import { Alert, AlertDescription } from "@/client/components/ui/alert"
 import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { api } from "@/igniter.client"
+import { translateAuthError } from "@/lib/utils/translate-auth-error"
 
 interface VerifyEmailFormProps extends React.ComponentProps<"div"> {
   email?: string
@@ -31,25 +31,28 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
   const [canResend, setCanResend] = useState(false)
   const [countdown, setCountdown] = useState(60)
   const [autoSubmitted, setAutoSubmitted] = useState(false)
+  const countdownEndRef = useRef(Date.now() + 60 * 1000)
 
   useEffect(() => {
-    if (countdown > 0 && !canResend) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
-      return () => clearTimeout(timer)
-    } else if (countdown === 0) {
-      setCanResend(true)
-    }
-  }, [countdown, canResend])
+    if (canResend) return
+    const id = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((countdownEndRef.current - Date.now()) / 1000))
+      setCountdown(remaining)
+      if (remaining <= 0) {
+        clearInterval(id)
+        setCanResend(true)
+      }
+    }, 250)
+    return () => clearInterval(id)
+  }, [canResend])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
+  const submitCode = useCallback(async (code: string) => {
     if (!email) {
       setError("Email não encontrado. Por favor, volte e faça o cadastro novamente.")
       return
     }
 
-    if (otp.length !== 6) {
+    if (code.length !== 6) {
       setError("Digite o código de 6 dígitos")
       return
     }
@@ -59,16 +62,18 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
 
     try {
       const { data, error: apiError } = await api.auth.verifyEmail.mutate({
-        body: { email, code: otp }
+        body: { email, code }
       })
 
       if (apiError) {
-        let errorMessage = "Código inválido ou expirado"
+        let errorMessage = "Código inválido ou expirado."
 
-        if (apiError.error?.message) {
-          errorMessage = apiError.error.message
-        } else if (apiError.message) {
-          errorMessage = apiError.message
+        const err = apiError as Record<string, unknown>
+        const errInner = err.error as Record<string, unknown> | undefined
+        if (typeof errInner?.message === 'string') {
+          errorMessage = errInner.message
+        } else if (typeof err.message === 'string') {
+          errorMessage = err.message
         }
 
         setError(errorMessage)
@@ -76,47 +81,56 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
         return
       }
 
-      if (data?.user) {
+      const result = data as { verified?: boolean; user?: { id: string; email: string; name: string; role: string } } | null
+      if (result?.user) {
         // Backend seta cookies httpOnly via Set-Cookie header.
         setSuccess(true)
 
         setTimeout(() => {
-          const redirectPath = data.user?.role === "admin" ? "/admin" : "/integracoes"
+          const redirectPath = result.user?.role === "admin" ? "/admin" : "/"
           window.location.href = redirectPath
         }, 1500)
       }
-    } catch (err: any) {
-      console.error("Verification error:", err)
+    } catch (err: unknown) {
+      let errorMessage = "Não foi possível verificar. Tente novamente."
 
-      let errorMessage = "Erro ao verificar código. Tente novamente."
-
-      if (err?.error?.details && Array.isArray(err.error.details) && err.error.details.length > 0) {
-        errorMessage = err.error.details[0].message || errorMessage
-      } else if (err?.error?.message) {
-        errorMessage = err.error.message
-      } else if (err?.message) {
-        errorMessage = err.message
+      const e = err as Record<string, unknown> | undefined
+      const errObj = e?.error as Record<string, unknown> | undefined
+      if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
+        errorMessage = String((errObj.details[0] as Record<string, unknown>)?.message) || errorMessage
+      } else if (errObj?.message && typeof errObj.message === 'string') {
+        errorMessage = errObj.message
+      } else if (e?.message && typeof e.message === 'string') {
+        errorMessage = e.message
       }
+
+      errorMessage = translateAuthError(errorMessage)
 
       setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
+  }, [email, isLoading])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await submitCode(otp)
   }
 
   const handleResend = async () => {
     if (!canResend || !email) return
 
     setError("")
-    setCanResend(false)
+    countdownEndRef.current = Date.now() + 60 * 1000
     setCountdown(60)
+    setCanResend(false)
 
     try {
+      // Note: Turnstile not required for resend — server exempts re-sends within active session
       await api.auth.resendVerification.mutate({
         body: { email }
       })
-    } catch (err: any) {
-      console.error("Resend error:", err)
+    } catch (err: unknown) {
       setError("Erro ao reenviar código")
       setCanResend(true)
       setCountdown(0)
@@ -127,25 +141,24 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
   useEffect(() => {
     if (otp.length === 6 && !isLoading && !autoSubmitted && email) {
       setAutoSubmitted(true)
-      handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+      submitCode(otp)
     }
     if (otp.length < 6) setAutoSubmitted(false)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otp])
+  }, [otp, isLoading, autoSubmitted, email, submitCode])
 
   if (success) {
     return (
-      <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
-        <div className="space-y-4 text-center">
+      <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
+        <div className="space-y-4 text-center animate-fade-in-up stagger-1">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
             <CheckCircle2 className="h-6 w-6 text-green-400" aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Email verificado!</h1>
-          <p className="text-gray-500 dark:text-gray-400">
+          <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">Email verificado!</h1>
+          <p className="text-[0.875rem] text-white/40 leading-relaxed">
             Redirecionando...
           </p>
           <div className="flex justify-center pt-2">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-hidden="true" />
+            <Loader2 className="h-6 w-6 animate-spin text-white/30" aria-hidden="true" />
             <span className="sr-only">Redirecionando...</span>
           </div>
         </div>
@@ -154,30 +167,29 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
   }
 
   return (
-    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
+    <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Verificação de email</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+      <div className="space-y-3 animate-fade-in-up stagger-1">
+        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">Verificação de email</h1>
+        <p className="text-[0.875rem] text-white/40 leading-relaxed">
           Enviamos um código de 6 dígitos para {email || "seu email"}.
         </p>
       </div>
 
-      {/* Alerts */}
-      {error && (
-        <Alert variant="destructive" role="alert" aria-live="assertive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       {/* OTP Form */}
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="animate-fade-in-up stagger-2">
         <FieldGroup>
-          <Field className="flex flex-col items-center space-y-2">
+          {error && (
+            <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
+              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
+              <p className="text-sm text-red-300" role="alert" aria-live="assertive">{error}</p>
+            </div>
+          )}
+          <Field className="flex flex-col space-y-2">
             <FieldLabel htmlFor="otp" className="sr-only">
               Código de verificação
             </FieldLabel>
-            <div className="flex justify-center w-full">
+            <div className="w-full">
               <InputOTP
                 id="otp"
                 value={otp}
@@ -187,29 +199,32 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
                 autoFocus
                 required
                 aria-required="true"
+                containerClassName="!w-full"
               >
-                <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border *:data-[slot=input-otp-slot]:border-gray-200 dark:*:data-[slot=input-otp-slot]:border-gray-700 *:data-[slot=input-otp-slot]:bg-white dark:*:data-[slot=input-otp-slot]:bg-gray-800 *:data-[slot=input-otp-slot]:text-gray-900 dark:*:data-[slot=input-otp-slot]:text-white">
-                  <InputOTPSlot index={0} />
-                  <InputOTPSlot index={1} />
-                  <InputOTPSlot index={2} />
-                  <InputOTPSlot index={3} />
-                  <InputOTPSlot index={4} />
-                  <InputOTPSlot index={5} />
+                <InputOTPGroup className="!w-full gap-2">
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <InputOTPSlot
+                      key={i}
+                      index={i}
+                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-lg !border !border-white/[0.08] !bg-white/[0.04] !text-white data-[active=true]:!border-white/30 data-[active=true]:!ring-white/10"
+                    />
+                  ))}
                 </InputOTPGroup>
               </InputOTP>
             </div>
-            <FieldDescription className="text-center mt-2 text-gray-500 dark:text-gray-400">
+            <FieldDescription className="text-left mt-2 text-white/30">
               Digite o código de 6 dígitos enviado para seu email.
             </FieldDescription>
           </Field>
 
           <Button
             type="submit"
+            variant="ghost"
             className={cn(
-              "w-full min-h-[44px] transition-colors",
+              "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
               otp.length === 6
-                ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                ? "bg-white text-[#0a0d14] hover:bg-white/90 active:bg-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+                : "bg-white/[0.06] text-white/30 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/40"
             )}
             disabled={isLoading || otp.length !== 6}
             aria-busy={isLoading}
@@ -224,25 +239,25 @@ export function VerifyEmailForm({ email, className, ...props }: VerifyEmailFormP
             )}
           </Button>
 
-          <FieldDescription className="text-center text-gray-500 dark:text-gray-400">
+          <FieldDescription className="text-left text-white/30">
             Não recebeu o código?{" "}
             {canResend ? (
               <button
                 type="button"
                 onClick={handleResend}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center text-gray-900 dark:text-white underline underline-offset-4 hover:text-gray-700 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center text-white hover:text-white/80 font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 Reenviar
               </button>
             ) : (
-              <span className="text-gray-400 dark:text-gray-500" aria-live="polite" aria-atomic="true">
+              <span className="text-white/20" aria-live="polite" aria-atomic="true">
                 Aguarde {countdown}s
               </span>
             )}
           </FieldDescription>
 
-          <FieldDescription className="text-center">
-            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
+          <FieldDescription className="text-left">
+            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-white/50 hover:text-white font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm">
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
               Voltar
             </Link>

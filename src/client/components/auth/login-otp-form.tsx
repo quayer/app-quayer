@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
@@ -15,11 +15,12 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/client/components/ui/input-otp"
-import { Alert, AlertDescription } from "@/client/components/ui/alert"
 import { Loader2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { api } from "@/igniter.client"
+import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
+import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -57,15 +58,20 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   const [countdown, setCountdown] = useState(60)
   const [autoSubmitted, setAutoSubmitted] = useState(false)
   const [twoFactorChallengeId, setTwoFactorChallengeId] = useState<string | null>(null)
+  const countdownEndRef = useRef(Date.now() + 60 * 1000)
 
   useEffect(() => {
-    if (countdown > 0 && !canResend) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
-      return () => clearTimeout(timer)
-    } else if (countdown === 0) {
-      setCanResend(true)
-    }
-  }, [countdown, canResend])
+    if (canResend) return
+    const id = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((countdownEndRef.current - Date.now()) / 1000))
+      setCountdown(remaining)
+      if (remaining <= 0) {
+        clearInterval(id)
+        setCanResend(true)
+      }
+    }, 250)
+    return () => clearInterval(id)
+  }, [canResend])
 
   // Escutar login via magic link em outra aba → redirecionar automaticamente
   useEffect(() => {
@@ -151,15 +157,13 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
     }
   }, [magicLinkSessionId])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
+  const submitCode = useCallback(async (code: string) => {
     if (!identifier) {
       setError("Identificador não encontrado. Volte e tente novamente.")
       return
     }
 
-    if (otp.length !== 6) {
+    if (code.length !== 6) {
       setError("Digite o código de 6 dígitos")
       return
     }
@@ -170,9 +174,9 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
       try {
         const res = await fetch('/api/v1/auth/verify-login-otp-phone', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
           credentials: 'include',
-          body: JSON.stringify({ phone, code: otp })
+          body: JSON.stringify({ phone, code })
         })
         const data = await res.json()
         if (!res.ok) { setError(data?.error?.message || 'Código inválido'); setIsLoading(false); return }
@@ -183,11 +187,16 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
           return
         }
         if (r.needsOnboarding) window.location.href = '/onboarding'
-        else window.location.href = r.user?.role === 'admin' ? '/admin' : '/integracoes'
+        else window.location.href = r.user?.role === 'admin' ? '/admin' : '/'
       } catch {
         setError('Erro ao verificar código')
         setIsLoading(false)
       }
+      return
+    }
+
+    if (!email) {
+      setError("Email não encontrado. Volte e tente novamente.")
       return
     }
 
@@ -198,10 +207,10 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
       // Call different endpoint based on signup vs login flow
       const { data, error: apiError } = isSignup
         ? await api.auth.verifySignupOTP.mutate({
-            body: { email: email!, code: otp }
+            body: { email, code }
           })
         : await api.auth.verifyLoginOTP.mutate({
-            body: { email: email!, code: otp }
+            body: { email, code }
           })
 
       if (apiError) {
@@ -222,11 +231,11 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         if (needsOnboarding) {
           window.location.href = "/onboarding"
         } else {
-          window.location.href = userRole === "admin" ? "/admin" : "/integracoes"
+          window.location.href = userRole === "admin" ? "/admin" : "/"
         }
       }
     } catch (err: unknown) {
-      let errorMessage = "Erro ao verificar código. Tente novamente."
+      let errorMessage = "Não foi possível verificar. Tente novamente."
 
       const e = err as Record<string, unknown> | undefined
       const errObj = e?.error as Record<string, unknown> | undefined
@@ -242,55 +251,56 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         errorMessage = err
       }
 
-      // Traduzir mensagens técnicas inglesas para português
-      const errorTranslations: Record<string, string> = {
-        'Invalid or expired code': 'Código inválido ou expirado. Solicite um novo código.',
-        'Code expired': 'Código expirado. Clique em Reenviar para obter um novo.',
-        'Invalid code': 'Código inválido. Verifique e tente novamente.',
-        'Account disabled': 'Conta desativada. Entre em contato com o suporte.',
-        'User not found': 'Usuário não encontrado. Verifique o email.',
-      }
-      for (const [en, pt] of Object.entries(errorTranslations)) {
-        if (errorMessage.includes(en)) {
-          errorMessage = pt
-          break
-        }
-      }
+      errorMessage = translateAuthError(errorMessage)
 
       setError(errorMessage)
       setIsLoading(false)
     }
+  }, [identifier, phone, email, isSignup, isLoading])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await submitCode(otp)
   }
 
   const handleResend = async () => {
     if (!canResend || !identifier) return
 
     setError("")
-    setCanResend(false)
+    countdownEndRef.current = Date.now() + 60 * 1000
     setCountdown(60)
+    setCanResend(false)
 
     try {
       if (phone) {
         const res = await fetch('/api/v1/auth/login-otp-phone', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
           credentials: 'include',
           body: JSON.stringify({ phone })
         })
         if (res.status === 429) {
           const retryAfter = parseInt(res.headers.get('Retry-After') || '60', 10)
           setError(`Muitas tentativas. Tente novamente em ${Math.ceil(retryAfter / 60)} minuto(s).`)
-          setCanResend(false)
+          countdownEndRef.current = Date.now() + retryAfter * 1000
           setCountdown(retryAfter)
+          setCanResend(false)
           return
         }
         return
       }
       // Use different endpoint based on signup vs login flow
+      // Note: Turnstile not required for resend — server exempts re-sends within active session
       // Note: signup resend needs the name, which we don't have here
       // For now, only support resend for login flow
       if (!isSignup) {
-        await api.auth.loginOTP.mutate({ body: { email: email! } })
+        if (!email) {
+          setError("Email não encontrado. Volte e tente novamente.")
+          setCanResend(true)
+          setCountdown(0)
+          return
+        }
+        await api.auth.loginOTP.mutate({ body: { email } })
       } else {
         setError("Para reenviar o código de cadastro, volte à página anterior")
         setCanResend(true)
@@ -307,17 +317,16 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   useEffect(() => {
     if (otp.length === 6 && !isLoading && !autoSubmitted && identifier) {
       setAutoSubmitted(true)
-      handleSubmit({ preventDefault: () => {} } as React.FormEvent)
+      submitCode(otp)
     }
     if (otp.length < 6) setAutoSubmitted(false)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otp])
+  }, [otp, isLoading, autoSubmitted, identifier, submitCode])
 
   const handle2FASuccess = (result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }) => {
     if (result.needsOnboarding) {
       window.location.href = "/onboarding"
     } else {
-      window.location.href = result.user.role === "admin" ? "/admin" : "/integracoes"
+      window.location.href = result.user.role === "admin" ? "/admin" : "/"
     }
   }
 
@@ -333,14 +342,14 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   }
 
   return (
-    <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
+    <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white flex items-center gap-2">
+      <div className="space-y-3 animate-fade-in-up stagger-1">
+        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight flex items-center gap-2">
           Verificar código
           {phone && <WhatsAppIcon className="h-5 w-5 text-[#25D366]" />}
         </h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-[0.875rem] text-white/40 leading-relaxed">
           {phone
             ? <>Enviado via <span className="text-[#25D366] font-medium">WhatsApp</span> para {formatPhoneDisplay(phone)}</>
             : `Enviamos um código de 6 dígitos para ${email || "seu email"}.`
@@ -348,16 +357,15 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         </p>
       </div>
 
-      {/* Alerts */}
-      {error && (
-        <Alert variant="destructive" role="alert" aria-live="assertive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       {/* OTP Form */}
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="animate-fade-in-up stagger-2">
         <FieldGroup>
+          {error && (
+            <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
+              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
+              <p className="text-sm text-red-300" role="alert" aria-live="assertive">{error}</p>
+            </div>
+          )}
           <Field className="flex flex-col space-y-2">
             <FieldLabel htmlFor="otp" className="sr-only">
               Código de verificação
@@ -379,14 +387,14 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
                     <InputOTPSlot
                       key={i}
                       index={i}
-                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-md !border !border-gray-200 dark:!border-gray-700 !bg-white dark:!bg-gray-800 !text-gray-900 dark:!text-white data-[active=true]:!border-gray-400 dark:data-[active=true]:!border-gray-500 data-[active=true]:!ring-gray-400/30 dark:data-[active=true]:!ring-gray-500/30"
+                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-lg !border !border-white/[0.08] !bg-white/[0.04] !text-white data-[active=true]:!border-white/30 data-[active=true]:!ring-white/10"
                     />
                   ))}
                 </InputOTPGroup>
               </InputOTP>
             </div>
             {!phone && (
-              <FieldDescription className="text-left mt-2 text-gray-500 dark:text-gray-400">
+              <FieldDescription className="text-left mt-2 text-white/30">
                 Verifique sua caixa de entrada
               </FieldDescription>
             )}
@@ -394,11 +402,12 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
 
           <Button
             type="submit"
+            variant="ghost"
             className={cn(
-              "w-full min-h-[44px] transition-colors",
+              "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
               otp.length === 6
-                ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                ? "bg-white text-[#0a0d14] hover:bg-white/90 active:bg-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+                : "bg-white/[0.06] text-white/30 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/40"
             )}
             disabled={isLoading || otp.length !== 6}
             aria-busy={isLoading}
@@ -413,25 +422,25 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
             )}
           </Button>
 
-          <FieldDescription className="text-left text-gray-500 dark:text-gray-400">
+          <FieldDescription className="text-left text-white/30">
             {phone ? 'Não recebeu no WhatsApp?' : 'Não recebeu o código?'}{" "}
             {canResend ? (
               <button
                 type="button"
                 onClick={handleResend}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center text-gray-900 dark:text-white underline underline-offset-4 hover:text-gray-700 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center text-white hover:text-white/80 font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 Reenviar
               </button>
             ) : (
-              <span className="text-gray-400 dark:text-gray-500" aria-live="polite" aria-atomic="true">
+              <span className="text-white/20" aria-live="polite" aria-atomic="true">
                 Aguarde {countdown}s
               </span>
             )}
           </FieldDescription>
 
           <FieldDescription className="text-left">
-            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
+            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-white/50 hover:text-white font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm">
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
               Voltar
             </Link>
