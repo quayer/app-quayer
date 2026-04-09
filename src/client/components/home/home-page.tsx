@@ -43,7 +43,7 @@ interface HomePageProps {
   recentResources?: ResourceTimelineItem[]
 }
 
-type Tab = "my-projects" | "team-projects"
+type Tab = "my-projects" | "learn" | "team-projects"
 
 interface ModelOption {
   id: string
@@ -545,6 +545,12 @@ export function HomePage({
                 badge={recentProjects.length}
               />
               <TabButton
+                active={activeTab === "learn"}
+                onClick={() => setActiveTab("learn")}
+                label="Aprender"
+                badge={recentResources.length}
+              />
+              <TabButton
                 active={activeTab === "team-projects"}
                 onClick={() => setActiveTab("team-projects")}
                 label="Do Time"
@@ -558,123 +564,112 @@ export function HomePage({
             {activeTab === "my-projects" && (
               <MyProjectsTab projects={recentProjects} />
             )}
+            {activeTab === "learn" && (
+              <LearnTab resources={recentResources} />
+            )}
             {activeTab === "team-projects" && <TeamTab />}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-          {/* Timeline de recursos — inline, sem CTA redirect */}
-          {recentResources.length > 0 && (
-            <section className="mt-16" aria-labelledby="home-resources-label">
-              <div className="mb-5 flex items-center gap-3">
-                <h2
-                  id="home-resources-label"
-                  className="text-[11px] font-semibold uppercase tracking-[0.18em]"
+// ---------- Aprender (timeline) ----------
+
+function LearnTab({
+  resources,
+}: {
+  resources: ResourceTimelineItem[]
+}) {
+  if (resources.length === 0) {
+    return (
+      <EmptyState
+        icon={Sparkles}
+        title="Biblioteca em construção"
+        description="Em breve guias, workshops e cheatsheets aqui."
+      />
+    )
+  }
+
+  return (
+    <ol className="flex flex-col">
+      {resources.map((resource, i) => {
+        const date = new Date(resource.publishedAt)
+        const formatted = new Intl.DateTimeFormat("pt-BR", {
+          day: "2-digit",
+          month: "short",
+        }).format(date)
+        const isLast = i === resources.length - 1
+        return (
+          <li
+            key={resource.slug}
+            className="relative flex gap-4 pb-6 last:pb-0"
+          >
+            {!isLast && (
+              <div
+                aria-hidden
+                className="absolute left-[9px] top-6 bottom-0 w-px"
+                style={{
+                  backgroundColor:
+                    "var(--color-border-subtle, rgba(255,255,255,0.08))",
+                }}
+              />
+            )}
+            <div
+              aria-hidden
+              className="relative z-10 mt-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
+              style={{
+                backgroundColor: "var(--color-bg-base, #000)",
+                border:
+                  "2px solid var(--color-border-brand, rgba(255,214,10,0.35))",
+              }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: "var(--color-brand, #FFD60A)" }}
+              />
+            </div>
+            <Link
+              href={`/recursos/${resource.slug}`}
+              className="group flex-1 rounded-lg p-3 transition-colors hover:bg-white/[0.02]"
+            >
+              <div className="mb-1 flex items-center gap-2">
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-[0.14em]"
+                  style={{ color: "var(--color-brand, #FFD60A)" }}
+                >
+                  {resource.categoryLabel}
+                </span>
+                <span
+                  className="text-[10px]"
                   style={{
                     color:
                       "var(--color-text-tertiary, rgba(255,255,255,0.65))",
                   }}
                 >
-                  Últimos recursos da comunidade
-                </h2>
-                <div
-                  className="h-px flex-1"
-                  style={{
-                    background:
-                      "linear-gradient(to right, var(--color-border-subtle, rgba(255,255,255,0.08)), transparent)",
-                  }}
-                />
+                  · {formatted}
+                </span>
               </div>
-              <ol className="flex flex-col">
-                {recentResources.map((resource, i) => {
-                  const date = new Date(resource.publishedAt)
-                  const formatted = new Intl.DateTimeFormat("pt-BR", {
-                    day: "2-digit",
-                    month: "short",
-                  }).format(date)
-                  const isLast = i === recentResources.length - 1
-                  return (
-                    <li
-                      key={resource.slug}
-                      className="relative flex gap-4 pb-6 last:pb-0"
-                    >
-                      {/* Timeline rail */}
-                      {!isLast && (
-                        <div
-                          aria-hidden
-                          className="absolute left-[9px] top-6 bottom-0 w-px"
-                          style={{
-                            backgroundColor:
-                              "var(--color-border-subtle, rgba(255,255,255,0.08))",
-                          }}
-                        />
-                      )}
-                      {/* Dot */}
-                      <div
-                        aria-hidden
-                        className="relative z-10 mt-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
-                        style={{
-                          backgroundColor: "var(--color-bg-base, #000)",
-                          border:
-                            "2px solid var(--color-border-brand, rgba(255,214,10,0.35))",
-                        }}
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{
-                            backgroundColor: "var(--color-brand, #FFD60A)",
-                          }}
-                        />
-                      </div>
-                      {/* Content */}
-                      <Link
-                        href={`/recursos/${resource.slug}`}
-                        className="group flex-1 rounded-lg p-3 transition-colors hover:bg-white/[0.02]"
-                      >
-                        <div className="mb-1 flex items-center gap-2">
-                          <span
-                            className="text-[10px] font-semibold uppercase tracking-[0.14em]"
-                            style={{
-                              color: "var(--color-brand, #FFD60A)",
-                            }}
-                          >
-                            {resource.categoryLabel}
-                          </span>
-                          <span
-                            className="text-[10px]"
-                            style={{
-                              color:
-                                "var(--color-text-tertiary, rgba(255,255,255,0.65))",
-                            }}
-                          >
-                            · {formatted}
-                          </span>
-                        </div>
-                        <h3
-                          className="mb-1 text-[15px] font-semibold leading-snug transition-colors group-hover:underline"
-                          style={{
-                            color: "var(--color-text-primary, #fff)",
-                          }}
-                        >
-                          {resource.title}
-                        </h3>
-                        <p
-                          className="line-clamp-2 text-[13px] leading-[1.55]"
-                          style={{
-                            color:
-                              "var(--color-text-secondary, rgba(255,255,255,0.75))",
-                          }}
-                        >
-                          {resource.description}
-                        </p>
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ol>
-            </section>
-          )}
-        </div>
-      </div>
-    </div>
+              <h3
+                className="mb-1 text-[15px] font-semibold leading-snug transition-colors group-hover:underline"
+                style={{ color: "var(--color-text-primary, #fff)" }}
+              >
+                {resource.title}
+              </h3>
+              <p
+                className="line-clamp-2 text-[13px] leading-[1.55]"
+                style={{
+                  color: "var(--color-text-secondary, rgba(255,255,255,0.75))",
+                }}
+              >
+                {resource.description}
+              </p>
+            </Link>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 

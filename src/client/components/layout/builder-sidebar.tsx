@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   Home,
   FolderKanban,
+  MessageSquareText,
   BookOpen,
   MoreHorizontal,
   PanelLeft,
@@ -40,6 +41,7 @@ interface NavItem {
 const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "Início", icon: Home, exact: true },
   { href: "/projetos", label: "Meus projetos", icon: FolderKanban },
+  { href: "/conversas", label: "Conversas", icon: MessageSquareText },
   { href: "/recursos", label: "Recursos", icon: BookOpen },
 ]
 
