@@ -41,6 +41,7 @@ const PROTECTED_PATHS = [
   '/contatos',
   '/ferramentas',
   '/projetos',
+  '/recursos',
   '/admin',
   '/dashboard',
   '/instances',

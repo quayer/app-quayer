@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Plus, Settings, Shield } from "lucide-react"
+import { PanelLeft, Plus, Settings, Shield } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 
 interface BuilderSidebarProject {
@@ -11,6 +11,7 @@ interface BuilderSidebarProject {
 interface BuilderSidebarProps {
   recentProjects: BuilderSidebarProject[]
   isSuperAdmin: boolean
+  onToggle?: () => void
 }
 
 /**
@@ -27,6 +28,7 @@ interface BuilderSidebarProps {
 export function BuilderSidebar({
   recentProjects,
   isSuperAdmin,
+  onToggle,
 }: BuilderSidebarProps) {
   const visibleProjects = recentProjects.slice(0, 7)
 
@@ -42,8 +44,8 @@ export function BuilderSidebar({
         fontFamily: "var(--font-dm-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
-      {/* Header — logo */}
-      <div className="flex h-16 items-center px-6">
+      {/* Header — logo + collapse toggle */}
+      <div className="flex h-16 items-center justify-between px-5">
         <Link
           href="/"
           className="flex items-center transition-opacity hover:opacity-90"
@@ -51,6 +53,20 @@ export function BuilderSidebar({
         >
           <Logo size={24} variant="color" />
         </Link>
+        {onToggle && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-white/5"
+            style={{
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+            }}
+            aria-label="Ocultar sidebar"
+            title="Ocultar (⌘B)"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* CTA Novo projeto */}

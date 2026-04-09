@@ -532,11 +532,49 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
 
 function LearnTab() {
   return (
-    <EmptyState
-      icon={Sparkles}
-      title="Biblioteca de aprendizado em breve"
-      description="Guias, exemplos e receitas de prompts dos melhores agentes criados na plataforma."
-    />
+    <div
+      className="flex flex-col items-center justify-center gap-4 rounded-2xl border py-12 text-center"
+      style={{
+        backgroundColor: "var(--color-bg-surface, #060402)",
+        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
+      }}
+    >
+      <div
+        className="flex h-12 w-12 items-center justify-center rounded-2xl"
+        style={{
+          backgroundColor: "rgba(255,214,10,0.08)",
+          color: "var(--color-brand, #FFD60A)",
+        }}
+      >
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <div>
+        <h3
+          className="text-sm font-semibold"
+          style={{ color: "var(--color-text-primary, #ffffff)" }}
+        >
+          Guias, workshops e cheatsheets
+        </h3>
+        <p
+          className="mx-auto mt-1 max-w-sm text-xs"
+          style={{
+            color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+          }}
+        >
+          Aprenda Claude Code, MCPs, anatomia de prompts e muito mais.
+        </p>
+      </div>
+      <a
+        href="/recursos"
+        className="inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-opacity hover:opacity-90"
+        style={{
+          backgroundColor: "var(--color-brand, #FFD60A)",
+          color: "var(--color-text-inverse, #1A0800)",
+        }}
+      >
+        Explorar recursos
+      </a>
+    </div>
   )
 }
 
