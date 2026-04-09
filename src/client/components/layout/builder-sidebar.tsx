@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import {
   Home,
   FolderKanban,
-  MessageSquareText,
   BookOpen,
   MoreHorizontal,
   PanelLeft,
@@ -38,10 +37,14 @@ interface NavItem {
   exact?: boolean
 }
 
+// Alinhado com architecture-v5.3 §6.3 (linhas 327-353):
+// "3-4 items visíveis na navegação principal. CRM fora. Inbox fora."
+// Conversas (CRM legacy) está disabled per arch §0/§1.
+// Recursos não está no spec original mas mantido como rota auxiliar
+// — pode ser removido se você quiser o estrito mínimo da arch.
 const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "Início", icon: Home, exact: true },
   { href: "/projetos", label: "Meus projetos", icon: FolderKanban },
-  { href: "/conversas", label: "Conversas", icon: MessageSquareText },
   { href: "/recursos", label: "Recursos", icon: BookOpen },
 ]
 
@@ -243,7 +246,7 @@ export function BuilderSidebar({
         className="mt-auto flex flex-col border-t p-2"
         style={{
           borderColor:
-            "var(--color-border-subtle, rgba(255,255,255,0.08))",
+            "var(--color-border-default, rgba(255,255,255,0.12))",
         }}
       >
         <NavLink

@@ -57,7 +57,7 @@ const MODELS: ModelOption[] = [
 ]
 
 const INPUT_PLACEHOLDER =
-  "ex: agente de captação de leads pra advocacia tributária que qualifica por urgência, tipo de imposto e faturamento da empresa..."
+  "ex: agente de captação de leads pra advocacia tributária..."
 
 /** Tipos de arquivo aceitos para anexar ao prompt do agente. */
 const ACCEPTED_FILE_TYPES =
@@ -259,13 +259,13 @@ export function HomePage({
 
           {/* Input card */}
           <div
-            className="rounded-2xl border transition-all focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.12)]"
+            className="rounded-2xl border transition-all focus-within:border-[rgba(255,214,10,0.45)] focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
             style={{
               backgroundColor: "var(--color-bg-surface, #060402)",
               borderColor: error
-                ? "rgba(239,68,68,0.4)"
-                : "var(--color-border-default, rgba(255,255,255,0.1))",
-              boxShadow: "0 12px 40px -12px rgba(0,0,0,0.6)",
+                ? "rgba(239,68,68,0.45)"
+                : "var(--color-border-strong, rgba(255,255,255,0.18))",
+              boxShadow: "0 16px 48px -16px rgba(0,0,0,0.75)",
             }}
           >
             {/* Hidden file input */}
@@ -340,7 +340,7 @@ export function HomePage({
               placeholder={INPUT_PLACEHOLDER}
               rows={3}
               disabled={isPending}
-              className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-40 disabled:opacity-50"
+              className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-55 disabled:opacity-50"
               style={{ color: "var(--color-text-primary, #ffffff)" }}
             />
 
