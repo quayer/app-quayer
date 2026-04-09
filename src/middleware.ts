@@ -31,16 +31,23 @@ const ONBOARDING_PATHS = ['/onboarding'];
 
 /**
  * Rotas protegidas (requerem autenticação)
+ *
+ * Nota: a rota raiz `/` (home nova do Builder) é tratada separadamente
+ * abaixo porque `startsWith('/')` daria match em tudo.
  */
 const PROTECTED_PATHS = [
   '/integracoes',
   '/conversas',
+  '/contatos',
+  '/ferramentas',
+  '/projetos',
   '/admin',
   '/dashboard',
   '/instances',
   '/organizations',
   '/projects',
   '/settings',
+  '/user',
   '/onboarding',
 ];
 
@@ -61,7 +68,11 @@ export async function middleware(request: NextRequest) {
   }
 
   // 2. Verificar se é rota protegida
-  const isProtected = PROTECTED_PATHS.some((path) => pathname.startsWith(path));
+  // Match exato em `/` (home nova do Builder) OU startsWith nas demais
+  const isRoot = pathname === '/';
+  const isProtected =
+    isRoot ||
+    PROTECTED_PATHS.some((path) => pathname.startsWith(path));
 
   if (!isProtected) {
     return NextResponse.next();
@@ -107,9 +118,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(onboardingUrl);
   }
 
-  // Se usuário JÁ completou onboarding mas está na rota de onboarding, redirecionar para dashboard
+  // Se usuário JÁ completou onboarding mas está na rota de onboarding, redirecionar para home
   if (!payload.needsOnboarding && isOnboardingPath) {
-    const dashboardUrl = new URL('/integracoes', request.url);
+    const dashboardUrl = new URL('/', request.url);
     return NextResponse.redirect(dashboardUrl);
   }
 
