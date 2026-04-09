@@ -6,7 +6,6 @@ import {
   Home,
   FolderKanban,
   BookOpen,
-  Search,
   MoreHorizontal,
   PanelLeft,
   Plus,
@@ -106,26 +105,31 @@ export function BuilderSidebar({
         )}
       </div>
 
-      {/* CTA Nova conversa */}
-      <div className="px-3 pb-4 pt-1">
+      {/* CTA Nova conversa — sutil, single accent no + */}
+      <div className="px-3 pb-3 pt-1">
         <Link
           href="/"
-          className="group flex h-10 w-full items-center justify-between gap-2 rounded-lg px-3.5 text-[13px] font-semibold transition-all hover:opacity-90"
+          className="group flex h-9 w-full items-center justify-between gap-2 rounded-md border px-3 text-[13px] font-medium transition-colors hover:bg-white/5"
           style={{
-            backgroundColor: "var(--color-brand, #FFD60A)",
-            color: "var(--color-text-inverse, #1A0800)",
-            boxShadow: "0 4px 14px -4px rgba(255,214,10,0.45)",
+            borderColor:
+              "var(--color-border-default, rgba(255,255,255,0.12))",
+            color: "var(--color-text-primary, #ffffff)",
+            backgroundColor: "transparent",
           }}
         >
           <span className="flex items-center gap-2">
-            <Plus className="h-3.5 w-3.5" strokeWidth={2.75} />
+            <Plus
+              className="h-3.5 w-3.5"
+              strokeWidth={2.5}
+              style={{ color: "var(--color-brand, #FFD60A)" }}
+            />
             Nova conversa
           </span>
           <kbd
-            className="pointer-events-none hidden rounded px-1.5 font-mono text-[10px] font-medium sm:inline-flex"
+            className="pointer-events-none hidden rounded px-1.5 font-mono text-[10px] sm:inline-flex"
             style={{
-              color: "rgba(26,8,0,0.65)",
-              backgroundColor: "rgba(26,8,0,0.12)",
+              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
+              backgroundColor: "rgba(255,255,255,0.06)",
             }}
           >
             ⌘K
@@ -135,34 +139,6 @@ export function BuilderSidebar({
 
       {/* Scrollable nav */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {/* Buscar (placeholder — vira command palette no futuro) */}
-        <button
-          type="button"
-          className="mb-2 flex w-full items-center gap-2.5 rounded-md px-3.5 py-2 text-[13px] transition-colors hover:bg-white/5"
-          style={{
-            color: "var(--color-text-secondary, rgba(255,255,255,0.85))",
-          }}
-          aria-label="Buscar"
-          title="Buscar (⌘/)"
-        >
-          <Search
-            className="h-3.5 w-3.5 shrink-0"
-            style={{
-              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
-            }}
-          />
-          <span className="flex-1 text-left">Buscar</span>
-          <kbd
-            className="rounded px-1.5 font-mono text-[10px]"
-            style={{
-              color: "var(--color-text-tertiary, rgba(255,255,255,0.65))",
-              backgroundColor: "rgba(255,255,255,0.06)",
-            }}
-          >
-            ⌘/
-          </kbd>
-        </button>
-
         {/* Primary nav */}
         <nav aria-label="Principal">
           <ul className="flex flex-col">
