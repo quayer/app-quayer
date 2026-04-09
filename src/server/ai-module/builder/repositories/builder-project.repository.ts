@@ -7,7 +7,7 @@
  * unless the method explicitly enforces it (see findProjectForOrg).
  */
 
-import { database } from '@/server/services/database'
+import { getDatabase } from '@/server/services/database'
 import type { Prisma } from '@prisma/client'
 
 export const builderProjectRepository = {
@@ -22,6 +22,12 @@ export const builderProjectRepository = {
     type: 'ai_agent'
     name: string
   }) {
+    const database = getDatabase()
+    if (!database.builderProject) {
+      throw new Error(
+        'PrismaClient.builderProject delegate not available. Run `npx prisma generate` and restart the dev server.',
+      )
+    }
     return database.$transaction(async (tx) => {
       const project = await tx.builderProject.create({
         data: {
@@ -60,6 +66,7 @@ export const builderProjectRepository = {
    * Find a project for a specific org — used to enforce tenant boundaries.
    */
   async findProjectForOrg(projectId: string, organizationId: string) {
+    const database = getDatabase()
     return database.builderProject.findFirst({
       where: { id: projectId, organizationId },
     })
@@ -69,6 +76,7 @@ export const builderProjectRepository = {
    * Find a BuilderPromptVersion by id, verifying it belongs to the given agent.
    */
   async findPromptVersionForAgent(promptVersionId: string, aiAgentId: string) {
+    const database = getDatabase()
     return database.builderPromptVersion.findFirst({
       where: { id: promptVersionId, aiAgentId },
     })
@@ -83,6 +91,7 @@ export const builderProjectRepository = {
     promptVersionId: string
     publishedBy: string
   }) {
+    const database = getDatabase()
     return database.$transaction(async (tx) => {
       const version = await tx.builderPromptVersion.update({
         where: { id: params.promptVersionId },
