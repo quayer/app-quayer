@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowUp,
@@ -8,7 +8,6 @@ import {
   ChevronDown,
   Loader2,
   Mic,
-  Paperclip,
   Sparkles,
   Square,
 } from "lucide-react"
@@ -45,6 +44,20 @@ const MODELS: ModelOption[] = [
   { id: "codex", label: "Codex", icon: CodexIcon },
 ]
 
+/**
+ * Exemplos rotativos usados como placeholder do textarea quando vazio.
+ * Propósito: ensinar o range de casos de uso sem modal de templates.
+ * Gira a cada 3.5s, pausa quando o user começa a digitar.
+ */
+const PLACEHOLDER_EXAMPLES = [
+  "agente de captação de leads pra advocacia tributária que qualifica por urgência e faturamento...",
+  "assistente de vendas pra barbearia que agenda horário e confirma 1h antes...",
+  "qualificador de leads pra imobiliária de alto padrão — orçamento, bairro, prazo...",
+  "SAC de e-commerce que consulta status de pedido e gera segunda via do boleto...",
+  "atendente de clínica odontológica que agenda consulta e envia lembrete...",
+  "recepcionista virtual pra escritório de contabilidade fora do horário comercial...",
+]
+
 export function HomePage({ recentProjects }: HomePageProps) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -77,6 +90,18 @@ export function HomePage({ recentProjects }: HomePageProps) {
     if (isListening) stopRecording()
     else startRecording()
   }
+
+  // Placeholder rotativo — ensina o range de casos de uso quando o
+  // textarea está vazio. Pausa assim que o user começa a digitar.
+  const [placeholderIdx, setPlaceholderIdx] = useState(0)
+  useEffect(() => {
+    if (prompt.length > 0 || isListening) return
+    const interval = setInterval(() => {
+      setPlaceholderIdx((i) => (i + 1) % PLACEHOLDER_EXAMPLES.length)
+    }, 3500)
+    return () => clearInterval(interval)
+  }, [prompt.length, isListening])
+  const currentPlaceholder = `ex: ${PLACEHOLDER_EXAMPLES[placeholderIdx]}`
 
   const submit = () => {
     const trimmed = prompt.trim()
@@ -161,17 +186,17 @@ export function HomePage({ recentProjects }: HomePageProps) {
 
       <div className="relative flex flex-1 flex-col items-center px-6 pt-24 pb-16">
         <div className="w-full max-w-[640px]">
-          {/* Top badge — QuayerCLI tease */}
+          {/* Announcement tag — não é actionable, é info */}
           <div className="mb-8 flex justify-center">
-            <button
-              type="button"
-              className="group inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] font-medium transition-all hover:-translate-y-0.5"
+            <div
+              className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-medium"
               style={{
-                borderColor: "var(--color-border-brand, rgba(255,214,10,0.20))",
+                borderColor: "var(--color-border-brand, rgba(255,214,10,0.25))",
                 backgroundColor: "var(--color-brand-muted, rgba(255,214,10,0.08))",
                 color: "var(--color-brand, #FFD60A)",
+                minHeight: "36px",
               }}
-              aria-label="Build locally with QuayerCLI — em breve"
+              role="status"
             >
               <Sparkles className="h-3.5 w-3.5" aria-hidden />
               <span>
@@ -179,22 +204,22 @@ export function HomePage({ recentProjects }: HomePageProps) {
                 <span style={{ fontWeight: 700 }}>QuayerCLI</span>
               </span>
               <span
-                className="ml-1 rounded-full border px-1.5 py-px text-[10px] uppercase tracking-[0.12em]"
+                className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
                 style={{
-                  borderColor: "rgba(255,214,10,0.25)",
-                  color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
+                  backgroundColor: "rgba(255,214,10,0.18)",
+                  color: "var(--color-brand, #FFD60A)",
                 }}
               >
                 em breve
               </span>
-            </button>
+            </div>
           </div>
 
-          {/* Big heading with logo mark */}
-          <div className="mb-10 flex flex-col items-center gap-5 text-center">
-            <Logo size={52} variant="color" showWordmark={false} />
+          {/* Heading — logo inline à esquerda pra economizar altura vertical */}
+          <div className="mb-10 flex items-center justify-center gap-4">
+            <Logo size={44} variant="color" showWordmark={false} />
             <h1
-              className="text-[2.5rem] font-bold sm:text-[3rem]"
+              className="text-[2.25rem] font-bold sm:text-[2.75rem]"
               style={{
                 letterSpacing: "-0.03em",
                 lineHeight: "1.05",
@@ -203,16 +228,6 @@ export function HomePage({ recentProjects }: HomePageProps) {
             >
               O que vamos criar hoje?
             </h1>
-            <p
-              className="max-w-md text-[15px]"
-              style={{
-                color: "var(--color-text-secondary, rgba(255,255,255,0.55))",
-                lineHeight: "1.5",
-              }}
-            >
-              Descreva sua ideia e o Builder transforma em um agente de
-              WhatsApp funcional.
-            </p>
           </div>
 
           {/* Input card */}
@@ -235,7 +250,7 @@ export function HomePage({ recentProjects }: HomePageProps) {
                 if (error) setError(null)
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Descreva o agente que você quer construir…"
+              placeholder={currentPlaceholder}
               rows={3}
               disabled={isPending}
               className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-40 disabled:opacity-50"
@@ -244,23 +259,8 @@ export function HomePage({ recentProjects }: HomePageProps) {
 
             {/* Action row */}
             <div className="flex items-center justify-between gap-2 px-3 pb-3">
-              {/* Left: attach + model */}
+              {/* Left: model picker */}
               <div className="flex items-center gap-1.5">
-                {/* Attach */}
-                <button
-                  type="button"
-                  disabled={isPending}
-                  className="flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] transition-colors hover:bg-white/5 disabled:opacity-50"
-                  style={{
-                    color: "var(--color-text-secondary, rgba(255,255,255,0.65))",
-                  }}
-                  aria-label="Anexar arquivo"
-                  title="Anexar (em breve)"
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Anexar</span>
-                </button>
-
                 {/* Model picker */}
                 <div className="relative">
                   <button
