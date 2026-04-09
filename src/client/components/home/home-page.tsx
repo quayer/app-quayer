@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useCallback, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
   ArrowUp,
@@ -8,8 +8,10 @@ import {
   ChevronDown,
   Loader2,
   Mic,
+  Paperclip,
   Sparkles,
   Square,
+  X,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { ClaudeIcon, CodexIcon } from "@/client/components/ds/model-icons"
@@ -31,7 +33,7 @@ interface HomePageProps {
   recentProjects: Project[]
 }
 
-type Tab = "learn" | "my-projects" | "team-projects"
+type Tab = "my-projects" | "team-projects"
 
 interface ModelOption {
   id: string
@@ -44,31 +46,45 @@ const MODELS: ModelOption[] = [
   { id: "codex", label: "Codex", icon: CodexIcon },
 ]
 
-/**
- * Exemplos rotativos usados como placeholder do textarea quando vazio.
- * Propósito: ensinar o range de casos de uso sem modal de templates.
- * Gira a cada 3.5s, pausa quando o user começa a digitar.
- */
-const PLACEHOLDER_EXAMPLES = [
-  "agente de captação de leads pra advocacia tributária que qualifica por urgência e faturamento...",
-  "assistente de vendas pra barbearia que agenda horário e confirma 1h antes...",
-  "qualificador de leads pra imobiliária de alto padrão — orçamento, bairro, prazo...",
-  "SAC de e-commerce que consulta status de pedido e gera segunda via do boleto...",
-  "atendente de clínica odontológica que agenda consulta e envia lembrete...",
-  "recepcionista virtual pra escritório de contabilidade fora do horário comercial...",
-]
+const INPUT_PLACEHOLDER =
+  "ex: agente de captação de leads pra advocacia tributária que qualifica por urgência, tipo de imposto e faturamento da empresa..."
+
+/** Tipos de arquivo aceitos para anexar ao prompt do agente. */
+const ACCEPTED_FILE_TYPES =
+  "image/*,application/pdf,text/plain,text/markdown,.md,.csv"
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export function HomePage({ recentProjects }: HomePageProps) {
   const router = useRouter()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [prompt, setPrompt] = useState("")
+  const [attachedFile, setAttachedFile] = useState<File | null>(null)
   const [selectedModel, setSelectedModel] = useState<ModelOption>(MODELS[0]!)
   const [modelOpen, setModelOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>(
-    recentProjects.length > 0 ? "my-projects" : "learn",
-  )
+  const [activeTab, setActiveTab] = useState<Tab>("my-projects")
+
+  const pickFile = () => fileInputRef.current?.click()
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null
+    if (file && file.size > 10 * 1024 * 1024) {
+      setError("Arquivo acima de 10 MB. Escolha um menor.")
+      return
+    }
+    setAttachedFile(file)
+    if (error) setError(null)
+  }
+  const removeFile = () => {
+    setAttachedFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
 
   // Web Speech API — transcrição ao vivo pro textarea
   const appendTranscript = useCallback((text: string) => {
@@ -90,18 +106,6 @@ export function HomePage({ recentProjects }: HomePageProps) {
     if (isListening) stopRecording()
     else startRecording()
   }
-
-  // Placeholder rotativo — ensina o range de casos de uso quando o
-  // textarea está vazio. Pausa assim que o user começa a digitar.
-  const [placeholderIdx, setPlaceholderIdx] = useState(0)
-  useEffect(() => {
-    if (prompt.length > 0 || isListening) return
-    const interval = setInterval(() => {
-      setPlaceholderIdx((i) => (i + 1) % PLACEHOLDER_EXAMPLES.length)
-    }, 3500)
-    return () => clearInterval(interval)
-  }, [prompt.length, isListening])
-  const currentPlaceholder = `ex: ${PLACEHOLDER_EXAMPLES[placeholderIdx]}`
 
   const submit = () => {
     const trimmed = prompt.trim()
@@ -241,6 +245,66 @@ export function HomePage({ recentProjects }: HomePageProps) {
               boxShadow: "0 12px 40px -12px rgba(0,0,0,0.6)",
             }}
           >
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_FILE_TYPES}
+              onChange={handleFileChange}
+              className="hidden"
+              aria-hidden
+            />
+
+            {/* Attached file chip */}
+            {attachedFile && (
+              <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
+                style={{
+                  borderColor:
+                    "var(--color-border-subtle, rgba(255,255,255,0.06))",
+                }}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <div
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+                    style={{
+                      backgroundColor: "rgba(255,214,10,0.1)",
+                      color: "var(--color-brand, #FFD60A)",
+                    }}
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="truncate text-[13px] font-medium"
+                      style={{ color: "var(--color-text-primary, #fff)" }}
+                    >
+                      {attachedFile.name}
+                    </p>
+                    <p
+                      className="text-[11px]"
+                      style={{
+                        color:
+                          "var(--color-text-tertiary, rgba(255,255,255,0.6))",
+                      }}
+                    >
+                      {formatFileSize(attachedFile.size)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={removeFile}
+                  className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
+                  style={{
+                    color: "var(--color-text-tertiary, rgba(255,255,255,0.6))",
+                  }}
+                  aria-label="Remover anexo"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Textarea */}
             <textarea
               ref={textareaRef}
@@ -250,7 +314,7 @@ export function HomePage({ recentProjects }: HomePageProps) {
                 if (error) setError(null)
               }}
               onKeyDown={handleKeyDown}
-              placeholder={currentPlaceholder}
+              placeholder={INPUT_PLACEHOLDER}
               rows={3}
               disabled={isPending}
               className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-40 disabled:opacity-50"
@@ -259,8 +323,31 @@ export function HomePage({ recentProjects }: HomePageProps) {
 
             {/* Action row */}
             <div className="flex items-center justify-between gap-2 px-3 pb-3">
-              {/* Left: model picker */}
+              {/* Left: attach + model picker */}
               <div className="flex items-center gap-1.5">
+                {/* Attach */}
+                <button
+                  type="button"
+                  onClick={pickFile}
+                  disabled={isPending}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
+                  style={{
+                    borderColor: attachedFile
+                      ? "var(--color-border-brand, rgba(255,214,10,0.35))"
+                      : "var(--color-border-default, rgba(255,255,255,0.12))",
+                    backgroundColor: attachedFile
+                      ? "rgba(255,214,10,0.08)"
+                      : "transparent",
+                    color: attachedFile
+                      ? "var(--color-brand, #FFD60A)"
+                      : "var(--color-text-primary, #ffffff)",
+                  }}
+                  aria-label="Anexar arquivo"
+                  title="Anexar imagem, PDF ou texto (até 10 MB)"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+
                 {/* Model picker */}
                 <div className="relative">
                   <button
@@ -411,22 +498,23 @@ export function HomePage({ recentProjects }: HomePageProps) {
             </p>
           )}
 
-          {/* Tabs */}
-          <div className="mt-12 mb-6 flex items-center justify-center">
+          {/* Separator — divide input (ação) da listagem (histórico) */}
+          <div className="relative mt-16 mb-8 flex items-center justify-center">
             <div
-              className="inline-flex items-center gap-1 rounded-full border p-1"
+              className="absolute inset-x-0 top-1/2 h-px"
+              style={{
+                background:
+                  "linear-gradient(to right, transparent, var(--color-border-subtle, rgba(255,255,255,0.08)) 20%, var(--color-border-subtle, rgba(255,255,255,0.08)) 80%, transparent)",
+              }}
+            />
+            <div
+              className="relative inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1"
               style={{
                 borderColor:
-                  "var(--color-border-subtle, rgba(255,255,255,0.08))",
-                backgroundColor: "rgba(255,255,255,0.02)",
+                  "var(--color-border-subtle, rgba(255,255,255,0.1))",
+                backgroundColor: "var(--color-bg-base, #000)",
               }}
             >
-              <TabButton
-                active={activeTab === "learn"}
-                onClick={() => setActiveTab("learn")}
-                label="Explorar"
-                badge={0}
-              />
               <TabButton
                 active={activeTab === "my-projects"}
                 onClick={() => setActiveTab("my-projects")}
@@ -447,7 +535,6 @@ export function HomePage({ recentProjects }: HomePageProps) {
             {activeTab === "my-projects" && (
               <MyProjectsTab projects={recentProjects} />
             )}
-            {activeTab === "learn" && <LearnTab />}
             {activeTab === "team-projects" && <TeamTab />}
           </div>
         </div>
@@ -576,54 +663,6 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
         style={{ color: "var(--color-brand, #FFD60A)" }}
       >
         Ver todos os projetos →
-      </a>
-    </div>
-  )
-}
-
-function LearnTab() {
-  return (
-    <div
-      className="flex flex-col items-center justify-center gap-4 rounded-2xl border py-12 text-center"
-      style={{
-        backgroundColor: "var(--color-bg-surface, #060402)",
-        borderColor: "var(--color-border-subtle, rgba(255,255,255,0.06))",
-      }}
-    >
-      <div
-        className="flex h-12 w-12 items-center justify-center rounded-2xl"
-        style={{
-          backgroundColor: "rgba(255,214,10,0.08)",
-          color: "var(--color-brand, #FFD60A)",
-        }}
-      >
-        <Sparkles className="h-5 w-5" />
-      </div>
-      <div>
-        <h3
-          className="text-sm font-semibold"
-          style={{ color: "var(--color-text-primary, #ffffff)" }}
-        >
-          Guias, workshops e cheatsheets
-        </h3>
-        <p
-          className="mx-auto mt-1 max-w-sm text-xs"
-          style={{
-            color: "var(--color-text-tertiary, rgba(255,255,255,0.55))",
-          }}
-        >
-          Aprenda Claude Code, MCPs, anatomia de prompts e muito mais.
-        </p>
-      </div>
-      <a
-        href="/recursos"
-        className="inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-opacity hover:opacity-90"
-        style={{
-          backgroundColor: "var(--color-brand, #FFD60A)",
-          color: "var(--color-text-inverse, #1A0800)",
-        }}
-      >
-        Explorar recursos
       </a>
     </div>
   )
