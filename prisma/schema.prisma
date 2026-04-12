@@ -125,6 +125,9 @@ model Organization {
   builderProjects      BuilderProject[]
   builderConversations BuilderProjectConversation[]
 
+  // Boards (Excalidraw)
+  boards Board[]
+
   @@index([document])
   @@index([slug])
   @@index([billingType])
@@ -240,6 +243,9 @@ model User {
   builderProjects              BuilderProject[]
   builderProjectConversations  BuilderProjectConversation[]
   builderPublishedPromptVersions BuilderPromptVersion[] @relation("BuilderPromptVersionPublisher")
+
+  // Boards (Excalidraw)
+  boards Board[]
 
   @@index([email])
   @@index([currentOrgId])
@@ -2771,4 +2777,29 @@ model WebhookEvent {
   @@index([eventType])
   @@index([status])
   @@map("webhook_events")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [7] BOARDS (Excalidraw)
+// ══════════════════════════════════════════════════════════════════════════════
+
+model Board {
+  id             String   @id @default(uuid())
+  name           String
+  folder         String   @default("scratch")
+  data           Json     @default("{}") @db.JsonB // Excalidraw scene (elements + appState + files)
+  thumbnail      String?  @db.Text // Base64 preview image
+  organizationId String
+  createdById    String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([folder])
+  @@map("boards")
 }

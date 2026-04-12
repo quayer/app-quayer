@@ -70,6 +70,7 @@
     "@ai-sdk/anthropic": "^3.0.64",
     "@ai-sdk/openai": "^3.0.48",
     "@ai-sdk/react": "^3.0.156",
+    "@excalidraw/excalidraw": "^0.18.0",
     "@hookform/resolvers": "^5.2.2",
     "@igniter-js/adapter-bullmq": "^0.3.4",
     "@igniter-js/adapter-mcp-server": "^0.3.7",

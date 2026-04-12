@@ -32,6 +32,7 @@ import { campaignsController } from '@/server/communication/campaigns'
 import { businessProfileController } from '@/server/communication/business-profile'
 import { aiAgentsController } from '@/server/ai-module/ai-agents/controllers/ai-agents.controller'
 import { builderController } from '@/server/ai-module/builder/builder.controller'
+import { boardsController } from '@/server/features-module/boards'
 
 /**
  * @description Main application router configuration
@@ -74,6 +75,7 @@ export const AppRouter = igniter.router({
     'business-profile': businessProfileController,
     'ai-agents': aiAgentsController,
     builder: builderController,
+    boards: boardsController,
   }
 })
 
