@@ -1,5 +1,5 @@
 import { headers } from 'next/headers'
-import { listRecentProjects } from '@/server/features/builder-projects/queries'
+import { listRecentProjects } from '@/server/ai-module/builder/queries'
 
 /**
  * Server helper que resolve os dados necessários para <BuilderSidebar>.

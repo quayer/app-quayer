@@ -1,15 +1,12 @@
 import { igniter } from '@/igniter'
 import { instancesController } from '@/server/communication/instances/controllers/instances.controller'
-import { shareController } from '@/server/communication/share'
 import { authController } from '@/server/core/auth/controllers/auth.controller'
 import { organizationsController } from '@/server/core/organizations'
-import { projectsController } from '@/server/crm/projects'
 import { webhooksController } from '@/server/features-module/webhooks'
 import { onboardingController } from '@/server/core/onboarding/controllers/onboarding.controller'
 import { invitationsController } from '@/server/core/invitations'
 import { dashboardController } from '@/server/features-module/dashboard'
 import { chatsController, messagesController, mediaController } from '@/server/communication/messages'
-import { sessionsController } from '@/server/core/sessions'
 import { auditController } from '@/server/features-module/audit'
 import { notificationsController } from '@/server/core/notifications'
 import { deviceSessionsController } from '@/server/core/device-sessions'
@@ -32,7 +29,7 @@ import { campaignsController } from '@/server/communication/campaigns'
 import { businessProfileController } from '@/server/communication/business-profile'
 import { aiAgentsController } from '@/server/ai-module/ai-agents/controllers/ai-agents.controller'
 import { builderController } from '@/server/ai-module/builder/builder.controller'
-import { boardsController } from '@/server/features-module/boards'
+import { deviceAuthController } from '@/server/core/device-auth/device-auth.controller'
 
 /**
  * @description Main application router configuration
@@ -48,11 +45,8 @@ export const AppRouter = igniter.router({
     chats: chatsController,
     messages: messagesController,
     media: mediaController,
-    projects: projectsController,
     webhooks: webhooksController,
     instances: instancesController,
-    share: shareController,
-    sessions: sessionsController,
     audit: auditController,
     notifications: notificationsController,
     deviceSessions: deviceSessionsController,
@@ -75,7 +69,7 @@ export const AppRouter = igniter.router({
     'business-profile': businessProfileController,
     'ai-agents': aiAgentsController,
     builder: builderController,
-    boards: boardsController,
+    'device-auth': deviceAuthController,
   }
 })
 

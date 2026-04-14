@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { Metadata } from 'next'
 import { ArrowLeft } from 'lucide-react'
-import { listOrgProjects } from '@/server/features/builder-projects/queries'
+import { listOrgProjects } from '@/server/ai-module/builder/queries'
 import { ProjetosList } from '@/client/components/projetos/projetos-list'
 import { Button } from '@/client/components/ui/button'
 

@@ -10,17 +10,14 @@
 //                                TotpDevice, RecoveryCode, DeviceSession, IpRule,
 //                                CustomRole, VerifiedDomain, ScimToken
 //   [2] CONNECTIONS & MESSAGING — Connection, ConnectionSettings, ConnectionEvent,
-//                                 ChatSession, Message, GroupChat, GroupParticipant,
-//                                 GroupMessage, SessionNote, QuickReply
+//                                 ChatSession, Message
 //   [3] ORGANIZATIONS & TEAMS  — Department, Project, ApiKey, Invitation
 //   [4] AI & AGENTS            — AIAgentConfig, AIPrompt, OrganizationProvider,
-//                                IntegrationConfig, N8nCallLog
+//                                IntegrationConfig, N8nCallLog, BuilderProject*
 //   [5] PLATFORM & INFRA       — Webhook, WebhookDelivery, AuditLog, LogEntry,
 //                                LogAnalysis, Notification, NotificationRead,
 //                                File, SystemSettings, EmailTemplate, SystemConfig
-//   [6] SALES & CONTACTS       — Contact, ContactAttribute, Attribute, Tabulation,
-//                                ContactTabulation, SessionTabulation, KanbanBoard,
-//                                KanbanColumn, Label, ContactObservation, Call
+//   [6] CAMPAIGNS              — Campaign, CampaignRecipient, MessageTemplate (dormant)
 //
 // NOTES:
 //   - Tables without @@map() use PascalCase in PostgreSQL (legacy, matches init migration)
@@ -72,10 +69,6 @@ model Organization {
   autoPauseWaitMinutes     Int               @default(30) // Minutos para aguardar cliente (se WAIT_CUSTOMER)
   autoPauseDurationMinutes Int               @default(15) // Duração padrão do auto-pause
 
-  // Group Chat Settings
-  groupDefaultMode    GroupMode           @default(DISABLED) // Modo padrão para novos grupos
-  groupAiResponseMode GroupAIResponseMode @default(PRIVATE) // Modo de resposta IA padrão
-
   // White-label Branding
   logoUrl        String? // URL do logo customizado
   primaryColor   String  @default("#000000") // Cor primária da marca
@@ -109,9 +102,7 @@ model Organization {
   webhooks     Webhook[]
   auditLogs    AuditLog[]
   chatSessions ChatSession[]
-  calls        Call[]
   providers       OrganizationProvider[]
-  quickReplies    QuickReply[]
   customRoles     CustomRole[]
   verifiedDomains VerifiedDomain[]
   scimTokens      ScimToken[]
@@ -124,9 +115,6 @@ model Organization {
   // Builder (home-chat-builder)
   builderProjects      BuilderProject[]
   builderConversations BuilderProjectConversation[]
-
-  // Boards (Excalidraw)
-  boards Board[]
 
   @@index([document])
   @@index([slug])
@@ -225,14 +213,10 @@ model User {
   organizations       UserOrganization[]
   auditLogs           AuditLog[]
   verificationCodes   VerificationCode[]
-  contactObservations ContactObservation[]
   files               File[]
-  calls               Call[]
   assignedConnections Connection[]         @relation("AssignedCustomer")
 
   passkeyCredentials PasskeyCredential[]
-  sessionNotes       SessionNote[]  // Notas criadas pelo usuário
-  quickReplies       QuickReply[]   // Respostas rápidas criadas pelo usuário
   totpDevices        TotpDevice[]
   recoveryCodes      RecoveryCode[]
   deviceSessions     DeviceSession[]
@@ -243,9 +227,6 @@ model User {
   builderProjects              BuilderProject[]
   builderProjectConversations  BuilderProjectConversation[]
   builderPublishedPromptVersions BuilderPromptVersion[] @relation("BuilderPromptVersionPublisher")
-
-  // Boards (Excalidraw)
-  boards Board[]
 
   @@index([email])
   @@index([currentOrgId])
@@ -499,10 +480,7 @@ model Connection {
   webhooks               Webhook[]
   chatSessions           ChatSession[]
   messages               Message[]
-  tabulationIntegrations TabulationIntegration[]
-  calls                  Call[]
   n8nCallLogs            N8nCallLog[]
-  groupChats             GroupChat[]
   agentDeployments       AgentDeployment[]
 
   // Advanced Settings
@@ -796,71 +774,9 @@ model RolePermission {
 
 // ── Chat Sessions & Messages ──────────────────────────────────────────────────
 
-model Contact {
-  id            String  @id @default(uuid())
-  phoneNumber   String  @unique
-  name          String?
-  email         String? // ❌ ADDED: Contact email
-  profilePicUrl String?
-
-  // WhatsApp Info
-  isBusiness   Boolean @default(false)
-  verifiedName String?
-
-  // Organization & Source
-  organizationId String? // ❌ ADDED: Organization link
-  source         String? // ❌ ADDED: Integration/Instance ID que originou o contato
-  externalId     String? // ❌ ADDED: ID externo (ex: CRM ID)
-  bypassBots     Boolean @default(false) // ❌ ADDED: Bypass AI/Bots for this contact
-
-  // Metadata
-  tags         String[] @default([])
-  customFields Json?
-
-  // Custom Fields (inspired by UAZapi/Chatwoot fieldMap)
-  contactField01 String? @db.VarChar(255)
-  contactField02 String? @db.VarChar(255)
-  contactField03 String? @db.VarChar(255)
-  contactField04 String? @db.VarChar(255)
-  contactField05 String? @db.VarChar(255)
-  contactField06 String? @db.VarChar(255)
-  contactField07 String? @db.VarChar(255)
-  contactField08 String? @db.VarChar(255)
-  contactField09 String? @db.VarChar(255)
-  contactField10 String? @db.VarChar(255)
-  contactField11 String? @db.VarChar(255)
-  contactField12 String? @db.VarChar(255)
-  contactField13 String? @db.VarChar(255)
-  contactField14 String? @db.VarChar(255)
-  contactField15 String? @db.VarChar(255)
-  contactField16 String? @db.VarChar(255)
-  contactField17 String? @db.VarChar(255)
-  contactField18 String? @db.VarChar(255)
-  contactField19 String? @db.VarChar(255)
-  contactField20 String? @db.VarChar(255)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  chatSessions        ChatSession[]
-  messages            Message[]
-  contactTabulations  ContactTabulation[] // ❌ ADDED: Tabulations relation
-  contactAttributes   ContactAttribute[] // Contact-specific attribute values
-  contactObservations ContactObservation[]
-  calls               Call[]
-  groupParticipations GroupParticipant[] // Participações em grupos
-  leads               Lead[]
-
-  @@index([phoneNumber])
-  @@index([name])
-  @@index([organizationId])
-  @@index([source])
-  @@index([externalId])
-}
-
 model ChatSession {
   id             String @id @default(uuid())
-  contactId      String
+  contactPhone   String // WhatsApp phone number (formerly linked to Contact)
   connectionId   String
   organizationId String
 
@@ -934,17 +850,13 @@ model ChatSession {
   closedAt  DateTime?
 
   // Relacionamentos
-  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
   connection         Connection          @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department         Department?         @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
   aiAgentConfig      AIAgentConfig?      @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
   messages           Message[]
-  sessionTabulations SessionTabulation[]
-  groupParticipants  GroupParticipant[] // Participantes de grupo vinculados a esta sessão
-  notes              SessionNote[] // Notas internas do atendente
 
-  @@index([contactId])
+  @@index([contactPhone])
   @@index([connectionId])
   @@index([organizationId])
   @@index([status])
@@ -988,203 +900,10 @@ enum GeoAlertMode {
   block   // Bloqueia login de país diferente do último
 }
 
-// ── Group Chat ────────────────────────────────────────────────────────────────
-
-enum GroupMode {
-  DISABLED // Bot não processa mensagens do grupo
-  MONITOR_ONLY // Bot escuta mas não responde (analytics, coleta de leads)
-  ACTIVE // Bot escuta e pode responder
-}
-
-enum GroupAIResponseMode {
-  IN_GROUP // IA responde diretamente no grupo
-  PRIVATE // IA responde no privado do participante
-  HYBRID // IA decide baseado no contexto
-}
-
-model GroupChat {
-  id             String @id @default(uuid())
-  groupJid       String @unique // ID do grupo WhatsApp (ex: 5552199998888-123456@g.us)
-  connectionId   String
-  organizationId String
-
-  // Group Info (synced from WhatsApp)
-  name        String?
-  description String?
-  pictureUrl  String?
-  ownerJid    String? // JID do dono do grupo
-  createdAtWa DateTime? // Data de criação no WhatsApp
-
-  // Configuration
-  mode            GroupMode           @default(DISABLED)
-  aiEnabled       Boolean             @default(false)
-  aiResponseMode  GroupAIResponseMode @default(PRIVATE)
-  aiAgentConfigId String? // Qual agente IA usa neste grupo
-
-  // Session (grupos não expiram como contatos individuais)
-  sessionStatus SessionStatus @default(ACTIVE)
-
-  // Analytics
-  totalMessages     Int       @default(0)
-  totalParticipants Int       @default(0)
-  lastMessageAt     DateTime?
-  lastSyncAt        DateTime?
-
-  // Metadata
-  metadata Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  connection    Connection         @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  aiAgentConfig AIAgentConfig?     @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
-  participants  GroupParticipant[]
-  messages      GroupMessage[]
-
-  @@index([connectionId])
-  @@index([organizationId])
-  @@index([mode])
-  @@index([sessionStatus])
-  @@index([lastMessageAt])
-  @@map("group_chats")
-}
-
-model GroupParticipant {
-  id             String @id @default(uuid())
-  groupId        String
-  participantJid String // Número do participante (ex: 5552199998888@s.whatsapp.net)
-
-  // Link com contato existente (se houver)
-  contactId String?
-
-  // Sessão privada vinculada (para responder no privado)
-  privateSessionId String?
-
-  // Role no grupo
-  role String @default("participant") // admin, superadmin, participant
-
-  // Tracking
-  lastMessageAt DateTime?
-  messageCount  Int       @default(0)
-  joinedAt      DateTime?
-  leftAt        DateTime?
-
-  // Status
-  isActive Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  group          GroupChat    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  privateSession ChatSession? @relation(fields: [privateSessionId], references: [id], onDelete: SetNull)
-
-  @@unique([groupId, participantJid])
-  @@index([groupId])
-  @@index([contactId])
-  @@index([participantJid])
-  @@index([isActive])
-  @@map("group_participants")
-}
-
-model GroupMessage {
-  id             String @id @default(uuid())
-  groupId        String
-  participantJid String // Quem enviou a mensagem
-
-  // Message Info
-  waMessageId String      @unique
-  type        MessageType
-  content     String      @db.Text
-
-  // Media (se aplicável)
-  mediaUrl  String?
-  mediaType String?
-  mimeType  String?
-  fileName  String?
-
-  // AI Response (se bot respondeu)
-  isAiResponse Boolean @default(false)
-  aiModel      String?
-  aiCost       Float?
-
-  createdAt DateTime @default(now())
-
-  // Relations
-  group GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
-
-  @@index([groupId])
-  @@index([participantJid])
-  @@index([waMessageId])
-  @@index([createdAt])
-  @@map("group_messages")
-}
-
-// ── Session Notes ─────────────────────────────────────────────────────────────
-
-model SessionNote {
-  id        String @id @default(uuid())
-  sessionId String
-  authorId  String // ID do usuário que criou a nota
-
-  // Content
-  content String @db.Text
-  isPinned Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId])
-  @@index([authorId])
-  @@index([createdAt])
-  @@map("session_notes")
-}
-
-// ── Quick Replies ─────────────────────────────────────────────────────────────
-
-model QuickReply {
-  id             String  @id @default(uuid())
-  organizationId String
-  createdById    String  // User who created
-
-  // Content
-  shortcut  String // e.g. "/ola", "/preco", "/horario"
-  title     String // Display title
-  content   String @db.Text // The actual message content
-  category  String? // Optional category for grouping
-
-  // Usage stats
-  usageCount Int @default(0)
-
-  // Visibility
-  isGlobal  Boolean @default(true) // Available to all org users
-  isActive  Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, shortcut]) // Shortcut must be unique per org
-  @@index([organizationId])
-  @@index([createdById])
-  @@index([category])
-  @@index([isActive])
-  @@map("quick_replies")
-}
-
 model Message {
   id           String @id @default(uuid())
   sessionId    String
-  contactId    String
+  contactPhone String // WhatsApp phone number (formerly linked to Contact)
   connectionId String
 
   // Mensagem
@@ -1266,11 +985,10 @@ model Message {
 
   // Relacionamentos
   session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
   connection Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
-  @@index([contactId])
+  @@index([contactPhone])
   @@index([connectionId])
   @@index([waMessageId])
   @@index([concatGroupId])
@@ -1326,266 +1044,8 @@ enum MessageAuthor {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// [6] SALES & CONTACTS
+// [6] CAMPAIGNS & TEMPLATES (dormant — kept for Communication module)
 // ══════════════════════════════════════════════════════════════════════════════
-
-model Tabulation {
-  id              String   @id @default(uuid())
-  organizationId  String
-  name            String
-  description     String?
-  backgroundColor String   @default("#ffffff")
-  labelId         String?  @default("NaN") // Compatibility with falecomigo.ai
-  autoTabulation  Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  contactTabulations     ContactTabulation[]
-  sessionTabulations     SessionTabulation[]
-  tabulationIntegrations TabulationIntegration[]
-  tabulationSettings     TabulationSetting[]
-  kanbanColumns          KanbanColumn[] // Link Kanban columns to tabulations
-
-  @@index([organizationId])
-  @@index([name])
-}
-
-model ContactTabulation {
-  id           String   @id @default(uuid())
-  contactId    String
-  tabulationId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  contact    Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([contactId, tabulationId])
-  @@index([contactId])
-  @@index([tabulationId])
-}
-
-model SessionTabulation {
-  id           String   @id @default(uuid())
-  sessionId    String
-  tabulationId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now())
-
-  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  tabulation Tabulation  @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, tabulationId])
-  @@index([sessionId])
-  @@index([tabulationId])
-}
-
-// ── Tabulation Integrations ───────────────────────────────────────────────────
-
-model TabulationIntegration {
-  id           String   @id @default(uuid())
-  tabulationId String
-  connectionId String
-  externalId   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-
-  @@unique([tabulationId, connectionId])
-  @@index([tabulationId])
-  @@index([connectionId])
-}
-
-model TabulationSetting {
-  id           String   @id @default(uuid())
-  tabulationId String
-  key          String // Setting key (e.g., "webhookUrl", "autoAssign")
-  value        String   @db.Text // Setting value (JSON)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([tabulationId, key])
-  @@index([tabulationId])
-}
-
-// ── Attributes (Custom Contact Fields) ───────────────────────────────────────
-
-model Attribute {
-  id             String   @id @default(uuid())
-  organizationId String
-  name           String // Field name (e.g., "Telefone alternativo")
-  description    String?
-  type           String // TEXT, DATE, DATETIME, INTEGER, FLOAT, DOCUMENT
-  isRequired     Boolean  @default(false)
-  defaultValue   String? // Default value for this attribute
-  options        Json? // For select/enum types: ["Option 1", "Option 2"]
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  contactAttributes ContactAttribute[]
-
-  @@index([organizationId])
-  @@index([type])
-  @@index([isActive])
-}
-
-model ContactAttribute {
-  id          String   @id @default(uuid())
-  contactId   String
-  attributeId String
-  value       String   @db.Text // Stored as string, cast based on Attribute.type
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  contact   Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-
-  @@unique([contactId, attributeId])
-  @@index([contactId])
-  @@index([attributeId])
-}
-
-// ── Kanban ────────────────────────────────────────────────────────────────────
-
-model KanbanBoard {
-  id             String   @id @default(uuid())
-  organizationId String
-  name           String
-  description    String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  columns KanbanColumn[]
-
-  @@index([organizationId])
-  @@index([isActive])
-}
-
-model KanbanColumn {
-  id              String   @id @default(uuid())
-  boardId         String
-  name            String
-  position        Int // Order position in board
-  backgroundColor String   @default("#ffffff")
-  tabulationId    String? // Link to Tabulation for auto-assignment
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  board      KanbanBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  tabulation Tabulation? @relation(fields: [tabulationId], references: [id], onDelete: SetNull)
-
-  @@index([boardId])
-  @@index([position])
-  @@index([tabulationId])
-}
-
-// ── Labels ────────────────────────────────────────────────────────────────────
-
-model Label {
-  id              String   @id @default(uuid())
-  organizationId  String
-  name            String
-  slug            String
-  description     String?
-  backgroundColor String   @default("#ffffff")
-  icon            String? // Icon name or emoji
-  category        String? // Category grouping
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([organizationId, slug])
-  @@index([organizationId])
-  @@index([category])
-  @@index([isActive])
-}
-
-// ── Contact Observations ─────────────────────────────────────────────────────
-
-model ContactObservation {
-  id        String   @id @default(uuid())
-  contactId String
-  userId    String // Author of observation
-  content   String   @db.Text
-  type      String   @default("note") // note, warning, important
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id])
-
-  @@index([contactId])
-  @@index([userId])
-  @@index([type])
-  @@index([createdAt])
-}
-
-// ── Leads & Sales Pipeline (CRM module) ─────────────────────────────────────
-
-model Lead {
-  id              String    @id @default(uuid())
-  organizationId  String
-  contactId       String
-  title           String
-  status          String    @default("new") // new | qualified | proposal | won | lost
-  value           Decimal?  @db.Decimal(12, 2)
-  expectedCloseAt DateTime?
-  assignedAgentId String?
-  notes           String?   @db.Text
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  contact       Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  opportunities LeadOpportunity[]
-  tasks         LeadTask[]
-
-  @@index([organizationId])
-  @@index([contactId])
-  @@index([status])
-  @@index([assignedAgentId])
-  @@map("leads")
-}
-
-model LeadOpportunity {
-  id          String   @id @default(uuid())
-  leadId      String
-  title       String
-  value       Decimal  @db.Decimal(12, 2)
-  stage       String   @default("prospecting") // prospecting | qualification | proposal | negotiation | closed
-  probability Int      @default(0) // 0-100
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-
-  @@index([leadId])
-  @@index([stage])
-  @@map("lead_opportunities")
-}
-
-model LeadTask {
-  id          String    @id @default(uuid())
-  leadId      String
-  title       String
-  dueAt       DateTime?
-  completedAt DateTime?
-  assignedTo  String?
-  createdAt   DateTime  @default(now())
-
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-
-  @@index([leadId])
-  @@index([dueAt])
-  @@map("lead_tasks")
-}
-
-// ── Campaigns / Dispatch (Communication module) ──────────────────────────────
 
 model Campaign {
   id             String    @id @default(uuid())
@@ -1674,64 +1134,6 @@ model File {
   @@index([userId])
   @@index([mimeType])
   @@index([createdAt])
-}
-
-// ── Calls ─────────────────────────────────────────────────────────────────────
-
-model Call {
-  id             String @id @default(uuid())
-  connectionId   String
-  contactId      String
-  organizationId String
-
-  // Call details
-  direction   CallDirection
-  status      CallStatus    @default(INITIATED)
-  externalId  String?       @unique
-  initiatedBy String?
-
-  // Timestamps
-  startedAt  DateTime  @default(now())
-  answeredAt DateTime?
-  endedAt    DateTime?
-  duration   Int?
-
-  // Metadata
-  metadata Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  connection   Connection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [initiatedBy], references: [id], onDelete: SetNull)
-
-  @@index([connectionId])
-  @@index([contactId])
-  @@index([organizationId])
-  @@index([initiatedBy])
-  @@index([status])
-  @@index([direction])
-  @@index([externalId])
-  @@index([startedAt])
-}
-
-enum CallDirection {
-  INCOMING // Chamada recebida
-  OUTGOING // Chamada feita
-}
-
-enum CallStatus {
-  INITIATED // Chamada iniciada
-  RINGING // Tocando
-  ANSWERED // Atendida
-  MISSED // Perdida
-  REJECTED // Rejeitada
-  BUSY // Ocupado
-  FAILED // Falhou
-  ENDED // Finalizada
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1950,7 +1352,6 @@ model AIAgentConfig {
 
   // Relacionamentos
   sessions   ChatSession[]
-  groupChats GroupChat[] // Grupos que usam este agente IA
   promptVersions AgentPromptVersion[]
   deployments    AgentDeployment[]
 
@@ -2780,26 +2181,46 @@ model WebhookEvent {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// [7] BOARDS (Excalidraw)
+// [7] DEVICE AUTHORIZATION FLOW
 // ══════════════════════════════════════════════════════════════════════════════
 
-model Board {
-  id             String   @id @default(uuid())
-  name           String
-  folder         String   @default("scratch")
-  data           Json     @default("{}") @db.JsonB // Excalidraw scene (elements + appState + files)
-  thumbnail      String?  @db.Text // Base64 preview image
-  organizationId String
-  createdById    String
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model DeviceAuthRequest {
+  id String @id @default(uuid())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  // Device identification
+  deviceCode String @unique // Random 40-char hex — used by CLI to poll
+  userCode   String @unique // Human-readable 8-char code (ABCD-1234 format)
 
-  @@index([organizationId])
-  @@index([createdById])
-  @@index([folder])
-  @@map("boards")
+  // What gets created on approval
+  scopes  String[] @default(["read", "write"])
+  keyName String   @default("CLI") // Name for the API key that will be created
+
+  // Status
+  status DeviceAuthStatus @default(PENDING)
+
+  // After approval — links to created API key
+  apiKeyId       String?
+  apiKeyPlaintext String? // Temporarily stores full key until CLI polls it, then cleared
+  userId         String? // Who approved it
+  organizationId String? // Which org was selected
+
+  // Expiration
+  expiresAt DateTime // 15 minutes from creation
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([deviceCode])
+  @@index([userCode])
+  @@index([status])
+  @@map("device_auth_requests")
 }
+
+enum DeviceAuthStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+}
+

@@ -4,7 +4,7 @@ import type { Metadata } from 'next'
 import {
   getProjectDetail,
   getInitialMessages,
-} from '@/server/features/builder-projects/queries'
+} from '@/server/ai-module/builder/queries'
 import { Workspace } from '@/client/components/projetos/workspace'
 import type {
   ChatMessage,

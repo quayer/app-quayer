@@ -9,12 +9,13 @@
  */
 
 import { generateText, streamText, stepCountIs, type ToolSet } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
-import { createAnthropic } from '@ai-sdk/anthropic'
 import { database } from '@/server/services/database'
+import { getModel } from './services/provider-factory'
+import { getRedis } from '@/server/services/redis'
 import { getEnabledBuiltinTools, type ToolExecutionContext } from './tools/builtin-tools'
 import { BUILDER_RESERVED_NAME } from '@/server/ai-module/builder/builder.constants'
 import { buildBuilderToolset } from '@/server/ai-module/builder/tools'
+import { normalizeForAI } from '@/server/communication/services/message-normalizer.service'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,28 @@ const COST_TABLE: Record<string, { input: number; output: number }> = {
 
 const FALLBACK_RATES = { input: 5.0, output: 15.0 }
 
+// ── US-036: Context Budget Error ────────────────────────────────────────────
+
+export class ContextBudgetExhaustedError extends Error {
+  constructor(totalTokens: number, maxTokens: number) {
+    super(
+      `Context budget exhausted: estimated ${totalTokens} tokens exceeds max ${maxTokens}`
+    )
+    this.name = 'ContextBudgetExhaustedError'
+  }
+}
+
+// ── US-036: Token Estimation ────────────────────────────────────────────────
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+// ── US-043: Provider Cooldown Map ───────────────────────────────────────────
+
+const PROVIDER_COOLDOWNS = new Map<string, number>()
+const COOLDOWN_DURATION_MS = 5 * 60 * 1000 // 5 minutes
+
 function calculateCost(model: string, inputTokens: number, outputTokens: number) {
   const rates = COST_TABLE[model] || FALLBACK_RATES
   const inputCost = (inputTokens / 1_000_000) * rates.input
@@ -78,37 +101,7 @@ function calculateCost(model: string, inputTokens: number, outputTokens: number)
 }
 
 // ── Provider Factory ─────────────────────────────────────────────────────────
-
-/**
- * Build a Vercel AI SDK model instance for the given provider.
- * Supports OpenAI, Anthropic, and Groq (OpenAI-compatible).
- */
-function getModel(provider: string, model: string, apiKey?: string) {
-  switch (provider) {
-    case 'anthropic': {
-      const anthropic = createAnthropic({
-        apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
-      })
-      return anthropic(model)
-    }
-
-    case 'groq': {
-      const groq = createOpenAI({
-        apiKey: apiKey || process.env.GROQ_API_KEY,
-        baseURL: 'https://api.groq.com/openai/v1',
-      })
-      return groq(model)
-    }
-
-    case 'openai':
-    default: {
-      const openai = createOpenAI({
-        apiKey: apiKey || process.env.OPENAI_API_KEY,
-      })
-      return openai(model)
-    }
-  }
-}
+// Imported from ./services/provider-factory.ts (shared with Builder tools)
 
 // ── Context Builders ─────────────────────────────────────────────────────────
 
@@ -127,12 +120,23 @@ async function buildConversationContext(sessionId: string, memoryWindow: number)
       author: true,
       type: true,
       createdAt: true,
+      transcription: true,
+      locationName: true,
+      latitude: true,
+      longitude: true,
+      geoAddress: true,
+      geoNeighborhood: true,
+      geoCity: true,
+      geoState: true,
+      geoPostalCode: true,
+      fileName: true,
+      mediaType: true,
     },
   })
 
   return messages.map((msg) => ({
     role: (msg.direction === 'INBOUND' ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: msg.content || `[${msg.type}]`,
+    content: normalizeForAI(msg),
   }))
 }
 
@@ -211,7 +215,7 @@ async function prepareAgentCall(
 
   // 2. Get active prompt (supports A/B testing)
   const promptVersion = await getActivePrompt(agentConfig.id, params.sessionId)
-  const systemPrompt =
+  let systemPrompt =
     promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
   // 3. Build conversation context from recent session messages
@@ -226,6 +230,7 @@ async function prepareAgentCall(
     contactId: params.contactId,
     connectionId: params.connectionId,
     organizationId: params.organizationId,
+    agentConfigId: agentConfig.id,
   }
   const tools: ToolSet = {
     ...getEnabledBuiltinTools(agentConfig.enabledTools, toolContext),
@@ -256,6 +261,33 @@ async function prepareAgentCall(
 
   // 5. Get LLM model instance
   const model = getModel(agentConfig.provider, agentConfig.model, params.apiKey)
+
+  // ── US-036: Token budget tracker ──────────────────────────────────────
+  const systemTokens = estimateTokens(systemPrompt)
+  const messagesTokens = conversationHistory.reduce(
+    (sum, msg) => sum + estimateTokens(msg.content),
+    0
+  )
+  const toolDefinitionsEstimate = 300
+  const totalEstimatedTokens = systemTokens + messagesTokens + toolDefinitionsEstimate
+  const maxTokens = agentConfig.maxTokens || 4096
+
+  if (totalEstimatedTokens > maxTokens) {
+    throw new ContextBudgetExhaustedError(totalEstimatedTokens, maxTokens)
+  }
+
+  if (totalEstimatedTokens > maxTokens * 0.80) {
+    systemPrompt += '\n\n[SISTEMA: Contexto próximo do limite. Seja conciso nas próximas respostas.]'
+  }
+
+  // ── US-036: Context window guard ──────────────────────────────────────
+  if (estimateTokens(systemPrompt) < 500) {
+    console.warn(
+      '[AgentRuntime] System prompt suspiciously short (<500 estimated tokens). Using fallback.'
+    )
+    systemPrompt =
+      'Desculpe, estou com dificuldades no momento. Um atendente vai te ajudar em breve.'
+  }
 
   return {
     agentConfig,
@@ -354,10 +386,28 @@ export async function processAgentMessage(
     throw new Error('Agent config missing after prepareAgentCall')
   }
 
-  // 6. Call LLM with automatic tool-calling loop
-  try {
-    const result = await generateText({
-      model,
+  // US-043: Check if primary provider is in cooldown
+  const fallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
+  const providerKey = `${agentConfig.provider}:${agentConfig.model}`
+  const cooldownUntil = PROVIDER_COOLDOWNS.get(providerKey) ?? 0
+  const isInCooldown = Date.now() < cooldownUntil
+
+  // Choose which model to use (skip primary if in cooldown and fallback exists)
+  let activeModel = model
+  let activeModelName = agentConfig.model
+  let usedFallback = false
+
+  if (isInCooldown && fallbackModel) {
+    console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown, using fallback ${fallbackModel}`)
+    activeModel = getModel(agentConfig.provider, fallbackModel, params.apiKey)
+    activeModelName = fallbackModel
+    usedFallback = true
+  }
+
+  // 6. Call LLM with automatic tool-calling loop + US-043 fallback
+  const callGenerateText = async (llmModel: ReturnType<typeof getModel>) => {
+    return generateText({
+      model: llmModel,
       system: systemPrompt,
       messages: [
         ...conversationHistory,
@@ -368,11 +418,33 @@ export async function processAgentMessage(
       temperature: agentConfig.temperature,
       maxOutputTokens: agentConfig.maxTokens,
     })
+  }
+
+  try {
+    let result: Awaited<ReturnType<typeof generateText>>
+
+    try {
+      result = await callGenerateText(activeModel)
+    } catch (primaryError: unknown) {
+      // US-043: On retriable error, try fallback model
+      if (!usedFallback && fallbackModel && isRetriableError(primaryError)) {
+        console.log(
+          `[AgentRuntime] Primary model failed, falling back to ${fallbackModel}`
+        )
+        PROVIDER_COOLDOWNS.set(providerKey, Date.now() + COOLDOWN_DURATION_MS)
+        const fallback = getModel(agentConfig.provider, fallbackModel, params.apiKey)
+        activeModelName = fallbackModel
+        usedFallback = true
+        result = await callGenerateText(fallback)
+      } else {
+        throw primaryError
+      }
+    }
 
     const latencyMs = Date.now() - startTime
     const inputTokens = result.usage?.inputTokens ?? 0
     const outputTokens = result.usage?.outputTokens ?? 0
-    const cost = calculateCost(agentConfig.model, inputTokens, outputTokens)
+    const cost = calculateCost(activeModelName, inputTokens, outputTokens)
 
     // 7. Extract tool calls from multi-step execution
     const toolCalls =
@@ -409,7 +481,7 @@ export async function processAgentMessage(
       },
       cost,
       latencyMs,
-      model: agentConfig.model,
+      model: activeModelName,
       provider: agentConfig.provider,
       promptVersionId: promptVersion?.id,
     }
@@ -506,6 +578,21 @@ export async function* processAgentMessageStream(
     return
   }
 
+  // US-043: Check cooldown for streaming path
+  const streamFallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
+  const streamProviderKey = `${agentConfig.provider}:${agentConfig.model}`
+  const streamCooldownUntil = PROVIDER_COOLDOWNS.get(streamProviderKey) ?? 0
+  const streamIsInCooldown = Date.now() < streamCooldownUntil
+
+  let streamActiveModel = model
+  let streamActiveModelName = agentConfig.model
+
+  if (streamIsInCooldown && streamFallbackModel) {
+    console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown (stream), using fallback ${streamFallbackModel}`)
+    streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, params.apiKey)
+    streamActiveModelName = streamFallbackModel
+  }
+
   // Aggregators collected from the stream to build the final `finish` event.
   const toolCallArgsById = new Map<string, Record<string, unknown>>()
   const toolCallNameById = new Map<string, string>()
@@ -518,18 +605,40 @@ export async function* processAgentMessageStream(
   let outputTokens = 0
 
   try {
-    const result = streamText({
-      model,
-      system: systemPrompt,
-      messages: [
-        ...conversationHistory,
-        { role: 'user', content: params.messageContent },
-      ],
-      tools,
-      stopWhen: stepCountIs(5),
-      temperature: agentConfig.temperature,
-      maxOutputTokens: agentConfig.maxTokens,
-    })
+    let result: ReturnType<typeof streamText>
+
+    const callStreamText = (llmModel: ReturnType<typeof getModel>) =>
+      streamText({
+        model: llmModel,
+        system: systemPrompt,
+        messages: [
+          ...conversationHistory,
+          { role: 'user', content: params.messageContent },
+        ],
+        tools,
+        stopWhen: stepCountIs(5),
+        temperature: agentConfig.temperature,
+        maxOutputTokens: agentConfig.maxTokens,
+      })
+
+    try {
+      result = callStreamText(streamActiveModel)
+      // Eagerly test the stream by awaiting a property — if the model is down,
+      // this may throw before we iterate. We rely on the for-await below to
+      // surface errors for models that fail mid-stream.
+    } catch (primaryError: unknown) {
+      if (!streamIsInCooldown && streamFallbackModel && isRetriableError(primaryError)) {
+        console.log(
+          `[AgentRuntime] Primary model failed (stream), falling back to ${streamFallbackModel}`
+        )
+        PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
+        streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, params.apiKey)
+        streamActiveModelName = streamFallbackModel
+        result = callStreamText(streamActiveModel)
+      } else {
+        throw primaryError
+      }
+    }
 
     for await (const part of result.fullStream) {
       switch (part.type) {
@@ -579,7 +688,7 @@ export async function* processAgentMessageStream(
     }
 
     const latencyMs = Date.now() - startTime
-    const cost = calculateCost(agentConfig.model, inputTokens, outputTokens)
+    const cost = calculateCost(streamActiveModelName, inputTokens, outputTokens)
 
     // Fire-and-forget metrics update (non-blocking), mirroring the sync path.
     updateRuntimeMetrics(
@@ -601,17 +710,55 @@ export async function* processAgentMessageStream(
       },
       cost,
       latencyMs,
-      model: agentConfig.model,
+      model: streamActiveModelName,
       provider: agentConfig.provider,
       toolCalls: aggregatedToolCalls,
     }
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : 'Unknown LLM stream error'
-    console.error(
-      `[AgentRuntime] LLM stream failed for agent "${agentConfig.name}":`,
-      message
-    )
-    yield { type: 'error', message }
+    // US-043: On retriable stream error, attempt fallback
+    if (!streamIsInCooldown && streamFallbackModel && isRetriableError(error)) {
+      console.log(
+        `[AgentRuntime] Primary model failed mid-stream, falling back to ${streamFallbackModel}`
+      )
+      PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
+      yield { type: 'error', message: `Primary model failed, retrying with fallback model ${streamFallbackModel}` }
+    } else {
+      const message =
+        error instanceof Error ? error.message : 'Unknown LLM stream error'
+      console.error(
+        `[AgentRuntime] LLM stream failed for agent "${agentConfig.name}":`,
+        message
+      )
+      yield { type: 'error', message }
+    }
   }
+}
+
+// ── US-043: Retriable Error Detection ───────────────────────────────────────
+
+/**
+ * Determines if an LLM error is retriable (429, 5xx, or timeout).
+ */
+function isRetriableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+
+  const message = error.message.toLowerCase()
+
+  // Check for timeout
+  if (message.includes('timeout') || message.includes('timed out') || message.includes('aborted')) {
+    return true
+  }
+
+  // Check for status code in error message or properties
+  const statusMatch = message.match(/\b(429|5\d{2})\b/)
+  if (statusMatch) return true
+
+  // Check for common status property on error objects
+  const statusCode = (error as unknown as Record<string, unknown>).status ??
+    (error as unknown as Record<string, unknown>).statusCode
+  if (typeof statusCode === 'number') {
+    return statusCode === 429 || (statusCode >= 500 && statusCode < 600)
+  }
+
+  return false
 }

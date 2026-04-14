@@ -4,16 +4,12 @@ import * as React from "react"
 import Image from "next/image"
 import {
   Settings2,
-  MessagesSquare,
   Building2,
   Plug,
   Shield,
   ShieldCheck,
-  Wrench,
   Bot,
-  FileText,
-  Megaphone,
-  PenTool,
+  Key,
 } from "lucide-react"
 
 import { NavMain } from "@/client/components/nav-main"
@@ -34,7 +30,6 @@ import { usePathname } from "next/navigation"
 import { useAuth } from "@/lib/auth/auth-provider"
 import { useCurrentOrganization } from "@/client/hooks/useOrganization"
 import { usePresence } from "@/client/hooks/useSocket"
-import { OnlineCount } from "@/client/components/chat/PresenceBadge"
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user } = useAuth()
@@ -69,7 +64,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           { title: "Dashboard",      url: "/admin" },
           { title: "Organizações",   url: "/admin/organizations" },
           { title: "Conexões",       url: "/admin/integracoes" },
-          { title: "Sessões",        url: "/admin/sessions" },
           { title: "Convites",       url: "/admin/invitations" },
           { title: "Notificações",   url: "/admin/notificacoes" },
           { title: "Auditoria",      url: "/admin/audit" },
@@ -85,13 +79,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
     // ── Principal ────────────────────────────────────────────────────────
     const mainMenu = isOrgMember ? [
-      { title: "Conversas",   url: "/conversas",    icon: MessagesSquare },
       { title: "Conexões",    url: "/integracoes",  icon: Plug },
-      { title: "Agentes IA",  url: "/integracoes/agents", icon: Bot },
-      { title: "Templates",   url: "/integracoes/settings/templates", icon: FileText },
-      { title: "Campanhas",   url: "/integracoes/settings/campaigns", icon: Megaphone },
-      { title: "Ferramentas", url: "/ferramentas",  icon: Wrench },
-      { title: "Quadros",     url: "/quadros",      icon: PenTool },
+      { title: "Agentes IA",  url: "/projetos", icon: Bot },
     ] : []
 
     // ── Configurações ────────────────────────────────────────────────────
@@ -111,6 +100,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           ],
         } : {}),
       },
+      { title: "API Keys",   url: "/configuracoes/api-keys", icon: Key },
       { title: "Segurança", url: "/user/seguranca", icon: Shield },
     ] : []
 
@@ -190,7 +180,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
 
       <SidebarFooter>
-        <OnlineCount count={onlineUsers.size} className="px-3 pb-1" />
         <NavUser user={data.user} />
       </SidebarFooter>
     </Sidebar>

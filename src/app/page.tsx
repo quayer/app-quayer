@@ -1,6 +1,6 @@
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { listRecentProjects } from '@/server/features/builder-projects/queries'
+import { listRecentProjects } from '@/server/ai-module/builder/queries'
 import { RESOURCES } from '@/server/ai-module/content/content.data'
 import { AppShell } from '@/client/components/layout/app-shell'
 import { HomePage } from '@/client/components/home/home-page'

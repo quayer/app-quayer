@@ -14,13 +14,10 @@ import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
  */
 const PUBLIC_PATHS = [
   '/login',
-  '/register',
   '/signup',
   '/connect',
-  '/forgot-password',
-  '/reset-password',
+  '/compartilhar',
   '/google-callback',
-  '/verify-email',
   '/verify',
 ];
 
@@ -37,9 +34,6 @@ const ONBOARDING_PATHS = ['/onboarding'];
  */
 const PROTECTED_PATHS = [
   '/integracoes',
-  '/conversas',
-  '/contatos',
-  '/ferramentas',
   '/projetos',
   '/recursos',
   '/admin',
@@ -50,6 +44,7 @@ const PROTECTED_PATHS = [
   '/settings',
   '/user',
   '/onboarding',
+  '/auth/device',
 ];
 
 /**
@@ -87,7 +82,9 @@ export async function middleware(request: NextRequest) {
   // 4. Se não há token, redirecionar para login
   if (!token) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
+    // Preservar query params na URL de redirect (ex: /auth/device?code=ABCD-1234)
+    const search = request.nextUrl.search;
+    loginUrl.searchParams.set('redirect', search ? `${pathname}${search}` : pathname);
     return NextResponse.redirect(loginUrl);
   }
 
