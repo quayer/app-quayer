@@ -6,7 +6,7 @@ import { webhooksController } from '@/server/features-module/webhooks'
 import { onboardingController } from '@/server/core/onboarding/controllers/onboarding.controller'
 import { invitationsController } from '@/server/core/invitations'
 import { dashboardController } from '@/server/features-module/dashboard'
-import { chatsController, messagesController, mediaController } from '@/server/communication/messages'
+import { mediaController } from '@/server/communication/messages'
 import { auditController } from '@/server/features-module/audit'
 import { notificationsController } from '@/server/core/notifications'
 import { deviceSessionsController } from '@/server/core/device-sessions'
@@ -42,8 +42,6 @@ export const AppRouter = igniter.router({
     organizations: organizationsController,
     invitations: invitationsController,
     dashboard: dashboardController,
-    chats: chatsController,
-    messages: messagesController,
     media: mediaController,
     webhooks: webhooksController,
     instances: instancesController,

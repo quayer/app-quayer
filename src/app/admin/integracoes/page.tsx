@@ -206,7 +206,6 @@ export default function IntegracoesAdminPage() {
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false)
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [selectedInstance, setSelectedInstance] = useState<AdminInstance | null>(null)
@@ -381,7 +380,6 @@ export default function IntegracoesAdminPage() {
   const handleConnect = (instance: AdminInstance) => { setSelectedInstance(instance); setIsConnectModalOpen(true) }
   const handleEditFromModal = (instance: ModalInstance) => { setSelectedInstance(instance as AdminInstance); setIsEditModalOpen(true) }
   const handleEdit = (instance: AdminInstance) => { setSelectedInstance(instance); setIsEditModalOpen(true) }
-  const handleShare = (instance: AdminInstance) => { setSelectedInstance(instance); setIsShareModalOpen(true) }
   const handleDetails = (instance: AdminInstance) => { setSelectedInstance(instance); setIsDetailModalOpen(true) }
   const handlePageChange = (newPage: number) => loadInstances(newPage)
 
@@ -729,9 +727,6 @@ export default function IntegracoesAdminPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => { const inst = instanceMap.get(row.id); if (inst) handleConnect(inst) }}>
                                   {row.status === 'connected' ? 'Reconectar' : 'Conectar'}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => { const inst = instanceMap.get(row.id); if (inst) handleShare(inst) }}>
-                                  Compartilhar
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem

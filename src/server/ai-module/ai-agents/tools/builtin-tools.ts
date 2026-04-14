@@ -94,94 +94,6 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     }),
 
     // -----------------------------------------------------------------------
-    // search_contacts
-    // -----------------------------------------------------------------------
-    search_contacts: tool({
-      description:
-        'Busca contatos no CRM pelo nome, telefone ou e-mail. Retorna até 5 contatos da organização que correspondam à consulta.',
-      inputSchema: z.object({
-        query: z.string().min(2).describe('Texto para busca: nome, telefone ou e-mail'),
-      }),
-      execute: async (input) => {
-        const { query } = input
-
-        const contacts = await database.contact.findMany({
-          where: {
-            organizationId: ctx.organizationId,
-            OR: [
-              { name: { contains: query, mode: 'insensitive' } },
-              { phoneNumber: { contains: query } },
-              { email: { contains: query, mode: 'insensitive' } },
-            ],
-          },
-          take: 5,
-          select: {
-            id: true,
-            name: true,
-            phoneNumber: true,
-            email: true,
-            createdAt: true,
-          },
-        })
-
-        return {
-          success: true,
-          contacts,
-          count: contacts.length,
-        }
-      },
-    }),
-
-    // -----------------------------------------------------------------------
-    // create_lead
-    // -----------------------------------------------------------------------
-    create_lead: tool({
-      description:
-        'Cria um novo lead no CRM vinculado ao contato da conversa atual. Use para registrar oportunidades de negócio identificadas durante o atendimento.',
-      inputSchema: z.object({
-        title: z
-          .string()
-          .describe(
-            'Título descritivo do lead (ex: "Interesse em plano Premium", "Solicitação de orçamento")',
-          ),
-        notes: z.string().optional().describe('Observações adicionais sobre o lead'),
-        assignedAgentId: z
-          .string()
-          .optional()
-          .describe('ID do usuário responsável pelo acompanhamento do lead'),
-      }),
-      execute: async (input) => {
-        const { title, notes, assignedAgentId } = input
-
-        try {
-          const lead = await database.lead.create({
-            data: {
-              organizationId: ctx.organizationId,
-              contactId: ctx.contactId,
-              title,
-              status: 'new',
-              notes: notes ?? null,
-              assignedAgentId: assignedAgentId ?? null,
-            },
-          })
-
-          return {
-            success: true,
-            leadId: lead.id,
-            message: `Lead "${title}" criado com sucesso`,
-          }
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : 'Erro desconhecido ao criar lead'
-          return {
-            success: false,
-            message: `Erro ao criar lead: ${message}`,
-          }
-        }
-      },
-    }),
-
-    // -----------------------------------------------------------------------
     // notify_team (US-019) — create notification without pausing AI
     // -----------------------------------------------------------------------
     notify_team: tool({
@@ -280,7 +192,5 @@ export type BuiltinToolName = keyof ReturnType<typeof createBuiltinTools>
 /** Ordered list of all available built-in tool names */
 export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'get_session_history',
-  'search_contacts',
-  'create_lead',
   'notify_team',
 ]
