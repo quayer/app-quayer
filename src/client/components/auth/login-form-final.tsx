@@ -18,6 +18,7 @@ import Link from "next/link"
 import { api } from "@/igniter.client"
 import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
+import { SIGNUP_ENABLED } from "@/lib/config"
 import { defaultCountries, parseCountry } from "react-international-phone"
 import * as Flags from "country-flag-icons/react/3x2"
 import { Popover, PopoverContent, PopoverTrigger } from "@/client/components/ui/popover"
@@ -30,7 +31,7 @@ import {
   CommandList,
 } from "@/client/components/ui/command"
 import { startAuthentication } from '@simplewebauthn/browser'
-import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
+import { getCsrfHeaders, ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
 import { looksLikePhone } from "@/lib/utils/phone"
 
 const FlagIcon = memo(function FlagIcon({ iso2, className }: { iso2: string; className?: string }) {
@@ -98,9 +99,11 @@ export function LoginFormFinal({
         if (!res.ok) return
         const { data: optionsWithId } = await res.json()
         const authResp = await startAuthentication({ optionsJSON: optionsWithId, useBrowserAutofill: true })
+        // verify-conditional exige csrfProcedure — garante cookie + header
+        const csrfHeaders = await ensureCsrfHeaders()
         const verifyRes = await fetch('/api/v1/auth/passkey/login/verify-conditional', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getCsrfHeaders() },
+          headers: { 'Content-Type': 'application/json', ...csrfHeaders },
           credentials: 'include',
           signal,
           body: JSON.stringify({ response: authResp, challengeId: optionsWithId.challengeId })
@@ -218,7 +221,7 @@ export function LoginFormFinal({
         return
       }
 
-      if (data?.authUrl) {
+      if (data && 'authUrl' in data && data.authUrl) {
         window.location.href = data.authUrl
       } else {
         setError("Erro ao obter URL de autenticação do Google")
@@ -239,16 +242,18 @@ export function LoginFormFinal({
         <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">
           Faça login no Quayer
         </h1>
-        <p className="text-[0.875rem] text-white/40 leading-relaxed">
-          Não tem conta?{" "}
-          <Link
-            href="/signup"
-            className="inline-flex items-center gap-0.5 text-white hover:text-white/80 font-medium underline underline-offset-2 transition-colors"
-          >
-            Comece agora
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </Link>
-        </p>
+        {SIGNUP_ENABLED && (
+          <p className="text-[0.875rem] text-white/40 leading-relaxed">
+            Não tem conta?{" "}
+            <Link
+              href="/signup"
+              className="inline-flex items-center gap-0.5 text-white hover:text-white/80 font-medium underline underline-offset-2 transition-colors"
+            >
+              Comece agora
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleOTPRequest} className="animate-fade-in-up stagger-2">

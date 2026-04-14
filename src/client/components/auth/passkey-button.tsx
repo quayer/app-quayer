@@ -6,6 +6,7 @@ import { Button } from "@/client/components/ui/button"
 import { Fingerprint, Loader2 } from "lucide-react"
 import { startAuthentication } from "@simplewebauthn/browser"
 import { useToast } from "@/client/hooks/use-toast"
+import { ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
 
 interface PasskeyButtonProps {
   mode?: "login" | "register"
@@ -65,10 +66,11 @@ export function PasskeyButton({
       // 2. Trigger browser passkey prompt
       const authResponse = await startAuthentication({ optionsJSON: optionsData })
 
-      // 3. Verify on server and get JWT
+      // 3. Verify on server and get JWT (requires CSRF cookie + header)
+      const csrfHeaders = await ensureCsrfHeaders()
       const verifyRes = await fetch('/api/v1/auth/passkey/login/verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders },
         credentials: 'include',
         body: JSON.stringify({ email, response: authResponse }),
       })

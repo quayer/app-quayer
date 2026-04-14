@@ -20,6 +20,7 @@ import Link from "next/link"
 import { api } from "@/igniter.client"
 import { PhoneInput } from "@/client/components/ui/phone-input"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
+import { SIGNUP_ENABLED, SIGNUP_DISABLED_MESSAGE } from "@/lib/config"
 
 export function SignupForm({
   className,
@@ -94,7 +95,7 @@ export function SignupForm({
     try {
       // Send OTP code to email (SIGNUP endpoint - creates TempUser)
       const { data, error: apiError } = await api.auth.signupOTP.mutate({
-        body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as Record<string, string>
+        body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as { name: string; email: string; 'cf-turnstile-response'?: string }
       })
 
       if (apiError) {
@@ -149,7 +150,7 @@ export function SignupForm({
         return
       }
 
-      if (data?.authUrl) {
+      if (data && 'authUrl' in data && data.authUrl) {
         window.location.href = data.authUrl
       } else {
         setError('Erro ao obter URL de autenticação do Google')
@@ -159,6 +160,31 @@ export function SignupForm({
       setError('Erro ao conectar com Google. Tente novamente.')
       setIsGoogleLoading(false)
     }
+  }
+
+  if (!SIGNUP_ENABLED) {
+    return (
+      <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+            Cadastro indisponível
+          </h1>
+        </div>
+        <Alert role="status" aria-live="polite">
+          <AlertDescription>{SIGNUP_DISABLED_MESSAGE}</AlertDescription>
+        </Alert>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Já tem conta?{" "}
+          <Link
+            href="/login"
+            className="inline-flex items-center gap-0.5 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+          >
+            Faça login
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
+        </p>
+      </div>
+    )
   }
 
   return (
