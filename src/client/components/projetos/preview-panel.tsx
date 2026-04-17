@@ -1,13 +1,17 @@
 "use client"
 
 /**
- * PreviewPanel — workspace direita (tabs do agente)
+ * PreviewPanel — workspace direita (tabs do projeto).
  *
- * Tema reativo via useAppTokens. Usa shadcn Tabs como base mas com
- * estilização inline pra combinar com o tom v3 (tabs pill + active
- * amber). Owns no state — tudo vem via props do workspace.
+ * Consome `TAB_REGISTRY` filtrado pelo `project.type`. Owns no state —
+ * tudo vem via props do workspace. Tema reativo via useAppTokens.
+ *
+ * A lista de tabs não é mais hardcoded aqui: cada project type pode ter
+ * seu próprio conjunto via `visibleFor` no registry. Hoje só `ai_agent`
+ * tem tabs específicas; outros kinds caem só nas tabs _core.
  */
 
+import { useMemo } from "react"
 import {
   Tabs,
   TabsList,
@@ -19,18 +23,23 @@ import type {
   PreviewPanelProps,
   PreviewTab,
 } from "@/client/components/projetos/types"
-
-import { OverviewTab } from "@/client/components/projetos/tabs/overview-tab"
-import { PromptTab } from "@/client/components/projetos/tabs/prompt-tab"
-import { PlaygroundTab } from "@/client/components/projetos/tabs/playground-tab"
-import { DeployTab } from "@/client/components/projetos/tabs/deploy-tab"
+import { getTabsForType } from "@/client/components/projetos/preview/tab-registry"
 
 export function PreviewPanel({
   project,
   activeTab,
   onTabChange,
+  messages,
 }: PreviewPanelProps) {
   const { tokens } = useAppTokens()
+
+  const tabs = useMemo(() => getTabsForType(project.type), [project.type])
+
+  // Fallback: se a URL aponta pra uma tab não disponível pro type (ex.
+  // deep link antigo), cai em 'overview' que é _core para todos os tipos.
+  const safeActiveTab: PreviewTab = useMemo(() => {
+    return tabs.some((t) => t.value === activeTab) ? activeTab : "overview"
+  }, [tabs, activeTab])
 
   return (
     <div
@@ -38,7 +47,7 @@ export function PreviewPanel({
       style={{ backgroundColor: tokens.bgBase }}
     >
       <Tabs
-        value={activeTab}
+        value={safeActiveTab}
         onValueChange={(v) => onTabChange(v as PreviewTab)}
         className="flex h-full min-h-0 flex-col"
       >
@@ -54,25 +63,20 @@ export function PreviewPanel({
               borderColor: tokens.divider,
             }}
           >
-            {(
-              [
-                { value: "overview", label: "Visão geral" },
-                { value: "prompt", label: "Prompt" },
-                { value: "playground", label: "Playground" },
-                { value: "deploy", label: "Publicar" },
-              ] as const
-            ).map((tab) => (
+            {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.value}
                 value={tab.value}
                 className="h-7 rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none"
                 style={{
                   color:
-                    activeTab === tab.value
+                    safeActiveTab === tab.value
                       ? tokens.brandText
                       : tokens.textSecondary,
                   backgroundColor:
-                    activeTab === tab.value ? tokens.brandSubtle : "transparent",
+                    safeActiveTab === tab.value
+                      ? tokens.brandSubtle
+                      : "transparent",
                 }}
               >
                 {tab.label}
@@ -83,18 +87,11 @@ export function PreviewPanel({
 
         {/* Tab content area — single scroll container */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <TabsContent value="overview" className="m-0 p-6">
-            <OverviewTab project={project} onTabChange={onTabChange} />
-          </TabsContent>
-          <TabsContent value="prompt" className="m-0 p-6">
-            <PromptTab project={project} />
-          </TabsContent>
-          <TabsContent value="playground" className="m-0 p-6">
-            <PlaygroundTab project={project} />
-          </TabsContent>
-          <TabsContent value="deploy" className="m-0 p-6">
-            <DeployTab project={project} />
-          </TabsContent>
+          {tabs.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value} className="m-0 p-6">
+              {tab.render({ project, messages, onTabChange })}
+            </TabsContent>
+          ))}
         </div>
       </Tabs>
     </div>

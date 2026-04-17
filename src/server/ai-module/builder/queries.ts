@@ -7,7 +7,7 @@
  */
 
 import { getDatabase } from '@/server/services/database'
-import { builderProjectRepository } from './repositories/builder-project.repository'
+import { builderProjectRepository } from './projects/projects.repository'
 
 export async function listOrgProjects(organizationId: string) {
   try {
@@ -51,6 +51,14 @@ export async function getProjectDetail(
             systemPrompt: true,
             provider: true,
             model: true,
+          },
+        },
+        // Needed to derive hasWhatsAppConnection in the page layer.
+        // A 'live' deployment with a connectionId means WhatsApp is attached.
+        deployments: {
+          select: {
+            status: true,
+            connectionId: true,
           },
         },
       },

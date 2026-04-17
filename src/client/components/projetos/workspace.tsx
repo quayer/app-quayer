@@ -2,8 +2,11 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ArrowLeft, Bot, MessageSquare, MoreVertical } from "lucide-react"
+import { toast } from "sonner"
 
+import { api } from "@/igniter.client"
 import { Button } from "@/client/components/ui/button"
 import { Input } from "@/client/components/ui/input"
 import {
@@ -24,7 +27,9 @@ import {
 } from "@/lib/project-status"
 
 import { ChatPanel } from "./chat-panel"
+import { ContextUsage } from "./chat/context-usage"
 import { PreviewPanel } from "./preview-panel"
+import { getTabByValue } from "./preview/tab-registry"
 import type { ChatMessage, PreviewTab, WorkspaceProject } from "./types"
 
 interface WorkspaceProps {
@@ -46,47 +51,130 @@ interface WorkspaceProps {
  */
 export function Workspace({ project, initialMessages }: WorkspaceProps) {
   const { tokens } = useAppTokens()
+  const router = useRouter()
 
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [mobilePanel, setMobilePanel] = React.useState<"chat" | "preview">(
     "chat",
   )
-  // Tab state is LOCAL — using URL state triggered router.replace on
-  // every click, which cascaded into RSC navigation + AuthProvider
-  // re-fetch + network errors. For an instant-response split UI,
-  // local state is the right trade-off. Deep-linking to specific
-  // tabs is a future US.
+  // Tab state is LOCAL + mirrored to URL via `window.history.replaceState`.
+  // We deliberately avoid `next/navigation`'s router.replace: on a dynamic
+  // route like /projetos/[id] it would trigger RSC refetch + AuthProvider
+  // re-fetch + network errors on every tab click. `history.replaceState`
+  // updates the URL with zero navigation, zero RSC cascade — pure client
+  // deep-linking. Initial value is hydrated from `?tab=` in a mount effect
+  // (guarded for SSR; useState initializer runs on the server too).
   const [activeTab, setActiveTab] = React.useState<PreviewTab>("overview")
+
+  // Hydrate active tab from the URL on mount (client-only).
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const raw = params.get("tab")
+    if (!raw) return
+    const descriptor = getTabByValue(raw)
+    if (descriptor) {
+      setActiveTab(descriptor.value)
+    }
+  }, [])
+  // Shared messages state — ChatPanel reports changes so PreviewPanel can
+  // derive dynamic progress from tool calls.
+  const [liveMessages, setLiveMessages] = React.useState<ChatMessage[]>(initialMessages)
 
   const status = getProjectStatusStyle(project.status)
   const statusLabel = PROJECT_STATUS_LABEL[project.status]
 
+  // ── Lifecycle mutations ─────────────────────────────────────────────────────
+  // Rename: optimistic UI update, revert on error
+  const renameMutation = api.builder.renameProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto renomeado")
+    },
+    onError: (error: unknown) => {
+      // Revert optimistic name change
+      setName(project.name)
+      const message =
+        error instanceof Error ? error.message : "Erro ao renomear projeto"
+      toast.error(message)
+    },
+  })
+
+  // Archive: navigate back to /projetos on success
+  const archiveMutation = api.builder.archiveProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto arquivado")
+      router.push("/projetos")
+    },
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Erro ao arquivar projeto"
+      toast.error(message)
+    },
+  })
+
+  // Duplicate: redirect to the new project on success
+  const duplicateMutation = api.builder.duplicateProject.useMutation({
+    onSuccess: (result) => {
+      const newId = result?.data?.id
+      toast.success("Projeto duplicado")
+      if (newId) {
+        router.push(`/projetos/${newId}?tab=overview`)
+      } else {
+        router.push("/projetos")
+      }
+    },
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Erro ao duplicar projeto"
+      toast.error(message)
+    },
+  })
+
   const handleTabChange = React.useCallback((tab: PreviewTab) => {
     setActiveTab(tab)
+    if (typeof window !== "undefined") {
+      // Pure client URL update — no RSC navigation, no router.replace.
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}?tab=${tab}`,
+      )
+    }
   }, [])
 
   const handleNameSubmit = React.useCallback(
     (value: string) => {
       const trimmed = value.trim()
       if (trimmed && trimmed !== project.name) {
-        // TODO: POST /api/v1/builder/projects/:id/rename
-        console.log("[workspace] rename stub", { id: project.id, name: trimmed })
+        // Optimistic update: reflect change immediately in the UI
         setName(trimmed)
+        setIsEditingName(false)
+        renameMutation.mutate({ params: { id: project.id }, body: { name: trimmed } })
       } else {
         setName(project.name)
+        setIsEditingName(false)
       }
-      setIsEditingName(false)
     },
-    [project.id, project.name],
+    [project.id, project.name, renameMutation],
   )
 
   const handleMenuAction = React.useCallback(
     (action: "archive" | "duplicate" | "rename") => {
-      console.log("[workspace] menu stub", { id: project.id, action })
-      if (action === "rename") setIsEditingName(true)
+      if (action === "rename") {
+        setIsEditingName(true)
+        return
+      }
+      if (action === "archive") {
+        archiveMutation.mutate({ params: { id: project.id }, body: {} })
+        return
+      }
+      if (action === "duplicate") {
+        duplicateMutation.mutate({ params: { id: project.id }, body: {} })
+        return
+      }
     },
-    [project.id],
+    [project.id, archiveMutation, duplicateMutation],
   )
 
   return (
@@ -167,7 +255,12 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
           </span>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Context usage indicator — hidden on very narrow mobile */}
+          <div className="hidden sm:flex">
+            <ContextUsage messages={liveMessages} variant="compact" />
+          </div>
+
           {/* Mobile toggle — shadcn ToggleGroup (radiogroup a11y) */}
           <ToggleGroup
             type="single"
@@ -228,7 +321,11 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
             borderRight: `1px solid ${tokens.divider}`,
           }}
         >
-          <ChatPanel projectId={project.id} initialMessages={initialMessages} />
+          <ChatPanel
+            projectId={project.id}
+            initialMessages={initialMessages}
+            onMessagesChange={setLiveMessages}
+          />
         </section>
 
         <section
@@ -240,6 +337,7 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
             project={project}
             activeTab={activeTab}
             onTabChange={handleTabChange}
+            messages={liveMessages}
           />
         </section>
       </main>

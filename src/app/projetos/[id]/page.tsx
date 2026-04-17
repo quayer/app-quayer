@@ -22,8 +22,7 @@ interface ProjetoPageProps {
 }
 
 // ------------------------------------------------------------------
-// Auth helper (matches src/app/integracoes/settings/billing/actions.ts).
-// Middleware injects x-user-id and x-current-org-id after JWT verify.
+// Auth helper: middleware injects x-user-id and x-current-org-id after JWT verify.
 // ------------------------------------------------------------------
 async function requireAuth() {
   const headersList = await headers()
@@ -71,6 +70,15 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
       createdAt: m.createdAt.toISOString(),
     }))
 
+  // Option A (minimum): derive a single boolean from the Builder deployment saga.
+  // A project has a live WhatsApp connection when at least one BuilderDeployment
+  // reached 'live' status AND has a connectionId set (meaning the attach step
+  // completed). `plan` and `byok` are left TODO — they require org billing /
+  // settings queries that are out of scope for this task.
+  const hasWhatsAppConnection = project.deployments.some(
+    (d) => d.status === 'live' && d.connectionId != null,
+  )
+
   const workspaceProject: WorkspaceProject = {
     id: project.id,
     name: project.name,
@@ -86,6 +94,7 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
           model: project.aiAgent.model,
         }
       : null,
+    hasWhatsAppConnection,
   }
 
   return (
