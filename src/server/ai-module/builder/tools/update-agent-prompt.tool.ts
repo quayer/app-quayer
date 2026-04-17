@@ -16,6 +16,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { buildBuilderTool } from './build-tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -39,7 +40,10 @@ export type BuilderToolContext = {
 // ---------------------------------------------------------------------------
 
 export function updateAgentPromptTool(ctx: BuilderToolContext) {
-  return tool({
+  return buildBuilderTool({
+    name: 'update_agent_prompt',
+    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    tool: tool({
     description:
       'Updates the system prompt of an existing agent. Creates a NEW version (linear increment) but does NOT publish it — stays as draft until user explicitly publishes.',
     inputSchema: z.object({
@@ -113,5 +117,6 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
         }
       }
     },
+  }),
   })
 }

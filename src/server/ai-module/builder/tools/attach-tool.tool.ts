@@ -35,6 +35,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { BUILTIN_TOOL_NAMES } from '@/server/ai-module/ai-agents/tools/builtin-tools'
+import { buildBuilderTool } from './build-tool'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other builder tools)
@@ -73,7 +74,10 @@ const toolKeyEnum = z.enum(
  * agent they are building.
  */
 export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
-  return tool({
+  return buildBuilderTool({
+    name: 'attach_tool_to_agent',
+    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    tool: tool({
     description:
       'Attaches a built-in tool to an existing AI agent in the current Builder project. Use this to enable capabilities like transfer_to_human, pause_session, search_contacts, create_lead, schedule_callback or get_session_history on an agent the user has already created. Idempotent: re-attaching an already-enabled tool is a no-op success.',
     inputSchema: z.object({
@@ -147,5 +151,6 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
         }
       }
     },
+  }),
   })
 }

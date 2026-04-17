@@ -20,6 +20,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { buildBuilderTool } from './build-tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -49,7 +50,10 @@ export interface BuilderToolExecutionContext {
  * generated system prompt in chat.
  */
 export function createAgentTool(ctx: BuilderToolExecutionContext) {
-  return tool({
+  return buildBuilderTool({
+    name: 'create_agent',
+    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    tool: tool({
     description:
       'Creates a new AI agent for WhatsApp in the current Builder project. Call this ONLY AFTER showing the generated system prompt to the user and receiving explicit approval. Links the new AIAgentConfig to the current BuilderProject and creates version 1 of the prompt.',
     inputSchema: z.object({
@@ -64,7 +68,7 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
         .max(50000)
         .describe('The full system prompt for the agent (user-approved)'),
       provider: z
-        .enum(['anthropic', 'openai', 'groq'])
+        .enum(['anthropic', 'openai', 'openrouter'])
         .default('anthropic')
         .describe('LLM provider'),
       model: z
@@ -157,5 +161,6 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
         }
       }
     },
+  }),
   })
 }

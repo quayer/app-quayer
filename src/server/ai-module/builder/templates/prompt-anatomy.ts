@@ -23,12 +23,18 @@ export const PROMPT_ANATOMY_TEMPLATE = `# Papel
 
 # Formato de resposta
 {{formato}}
+
+<!-- FORMAT_TAGS: seção interna — criador não edita. Injetada pelo Builder em runtime. -->
 `
 
 /**
  * Short hint strings injected into the sub-LLM call to bias the generated
  * prompt toward each vertical's norms (tom de voz, terminologia, limites
  * regulatórios). Keep each under ~300 chars.
+ *
+ * Keys are matched via substring against the free-text `nicho` input.
+ * Quayer is a channel specialist, not a niche specialist — any niche is valid.
+ * These hints provide suggestions for known verticals; unknown niches get `outro`.
  */
 export const NICHE_HINTS: Record<string, string> = {
   advocacia:
@@ -38,5 +44,5 @@ export const NICHE_HINTS: Record<string, string> = {
   seguros:
     'Público de corretora de seguros. Tom consultivo e empático (muitas vezes o cliente ligou após sinistro). NUNCA prometer cobertura ou valor de indenização sem conferir apólice. Sempre escalar sinistros em andamento para corretor humano. Explicar termos técnicos (franquia, cobertura, vigência) em linguagem simples.',
   outro:
-    'Público genérico de pequeno/médio negócio brasileiro. Tom profissional e acolhedor. Adaptar vocabulário ao contexto fornecido no brief. Escalar para humano sempre que a pergunta fugir do escopo descrito.',
+    'Quayer é canal specialist — qualquer nicho é válido. Adapte tom, vocabulário e regras ao contexto descrito no brief. Tom profissional e acolhedor por padrão. Escalar para humano sempre que a pergunta fugir do escopo descrito. Não inventar regulamentações específicas do setor sem confirmar.',
 }

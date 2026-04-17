@@ -20,6 +20,7 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
+import { buildBuilderTool } from './build-tool'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other Builder tools in this directory)
@@ -81,7 +82,10 @@ function truncateSnippet(text: string | undefined): string {
  * category, common customer questions).
  */
 export function searchWebTool(_ctx: BuilderToolExecutionContext) {
-  return tool({
+  return buildBuilderTool({
+    name: 'search_web',
+    metadata: { isReadOnly: true, isConcurrencySafe: true },
+    tool: tool({
     description:
       'Searches the public web using the Tavily search API and returns a short list of results (title, url, snippet). Use this when you need current information about a business, product, or topic to better draft the agent prompt. Keep queries concise and in the same language as the user.',
     inputSchema: z.object({
@@ -144,5 +148,6 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
         return { success: false, message }
       }
     },
+  }),
   })
 }

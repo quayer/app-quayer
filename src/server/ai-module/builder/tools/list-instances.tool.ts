@@ -15,6 +15,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { buildBuilderTool } from './build-tool'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with create-agent.tool.ts / create-instance.tool.ts)
@@ -50,7 +51,10 @@ type ListInstancesResult =
 // ---------------------------------------------------------------------------
 
 export function listInstancesTool(ctx: BuilderToolExecutionContext) {
-  return tool({
+  return buildBuilderTool({
+    name: 'list_whatsapp_instances',
+    metadata: { isReadOnly: true, isConcurrencySafe: true },
+    tool: tool({
     description:
       'Lists WhatsApp instances (connections) available in the current organization. Returns an array with id, name, phoneNumber, and status. Use this before create_whatsapp_instance to avoid creating duplicates, and when the user asks which WhatsApp numbers are already connected.',
     inputSchema: z.object({}),
@@ -88,5 +92,6 @@ export function listInstancesTool(ctx: BuilderToolExecutionContext) {
         return { success: false, message, instances: [] }
       }
     },
+  }),
   })
 }

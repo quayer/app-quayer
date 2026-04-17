@@ -42,7 +42,10 @@ export default defineConfig({
           environment: 'node',
           globals: false,
           setupFiles: ['./test/setup.ts'],
-          include: ['test/unit/**/*.test.ts'],
+          include: [
+            'test/unit/**/*.test.ts',
+            'src/**/sub-agents/**/*.test.ts',
+          ],
           exclude: ['test/unit/react/**']
         }
       },

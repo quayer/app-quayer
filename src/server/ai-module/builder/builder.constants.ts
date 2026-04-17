@@ -21,4 +21,4 @@
  */
 export const BUILDER_RESERVED_NAME = '__quayer_builder__'
 
-export { BUILDER_AGENT_DEFAULTS, BUILDER_SYSTEM_PROMPT } from './prompts/builder-system-prompt'
+export { BUILDER_AGENT_DEFAULTS, BUILDER_SYSTEM_PROMPT } from './prompts/whatsapp-agent-system-prompt'
