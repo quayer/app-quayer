@@ -105,3 +105,18 @@ export const versionListParamsSchema = z.object({
 })
 
 export type VersionListParams = z.infer<typeof versionListParamsSchema>
+
+// ==========================================
+// ROLLBACK PROMPT (POST /projects/:id/prompt/rollback)
+// ==========================================
+export const rollbackPromptParamsSchema = z.object({
+  id: z.string().uuid('ID de projeto inválido'),
+})
+
+export type RollbackPromptParams = z.infer<typeof rollbackPromptParamsSchema>
+
+export const rollbackPromptBodySchema = z.object({
+  targetVersionId: z.string().uuid('ID de versão inválido'),
+})
+
+export type RollbackPromptBody = z.infer<typeof rollbackPromptBodySchema>

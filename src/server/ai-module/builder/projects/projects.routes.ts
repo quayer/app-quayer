@@ -26,6 +26,8 @@ import {
   updatePromptParamsSchema,
   versionListParamsSchema,
   playgroundStreamBodySchema,
+  rollbackPromptParamsSchema,
+  rollbackPromptBodySchema,
 } from '../builder.schemas'
 import { getDatabase } from '@/server/services/database'
 import { builderProjectRepository } from './projects.repository'
@@ -663,6 +665,54 @@ export const projectsRoutes = {
         totalCost: agent.totalCost,
         lastMessageAt: lastMsg?.createdAt.toISOString() ?? null,
       })
+    },
+  }),
+
+  // ==========================================
+  // ROLLBACK PROMPT — POST /projects/:id/prompt/rollback
+  // ==========================================
+  rollbackPrompt: igniter.mutation({
+    name: 'Rollback Agent Prompt',
+    description:
+      'Cria uma nova BuilderPromptVersion com createdBy=rollback copiando o conteúdo ' +
+      'de targetVersionId e atualiza o AIAgentConfig.systemPrompt. Não sobrescreve histórico.',
+    path: '/projects/:id/prompt/rollback',
+    method: 'POST',
+    use: [authOrApiKeyProcedure({ required: true })],
+    body: rollbackPromptBodySchema,
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const paramsResult = rollbackPromptParamsSchema.safeParse(request.params)
+      if (!paramsResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = paramsResult.data
+
+      const { targetVersionId } = request.body
+
+      try {
+        const result = await builderProjectRepository.rollbackToVersion(
+          id,
+          user.currentOrgId,
+          targetVersionId,
+          user.id,
+        )
+
+        if (!result) {
+          return response.notFound('Projeto, agente ou versão alvo não encontrado')
+        }
+
+        return response.success({
+          versionId: result.newVersion.id,
+          versionNumber: result.newVersion.versionNumber,
+          content: result.newVersion.content,
+        })
+      } catch (error: unknown) {
+        console.error('[projectsRoutes.rollbackPrompt] Erro ao reverter prompt:', error)
+        const message = error instanceof Error ? error.message : 'Erro desconhecido'
+        return response.badRequest(`Erro ao reverter prompt: ${message}`)
+      }
     },
   }),
 

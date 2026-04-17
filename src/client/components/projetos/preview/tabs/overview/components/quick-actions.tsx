@@ -3,6 +3,7 @@
 import { FileText, Play, Plug, Rocket } from "lucide-react"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { PreviewTab } from "@/client/components/projetos/types"
+import { AskBuilderButton } from "../../../shared/ask-builder-button"
 import { ActionButton } from "./action-button"
 
 interface QuickActionsProps {
@@ -25,6 +26,10 @@ export function QuickActions({ onTabChange, tokens }: QuickActionsProps) {
         label="Editar Prompt"
         onClick={() => onTabChange?.("prompt")}
         tokens={tokens}
+      />
+      <AskBuilderButton
+        tokens={tokens}
+        message="Revise o progresso atual do agente e sugira proximos passos"
       />
       <ActionButton
         icon={Plug}

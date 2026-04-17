@@ -19,10 +19,12 @@ import type {
 import { AgentIdentityHeader } from "./components/agent-identity-header"
 import { DeployReadinessCard } from "./components/deploy-readiness-card"
 import { EmptyState } from "./components/empty-state"
+import { FirstMessagePreviewCard } from "./components/first-message-preview"
 import { MetricsCard } from "./components/metrics-card"
 import { ProgressHeader } from "./components/progress-header"
 import { QuickActions } from "./components/quick-actions"
 import { StageList } from "./components/stage-list"
+import { deriveFirstMessage } from "./helpers/derive-first-message"
 import { useOverviewDerivations } from "./hooks/use-overview-derivations"
 
 export interface OverviewTabProps {
@@ -38,6 +40,7 @@ export function OverviewTab({
 }: OverviewTabProps) {
   const { tokens } = useAppTokens()
   const { stages, readiness } = useOverviewDerivations(project, messages)
+  const firstMessage = deriveFirstMessage(project, messages)
 
   const doneCount = stages.filter((s) => s.status === "done").length
   const readinessMet = readiness.filter((r) => r.met).length
@@ -57,6 +60,15 @@ export function OverviewTab({
           aiAgent={aiAgent}
           status={status}
           tokens={tokens}
+        />
+      )}
+
+      {/* -- Section 1b: First WhatsApp greeting preview (only with agent) -- */}
+      {aiAgent && (
+        <FirstMessagePreviewCard
+          tokens={tokens}
+          firstMessage={firstMessage.text}
+          source={firstMessage.source}
         />
       )}
 

@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { ChevronDown, ChevronUp, Sparkles } from "lucide-react"
 import { Card, CardContent } from "@/client/components/ui/card"
 import type { ChatMessage } from "@/client/components/projetos/types"
+import { AskBuilderButton } from "../../shared/ask-builder-button"
 import type { AppTokens, PromptInsights } from "./prompt-types"
 import { formatNumber } from "./prompt-utils"
 import {
@@ -227,6 +228,15 @@ function BuilderAnatomyBlock({
           </div>
         </div>
       )}
+
+      {/* Hand-off to the Builder chat for iterative improvements. */}
+      <div className="mt-3">
+        <AskBuilderButton
+          tokens={tokens}
+          variant="small"
+          message="Adicione mais clareza sobre o papel do agente no prompt atual"
+        />
+      </div>
     </div>
   )
 }

@@ -268,6 +268,75 @@ export const builderProjectRepository = {
   },
 
   /**
+   * Rollback: creates a new BuilderPromptVersion with `createdBy: 'rollback'`
+   * copying the content of `targetVersionId`, then updates the AIAgentConfig
+   * systemPrompt to that content. Executes in a single transaction.
+   *
+   * Returns `{ newVersion, restored: { id, content } }` on success, or `null`
+   * when the project does not exist, does not belong to the org, has no
+   * aiAgentId, or the targetVersion does not belong to the same agent.
+   */
+  async rollbackToVersion(
+    projectId: string,
+    organizationId: string,
+    targetVersionId: string,
+    userId: string,
+  ) {
+    const database = getDatabase()
+
+    const project = await database.builderProject.findFirst({
+      where: { id: projectId, organizationId },
+      select: { id: true, aiAgentId: true },
+    })
+
+    if (!project?.aiAgentId) return null
+
+    const targetVersion = await database.builderPromptVersion.findUnique({
+      where: { id: targetVersionId },
+      select: {
+        id: true,
+        aiAgentId: true,
+        versionNumber: true,
+        content: true,
+      },
+    })
+
+    if (!targetVersion || targetVersion.aiAgentId !== project.aiAgentId) {
+      return null
+    }
+
+    const aggregate = await database.builderPromptVersion.aggregate({
+      where: { aiAgentId: project.aiAgentId },
+      _max: { versionNumber: true },
+    })
+    const nextVersionNumber = (aggregate._max.versionNumber ?? 0) + 1
+
+    return database.$transaction(async (tx) => {
+      const newVersion = await tx.builderPromptVersion.create({
+        data: {
+          aiAgentId: project.aiAgentId!,
+          versionNumber: nextVersionNumber,
+          content: targetVersion.content,
+          description: `Revertido para v${targetVersion.versionNumber}`,
+          createdBy: 'rollback',
+          publishedAt: new Date(),
+          publishedBy: userId,
+        },
+      })
+
+      await tx.aIAgentConfig.update({
+        where: { id: project.aiAgentId! },
+        data: { systemPrompt: targetVersion.content, updatedAt: new Date() },
+      })
+
+      return {
+        newVersion,
+        restored: { id: project.aiAgentId!, content: targetVersion.content },
+      }
+    })
+  },
+
+  /**
    * Rename: updates `name` of a BuilderProject, verifying org ownership.
    * Returns the updated project, or `null` if not found / not owned.
    */

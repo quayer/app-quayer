@@ -13,6 +13,7 @@
 
 import { ChevronDown, Circle, GitCompare, RotateCcw } from "lucide-react"
 import { useMemo, useState } from "react"
+import { toast } from "sonner"
 import { api } from "@/igniter.client"
 import { Card, CardContent } from "@/client/components/ui/card"
 import {
@@ -21,12 +22,23 @@ import {
   CollapsibleTrigger,
 } from "@/client/components/ui/collapsible"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/client/components/ui/alert-dialog"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/client/components/ui/dialog"
+import { AskBuilderButton } from "../../shared/ask-builder-button"
 import { TimelineDot, VersionStatusCards } from "./deploy-status-card"
 import type { PromptVersion, Tokens } from "./deploy-status-card"
 import { PromptDiff } from "./prompt-diff"
@@ -51,6 +63,17 @@ interface ListVersionsClient {
     data?: { versions: VersionListItem[] } | null
     isLoading: boolean
   }
+}
+
+interface RollbackPromptClient {
+  mutate: (
+    args: { params: { id: string }; body: { targetVersionId: string } },
+    options: {
+      onSuccess: (data: { versionNumber: number }) => void
+      onError: (err: unknown) => void
+    },
+  ) => void
+  isPending: boolean
 }
 
 function VersionTimelineEntry({
@@ -154,11 +177,14 @@ export function SummaryStep({
   projectId,
 }: SummaryStepProps) {
   const [diffOpen, setDiffOpen] = useState(false)
+  const [rollbackOpen, setRollbackOpen] = useState(false)
 
   const listVersions = api.builder.listVersions as unknown as ListVersionsClient
   const { data: versionsData, isLoading: versionsLoading } = listVersions.useQuery({
     params: { id: projectId },
   })
+
+  const rollbackPrompt = api.builder.rollbackPrompt as unknown as RollbackPromptClient
 
   const fullVersions = useMemo<VersionListItem[]>(() => {
     const rows = versionsData?.versions ?? []
@@ -166,8 +192,28 @@ export function SummaryStep({
   }, [versionsData])
 
   const newest = fullVersions[0] ?? null
+  // The version currently live in prod = the most recent published one that
+  // is not the very newest (so we can offer reverting to it).
   const prodVersion =
     fullVersions.find((v) => v.publishedAt !== null) ?? null
+  // A previous prod version exists only when newest itself is published AND
+  // there is an older published version, OR when newest is unpublished and
+  // prodVersion exists as the live one.
+  // For rollback we need: we have at least one published version AND there
+  // is an older published version to go back to.
+  const prevProdVersion = useMemo<VersionListItem | null>(() => {
+    const published = fullVersions.filter((v) => v.publishedAt !== null)
+    // published[0] is the latest published, published[1] is the one before it
+    return published.length >= 2 ? (published[1] ?? null) : null
+  }, [fullVersions])
+
+  // Show rollback when the current prod version is not null and there's a
+  // previous published version to revert to.
+  const canRollback =
+    newest !== null &&
+    newest.publishedAt !== null &&
+    prevProdVersion !== null
+
   const canShowDiff =
     newest !== null && prodVersion !== null && newest.id !== prodVersion.id
 
@@ -176,6 +222,26 @@ export function SummaryStep({
   )
 
   const isLoading = loading || versionsLoading
+
+  function handleRollbackConfirm() {
+    if (!prevProdVersion) return
+    rollbackPrompt.mutate(
+      { params: { id: projectId }, body: { targetVersionId: prevProdVersion.id } },
+      {
+        onSuccess: (data) => {
+          toast.success(`Revertido para v${prevProdVersion.versionNumber} (nova versão v${data.versionNumber})`)
+          setRollbackOpen(false)
+          // TODO: substituir por queryClient.invalidateQueries quando cast suportar
+          window.location.reload()
+        },
+        onError: (err: unknown) => {
+          const msg = err instanceof Error ? err.message : 'Erro ao reverter'
+          toast.error(msg)
+          setRollbackOpen(false)
+        },
+      },
+    )
+  }
 
   return (
     <>
@@ -195,21 +261,44 @@ export function SummaryStep({
           >
             Resumo da publicacao
           </h3>
-          {canShowDiff && newest && prodVersion && (
-            <button
-              type="button"
-              onClick={() => setDiffOpen(true)}
-              className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors"
-              style={{
-                borderColor: tokens.divider,
-                color: tokens.textPrimary,
-                backgroundColor: tokens.bgSurface,
-              }}
-            >
-              <GitCompare className="h-3 w-3" />
-              Ver diff
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <AskBuilderButton
+              tokens={tokens}
+              variant="small"
+              message="Estou pronto para publicar. Ha algo que voce recomendaria ajustar antes?"
+            />
+            {canRollback && prevProdVersion && (
+              <button
+                type="button"
+                disabled={rollbackPrompt.isPending}
+                onClick={() => setRollbackOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+                style={{
+                  borderColor: tokens.divider,
+                  color: tokens.textPrimary,
+                  backgroundColor: tokens.bgSurface,
+                }}
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reverter para v{prevProdVersion.versionNumber}
+              </button>
+            )}
+            {canShowDiff && newest && prodVersion && (
+              <button
+                type="button"
+                onClick={() => setDiffOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors"
+                style={{
+                  borderColor: tokens.divider,
+                  color: tokens.textPrimary,
+                  backgroundColor: tokens.bgSurface,
+                }}
+              >
+                <GitCompare className="h-3 w-3" />
+                Ver diff
+              </button>
+            )}
+          </div>
         </div>
 
         {versionsLoading ? (
@@ -321,6 +410,32 @@ export function SummaryStep({
           </CollapsibleContent>
         </Collapsible>
       </section>
+
+      {canRollback && prevProdVersion && newest && (
+        <AlertDialog open={rollbackOpen} onOpenChange={setRollbackOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reverter para v{prevProdVersion.versionNumber}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Isso cria uma nova versão v{(newest.versionNumber) + 1} com o conteúdo
+                de v{prevProdVersion.versionNumber} e a torna ativa imediatamente. O
+                histórico existente não é alterado.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={rollbackPrompt.isPending}>
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={rollbackPrompt.isPending}
+                onClick={handleRollbackConfirm}
+              >
+                {rollbackPrompt.isPending ? "Revertendo..." : "Confirmar reversão"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       {newest && prodVersion && (
         <Dialog open={diffOpen} onOpenChange={setDiffOpen}>

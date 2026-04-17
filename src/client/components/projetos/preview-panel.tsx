@@ -11,7 +11,7 @@
  * tem tabs específicas; outros kinds caem só nas tabs _core.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   Tabs,
   TabsList,
@@ -24,6 +24,9 @@ import type {
   PreviewTab,
 } from "@/client/components/projetos/types"
 import { getTabsForType } from "@/client/components/projetos/preview/tab-registry"
+import { BuilderWorkingBanner } from "@/client/components/projetos/preview/banners/builder-working-banner"
+import { ErrorBanner } from "@/client/components/projetos/preview/banners/error-banner"
+import { getBannerState } from "@/client/components/projetos/preview/banners/derive-banner-state"
 
 export function PreviewPanel({
   project,
@@ -41,6 +44,17 @@ export function PreviewPanel({
     return tabs.some((t) => t.value === activeTab) ? activeTab : "overview"
   }, [tabs, activeTab])
 
+  // Persistent banners — driven by the live chat messages. "Working" is
+  // auto-managed (shows while any tool call is in-flight); "error" is
+  // dismissable per-message-id so a fresh failure reopens it.
+  const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null)
+  const bannerState = useMemo(
+    () => getBannerState(messages, dismissedErrorId),
+    [messages, dismissedErrorId],
+  )
+  // Local alias so the JSX below can narrow through a const (avoids `!`).
+  const errorBanner = bannerState.error
+
   return (
     <div
       className="flex h-full min-h-0 flex-col"
@@ -51,6 +65,13 @@ export function PreviewPanel({
         onValueChange={(v) => onTabChange(v as PreviewTab)}
         className="flex h-full min-h-0 flex-col"
       >
+        {bannerState.working && <BuilderWorkingBanner />}
+        {errorBanner !== null && (
+          <ErrorBanner
+            onDismiss={() => setDismissedErrorId(errorBanner.lastErrorId)}
+          />
+        )}
+
         {/* Tab strip — sticky top, same divider style as header */}
         <div
           className="flex shrink-0 items-center px-4 py-3"
