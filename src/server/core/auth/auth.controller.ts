@@ -12,11 +12,12 @@ import { magicLinkController } from "./magic-link/magic-link.controller";
 import { oauthGoogleController } from "./oauth-google/oauth-google.controller";
 import { passkeyController } from "./passkey/passkey.controller";
 import { phoneOtpController } from "./phone-otp/phone-otp.controller";
+import { totpController } from "./totp/totp.controller";
 
 export const authController = igniter.controller({
   name: "auth",
   path: "/auth",
-  description: "Authentication and authorization (aggregated from 8 subdomain controllers)",
+  description: "Authentication and authorization (aggregated from 9 subdomain controllers)",
   actions: {
     ...sessionController.actions,
     ...identityController.actions,
@@ -25,5 +26,6 @@ export const authController = igniter.controller({
     ...oauthGoogleController.actions,
     ...passkeyController.actions,
     ...phoneOtpController.actions,
+    ...totpController.actions,
   },
 });

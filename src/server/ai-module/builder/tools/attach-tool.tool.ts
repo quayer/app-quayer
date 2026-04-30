@@ -76,7 +76,7 @@ const toolKeyEnum = z.enum(
 export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'attach_tool_to_agent',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
       'Attaches a built-in tool to an existing AI agent in the current Builder project. Use this to enable capabilities like transfer_to_human, pause_session, search_contacts, create_lead, schedule_callback or get_session_history on an agent the user has already created. Idempotent: re-attaching an already-enabled tool is a no-op success.',
@@ -99,6 +99,18 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
           return {
             success: false,
             message: `Unknown tool key '${input.toolKey}'. Valid keys: ${BUILTIN_TOOL_NAMES.join(', ')}`,
+          }
+        }
+
+        // Ensure the agent belongs to the active project (prevents cross-project mutation).
+        const project = await database.builderProject.findFirst({
+          where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
+          select: { id: true },
+        })
+        if (!project) {
+          return {
+            success: false,
+            message: 'Agent does not belong to the active project',
           }
         }
 

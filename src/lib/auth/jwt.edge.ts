@@ -78,8 +78,12 @@ export async function signAccessToken(payload: AccessTokenPayload): Promise<stri
  * Extract token from Authorization header
  */
 export function extractTokenFromHeader(authHeader: string): string | null {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader) return null
+
+  const parts = authHeader.split(' ')
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
     return null
   }
-  return authHeader.substring(7)
+
+  return parts[1]
 }

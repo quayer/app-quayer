@@ -60,11 +60,28 @@ const ADMIN_ONLY_PATHS = ['/admin', '/docs'];
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // 0. Strip all sensitive headers unconditionally — before ANY branching.
+  //    This prevents attacker-controlled request headers from reaching downstream
+  //    Server Components or Route Handlers regardless of which path is taken.
+  const SENSITIVE_HEADERS = [
+    'x-user-id',
+    'x-user-email',
+    'x-user-role',
+    'x-needs-onboarding',
+    'x-current-org-id',
+    'x-organization-role',
+    'x-org-id',
+    'x-org-role',
+  ] as const;
+
+  const requestHeaders = new Headers(request.headers);
+  SENSITIVE_HEADERS.forEach((h) => requestHeaders.delete(h));
+
   // 1. Permitir rotas públicas sem autenticação
   // startsWith sozinho daria match em prefixos parciais (ex: '/login' matcharia
   // '/login-admin'). Verificamos o separador de segmento para evitar bypass.
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'))) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   // 2. Verificar se é rota protegida
@@ -75,7 +92,7 @@ export async function middleware(request: NextRequest) {
     PROTECTED_PATHS.some((path) => pathname.startsWith(path));
 
   if (!isProtected) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
   // 3. Extrair token (cookie ou header Authorization)
@@ -141,7 +158,7 @@ export async function middleware(request: NextRequest) {
   // de autenticação — sempre revalidar via JWT ou session no handler. Eles
   // existem apenas como conveniência de leitura para Server Components que já
   // estão atrás desta camada de middleware.
-  const requestHeaders = new Headers(request.headers);
+  // NOTE: requestHeaders was already created at step 0 with sensitive headers stripped.
   requestHeaders.set('x-user-id', payload.userId);
   requestHeaders.set('x-user-email', payload.email);
   requestHeaders.set('x-user-role', payload.role);

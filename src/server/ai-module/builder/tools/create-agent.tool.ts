@@ -21,6 +21,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
+import { BUILDER_RESERVED_NAME } from '../builder.constants'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -52,7 +53,7 @@ export interface BuilderToolExecutionContext {
 export function createAgentTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'create_agent',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
       'Creates a new AI agent for WhatsApp in the current Builder project. Call this ONLY AFTER showing the generated system prompt to the user and receiving explicit approval. Links the new AIAgentConfig to the current BuilderProject and creates version 1 of the prompt.',
@@ -87,6 +88,13 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
     }),
     execute: async (input) => {
       try {
+        if (input.name === BUILDER_RESERVED_NAME) {
+          return {
+            success: false,
+            message: 'This agent name is reserved',
+          }
+        }
+
         // Sanity check: ensure the BuilderProject exists in the same org and
         // does not yet have an agent bound to it (1:1 relation).
         const project = await database.builderProject.findFirst({

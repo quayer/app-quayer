@@ -247,7 +247,7 @@ export const authOrApiKeyProcedure = igniter.procedure({
 
     // 2. Fallback para JWT/session
     const { AuthRepository: AuthRepo } = await import('../repositories/auth.repository')
-    const { verifyAccessToken } = await import('@/lib/auth/jwt')
+    const { validateBearerToken } = await import('@/lib/auth/jwt')
     const { getCustomRolePermissions } = await import('@/lib/auth/permissions')
 
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization')
@@ -293,7 +293,7 @@ export const authOrApiKeyProcedure = igniter.procedure({
     const token = effectiveAuthHeader.replace('Bearer ', '')
 
     try {
-      const decoded = verifyAccessToken(token) as { userId: string }
+      const decoded = validateBearerToken(token)
       if (!decoded?.userId) {
         if (required) {
           return Response.json({ error: 'Token inválido' }, { status: 401 })

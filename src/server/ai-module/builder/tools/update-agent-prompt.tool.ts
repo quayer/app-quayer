@@ -42,7 +42,7 @@ export type BuilderToolContext = {
 export function updateAgentPromptTool(ctx: BuilderToolContext) {
   return buildBuilderTool({
     name: 'update_agent_prompt',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
       'Updates the system prompt of an existing agent. Creates a NEW version (linear increment) but does NOT publish it — stays as draft until user explicitly publishes.',
@@ -66,7 +66,18 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
     }),
     execute: async (input) => {
       try {
-        // 1. Validate the agent belongs to the caller's org (tenant boundary).
+        // 1. Validate the agent belongs to the active project (prevents cross-project mutation).
+        const project = await database.builderProject.findFirst({
+          where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
+          select: { id: true },
+        })
+        if (!project) {
+          return {
+            success: false as const,
+            message: 'Agent does not belong to the active project',
+          }
+        }
+
         const agent = await database.aIAgentConfig.findFirst({
           where: {
             id: input.agentId,

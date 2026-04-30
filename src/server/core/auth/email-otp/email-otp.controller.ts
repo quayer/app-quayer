@@ -353,6 +353,7 @@ export const emailOtpController = igniter.controller({
         await createAuditLog('auth.signup', user.id, request, { email: user.email, method: 'email-otp' }, organization.id);
 
         return response.success({
+          needsOnboarding: !user.onboardingCompleted,
           user: {
             id: user.id,
             email: user.email,
@@ -388,6 +389,16 @@ export const emailOtpController = igniter.controller({
         }
 
         const { email } = request.body;
+
+        // Per-email rate limit to prevent OTP spam to any address
+        const clientIp = getClientIdentifier(request);
+        const otpRateLimit = await checkOtpRateLimit(`send-login-otp:${email}`, clientIp);
+        if (!otpRateLimit.success) {
+          return response.status(429).json({
+            error: 'Too many OTP requests for this email. Please wait before requesting a new code.',
+            retryAfter: otpRateLimit.retryAfter,
+          });
+        }
 
         // Buscar usuário
         const user = await db.user.findUnique({ where: { email } });
@@ -436,8 +447,7 @@ export const emailOtpController = igniter.controller({
 
           return response.success({
             sent: true,
-            isNewUser: true,
-            message: 'Código de cadastro enviado para seu email',
+            message: 'Código enviado para seu email',
             magicLinkSessionId: signupVerificationCode.id,
           });
         }
@@ -479,7 +489,7 @@ export const emailOtpController = igniter.controller({
 
         return response.success({
           sent: true,
-          message: 'Login code sent to your email',
+          message: 'Código enviado para seu email',
           magicLinkSessionId: verificationCode.id,
         });
       },

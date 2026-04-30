@@ -196,10 +196,7 @@ const rollback = igniter.mutation({
   handler: async ({ request, context, response }) => {
     const user = context.auth?.session?.user as { id: string; role?: string; currentOrgId?: string } | undefined
     if (!user) return response.unauthorized('Não autenticado')
-    // Admin-only gate — role check is intentionally permissive (lets
-    // both 'owner' and 'admin' through); tighten when the roles module
-    // exposes a canonical guard.
-    if (user.role && !['admin', 'owner'].includes(user.role)) {
+    if (user.role !== 'admin') {
       return response.forbidden('Apenas administradores podem reverter deploys')
     }
 
@@ -215,6 +212,14 @@ const rollback = igniter.mutation({
     }
 
     try {
+      const deployment = await delegate.findUnique({ where: { id: deploymentId } })
+      if (!deployment) {
+        return response.notFound('Deployment não encontrado')
+      }
+      if (deployment.organizationId !== user.currentOrgId) {
+        return response.forbidden('Deployment não pertence à organização ativa')
+      }
+
       const result = await rollbackDeployment(deploymentId, user.id)
       return response.json({ success: true, data: result })
     } catch (err) {

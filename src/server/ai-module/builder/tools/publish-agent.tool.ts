@@ -57,7 +57,7 @@ interface ToolBlocker {
 export function publishAgentTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'publish_agent',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
       description:
         'Publishes the AI agent bound to the current Builder project to a WhatsApp instance. Runs plan + BYOK pre-checks, then delegates to the deploy-runner sub-agent which validates the prompt/version/channel and runs the publish→create-instance→attach-connection saga (with rollback on failure). Returns structured blockers with redirect URLs when the deploy cannot proceed.',

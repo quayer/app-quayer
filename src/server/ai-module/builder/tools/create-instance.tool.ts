@@ -72,7 +72,7 @@ const SHARE_TOKEN_TTL_SECONDS = 15 * 60 // 15 minutes
 export function createInstanceTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'create_whatsapp_instance',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
       'Creates a new WhatsApp instance (Connection) in the current organization and returns a QR code and a share link so the user can pair their WhatsApp. Call this ONLY AFTER the user confirms they want a new WhatsApp number connected. After calling, tell the user to scan the QR code or open the share link on their phone.',

@@ -78,7 +78,7 @@ export function setAuthCookies(
   if (refreshToken) {
     response.setCookie('refreshToken', refreshToken, {
       httpOnly: true,
-      sameSite: 'lax' as const,
+      sameSite: 'strict' as const,
       path: '/api/v1/auth/refresh',
       maxAge: 604800, // 7 days
       secure: isProduction,
@@ -115,9 +115,12 @@ export function clearAuthCookies(response: any) {
  * 2FA Challenge: sign a short-lived JWT (5 min) that proves first-factor passed.
  */
 export function sign2faChallenge(userId: string): string {
-  const secret = process.env.JWT_SECRET;
+  if (!process.env.JWT_2FA_CHALLENGE_SECRET) {
+    console.warn('[Security] JWT_2FA_CHALLENGE_SECRET is not set — falling back to JWT_SECRET for 2FA challenges');
+  }
+  const secret = process.env.JWT_2FA_CHALLENGE_SECRET ?? process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET is required');
-  return jwt.sign({ userId, type: '2fa-challenge' }, secret, { expiresIn: '5m', issuer: 'quayer' });
+  return jwt.sign({ userId, type: '2fa-challenge' }, secret, { expiresIn: '5m', issuer: 'quayer', audience: 'quayer-2fa' });
 }
 
 /**
@@ -125,9 +128,12 @@ export function sign2faChallenge(userId: string): string {
  */
 export function verify2faChallenge(token: string): { userId: string } | null {
   try {
-    const secret = process.env.JWT_SECRET;
+    if (!process.env.JWT_2FA_CHALLENGE_SECRET) {
+      console.warn('[Security] JWT_2FA_CHALLENGE_SECRET is not set — falling back to JWT_SECRET for 2FA challenges');
+    }
+    const secret = process.env.JWT_2FA_CHALLENGE_SECRET ?? process.env.JWT_SECRET;
     if (!secret) throw new Error('JWT_SECRET is required');
-    const payload = jwt.verify(token, secret, { issuer: 'quayer' }) as any;
+    const payload = jwt.verify(token, secret, { issuer: 'quayer', audience: 'quayer-2fa' }) as any;
     if (payload.type !== '2fa-challenge' || !payload.userId) return null;
     return { userId: payload.userId };
   } catch {
@@ -212,6 +218,7 @@ export function parseDeviceName(userAgent: string): string {
  * Wrapped in try/catch so it never blocks the login flow.
  */
 export async function registerDeviceSession(userId: string, request: any): Promise<{ blocked: boolean }> {
+  let geoAlertMode = 'off';
   try {
     const headers = request?.headers;
     const get = (key: string): string | undefined => {
@@ -246,6 +253,7 @@ export async function registerDeviceSession(userId: string, request: any): Promi
       });
 
       const geoMode = org?.geoAlertMode || 'off';
+      geoAlertMode = geoMode;
 
       if (geoMode !== 'off') {
         // Check if this country is new for this user
@@ -333,8 +341,9 @@ export async function registerDeviceSession(userId: string, request: any): Promi
 
     return { blocked: false };
   } catch (err) {
-    console.error('[Auth] Failed to register device session:', err);
-    return { blocked: false }; // fail-open
+    console.error('[Security] geo lookup failed:', err);
+    if (geoAlertMode === 'block') return { blocked: true, reason: 'geo_lookup_failed' } as { blocked: boolean };
+    return { blocked: false };
   }
 }
 

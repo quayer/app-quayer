@@ -19,6 +19,21 @@ import type { Prisma } from '@prisma/client'
 
 type JsonValue = Prisma.InputJsonValue
 
+// ---------------------------------------------------------------------------
+// Metadata size guard
+// ---------------------------------------------------------------------------
+
+const MAX_JSON_BYTES = 256 * 1024
+
+function capJson(data: unknown, label: string): unknown {
+  const s = JSON.stringify(data)
+  if (s.length > MAX_JSON_BYTES) {
+    console.warn(`[Builder] ${label} truncated — was ${s.length} bytes`)
+    return { _truncated: true, originalSize: s.length }
+  }
+  return data
+}
+
 export interface PersistUserMessageArgs {
   conversationId: string
   content: string
@@ -62,7 +77,7 @@ export async function persistUserMessage(
         conversationId: args.conversationId,
         role: 'user',
         content: args.content,
-        metadata: args.metadata,
+        metadata: args.metadata !== undefined ? capJson(args.metadata, 'user.metadata') as JsonValue : undefined,
       },
       select: { id: true },
     })
@@ -82,9 +97,9 @@ export async function persistAssistantMessage(
         conversationId: args.conversationId,
         role: 'assistant',
         content: args.content,
-        toolCalls: args.toolCalls,
+        toolCalls: args.toolCalls !== undefined ? capJson(args.toolCalls, 'assistant.toolCalls') as JsonValue : undefined,
         toolResults: args.toolResults,
-        metadata: args.metadata,
+        metadata: args.metadata !== undefined ? capJson(args.metadata, 'assistant.metadata') as JsonValue : undefined,
       },
       select: { id: true },
     })
@@ -133,7 +148,7 @@ export async function persistSystemBanner(
         conversationId: args.conversationId,
         role: 'system_banner',
         content: args.content,
-        metadata: args.metadata,
+        metadata: args.metadata !== undefined ? capJson(args.metadata, 'system_banner.metadata') as JsonValue : undefined,
       },
       select: { id: true },
     })

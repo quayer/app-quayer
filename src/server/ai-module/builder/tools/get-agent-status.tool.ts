@@ -30,7 +30,19 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
       }),
       execute: async (input) => {
         try {
-          // 1. Load agent (scoped to org)
+          // 1. Verify agent belongs to the active project
+          const project = await database.builderProject.findFirst({
+            where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
+            select: { id: true },
+          })
+          if (!project) {
+            return {
+              success: false,
+              message: 'Agent does not belong to the active project',
+            }
+          }
+
+          // 2. Load agent (scoped to org)
           const agent = await database.aIAgentConfig.findFirst({
             where: {
               id: input.agentId,
@@ -52,7 +64,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // 2. Get active deployment with connection info
+          // 3. Get active deployment with connection info
           const deployment = await database.agentDeployment.findFirst({
             where: {
               agentConfigId: agent.id,
@@ -74,7 +86,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
             },
           })
 
-          // 3. Get latest published version and latest draft version
+          // 4. Get latest published version and latest draft version
           const [publishedVersion, latestVersion] = await Promise.all([
             database.builderPromptVersion.findFirst({
               where: {
@@ -91,7 +103,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
             }),
           ])
 
-          // 4. Count active conversations (sessions linked to this agent)
+          // 5. Count active conversations (sessions linked to this agent)
           const activeConversations = await database.chatSession.count({
             where: {
               organizationId: ctx.organizationId,
@@ -100,7 +112,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
             },
           })
 
-          // 5. Count messages in the last 24 hours across sessions for this agent
+          // 6. Count messages in the last 24 hours across sessions for this agent
           const twentyFourHoursAgo = new Date(
             Date.now() - 24 * 60 * 60 * 1000,
           )
@@ -115,7 +127,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
             },
           })
 
-          // 6. Determine draft version (latest that is not published yet)
+          // 7. Determine draft version (latest that is not published yet)
           const draftVersion =
             latestVersion && !latestVersion.publishedAt
               ? latestVersion.versionNumber

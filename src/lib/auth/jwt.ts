@@ -16,17 +16,27 @@ function getJwtSecret(): string {
   return secret;
 }
 const JWT_SECRET = getJwtSecret();
-const JWT_REFRESH_SECRET = ((): string => {
+
+function getJwtRefreshSecret(): string {
   const secret = process.env.JWT_REFRESH_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('JWT_REFRESH_SECRET environment variable is required in production');
-    }
-    console.warn('[JWT] JWT_REFRESH_SECRET not set — using JWT_SECRET as fallback. Set a separate secret in production.');
-    return JWT_SECRET;
-  }
+  if (!secret) throw new Error('JWT_REFRESH_SECRET environment variable is required');
   return secret;
-})();
+}
+const JWT_REFRESH_SECRET = getJwtRefreshSecret();
+
+function getJwtMagicLinkSecret(): string {
+  const secret = process.env.JWT_MAGIC_LINK_SECRET;
+  if (!secret) throw new Error('[Security] JWT_MAGIC_LINK_SECRET is required');
+  return secret;
+}
+const JWT_MAGIC_LINK_SECRET = getJwtMagicLinkSecret();
+
+function getJwt2faChallengeSecret(): string {
+  const secret = process.env.JWT_2FA_CHALLENGE_SECRET;
+  if (!secret) throw new Error('[Security] JWT_2FA_CHALLENGE_SECRET is required');
+  return secret;
+}
+const JWT_2FA_CHALLENGE_SECRET = getJwt2faChallengeSecret();
 
 /**
  * Token expiration times
@@ -303,10 +313,10 @@ export function signMagicLinkToken(
     ...(payload.name && { name: payload.name }),
   };
 
-  return jwt.sign(fullPayload as object, JWT_SECRET, {
+  return jwt.sign(fullPayload as object, JWT_MAGIC_LINK_SECRET, {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
-    audience: 'quayer-api',
+    audience: 'quayer-magic-link',
   });
 }
 
@@ -326,9 +336,9 @@ export function signMagicLinkToken(
  */
 export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, {
+    const decoded = jwt.verify(token, JWT_MAGIC_LINK_SECRET, {
       issuer: 'quayer',
-      audience: 'quayer-api',
+      audience: 'quayer-magic-link',
     }) as JwtPayload;
 
     if (!decoded.type || (!decoded.type.startsWith('magic-link'))) {
@@ -338,6 +348,19 @@ export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | nul
     return decoded as MagicLinkTokenPayload;
   } catch (error) {
     console.error('Error verifying magic link token:', error);
+    return null;
+  }
+}
+
+export function validateBearerToken(token: string): { userId: string; currentOrgId?: string } | null {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET, {
+      issuer: 'quayer',
+      audience: 'quayer-api',
+    }) as JwtPayload;
+    if (!payload || payload.type !== 'access' || !payload.userId) return null;
+    return { userId: String(payload.userId), currentOrgId: payload.currentOrgId as string | undefined };
+  } catch {
     return null;
   }
 }

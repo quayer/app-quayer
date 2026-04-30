@@ -10,3 +10,4 @@ export { magicLinkController } from "./magic-link/magic-link.controller";
 export { oauthGoogleController } from "./oauth-google/oauth-google.controller";
 export { passkeyController } from "./passkey/passkey.controller";
 export { phoneOtpController } from "./phone-otp/phone-otp.controller";
+export { totpController } from "./totp/totp.controller";

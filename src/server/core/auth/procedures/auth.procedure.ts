@@ -1,7 +1,7 @@
 import { igniter } from "@/igniter";
 import { AuthRepository } from "../repositories/auth.repository";
 import { User } from "@prisma/client";
-import { verifyAccessToken } from "@/lib/auth/jwt";
+import { validateBearerToken } from "@/lib/auth/jwt";
 import { getCustomRolePermissions, type CustomRoleContext } from "@/lib/auth/permissions";
 
 /**
@@ -90,7 +90,7 @@ export const authProcedure = igniter.procedure({
 
     try {
       // Verificar JWT token
-      const payload = await verifyAccessToken(token as string);
+      const payload = validateBearerToken(token as string);
 
       if (!payload) {
         if (required) {
@@ -154,7 +154,6 @@ export const authProcedure = igniter.procedure({
       const userWithOrg = {
         ...user,
         organizationId: payload.currentOrgId,
-        organizationRole: payload.organizationRole,
       };
 
       // Adicionar headers de autenticação à request para uso em controllers
@@ -162,9 +161,6 @@ export const authProcedure = igniter.procedure({
       request.headers.set('x-user-role', user.role);
       if (payload.currentOrgId) {
         request.headers.set('x-org-id', payload.currentOrgId);
-      }
-      if (payload.organizationRole) {
-        request.headers.set('x-org-role', payload.organizationRole);
       }
 
       // Resolve CustomRole if user has customRoleId in current org
@@ -257,7 +253,7 @@ export const adminProcedure = igniter.procedure({
       const authRepo = new AuthRepository(context.db);
 
       // Verificar JWT token
-      const payload = await verifyAccessToken(token as string);
+      const payload = validateBearerToken(token as string);
 
       if (!payload) {
         return Response.json({ error: "Token inválido" }, { status: 401 });
@@ -285,7 +281,6 @@ export const adminProcedure = igniter.procedure({
       const userWithOrg = {
         ...user,
         organizationId: payload.currentOrgId,
-        organizationRole: payload.organizationRole,
       };
 
       // Adicionar headers de autenticação à request para uso em controllers
@@ -293,9 +288,6 @@ export const adminProcedure = igniter.procedure({
       request.headers.set('x-user-role', user.role);
       if (payload.currentOrgId) {
         request.headers.set('x-org-id', payload.currentOrgId);
-      }
-      if (payload.organizationRole) {
-        request.headers.set('x-org-role', payload.organizationRole);
       }
 
       // Retornar contexto com usuário admin (admins don't use CustomRole)

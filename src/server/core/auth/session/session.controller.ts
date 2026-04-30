@@ -277,8 +277,48 @@ export const sessionController = igniter.controller({
           needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
         });
 
-        // Set new accessToken cookie with updated org
-        setAuthCookies(response, accessToken);
+        // Rotate refresh token: revoke current, issue a new one
+        const cookieHeader = request.headers.get('cookie') || '';
+        const currentRawRefreshToken = cookieHeader
+          .split(';')
+          .map((c: string) => c.trim())
+          .find((c: string) => c.startsWith('refreshToken='))
+          ?.split('=')
+          .slice(1)
+          .join('=');
+
+        let newRefreshToken: string | undefined;
+
+        if (currentRawRefreshToken) {
+          const currentPayload = verifyRefreshToken(currentRawRefreshToken);
+          if (currentPayload) {
+            await db.refreshToken.update({
+              where: { id: currentPayload.tokenId },
+              data: { revokedAt: new Date() },
+            });
+          }
+        }
+
+        const refreshTokenData = await db.refreshToken.create({
+          data: {
+            userId: user.id,
+            token: signRefreshToken({ userId: user.id, tokenId: '' }),
+            expiresAt: getExpirationDate('7d'),
+          },
+        });
+
+        newRefreshToken = signRefreshToken({
+          userId: user.id,
+          tokenId: refreshTokenData.id,
+        });
+
+        await db.refreshToken.update({
+          where: { id: refreshTokenData.id },
+          data: { token: newRefreshToken },
+        });
+
+        // Set new accessToken cookie with updated org and rotated refresh token
+        setAuthCookies(response, accessToken, newRefreshToken);
 
         // Audit log — registrar troca de organização
         await createAuditLog(

@@ -7,10 +7,12 @@
  * The created AgentTool has type CUSTOM and is scoped to the organization.
  */
 
+import { promises as dns } from 'dns'
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import { database } from '@/server/services/database'
+import { encrypt } from '@/lib/crypto'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 
@@ -117,6 +119,19 @@ export function isWebhookUrlSafe(
   return { ok: true }
 }
 
+async function isResolvedIpSafe(hostname: string): Promise<boolean> {
+  try {
+    const { address } = await dns.lookup(hostname)
+    const privateRanges = [
+      /^127\./,/^10\./,/^172\.(1[6-9]|2\d|3[01])\./,
+      /^192\.168\./,/^169\.254\./,/^::1$/,/^fc00:/i,/^fe80:/i,
+    ]
+    return !privateRanges.some((re) => re.test(address))
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -124,7 +139,7 @@ export function isWebhookUrlSafe(
 export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'create_custom_tool',
-    metadata: { isReadOnly: false, isConcurrencySafe: false },
+    metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
       description:
         'Creates a custom webhook-based tool that can be attached to AI agents. The tool name must be snake_case (e.g., check_inventory, send_invoice). When the AI agent calls this tool, it will POST to the specified webhook URL with the tool parameters. Use this when the user wants to connect their agent to external APIs or business systems.',
@@ -183,7 +198,16 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // 2. Verify the agent exists in this org (context validation)
+          // 2. Post-DNS SSRF guard (DNS rebinding protection)
+          const resolvedSafe = await isResolvedIpSafe(new URL(input.webhookUrl).hostname)
+          if (!resolvedSafe) {
+            return {
+              success: false,
+              message: 'Webhook URL resolves to a private or reserved IP address and is not allowed.',
+            }
+          }
+
+          // 3. Verify the agent exists in this org (context validation)
           const agent = await database.aIAgentConfig.findFirst({
             where: {
               id: input.agentId,
@@ -199,7 +223,7 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // 3. Check for name uniqueness within the org
+          // 4. Check for name uniqueness within the org
           const existing = await database.agentTool.findFirst({
             where: {
               organizationId: ctx.organizationId,
@@ -215,7 +239,7 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // 4. Create the AgentTool
+          // 5. Create the AgentTool
           const agentTool = await database.agentTool.create({
             data: {
               organizationId: ctx.organizationId,
@@ -223,7 +247,7 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
               description: input.description,
               type: 'CUSTOM',
               webhookUrl: input.webhookUrl,
-              webhookSecret: input.webhookSecret ?? null,
+              webhookSecret: input.webhookSecret ? encrypt(input.webhookSecret) : null,
               parameters: input.parameters as Prisma.InputJsonValue,
               isActive: true,
             },

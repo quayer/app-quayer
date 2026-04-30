@@ -39,6 +39,41 @@ import {
   parseDeviceName, registerDeviceSession, autoJoinByVerifiedDomain,
 } from "../_shared/helpers";
 
+/**
+ * Detect the real MIME type of an image buffer by inspecting magic bytes.
+ * Returns null for unsupported or unrecognised formats (including GIF, which
+ * is intentionally excluded to prevent tracking-pixel abuse).
+ *
+ * Supported formats: JPEG (FF D8), PNG (89 50 4E 47 0D 0A 1A 0A), WebP (RIFF...WEBP).
+ */
+function detectImageMimeFromBuffer(buffer: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+  if (buffer.length < 12) return null;
+
+  // JPEG: starts with FF D8
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8) return 'image/jpeg';
+
+  // PNG: starts with 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4E &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0D &&
+    buffer[5] === 0x0A &&
+    buffer[6] === 0x1A &&
+    buffer[7] === 0x0A
+  ) return 'image/png';
+
+  // WebP: RIFF????WEBP (bytes 0-3 = "RIFF", bytes 8-11 = "WEBP")
+  if (
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) return 'image/webp';
+
+  // GIF and all other formats are intentionally rejected.
+  return null;
+}
+
 const meRateLimiter = new RateLimiter({
   limit: 120,
   window: 60,
@@ -205,13 +240,15 @@ export const identityController = igniter.controller({
       description: 'Upload a new avatar for the authenticated user',
       path: '/me/avatar',
       method: 'POST',
-      use: [authProcedure({ required: true })],
+      use: [authProcedure({ required: true }), csrfProcedure()],
       body: z.object({
         fileBase64: z.string().min(1, 'Conteúdo do arquivo é obrigatório'),
         fileName: z.string().min(1, 'Nome do arquivo é obrigatório'),
+        // GIF is excluded: animated GIFs can be used as tracking pixels and carry
+        // hidden payloads. Only static image formats are accepted.
         mimeType: z
           .string()
-          .regex(/^image\/(jpeg|png|webp|gif)$/, 'Tipo de imagem não suportado'),
+          .regex(/^image\/(jpeg|png|webp)$/, 'Tipo de imagem não suportado'),
       }),
       handler: async ({ request, response, context }) => {
         const authUser = context.auth?.session?.user;
@@ -227,6 +264,17 @@ export const identityController = igniter.controller({
 
         const { fileBase64, fileName, mimeType } = request.body;
         const fileBuffer = Buffer.from(fileBase64, 'base64');
+
+        // Magic-byte validation: verify the actual file content matches a known
+        // image format regardless of the client-supplied mimeType. This prevents
+        // a renamed HTML/SVG/script file from being stored as an image.
+        const detectedMime = detectImageMimeFromBuffer(fileBuffer);
+        if (!detectedMime) {
+          return response.status(400).json({ error: 'Conteúdo do arquivo não corresponde a uma imagem suportada (jpeg, png, webp)' });
+        }
+        if (detectedMime !== mimeType) {
+          return response.status(400).json({ error: 'Tipo de arquivo declarado não corresponde ao conteúdo real' });
+        }
 
         const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
         if (fileBuffer.length === 0) {
