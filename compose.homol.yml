@@ -39,16 +39,10 @@ services:
         max-file: "2"
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NODE_ENV: production
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
-        NEXT_PUBLIC_IGNITER_API_URL: ${NEXT_PUBLIC_APP_URL}/
-        NEXT_PUBLIC_IGNITER_API_BASE_PATH: /api/v1
-    container_name: homol-quayer-app
+    # Imagem pré-buildada pelo GitHub Actions runner (sem build no servidor → sem OOM)
+    # Para buildar: gh workflow run deploy-homol.yml
     image: quayer-app:homol
+    container_name: homol-quayer-app
     restart: unless-stopped
     # Sem ports: tráfego entra via cloudflared na rede interna
     environment:
