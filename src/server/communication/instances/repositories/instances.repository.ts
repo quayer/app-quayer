@@ -1,0 +1,334 @@
+import { PrismaClient, Connection as Instance, ConnectionStatus } from "@prisma/client";
+import { CreateInstanceInput, UpdateInstanceInput } from "../instances.interfaces";
+
+/**
+ * @class InstancesRepository
+ * @description Repository para gerenciamento de instâncias WhatsApp no banco de dados
+ * Centraliza todas as operações de banco de dados relacionadas às instâncias
+ */
+export class InstancesRepository {
+  private prisma: PrismaClient;
+
+  /**
+   * @param {PrismaClient} prisma - Cliente Prisma para acesso ao banco de dados
+   */
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
+  }
+
+  /**
+   * @method create
+   * @description Cria uma nova instância no banco de dados
+   * @param {CreateInstanceInput} data - Dados da instância a ser criada
+   * @returns {Promise<Instance>} Instância criada
+   */
+  async create(data: CreateInstanceInput): Promise<Instance> {
+    const { brokerType, webhookUrl, brokerId, ...rest } = data as any
+
+    // Map brokerType → Prisma provider + channel enums
+    let provider: 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API' | 'INSTAGRAM_META' = 'WHATSAPP_WEB'
+    let channel: 'WHATSAPP' | 'INSTAGRAM' = 'WHATSAPP'
+    if (brokerType === 'cloudapi') {
+      provider = 'WHATSAPP_CLOUD_API'
+    } else if (brokerType === 'instagram') {
+      provider = 'INSTAGRAM_META'
+      channel = 'INSTAGRAM'
+    }
+
+    return this.prisma.connection.create({
+      data: {
+        ...rest,
+        provider,
+        channel,
+        ...(webhookUrl ? { n8nWebhookUrl: webhookUrl } : {}),
+        ...(brokerId ? { uazapiInstanceId: brokerId } : {}),
+      },
+    })
+  }
+
+  /**
+   * @method findAll
+   * @description Busca todas as instâncias do banco de dados (com filtro opcional por organização)
+   * @param {string} organizationId - ID da organização para filtrar (opcional)
+   * @returns {Promise<Instance[]>} Lista de todas as instâncias
+   */
+  async findAll(organizationId?: string): Promise<Instance[]> {
+    // Business Logic: Buscar todas as instâncias ordenadas por data de criação
+    return this.prisma.connection.findMany({
+      where: organizationId ? { organizationId } : undefined,
+      orderBy: { createdAt: 'desc' }
+    });
+  }
+
+  /**
+   * @method findAllPaginated
+   * @description Busca instâncias com paginação e filtros
+   * @param {object} params - Parâmetros de paginação e filtro
+   * @returns {Promise<{instances: Instance[], total: number}>} Instâncias paginadas e total
+   */
+  async findAllPaginated(params: {
+    organizationId?: string;
+    page: number;
+    limit: number;
+    status?: string;
+    search?: string;
+  }): Promise<{ instances: (Instance & { connectedProjects: Array<{ id: string; name: string; status: string }> })[]; total: number }> {
+    const { organizationId, page, limit, status, search } = params;
+
+    // Build where clause
+    const where: any = {};
+
+    if (organizationId) {
+      where.organizationId = organizationId;
+    }
+
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phoneNumber: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Execute queries in parallel
+    const [instances, total] = await Promise.all([
+      this.prisma.connection.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.connection.count({ where }),
+    ]);
+
+    // Enrich instances with connected Builder projects via BuilderDeployment
+    const instanceIds = instances.map((i) => i.id);
+    const deployments = instanceIds.length > 0
+      ? await this.prisma.builderDeployment.findMany({
+          where: {
+            connectionId: { in: instanceIds },
+            status: 'live',
+          },
+          select: {
+            connectionId: true,
+            project: { select: { id: true, name: true, status: true } },
+          },
+        })
+      : [];
+
+    const deploymentsByConnectionId = new Map<string, Array<{ id: string; name: string; status: string }>>();
+    for (const d of deployments) {
+      if (!d.connectionId) continue;
+      if (!deploymentsByConnectionId.has(d.connectionId)) {
+        deploymentsByConnectionId.set(d.connectionId, []);
+      }
+      deploymentsByConnectionId.get(d.connectionId)!.push(d.project);
+    }
+
+    const enriched = instances.map((i) => ({
+      ...i,
+      connectedProjects: deploymentsByConnectionId.get(i.id) ?? [],
+    }));
+
+    return { instances: enriched, total };
+  }
+
+  /**
+   * @method findById
+   * @description Busca uma instância pelo ID
+   * @param {string} id - ID da instância
+   * @returns {Promise<Instance | null>} Instância encontrada ou null
+   */
+  async findById(id: string): Promise<Instance | null> {
+    // Business Logic: Buscar instância por ID usando Prisma
+    return this.prisma.connection.findUnique({
+      where: { id }
+    });
+  }
+
+  /**
+   * @method findByName
+   * @description Busca uma instância pelo nome
+   * @param {string} name - Nome da instância
+   * @returns {Promise<Instance | null>} Instância encontrada ou null
+   */
+  async findByName(name: string): Promise<Instance | null> {
+    // Business Logic: Buscar instância por nome usando Prisma
+    return this.prisma.connection.findFirst({
+      where: { name }
+    });
+  }
+
+  /**
+   * @method update
+   * @description Atualiza uma instância existente
+   * @param {string} id - ID da instância
+   * @param {UpdateInstanceInput} data - Dados para atualização
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async update(id: string, data: UpdateInstanceInput): Promise<Instance> {
+    // Business Logic: Atualizar instância no banco de dados
+    return this.prisma.connection.update({
+      where: { id },
+      data
+    });
+  }
+
+  /**
+   * @method updateStatus
+   * @description Atualiza apenas o status de uma instância
+   * @param {string} id - ID da instância
+   * @param {string} status - Novo status
+   * @param {string} brokerId - ID do broker (opcional)
+   * @param {string} phoneNumber - Número do telefone (opcional)
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async updateStatus(
+    id: string,
+    status: string,
+    brokerId?: string,
+    phoneNumber?: string
+  ): Promise<Instance> {
+    return this.prisma.connection.update({
+      where: { id },
+      data: {
+        status: status as ConnectionStatus,
+        ...(brokerId && { uazapiInstanceId: brokerId }),
+        ...(phoneNumber && { phoneNumber }),
+        ...(status === 'CONNECTED' && { lastConnected: new Date() }),
+      },
+    })
+  }
+
+  /**
+   * @method updateQRCode
+   * @description Atualiza o QR Code e código de pareamento de uma instância
+   * @param {string} id - ID da instância
+   * @param {string} qrCode - QR Code base64
+   * @param {string} pairingCode - Código de pareamento (opcional)
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async updateQRCode(id: string, qrCode: string, pairingCode?: string): Promise<Instance> {
+    // Business Logic: Atualizar QR Code e código de pareamento
+    return this.prisma.connection.update({
+      where: { id },
+      data: {
+        qrCode,
+        ...(pairingCode && { pairingCode }),
+        status: 'CONNECTING'
+      }
+    });
+  }
+
+  /**
+   * @method clearQRCode
+   * @description Remove o QR Code de uma instância
+   * @param {string} id - ID da instância
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async clearQRCode(id: string): Promise<Instance> {
+    // Business Logic: Limpar QR Code e código de pareamento
+    return this.prisma.connection.update({
+      where: { id },
+      data: {
+        qrCode: null,
+        pairingCode: null
+      }
+    });
+  }
+
+  /**
+   * @method delete
+   * @description Remove uma instância do banco de dados
+   * @param {string} id - ID da instância
+   * @returns {Promise<Instance>} Instância removida
+   */
+  async delete(id: string): Promise<Instance> {
+    // Business Logic: Remover instância do banco de dados
+    return this.prisma.connection.delete({
+      where: { id }
+    });
+  }
+
+  /**
+   * @method count
+   * @description Conta o total de instâncias no banco
+   * @returns {Promise<number>} Número total de instâncias
+   */
+  async count(): Promise<number> {
+    // Business Logic: Contar total de instâncias
+    return this.prisma.connection.count();
+  }
+
+  /**
+   * @method countByStatus
+   * @description Conta instâncias por status
+   * @param {string} status - Status para filtrar
+   * @returns {Promise<number>} Número de instâncias com o status
+   */
+  async countByStatus(status: string): Promise<number> {
+    // Business Logic: Contar instâncias por status específico
+    return this.prisma.connection.count({
+      where: { status: status as ConnectionStatus }
+    });
+  }
+
+  /**
+   * @method findByShareToken
+   * @description Busca instância pelo token de compartilhamento
+   * @param {string} shareToken - Token de compartilhamento
+   * @returns {Promise<Instance | null>} Instância encontrada ou null
+   */
+  async findByShareToken(shareToken: string): Promise<Instance | null> {
+    // Business Logic: Buscar instância pelo token de compartilhamento com dados da organização
+    return this.prisma.connection.findFirst({
+      where: { 
+        shareToken,
+        shareTokenExpiresAt: {
+          gt: new Date() // Apenas tokens não expirados
+        }
+      },
+      include: {
+        organization: true
+      }
+    });
+  }
+
+  /**
+   * @method updateShareToken
+   * @description Atualiza token de compartilhamento de uma instância
+   * @param {string} id - ID da instância
+   * @param {object} shareData - Dados do token de compartilhamento
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async updateShareToken(id: string, shareData: {
+    shareToken: string;
+    shareTokenExpiresAt: Date;
+  }): Promise<Instance> {
+    // Business Logic: Atualizar token de compartilhamento
+    return this.prisma.connection.update({
+      where: { id },
+      data: shareData
+    });
+  }
+
+  /**
+   * @method revokeShareToken
+   * @description Revoga token de compartilhamento (define como expirado)
+   * @param {string} id - ID da instância
+   * @returns {Promise<Instance>} Instância atualizada
+   */
+  async revokeShareToken(id: string): Promise<Instance> {
+    // Business Logic: Revogar token definindo expiração no passado
+    return this.prisma.connection.update({
+      where: { id },
+      data: {
+        shareToken: null,
+        shareTokenExpiresAt: new Date(0) // Data no passado
+      }
+    });
+  }
+}

@@ -1,0 +1,131 @@
+/**
+ * Design Tokens - Colors
+ * Sistema de cores centralizado para todas as versões de UI
+ */
+
+:root {
+  /* ========================================
+     Background Layers
+     ======================================== */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #2a2a2a;
+  --bg-hover: #333333;
+  --bg-active: #404040;
+
+  /* ========================================
+     WhatsApp Brand Colors
+     ======================================== */
+  --whatsapp-green: #25d366;
+  --whatsapp-green-hover: #20bd5a;
+  --whatsapp-green-active: #1ba64e;
+  --whatsapp-dark: #075e54;
+  --whatsapp-light: #dcf8c6;
+  --whatsapp-teal: #128c7e;
+
+  /* ========================================
+     Accent Colors
+     ======================================== */
+  --accent-blue: #3b82f6;
+  --accent-blue-hover: #2563eb;
+  --accent-blue-active: #1d4ed8;
+
+  --accent-purple: #a855f7;
+  --accent-purple-hover: #9333ea;
+  --accent-purple-active: #7e22ce;
+
+  --accent-emerald: #10b981;
+  --accent-emerald-hover: #059669;
+  --accent-emerald-active: #047857;
+
+  --accent-red: #ef4444;
+  --accent-red-hover: #dc2626;
+  --accent-red-active: #b91c1c;
+
+  --accent-yellow: #f59e0b;
+  --accent-yellow-hover: #d97706;
+  --accent-yellow-active: #b45309;
+
+  --accent-cyan: #06b6d4;
+  --accent-cyan-hover: #0891b2;
+  --accent-cyan-active: #0e7490;
+
+  --accent-gold: #fbbf24;
+  --accent-gold-hover: #f59e0b;
+  --accent-gold-active: #d97706;
+
+  /* ========================================
+     Text Colors
+     ======================================== */
+  --text-primary: #ffffff;
+  --text-secondary: #a3a3a3;
+  --text-tertiary: #737373;
+  --text-disabled: #525252;
+  --text-muted: #404040;
+  --text-inverse: #0a0a0a;
+
+  /* ========================================
+     Border Colors
+     ======================================== */
+  --border-primary: #404040;
+  --border-secondary: #262626;
+  --border-tertiary: #1a1a1a;
+  --border-focus: var(--accent-blue);
+  --border-error: var(--accent-red);
+  --border-success: var(--accent-emerald);
+
+  /* ========================================
+     Status Colors
+     ======================================== */
+  --status-success: #10b981;
+  --status-success-bg: #10b98110;
+  --status-success-border: #10b98130;
+
+  --status-warning: #f59e0b;
+  --status-warning-bg: #f59e0b10;
+  --status-warning-border: #f59e0b30;
+
+  --status-error: #ef4444;
+  --status-error-bg: #ef444410;
+  --status-error-border: #ef444430;
+
+  --status-info: #3b82f6;
+  --status-info-bg: #3b82f610;
+  --status-info-border: #3b82f630;
+
+  /* ========================================
+     Shadow Colors
+     ======================================== */
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 4px 6px var(--shadow-color);
+  --shadow-lg: 0 10px 15px var(--shadow-color);
+  --shadow-xl: 0 20px 25px var(--shadow-color);
+
+  /* ========================================
+     Overlay Colors
+     ======================================== */
+  --overlay-light: rgba(255, 255, 255, 0.05);
+  --overlay-medium: rgba(255, 255, 255, 0.1);
+  --overlay-strong: rgba(255, 255, 255, 0.15);
+  --overlay-dark: rgba(0, 0, 0, 0.5);
+  --overlay-darker: rgba(0, 0, 0, 0.7);
+}
+
+/* ========================================
+   Light Mode (opcional para futuro)
+   ======================================== */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e5e5e5;
+
+  --text-primary: #0a0a0a;
+  --text-secondary: #525252;
+  --text-tertiary: #737373;
+
+  --border-primary: #e5e5e5;
+  --border-secondary: #d4d4d4;
+
+  --shadow-color: rgba(0, 0, 0, 0.1);
+}

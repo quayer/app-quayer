@@ -1,0 +1,243 @@
+/**
+ * Theme V5 - ShadcnUIKit Inspired
+ * Modern, professional design inspired by https://shadcnuikit.com/dashboard/default
+ *
+ * Features:
+ * - Clean, minimal aesthetic
+ * - Excellent contrast ratios (WCAG AAA)
+ * - Subtle borders and elevations
+ * - Professional indigo/teal palette
+ * - Optimized for dark mode
+ */
+
+[data-theme='v5-shadcnuikit'] {
+  /* ===== Primary Colors ===== */
+  /* Indigo - Professional and trustworthy */
+  --theme-primary: #6366F1; /* Indigo 500 */
+  --theme-primary-hover: #4F46E5; /* Indigo 600 */
+  --theme-primary-light: #818CF8; /* Indigo 400 */
+  --theme-primary-dark: #3730A3; /* Indigo 700 */
+
+  /* Teal - Fresh and modern secondary */
+  --theme-secondary: #14B8A6; /* Teal 500 */
+  --theme-secondary-hover: #0D9488; /* Teal 600 */
+  --theme-secondary-light: #2DD4BF; /* Teal 400 */
+  --theme-secondary-dark: #0F766E; /* Teal 700 */
+
+  /* Purple - Elegant accent */
+  --theme-accent: #A855F7; /* Purple 500 */
+  --theme-accent-hover: #9333EA; /* Purple 600 */
+  --theme-accent-light: #C084FC; /* Purple 400 */
+
+  /* ===== Background Layers ===== */
+  /* Rich hierarchy for depth */
+  --background: #09090B; /* Zinc 950 - Deepest background */
+  --background-secondary: #18181B; /* Zinc 900 - Secondary surfaces */
+  --surface: #27272A; /* Zinc 800 - Card backgrounds */
+  --surface-hover: #3F3F46; /* Zinc 700 - Hover states */
+  --surface-elevated: #52525B; /* Zinc 600 - Elevated elements */
+
+  /* ===== Borders ===== */
+  /* Subtle yet defined */
+  --border: #27272A; /* Zinc 800 - Default borders */
+  --border-hover: #3F3F46; /* Zinc 700 - Hover borders */
+  --border-focus: #6366F1; /* Indigo 500 - Focus states */
+  --border-subtle: #18181B; /* Zinc 900 - Very subtle dividers */
+
+  /* ===== Text Hierarchy ===== */
+  --text-primary: #FAFAFA; /* Zinc 50 - Primary text */
+  --text-secondary: #A1A1AA; /* Zinc 400 - Secondary text */
+  --text-muted: #71717A; /* Zinc 500 - Muted text */
+  --text-placeholder: #52525B; /* Zinc 600 - Placeholder text */
+
+  /* ===== Status Colors ===== */
+  /* Semantic colors for feedback */
+  --success: #22C55E; /* Green 500 */
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --success-border: rgba(34, 197, 94, 0.2);
+
+  --warning: #F59E0B; /* Amber 500 */
+  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning-border: rgba(245, 158, 11, 0.2);
+
+  --error: #EF4444; /* Red 500 */
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.2);
+
+  --info: #3B82F6; /* Blue 500 */
+  --info-bg: rgba(59, 130, 246, 0.1);
+  --info-border: rgba(59, 130, 246, 0.2);
+
+  /* ===== Shadows & Elevation ===== */
+  /* Subtle depth without overwhelming */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.3);
+
+  /* ===== Interactive States ===== */
+  --hover-overlay: rgba(255, 255, 255, 0.05);
+  --active-overlay: rgba(255, 255, 255, 0.1);
+  --disabled-opacity: 0.5;
+
+  /* ===== Gradients ===== */
+  --gradient-primary: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+  --gradient-secondary: linear-gradient(135deg, #14B8A6 0%, #06B6D4 100%);
+  --gradient-accent: linear-gradient(135deg, #A855F7 0%, #EC4899 100%);
+  --gradient-surface: linear-gradient(180deg, #27272A 0%, #18181B 100%);
+
+  /* ===== Radii ===== */
+  --radius-sm: 0.375rem; /* 6px */
+  --radius-md: 0.5rem; /* 8px */
+  --radius-lg: 0.75rem; /* 12px */
+  --radius-xl: 1rem; /* 16px */
+  --radius-full: 9999px;
+
+  /* ===== Spacing System ===== */
+  --space-xs: 0.25rem; /* 4px */
+  --space-sm: 0.5rem; /* 8px */
+  --space-md: 1rem; /* 16px */
+  --space-lg: 1.5rem; /* 24px */
+  --space-xl: 2rem; /* 32px */
+  --space-2xl: 3rem; /* 48px */
+
+  /* ===== Typography ===== */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* ===== Transitions ===== */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Component-Specific Overrides ===== */
+
+[data-theme='v5-shadcnuikit'] .card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-base);
+}
+
+[data-theme='v5-shadcnuikit'] .card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+[data-theme='v5-shadcnuikit'] .button-primary {
+  background: var(--theme-primary);
+  color: var(--text-primary);
+  border: none;
+  transition: all var(--transition-fast);
+}
+
+[data-theme='v5-shadcnuikit'] .button-primary:hover {
+  background: var(--theme-primary-hover);
+  box-shadow: var(--shadow-glow);
+}
+
+[data-theme='v5-shadcnuikit'] .button-secondary {
+  background: var(--theme-secondary);
+  color: var(--text-primary);
+}
+
+[data-theme='v5-shadcnuikit'] .button-secondary:hover {
+  background: var(--theme-secondary-hover);
+}
+
+[data-theme='v5-shadcnuikit'] .input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+}
+
+[data-theme='v5-shadcnuikit'] .input:hover {
+  border-color: var(--border-hover);
+}
+
+[data-theme='v5-shadcnuikit'] .input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  outline: none;
+}
+
+/* ===== Accessibility ===== */
+
+[data-theme='v5-shadcnuikit'] :focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
+[data-theme='v5-shadcnuikit'] ::selection {
+  background: var(--theme-primary);
+  color: var(--text-primary);
+}
+
+/* ===== Scrollbar Styling ===== */
+
+[data-theme='v5-shadcnuikit'] ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+[data-theme='v5-shadcnuikit'] ::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+[data-theme='v5-shadcnuikit'] ::-webkit-scrollbar-thumb {
+  background: var(--surface-hover);
+  border-radius: var(--radius-md);
+  border: 2px solid var(--background-secondary);
+}
+
+[data-theme='v5-shadcnuikit'] ::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-elevated);
+}
+
+/* ===== Animation Utilities ===== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+  }
+}
+
+[data-theme='v5-shadcnuikit'] .animate-fade-in {
+  animation: fadeIn var(--transition-base) ease-out;
+}
+
+[data-theme='v5-shadcnuikit'] .animate-slide-in {
+  animation: slideIn var(--transition-base) ease-out;
+}
+
+[data-theme='v5-shadcnuikit'] .animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}

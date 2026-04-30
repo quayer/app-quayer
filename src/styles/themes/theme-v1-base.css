@@ -1,0 +1,90 @@
+/**
+ * Theme V1: Base
+ * shadcn/ui + Magic UI
+ * Estilo: Moderno, minimalista, dark-first
+ * Cores: Azul profundo + Verde WhatsApp
+ */
+
+[data-theme='v1-base'] {
+  /* Primary Colors */
+  --theme-primary: var(--accent-blue);
+  --theme-primary-hover: var(--accent-blue-hover);
+  --theme-primary-active: var(--accent-blue-active);
+
+  /* Secondary Colors */
+  --theme-secondary: var(--whatsapp-green);
+  --theme-secondary-hover: var(--whatsapp-green-hover);
+  --theme-secondary-active: var(--whatsapp-green-active);
+
+  /* Accent Colors */
+  --theme-accent: var(--accent-purple);
+  --theme-accent-hover: var(--accent-purple-hover);
+  --theme-accent-active: var(--accent-purple-active);
+
+  /* Background */
+  --theme-bg-primary: var(--bg-primary);
+  --theme-bg-secondary: var(--bg-secondary);
+  --theme-bg-tertiary: var(--bg-tertiary);
+
+  /* Text */
+  --theme-text-primary: var(--text-primary);
+  --theme-text-secondary: var(--text-secondary);
+  --theme-text-tertiary: var(--text-tertiary);
+
+  /* Borders */
+  --theme-border-primary: var(--border-primary);
+  --theme-border-secondary: var(--border-secondary);
+
+  /* Specific Components */
+  --theme-card-bg: var(--bg-secondary);
+  --theme-card-border: var(--border-primary);
+  --theme-button-primary-bg: var(--accent-blue);
+  --theme-button-primary-text: var(--text-primary);
+  --theme-button-secondary-bg: var(--whatsapp-green);
+  --theme-button-secondary-text: var(--text-primary);
+
+  /* Status Colors (inherit from base) */
+  --theme-status-success: var(--status-success);
+  --theme-status-warning: var(--status-warning);
+  --theme-status-error: var(--status-error);
+  --theme-status-info: var(--status-info);
+}
+
+/* V1 Specific Styles */
+[data-theme='v1-base'] {
+  /* Smooth transitions */
+  * {
+    transition: var(--transition-colors-fast);
+  }
+
+  /* Cards with subtle hover effect */
+  .card {
+    background: var(--theme-card-bg);
+    border: 1px solid var(--theme-card-border);
+    transition: var(--transition-colors-normal), var(--transition-transform-fast);
+  }
+
+  .card:hover {
+    border-color: var(--theme-primary);
+    transform: translateY(-2px);
+  }
+
+  /* Buttons */
+  .btn-primary {
+    background: var(--theme-button-primary-bg);
+    color: var(--theme-button-primary-text);
+  }
+
+  .btn-primary:hover {
+    background: var(--theme-primary-hover);
+  }
+
+  .btn-secondary {
+    background: var(--theme-button-secondary-bg);
+    color: var(--theme-button-secondary-text);
+  }
+
+  .btn-secondary:hover {
+    background: var(--theme-secondary-hover);
+  }
+}

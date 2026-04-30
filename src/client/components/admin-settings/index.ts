@@ -1,0 +1,12 @@
+export { ProvedoresSettings } from './ProvedoresSettings'
+export { EmailSettings } from './EmailSettings'
+export { AISettings } from './AISettings'
+export { ConcatenationSettings } from './ConcatenationSettings'
+export { AutenticacaoSettings } from './AutenticacaoSettings'
+export { ApiKeysSettings } from './ApiKeysSettings'
+export { SystemInfo } from './SystemInfo'
+// Componentes individuais — mantidos para compatibilidade
+export { UAZapiSettings } from './UAZapiSettings'
+export { WebhookSettings } from './WebhookSettings'
+export { OAuthSettings } from './OAuthSettings'
+export { SecuritySettings } from './SecuritySettings'

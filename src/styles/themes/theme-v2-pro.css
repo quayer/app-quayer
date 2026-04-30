@@ -1,0 +1,130 @@
+/**
+ * Theme V2: Pro
+ * 21st.dev Components
+ * Estilo: Profissional, rico em features
+ * Cores: Roxo + Ciano + Verde WhatsApp
+ */
+
+[data-theme='v2-pro'] {
+  /* Primary Colors */
+  --theme-primary: var(--accent-purple);
+  --theme-primary-hover: var(--accent-purple-hover);
+  --theme-primary-active: var(--accent-purple-active);
+
+  /* Secondary Colors */
+  --theme-secondary: var(--accent-cyan);
+  --theme-secondary-hover: var(--accent-cyan-hover);
+  --theme-secondary-active: var(--accent-cyan-active);
+
+  /* Accent Colors */
+  --theme-accent: var(--whatsapp-green);
+  --theme-accent-hover: var(--whatsapp-green-hover);
+  --theme-accent-active: var(--whatsapp-green-active);
+
+  /* Background - Slightly darker */
+  --theme-bg-primary: #0f0f0f;
+  --theme-bg-secondary: #1f1f1f;
+  --theme-bg-tertiary: #2f2f2f;
+
+  /* Text */
+  --theme-text-primary: #fafafa;
+  --theme-text-secondary: #b0b0b0;
+  --theme-text-tertiary: #808080;
+
+  /* Borders */
+  --theme-border-primary: #4a4a4a;
+  --theme-border-secondary: #2a2a2a;
+
+  /* Specific Components */
+  --theme-card-bg: var(--theme-bg-secondary);
+  --theme-card-border: var(--theme-border-primary);
+  --theme-button-primary-bg: var(--accent-purple);
+  --theme-button-primary-text: var(--text-primary);
+  --theme-button-secondary-bg: var(--accent-cyan);
+  --theme-button-secondary-text: var(--text-primary);
+
+  /* Status Colors */
+  --theme-status-success: var(--status-success);
+  --theme-status-warning: var(--status-warning);
+  --theme-status-error: var(--status-error);
+  --theme-status-info: var(--accent-cyan);
+}
+
+/* V2 Specific Styles */
+[data-theme='v2-pro'] {
+  /* More elaborate transitions */
+  * {
+    transition: var(--transition-base);
+  }
+
+  /* Cards with glow effect */
+  .card {
+    background: var(--theme-card-bg);
+    border: 1px solid var(--theme-card-border);
+    transition: var(--transition-colors-normal), var(--transition-shadow);
+  }
+
+  .card:hover {
+    border-color: var(--theme-primary);
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+  }
+
+  /* Buttons with gradient hover */
+  .btn-primary {
+    background: linear-gradient(
+      135deg,
+      var(--theme-button-primary-bg),
+      var(--theme-primary-hover)
+    );
+    color: var(--theme-button-primary-text);
+  }
+
+  .btn-primary:hover {
+    background: linear-gradient(
+      135deg,
+      var(--theme-primary-hover),
+      var(--theme-primary-active)
+    );
+    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+  }
+
+  .btn-secondary {
+    background: linear-gradient(
+      135deg,
+      var(--theme-button-secondary-bg),
+      var(--theme-secondary-hover)
+    );
+    color: var(--theme-button-secondary-text);
+  }
+
+  .btn-secondary:hover {
+    background: linear-gradient(
+      135deg,
+      var(--theme-secondary-hover),
+      var(--theme-secondary-active)
+    );
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
+  }
+
+  /* Enhanced notifications */
+  .notification {
+    background: var(--theme-card-bg);
+    border-left: 4px solid var(--theme-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  /* AI Chat specific styling */
+  .ai-chat-message {
+    background: var(--theme-bg-tertiary);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+  }
+
+  .ai-chat-message.user {
+    background: linear-gradient(
+      135deg,
+      var(--theme-primary),
+      var(--theme-primary-hover)
+    );
+  }
+}
