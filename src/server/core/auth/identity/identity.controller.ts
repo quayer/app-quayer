@@ -134,6 +134,7 @@ export const identityController = igniter.controller({
           emailVerified: user.emailVerified,
           currentOrgId: user.currentOrgId,
           isAgency: user.isAgency,
+          avatarUrl: user.avatarUrl ?? null,
           organizations: user.organizations.map((org) => ({
             id: org.organization.id,
             name: org.organization.name,
@@ -212,10 +213,9 @@ export const identityController = igniter.controller({
           role: user.role,
           emailVerified: user.emailVerified,
           currentOrgId: user.currentOrgId,
-          // Campos ecoados do body (ainda sem persistência no schema). TODO(schema).
           language: language ?? null,
           timezone: timezone ?? null,
-          avatarUrl: null,
+          avatarUrl: user.avatarUrl ?? null,
           organizations: user.organizations.map((org) => ({
             id: org.organization.id,
             name: org.organization.name,
@@ -297,8 +297,7 @@ export const identityController = igniter.controller({
 
         const avatarUrl = await storage.getSignedUrl(BUCKETS.PROFILES, result.path);
 
-        // TODO(schema): persistir avatarUrl quando o campo existir no User.
-        // await db.user.update({ where: { id: authUser.id }, data: { avatarUrl } });
+        await db.user.update({ where: { id: authUser.id }, data: { avatarUrl } });
 
         return response.success({ avatarUrl });
       },

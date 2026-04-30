@@ -211,6 +211,7 @@ function PerfilTab() {
   const [language, setLanguage] = useState('pt_BR')
   const [timezone, setTimezone] = useState('America/Sao_Paulo')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -256,13 +257,46 @@ function PerfilTab() {
 
   const handleAvatarClick = () => fileInputRef.current?.click()
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    // Show local preview immediately; server upload requires backend implementation
-    const objectUrl = URL.createObjectURL(file)
-    setAvatarUrl(objectUrl)
-    toast.info('Foto atualizada localmente. A sincronização com o servidor estará disponível em breve.')
+
+    const previewUrl = URL.createObjectURL(file)
+    setAvatarUrl(previewUrl)
+    setUploadingAvatar(true)
+
+    try {
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = reader.result as string
+          resolve(result.split(',')[1])
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const res = await apiFetch<{ data?: { avatarUrl: string }; avatarUrl?: string }>(
+        '/api/v1/auth/me/avatar',
+        {
+          method: 'POST',
+          body: JSON.stringify({ fileBase64, fileName: file.name, mimeType: file.type }),
+        }
+      )
+
+      const serverUrl = (res as { data?: { avatarUrl?: string } }).data?.avatarUrl ?? (res as { avatarUrl?: string }).avatarUrl
+      if (serverUrl) {
+        URL.revokeObjectURL(previewUrl)
+        setAvatarUrl(serverUrl)
+      }
+
+      toast.success('Foto de perfil atualizada com sucesso')
+    } catch (err) {
+      toast.error((err as Error).message || 'Erro ao enviar foto')
+    } finally {
+      setUploadingAvatar(false)
+      e.target.value = ''
+    }
   }
 
   const handleDeleteAccount = async () => {
@@ -307,11 +341,11 @@ function PerfilTab() {
           <div className="flex items-center gap-5">
             <div
               className="relative group cursor-pointer shrink-0"
-              onClick={handleAvatarClick}
+              onClick={uploadingAvatar ? undefined : handleAvatarClick}
               role="button"
               tabIndex={0}
               aria-label="Alterar foto de perfil"
-              onKeyDown={(e) => e.key === 'Enter' && handleAvatarClick()}
+              onKeyDown={(e) => !uploadingAvatar && e.key === 'Enter' && handleAvatarClick()}
             >
               <Avatar className="h-20 w-20 ring-2 ring-border">
                 {avatarUrl ? <AvatarImage src={avatarUrl} alt={name || 'Avatar'} /> : null}
@@ -320,19 +354,22 @@ function PerfilTab() {
                 </AvatarFallback>
               </Avatar>
               <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Upload className="h-5 w-5 text-white" />
+                {uploadingAvatar
+                  ? <Loader2 className="h-5 w-5 text-white animate-spin" />
+                  : <Upload className="h-5 w-5 text-white" />}
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              <Button variant="outline" size="sm" onClick={handleAvatarClick} className="w-fit">
-                <Upload className="mr-2 h-4 w-4" />
-                Alterar foto
+              <Button variant="outline" size="sm" onClick={handleAvatarClick} disabled={uploadingAvatar} className="w-fit">
+                {uploadingAvatar
+                  ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</>
+                  : <><Upload className="mr-2 h-4 w-4" />Alterar foto</>}
               </Button>
               <p className="text-xs text-muted-foreground">PNG ou JPG, até 2 MB.</p>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg"
+                accept="image/png,image/jpeg,image/webp"
                 className="hidden"
                 onChange={handleAvatarChange}
               />
