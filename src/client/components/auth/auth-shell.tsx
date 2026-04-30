@@ -48,6 +48,7 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
             aria-hidden="true"
             className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden bg-[#F5F2ED] dark:bg-black"
           >
+            {/* Dark mode */}
             <Image
               src="/images/auth/login-hero.webp"
               alt=""
@@ -55,7 +56,17 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
               priority
               fetchPriority="high"
               sizes="(max-width: 1280px) 42vw, 45vw"
-              className="object-cover"
+              className="object-cover hidden dark:block"
+            />
+            {/* Light mode */}
+            <Image
+              src="/images/auth/login-hero-light.png"
+              alt=""
+              fill
+              priority
+              fetchPriority="high"
+              sizes="(max-width: 1280px) 42vw, 45vw"
+              className="object-cover block dark:hidden"
             />
             <div
               aria-hidden="true"
