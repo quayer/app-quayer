@@ -15,8 +15,8 @@ function getJwtSecret(): string {
   if (!secret) throw new Error('JWT_SECRET environment variable is required');
   return secret;
 }
-const getSecret = () => getJwtSecret();
-const getRefreshSecret = () => process.env.JWT_REFRESH_SECRET || getSecret();
+const JWT_SECRET = getJwtSecret();
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || JWT_SECRET;
 
 /**
  * Token expiration times
@@ -83,7 +83,7 @@ export function signAccessToken(
     type: 'access',
   };
 
-  return jwt.sign(fullPayload as object, getSecret(), {
+  return jwt.sign(fullPayload as object, JWT_SECRET, {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-api',
@@ -114,7 +114,7 @@ export function signRefreshToken(
     type: 'refresh',
   };
 
-  return jwt.sign(fullPayload as object, getRefreshSecret(), {
+  return jwt.sign(fullPayload as object, JWT_REFRESH_SECRET, {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-api',
@@ -137,7 +137,7 @@ export function signRefreshToken(
  */
 export function verifyAccessToken(token: string): AccessTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, getSecret(), {
+    const decoded = jwt.verify(token, JWT_SECRET, {
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;
@@ -169,7 +169,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
  */
 export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, getRefreshSecret(), {
+    const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;
@@ -293,7 +293,7 @@ export function signMagicLinkToken(
     ...(payload.name && { name: payload.name }),
   };
 
-  return jwt.sign(fullPayload as object, getSecret(), {
+  return jwt.sign(fullPayload as object, JWT_SECRET, {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-api',
@@ -316,7 +316,7 @@ export function signMagicLinkToken(
  */
 export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, getSecret(), {
+    const decoded = jwt.verify(token, JWT_SECRET, {
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;

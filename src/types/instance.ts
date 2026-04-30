@@ -13,6 +13,23 @@ export interface Instance {
   updatedAt: Date
 }
 
+/**
+ * Minimal instance type accepted by modal components.
+ * Compatible with both full Prisma Instance and AdminInstance (from server actions).
+ */
+export interface ModalInstance {
+  id: string
+  name: string
+  phoneNumber: string | null
+  status: string
+  brokerType: string
+  createdAt: string | Date
+  updatedAt?: string | Date
+  uazapiToken?: string | null
+  brokerId?: string | null
+  organization?: { id: string; name: string } | null
+}
+
 export interface CreateInstanceRequest {
   name: string
   phoneNumber?: string

@@ -1,21 +1,17 @@
-const AUTH_ERROR_MAP: Record<string, string> = {
-  'Invalid credentials': 'Credenciais inválidas',
-  'User not found': 'Usuário não encontrado',
-  'Invalid password': 'Senha inválida',
-  'Email not verified': 'E-mail não verificado',
-  'Account disabled': 'Conta desativada',
-  'Too many attempts': 'Muitas tentativas. Tente novamente mais tarde',
-  'Invalid token': 'Token inválido ou expirado',
-  'Token expired': 'Token expirado',
-  'Unauthorized': 'Não autorizado',
-  'Invalid code': 'Código inválido',
-  'Code expired': 'Código expirado',
+const AUTH_ERROR_TRANSLATIONS: Record<string, string> = {
+  'Invalid or expired code': 'Código inválido ou expirado.',
+  'Code expired': 'Código expirado. Reenvie para obter um novo.',
+  'Invalid code': 'Código inválido. Tente novamente.',
+  'Invalid TOTP code.': 'Código inválido. Tente novamente.',
+  'Invalid recovery code.': 'Código de recuperação inválido.',
+  'Account disabled': 'Conta desativada. Entre em contato com o suporte.',
+  'User not found': 'Usuário não encontrado.',
+  'Too many attempts': 'Muitas tentativas. Aguarde antes de tentar novamente.',
 }
 
 export function translateAuthError(message: string): string {
-  if (!message) return 'Ocorreu um erro inesperado'
-  for (const [key, value] of Object.entries(AUTH_ERROR_MAP)) {
-    if (message.toLowerCase().includes(key.toLowerCase())) return value
+  for (const [en, pt] of Object.entries(AUTH_ERROR_TRANSLATIONS)) {
+    if (message.includes(en)) return pt
   }
   return message
 }
