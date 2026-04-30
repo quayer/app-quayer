@@ -112,6 +112,7 @@ yarn-error.log*
 *.sqlite3
 prisma/migrations/
 dump.rdb
+data/
 
 # ==================================
 # Misc
