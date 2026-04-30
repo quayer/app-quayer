@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
+import { useRouter, usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import { PanelLeft } from "lucide-react"
 import { BuilderSidebar } from "./builder-sidebar"
 import { SidebarProvider } from "@/client/components/ui/sidebar"
 
 interface AppShellClientProps {
-  recentProjects: Array<{ id: string; name: string; status: string }>
+  recentProjects: Array<{ id: string; name: string; status: string; type: string }>
   isSuperAdmin: boolean
   children: ReactNode
   /**
@@ -40,6 +41,8 @@ export function AppShellClient({
   const [collapsed, setCollapsed] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const { resolvedTheme } = useTheme()
+  const router = useRouter()
+  const pathname = usePathname()
   const isLight = hydrated && resolvedTheme === "light"
   // DS v3 tokens:
   //   --color-bg-base    #000000 (dark)
@@ -52,8 +55,11 @@ export function AppShellClient({
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved === "true") setCollapsed(true)
-    } catch {}
+    } catch (e) {
+      console.warn("[sidebar] localStorage indisponível:", e)
+    }
     setHydrated(true)
 
     const onKey = (e: KeyboardEvent) => {
@@ -63,14 +69,31 @@ export function AppShellClient({
           const next = !prev
           try {
             localStorage.setItem(STORAGE_KEY, String(next))
-          } catch {}
+          } catch (e) {
+            console.warn("[sidebar] localStorage indisponível:", e)
+          }
           return next
         })
+      }
+      // ⌘K / Ctrl+K — Nova conversa
+      //   Na home (/): foca o textarea
+      //   Fora da home: navega pra /; focus acontece no mount do home-page
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        const input = document.getElementById(
+          "builder-home-input",
+        ) as HTMLTextAreaElement | null
+        if (input) {
+          input.focus()
+          input.select()
+        } else {
+          router.push("/")
+        }
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [router, pathname])
 
   const toggle = () => {
     setCollapsed((prev) => {
@@ -100,6 +123,13 @@ export function AppShellClient({
         fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
       }}
     >
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-white focus:px-4 focus:py-2 focus:text-black focus:shadow-lg focus:outline-none"
+      >
+        Pular para o conteúdo
+      </a>
+
       {/* Durante hidratação OU quando não-colapsado, renderiza sidebar.
           suppressHydrationWarning pro caso de o estado inicial ser colapsado. */}
       {(!hydrated || !collapsed) && sidebar}
@@ -124,7 +154,11 @@ export function AppShellClient({
           </button>
         )}
 
-        <main className="flex min-h-screen flex-1 flex-col min-w-0">
+        <main
+          id="main-content"
+          className="flex min-h-screen flex-1 flex-col min-w-0"
+          style={{ scrollMarginLeft: '260px' }}
+        >
           {children}
         </main>
       </SidebarProvider>

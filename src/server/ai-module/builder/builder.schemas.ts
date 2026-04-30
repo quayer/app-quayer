@@ -57,6 +57,9 @@ export type PublishProjectOutput = z.infer<typeof publishProjectOutputSchema>
 // ==========================================
 export const sendChatMessageInputSchema = z.object({
   content: z.string().min(1).max(10000),
+  // When true the user message is already persisted (e.g. auto-trigger after
+  // createProject) — skip the redundant persistUserMessage call.
+  skipUserPersist: z.boolean().optional(),
 })
 
 export type SendChatMessageInput = z.infer<typeof sendChatMessageInputSchema>

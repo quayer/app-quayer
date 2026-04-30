@@ -58,7 +58,7 @@ const sendMessage = igniter.mutation({
       return response.badRequest('projectId inválido')
     }
 
-    const { content } = request.body
+    const { content, skipUserPersist } = request.body
 
     const conversation = await database.builderProjectConversation.findUnique({
       where: { projectId },
@@ -83,17 +83,21 @@ const sendMessage = igniter.mutation({
       )
     }
 
-    // Persist the user message before streaming.
-    await persistUserMessage({
-      conversationId: conversation.id,
-      content,
-    })
+    // Only persist when the message is new. The auto-trigger path (skipUserPersist=true)
+    // arrives here with a message already saved by createWithInitialMessage.
+    if (!skipUserPersist) {
+      await persistUserMessage({
+        conversationId: conversation.id,
+        content,
+      })
+    }
 
     return buildSseResponse({
       agentConfigId: builderAgent.id,
       conversationId: conversation.id,
       organizationId: user.currentOrgId,
       userId: user.id,
+      projectId,
       userMessage: content,
       stateSummary: conversation.stateSummary,
     })

@@ -28,11 +28,12 @@ Regras duras:
 - Sempre em pt-BR.
 - Máximo ~400 palavras no total — prompts enxutos performam melhor.
 - Seção "Regras de conduta": use lista com marcadores, 3 a 6 itens.
-- Seção "Limitações": use lista com marcadores, inclua sempre "Se a pergunta fugir do escopo, use transfer_to_human".
+- Seção "Limitações": use lista com marcadores. SOMENTE referencie ferramentas específicas (transfer_to_human, schedule_appointment, etc.) se elas estiverem explicitamente listadas em "Ferramentas habilitadas". Se a lista estiver vazia ou ausente, descreva apenas COMPORTAMENTOS (ex: "informe que não pode ajudar") sem mencionar nomes de ferramentas ou integrações.
 - Seção "Formato de resposta": 2-4 frases descrevendo tom, comprimento e uso de emojis/formatação.
 - NUNCA invente integrações, nomes próprios, preços ou dados sensíveis que não estejam no brief.
 - NUNCA inclua cabeçalhos extras além dos 5 do template.
 - NUNCA envolva a resposta em blocos de código — devolva markdown cru.
+- NUNCA mencione capacidades que dependem de ferramentas não listadas (ex: agendar consulta, enviar preço, escalar para humano) se a ferramenta correspondente não estiver habilitada.
 
 Responda APENAS com o template preenchido, sem comentários antes ou depois.`
 
@@ -44,6 +45,8 @@ export interface BuildUserMessageInput {
   brief: string
   nicho: string
   objetivo: string
+  /** Tools already attached/selected for this agent. Empty = none yet. */
+  attachedTools?: string[]
   nicheInsights?: {
     regulations?: string[]
     vocabulary?: string[]
@@ -90,6 +93,11 @@ export function buildUserMessage(input: BuildUserMessageInput): string {
     ? buildInsightsBlock(input.nicheInsights)
     : ''
 
+  const toolsBlock =
+    input.attachedTools && input.attachedTools.length > 0
+      ? `## Ferramentas habilitadas\n${input.attachedTools.map((t) => `- ${t}`).join('\n')}\n`
+      : `## Ferramentas habilitadas\nNenhuma ferramenta configurada ainda. NÃO mencione capacidades que dependam de ferramentas (agendamento, envio de preço, escalação para humano, etc.).\n`
+
   return `Preencha o template abaixo com base no brief do cliente.
 
 ## Brief do cliente
@@ -102,6 +110,7 @@ ${input.objetivo}
 ${nicheHint}
 (Sugestões de nichos com dicas especializadas disponíveis: advocacia, contabilidade, seguros. Para outros nichos, adapte o tom e as regras ao contexto descrito.)
 ${insightsBlock}
+${toolsBlock}
 ## Template (preencha TODOS os placeholders)
 ${PROMPT_ANATOMY_TEMPLATE}`
 }

@@ -50,10 +50,7 @@ export function GoogleCallbackV3(): React.ReactElement {
   const exchange = React.useCallback(
     async (code: string): Promise<void> => {
       try {
-        const mutateArg = { body: { code } } as Parameters<
-          typeof api.auth.googleCallback.mutate
-        >[0]
-        const result = (await api.auth.googleCallback.mutate(mutateArg)) as {
+        const result = (await api.auth.googleCallback.mutate({ body: { code } }) as unknown) as {
           data?: GoogleCallbackResponse
           error?: ApiErrorShape['error']
         }

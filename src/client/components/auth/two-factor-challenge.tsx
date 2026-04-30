@@ -186,10 +186,10 @@ export function TwoFactorChallenge({
       {/* Header */}
       <div className="space-y-2 text-center">
         <div className="flex justify-center mb-2">
-          <ShieldCheck className="h-10 w-10 text-gray-900 dark:text-white" aria-hidden="true" />
+          <ShieldCheck className="h-10 w-10 text-foreground" aria-hidden="true" />
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Verificação em duas etapas</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Verificação em duas etapas</h1>
+        <p className="text-sm text-muted-foreground">
           {mode === "totp"
             ? "Digite o código de 6 dígitos do seu aplicativo autenticador."
             : "Digite um dos seus códigos de recuperação."}
@@ -225,7 +225,7 @@ export function TwoFactorChallenge({
                   disabled={isLoading || attemptsRemaining <= 0}
                   autoFocus
                 >
-                  <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border *:data-[slot=input-otp-slot]:border-gray-200 dark:*:data-[slot=input-otp-slot]:border-gray-700 *:data-[slot=input-otp-slot]:bg-white dark:*:data-[slot=input-otp-slot]:bg-gray-800 *:data-[slot=input-otp-slot]:text-gray-900 dark:*:data-[slot=input-otp-slot]:text-white">
+                  <InputOTPGroup className="gap-2.5 *:data-[slot=input-otp-slot]:rounded-md *:data-[slot=input-otp-slot]:border *:data-[slot=input-otp-slot]:border-border *:data-[slot=input-otp-slot]:bg-muted/50 *:data-[slot=input-otp-slot]:text-foreground">
                     <InputOTPSlot index={0} />
                     <InputOTPSlot index={1} />
                     <InputOTPSlot index={2} />
@@ -248,8 +248,8 @@ export function TwoFactorChallenge({
               className={cn(
                 "w-full min-h-[44px] transition-colors",
                 totpCode.length === 6
-                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  ? "bg-foreground text-background hover:bg-foreground/90 border-transparent"
+                  : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
               )}
               disabled={isLoading || totpCode.length !== 6 || attemptsRemaining <= 0}
             >
@@ -267,7 +267,7 @@ export function TwoFactorChallenge({
               <button
                 type="button"
                 onClick={() => switchMode("recovery")}
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                 Perdeu acesso ao autenticador?
@@ -278,7 +278,7 @@ export function TwoFactorChallenge({
               <button
                 type="button"
                 onClick={onCancel}
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                 Voltar ao login
@@ -303,7 +303,7 @@ export function TwoFactorChallenge({
             )}
 
             <Field>
-              <FieldLabel htmlFor="recovery-code" className="text-sm font-medium text-gray-900 dark:text-gray-200">Código de recuperação</FieldLabel>
+              <FieldLabel htmlFor="recovery-code" className="text-sm font-medium text-foreground">Código de recuperação</FieldLabel>
               <Input
                 id="recovery-code"
                 type="text"
@@ -313,9 +313,9 @@ export function TwoFactorChallenge({
                 disabled={isLoading || attemptsRemaining <= 0}
                 autoFocus
                 maxLength={20}
-                className="font-mono text-center tracking-widest bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                className="font-mono text-center tracking-widest auth-input"
               />
-              <FieldDescription className="text-gray-500 dark:text-gray-400">
+              <FieldDescription className="text-muted-foreground">
                 Use um dos 8 códigos gerados durante a configuração do 2FA.
               </FieldDescription>
             </Field>
@@ -331,8 +331,8 @@ export function TwoFactorChallenge({
               className={cn(
                 "w-full min-h-[44px] transition-colors",
                 recoveryCode.trim()
-                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  ? "bg-foreground text-background hover:bg-foreground/90 border-transparent"
+                  : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
               )}
               disabled={isLoading || !recoveryCode.trim() || attemptsRemaining <= 0}
             >
@@ -350,7 +350,7 @@ export function TwoFactorChallenge({
               <button
                 type="button"
                 onClick={() => switchMode("totp")}
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
                 Usar código do autenticador
@@ -361,7 +361,7 @@ export function TwoFactorChallenge({
               <button
                 type="button"
                 onClick={onCancel}
-                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm"
+                className="inline-flex min-h-[44px] items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                 Voltar ao login

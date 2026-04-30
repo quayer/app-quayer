@@ -59,20 +59,6 @@ chat.quayer.com {
 	}
 }
 
-draw.quayer.com {
-	import cf_origin_tls
-	import security_headers
-	reverse_proxy localhost:3030 {
-		header_up Host {host}
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto https
-	}
-	log {
-		output file /var/log/caddy/draw.quayer.com.log
-		format json
-	}
-}
-
 supabase.quayer.com {
 	import cf_origin_tls
 	import security_headers

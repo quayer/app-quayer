@@ -10,7 +10,7 @@
  * Toda logica de estado pesada vive nos hooks co-locados em ./hooks/.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { usePromptAutosave } from "./hooks/use-prompt-autosave"
 import { usePromptActions } from "./hooks/use-prompt-actions"
@@ -20,17 +20,25 @@ import { PromptHeader } from "./prompt-header"
 import { PromptEditor } from "./prompt-editor"
 import { PromptInsightsSection } from "./prompt-insights-section"
 import { VersionHistory } from "./version-history"
-import { PromptActions } from "./prompt-actions"
 import type { PromptTabProps } from "./prompt-types"
 
 export type { PromptTabProps } from "./prompt-types"
 
-export function PromptTab({ project, messages }: PromptTabProps) {
+export function PromptTab({ project, messages, onOpenChat }: PromptTabProps) {
   const { tokens } = useAppTokens()
   const initial = project.aiAgent?.systemPrompt ?? ""
   const [value, setValue] = useState(initial)
   const [expanded, setExpanded] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(true)
+
+  useEffect(() => {
+    const serverPrompt = project.aiAgent?.systemPrompt ?? ""
+    if (value === initial || value === serverPrompt) {
+      setValue(serverPrompt)
+    }
+    // Only run when the server-side prompt changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.aiAgent?.systemPrompt])
 
   // Pass project.id (BuilderProject UUID) — the PATCH /projects/:id/prompt endpoint
   // resolves the linked AIAgentConfig internally. Pass null when aiAgent is absent
@@ -48,7 +56,7 @@ export function PromptTab({ project, messages }: PromptTabProps) {
   // --- empty state ---
   if (!project.aiAgent) {
     return (
-      <PromptEmptyState tokens={tokens}>
+      <PromptEmptyState tokens={tokens} onOpenChat={onOpenChat}>
         Aguardando o Builder criar o agente. Continue a conversa no chat.
       </PromptEmptyState>
     )
@@ -93,13 +101,6 @@ export function PromptTab({ project, messages }: PromptTabProps) {
 
       {/* Section 4: Version History (real but gracefully empty) */}
       <VersionHistory tokens={tokens} projectId={project.id} />
-
-      {/* Section 5: Actions */}
-      <PromptActions
-        tokens={tokens}
-        onRegenerate={handleRegenerate}
-        onCopy={handleCopy}
-      />
     </div>
   )
 }

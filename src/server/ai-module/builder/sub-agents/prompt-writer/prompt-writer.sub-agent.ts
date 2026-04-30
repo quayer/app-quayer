@@ -32,6 +32,7 @@ export const promptWriterInputSchema = z.object({
   brief: z.string().min(20).max(4000),
   nicho: z.string().min(2).max(200),
   objetivo: z.string().min(10).max(500),
+  attachedTools: z.array(z.string()).default([]),
   nicheInsights: z
     .object({
       regulations: z.array(z.string()).optional(),

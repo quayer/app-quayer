@@ -22,7 +22,7 @@ export function LoginVerifyMagicClient() {
     if (result.needsOnboarding) {
       window.location.href = '/onboarding'
     } else {
-      window.location.href = result.user.role === 'admin' ? '/admin' : '/integracoes'
+      window.location.href = result.user.role === 'admin' ? '/admin' : '/projetos'
     }
   }, [])
 
@@ -55,7 +55,7 @@ export function LoginVerifyMagicClient() {
           const user = responseData.user
           const needsOnboarding = responseData.needsOnboarding
 
-          let redirectPath = '/integracoes'
+          let redirectPath = '/projetos'
           if (needsOnboarding || !user.currentOrgId) {
             redirectPath = '/onboarding'
           } else if (user.role === 'admin') {
@@ -121,12 +121,12 @@ export function LoginVerifyMagicClient() {
         <div className="flex flex-col gap-8">
           {/* Header */}
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
               {status === 'verifying' && 'Verificando login...'}
               {status === 'success' && 'Login realizado!'}
               {status === 'error' && 'Erro na verificação'}
             </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <p className="text-sm text-muted-foreground">
               {status === 'verifying' && 'Aguarde enquanto verificamos seu link...'}
               {status === 'success' && 'Redirecionando para o dashboard...'}
               {status === 'error' && error}
@@ -137,7 +137,7 @@ export function LoginVerifyMagicClient() {
           <div className="flex flex-col items-center gap-4">
             {status === 'verifying' && (
               <div role="status" aria-label="Verificando link mágico" className="flex flex-col items-center gap-4">
-                <Loader2 className="h-12 w-12 animate-spin text-gray-400" aria-hidden="true" />
+                <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" aria-hidden="true" />
                 <span className="sr-only">Verificando...</span>
               </div>
             )}
@@ -147,7 +147,7 @@ export function LoginVerifyMagicClient() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
                   <CheckCircle2 className="h-6 w-6 text-green-400" aria-hidden="true" />
                 </div>
-                <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-hidden="true" />
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
                 <span className="sr-only">Redirecionando...</span>
               </div>
             )}
@@ -159,7 +159,7 @@ export function LoginVerifyMagicClient() {
                 </div>
                 <Button
                   onClick={() => router.push('/login')}
-                  className="w-full min-h-[44px] bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
+                  className="w-full min-h-[44px] bg-foreground text-background hover:bg-foreground/90 border-transparent"
                 >
                   Fazer login novamente
                 </Button>

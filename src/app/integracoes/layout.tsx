@@ -1,14 +1,5 @@
-import { AppShell } from "@/client/components/layout/app-shell"
-import { ErrorBoundary } from "@/client/components/error-boundary"
+import { AppShell } from '@/client/components/layout/app-shell'
 
-export default async function IntegracoesLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <ErrorBoundary>
-      <AppShell>{children}</AppShell>
-    </ErrorBoundary>
-  )
+export default async function IntegracoesLayout({ children }: { children: React.ReactNode }) {
+  return <AppShell>{children}</AppShell>
 }

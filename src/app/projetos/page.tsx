@@ -14,8 +14,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic'
 
 export default async function ProjetosPage() {
-  // Auth pattern (matches src/app/integracoes/settings/billing/actions.ts):
-  // middleware populates `x-user-id` and `x-current-org-id` headers after verifying JWT.
+  // Auth pattern: middleware populates `x-user-id` and `x-current-org-id` headers after verifying JWT.
   const headersList = await headers()
   const userId = headersList.get('x-user-id')
   const orgId = headersList.get('x-current-org-id')

@@ -51,10 +51,16 @@ export async function getProjectDetail(
             systemPrompt: true,
             provider: true,
             model: true,
+            // Active AgentDeployments indicate a live channel connection.
+            // Field name on AIAgentConfig is 'deployments' (-> AgentDeployment[]).
+            deployments: {
+              where: { status: 'ACTIVE' },
+              select: { id: true, connectionId: true },
+              take: 1,
+            },
           },
         },
-        // Needed to derive hasWhatsAppConnection in the page layer.
-        // A 'live' deployment with a connectionId means WhatsApp is attached.
+        // Still included for backward compat with the publish saga.
         deployments: {
           select: {
             status: true,

@@ -41,7 +41,8 @@
     "prisma/seed*.ts",
     "scripts/**/*.ts",
     "test/**/*.ts",
-    "docs/claude-code-src/**",
+    "test/**/*.tsx",
+    "docs/**",
     "**/*-WIN-QVULKCTEEEN.ts",
     "**/*-WIN-QVULKCTEEEN.tsx"
   ]

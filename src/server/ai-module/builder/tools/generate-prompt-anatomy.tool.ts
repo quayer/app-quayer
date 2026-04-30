@@ -79,6 +79,7 @@ export function generatePromptAnatomyTool(ctx: BuilderToolExecutionContext) {
             brief: input.brief,
             nicho: input.nicho,
             objetivo: input.objetivo,
+            attachedTools: input.attachedTools,
           },
           {
             organizationId: ctx.organizationId,

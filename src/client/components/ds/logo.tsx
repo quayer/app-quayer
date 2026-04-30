@@ -72,6 +72,7 @@ export function Logo({
       aria-label={ariaLabel}
       className={`inline-flex items-center ${className}`}
       style={{ gap }}
+      suppressHydrationWarning
     >
       <svg
         width={iconWidth}
@@ -79,6 +80,7 @@ export function Logo({
         viewBox="0 0 200 248"
         filter={variant === 'color' || variant === 'light' ? `url(#${ids.filter})` : undefined}
         aria-hidden="true"
+        suppressHydrationWarning
       >
         <defs>
           {/* Gradiente principal ambar → laranja → vermelho profundo (fundo escuro) */}

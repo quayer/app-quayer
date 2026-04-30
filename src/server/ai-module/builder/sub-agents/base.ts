@@ -17,6 +17,7 @@
 import { generateText } from 'ai'
 import { getModel } from '@/server/ai-module/ai-agents/services/provider-factory'
 import { database } from '@/server/services/database'
+import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 import { BUILDER_RESERVED_NAME } from '../builder.constants'
 import type { SubAgentContext, SubAgentResult } from './types'
 
@@ -88,7 +89,15 @@ export async function runLLMSubAgent(
       modelName = modelName ?? builderAgent?.model ?? 'gpt-4o-mini'
     }
 
-    const model = getModel(provider, modelName)
+    // Resolve BYOK key for sub-agents (mirrors stream-agent-response.ts)
+    const resolved = await credentialResolver.resolve(
+      'AI',
+      provider,
+      { organizationId: context.organizationId, projectId: context.projectId },
+    )
+    const apiKey = resolved?.credentials?.apiKey as string | undefined
+
+    const model = getModel(provider, modelName, apiKey)
 
     const abortController = new AbortController()
     const onCallerAbort = () => abortController.abort()

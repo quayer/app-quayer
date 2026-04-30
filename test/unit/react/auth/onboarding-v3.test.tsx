@@ -91,7 +91,7 @@ describe('OnboardingV3', () => {
       expect(createOrgMock).toHaveBeenCalled()
     })
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith('/integracoes')
+      expect(pushMock).toHaveBeenCalledWith('/')
     })
   })
 

@@ -14,6 +14,8 @@ export interface PromptTabProps {
    * block.
    */
   messages?: ChatMessage[]
+  /** Optional callback to open the chat panel from the empty state. */
+  onOpenChat?: () => void
 }
 
 export type SaveState =

@@ -19,7 +19,7 @@ function GoogleCallbackContent() {
     if (result.needsOnboarding) {
       window.location.href = '/onboarding'
     } else {
-      window.location.href = result.user.role === 'admin' ? '/admin' : '/integracoes'
+      window.location.href = result.user.role === 'admin' ? '/admin' : '/projetos'
     }
   }, [])
 
@@ -44,7 +44,7 @@ function GoogleCallbackContent() {
         const user = responseData.user
         const needsOnboarding = responseData.needsOnboarding
 
-        let redirectPath = '/integracoes'
+        let redirectPath = '/projetos'
         if (needsOnboarding || !user.currentOrgId) {
           redirectPath = '/onboarding'
         } else if (user.role === 'admin') {
@@ -73,6 +73,7 @@ function GoogleCallbackContent() {
     const errorParam = searchParams.get('error')
 
     if (errorParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError('Erro na autenticação com Google')
       setTimeout(() => router.push('/login'), 3000)
       return

@@ -13,7 +13,7 @@ import type { ProjectType } from '@/lib/project-type'
 
 export type { ProjectType }
 export type ProjectStatus = 'draft' | 'production' | 'paused' | 'archived'
-export type PreviewTab = 'overview' | 'prompt' | 'playground' | 'deploy' | 'activity'
+export type PreviewTab = 'overview' | 'prompt' | 'playground' | 'deploy' | 'credentials'
 
 export interface WorkspaceProject {
   id: string

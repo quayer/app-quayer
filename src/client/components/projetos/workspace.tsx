@@ -3,10 +3,20 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Bot, MessageSquare, MoreVertical } from "lucide-react"
+import { ArrowLeft, Layout, MessageSquare, MoreVertical, Pencil } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/igniter.client"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/client/components/ui/alert-dialog"
 import { Button } from "@/client/components/ui/button"
 import { Input } from "@/client/components/ui/input"
 import {
@@ -27,7 +37,6 @@ import {
 } from "@/lib/project-status"
 
 import { ChatPanel } from "./chat-panel"
-import { ContextUsage } from "./chat/context-usage"
 import { PreviewPanel } from "./preview-panel"
 import { getTabByValue } from "./preview/tab-registry"
 import type { ChatMessage, PreviewTab, WorkspaceProject } from "./types"
@@ -55,6 +64,7 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
 
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = React.useState(false)
   const [mobilePanel, setMobilePanel] = React.useState<"chat" | "preview">(
     "chat",
   )
@@ -166,7 +176,7 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
         return
       }
       if (action === "archive") {
-        archiveMutation.mutate({ params: { id: project.id }, body: {} })
+        setArchiveConfirmOpen(true)
         return
       }
       if (action === "duplicate") {
@@ -174,10 +184,34 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
         return
       }
     },
-    [project.id, archiveMutation, duplicateMutation],
+    [project.id, duplicateMutation],
   )
 
   return (
+    <>
+    <AlertDialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Arquivar projeto?</AlertDialogTitle>
+          <AlertDialogDescription>
+            O projeto <strong>{name}</strong> será arquivado e removido da lista
+            principal. Você pode encontrá-lo nos projetos arquivados depois.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() =>
+              archiveMutation.mutate({ params: { id: project.id }, body: {} })
+            }
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Arquivar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <div
       className="flex h-screen flex-col"
       style={{
@@ -228,7 +262,7 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
             <button
               type="button"
               onClick={() => setIsEditingName(true)}
-              className="min-w-0 truncate rounded-md px-2 py-1 text-left text-sm font-semibold transition-colors"
+              className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm font-semibold transition-colors"
               style={{ color: tokens.textPrimary }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = tokens.hoverBg
@@ -236,9 +270,13 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = "transparent"
               }}
-              title="Clique para renomear"
+              aria-label="Renomear projeto"
             >
-              {name}
+              <span className="truncate">{name}</span>
+              <Pencil
+                className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
+                aria-hidden="true"
+              />
             </button>
           )}
 
@@ -256,11 +294,6 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
-          {/* Context usage indicator — hidden on very narrow mobile */}
-          <div className="hidden sm:flex">
-            <ContextUsage messages={liveMessages} variant="compact" />
-          </div>
-
           {/* Mobile toggle — shadcn ToggleGroup (radiogroup a11y) */}
           <ToggleGroup
             type="single"
@@ -275,9 +308,9 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
               <MessageSquare className="h-3.5 w-3.5" />
               Chat
             </ToggleGroupItem>
-            <ToggleGroupItem value="preview" aria-label="Ver agente" className="gap-1.5 px-2.5 text-xs">
-              <Bot className="h-3.5 w-3.5" />
-              Agente
+            <ToggleGroupItem value="preview" aria-label="Ver painel" className="gap-1.5 px-2.5 text-xs">
+              <Layout className="h-3.5 w-3.5" />
+              Painel
             </ToggleGroupItem>
           </ToggleGroup>
 
@@ -342,5 +375,6 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
         </section>
       </main>
     </div>
+    </>
   )
 }

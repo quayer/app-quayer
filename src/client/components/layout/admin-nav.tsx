@@ -10,7 +10,6 @@ import {
   FileSearch,
   LayoutDashboard,
   Mail,
-  MonitorSmartphone,
   Plug,
   Settings,
   Shield,
@@ -29,7 +28,7 @@ const ADMIN_MENU: AdminMenuItem[] = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/admin/organizations", label: "Organizações", icon: Building2 },
   { href: "/admin/integracoes", label: "Conexões", icon: Plug },
-  { href: "/admin/sessions", label: "Sessões", icon: MonitorSmartphone },
+
   { href: "/admin/invitations", label: "Convites", icon: Mail },
   { href: "/admin/notificacoes", label: "Notificações", icon: Bell },
   { href: "/admin/audit", label: "Auditoria", icon: FileSearch },
@@ -57,7 +56,7 @@ export function AdminNav() {
       className="hidden lg:flex lg:w-[252px] lg:shrink-0 lg:flex-col"
       aria-label="Navegação do painel admin"
       style={{
-        backgroundColor: isLight ? "#FFFFFF" : "#0B0704",
+        backgroundColor: "var(--q-admin-nav-bg)",
         color: tokens.textPrimary,
         borderRight: `1px solid ${tokens.divider}`,
         fontFamily: "var(--font-sans), 'DM Sans', system-ui, sans-serif",
@@ -121,7 +120,7 @@ export function AdminNav() {
               className="text-[10px]"
               style={{ color: tokens.textTertiary }}
             >
-              Início · Projetos · Recursos
+              Início · Projetos
             </div>
           </div>
         </Link>

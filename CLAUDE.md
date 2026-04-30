@@ -14,12 +14,11 @@
 
 | Módulo | Features | Skill |
 |---|---|---|
-| `core/` | auth, organizations, sessions, invitations, permissions, onboarding, ip-rules, scim-tokens, verified-domains, device-sessions, system-settings, notifications, health | `.claude/skills/auth.md` + `.claude/skills/admin.md` |
-| `communication/` | messages, connections, instances, quick-replies, bots, share, sse, files | `.claude/skills/conversations.md` + `.claude/skills/integrations.md` |
-| `crm/` | contacts, attributes, observations, calls, projects, **leads** ✨ | `.claude/skills/conversations.md` |
-| `features-module/` | analytics, dashboard, audit, logs, webhooks, **short-links** ✨ | `.claude/skills/admin.md` |
+| `core/` | api-keys, auth, billing, device-auth, device-sessions, health, invitations, ip-rules, notifications, onboarding, organizations, permissions, scim-tokens, system-settings, verified-domains | `.claude/skills/auth.md` + `.claude/skills/admin.md` |
+| `communication/` | business-profile, campaigns, connection-settings, connections, files, flows, instances, messages, services, sse, templates | `.claude/skills/conversations.md` + `.claude/skills/integrations.md` |
+| `features-module/` | analytics, audit, dashboard, logs, webhooks | `.claude/skills/admin.md` |
 | `integration/` | chatwoot, organization-providers | `.claude/skills/integrations.md` |
-| `ai-module/` | ai agents, bots, knowledge bases | `.claude/skills/auth.md` |
+| `ai-module/` | ai, ai-agents, builder, shared | `.claude/skills/auth.md` + `.claude/skills/quayer-builder.md` |
 | `frontend/` | componentes UI, layouts, páginas, landing pages, design system | `.claude/skills/design.md` |
 | `testing/` | testes unit/integration/e2e, CI workflows, rollback, release | `.claude/skills/testing-pipeline.md` + `.claude/skills/release-checklist.md` |
 
@@ -51,15 +50,15 @@ schema Prisma → migration → Zod schema → interfaces → repository → con
 
 ```
 src/server/
-├── core/           → auth, organizations, sessions, invitations, permissions,
-│                     onboarding, ip-rules, scim-tokens, verified-domains,
-│                     device-sessions, system-settings, notifications, health, api-keys
-├── communication/  → messages, connections, connection-settings, instances,
-│                     share, sse, quick-replies, bots, files
-├── crm/            → contacts, attributes, observations, calls, projects, leads ✨
-├── features-module/→ analytics, dashboard, audit, logs, webhooks, short-links ✨
+├── core/           → api-keys, auth, billing, device-auth, device-sessions,
+│                     health, invitations, ip-rules, notifications, onboarding,
+│                     organizations, permissions, scim-tokens, system-settings,
+│                     verified-domains
+├── communication/  → business-profile, campaigns, connection-settings, connections,
+│                     files, flows, instances, messages, services, sse, templates
+├── features-module/→ analytics, audit, dashboard, logs, webhooks
 ├── integration/    → chatwoot, organization-providers
-├── ai-module/      → ai agents
+├── ai-module/      → ai, ai-agents, builder, shared
 └── services/       → database (Prisma), store (Redis), jobs (BullMQ)
 
 src/app/            → Next.js App Router (páginas + API routes)
@@ -69,14 +68,14 @@ src/igniter.ts      → Init Igniter.js
 src/igniter.router.ts → Registro de controllers (importa dos módulos)
 ```
 
-### Novos Modelos (2026-03-14)
+### Modelos Prisma Relevantes (pós-pivot Builder IA)
 | Modelo | Módulo | Tabela |
 |---|---|---|
-| `Lead`, `LeadOpportunity`, `LeadTask` | crm/ | `leads`, `lead_opportunities`, `lead_tasks` |
 | `Campaign`, `CampaignRecipient` | communication/ | `campaigns`, `campaign_recipients` |
 | `MessageTemplate` | communication/ | `message_templates` |
-| `ShortLink`, `ShortLinkClick` | features-module/ | `short_links`, `short_link_clicks` |
+| `ShortLink`, `ShortLinkClick` | (schema, sem módulo dedicado ainda) | `short_links`, `short_link_clicks` |
 | `UserPreferences` | core/auth | `UserPreferences` |
+| `BuilderProject`, `BuilderDeployment`, `BuilderProjectConversation`, `BuilderProjectMessage`, `BuilderPromptVersion`, `BuilderToolCall`, `BuilderContextSnapshot` | ai-module/builder | `builder_*` |
 
 ---
 

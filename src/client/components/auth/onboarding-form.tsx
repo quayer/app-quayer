@@ -146,7 +146,7 @@ export function OnboardingForm({
   if (step === "loading") {
     return (
       <div className={cn("flex items-center justify-center py-12", className)} {...props}>
-        <Loader2 className="h-6 w-6 animate-spin text-white/40" aria-hidden="true" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
         <span className="sr-only">Carregando...</span>
       </div>
     )
@@ -157,16 +157,16 @@ export function OnboardingForm({
     return (
       <div className={cn("w-full flex flex-col gap-10", className)} {...props}>
         <div className="space-y-3 animate-fade-in-up stagger-1">
-          <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">
+          <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight">
             Preparando tudo...
           </h1>
-          <p className="text-[0.875rem] text-white/40 leading-relaxed">
+          <p className="text-[0.875rem] text-muted-foreground leading-relaxed">
             Estamos configurando sua conta
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Building2 className="h-5 w-5 text-white/30" aria-hidden="true" />
-          <Loader2 className="h-5 w-5 animate-spin text-white/40" aria-hidden="true" />
+          <Building2 className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
           <span className="sr-only">Configurando sua conta...</span>
         </div>
       </div>
@@ -178,10 +178,10 @@ export function OnboardingForm({
       <div className={cn("w-full flex flex-col gap-10", className)} {...props}>
         {/* Header */}
         <div className="space-y-3 animate-fade-in-up stagger-1">
-          <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight">
+          <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight">
             Configure sua conta
           </h1>
-          <p className="text-[0.875rem] text-white/40 leading-relaxed">
+          <p className="text-[0.875rem] text-muted-foreground leading-relaxed">
             Informe seus dados para começar
           </p>
         </div>
@@ -191,14 +191,14 @@ export function OnboardingForm({
             {error && (
               <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
                 <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                <p className="text-sm text-red-300" role="alert" aria-live="assertive">{error}</p>
+                <p className="text-sm text-red-600 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
               </div>
             )}
 
             {/* firstName + lastName side by side */}
             <div className="grid grid-cols-2 gap-3">
               <Field>
-                <FieldLabel htmlFor="firstName" className="text-[0.8rem] font-medium text-white/50 uppercase tracking-wider">Nome</FieldLabel>
+                <FieldLabel htmlFor="firstName" className="text-[0.8rem] font-medium text-muted-foreground uppercase tracking-wider">Nome</FieldLabel>
                 <Input
                   id="firstName"
                   type="text"
@@ -214,7 +214,7 @@ export function OnboardingForm({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="lastName" className="text-[0.8rem] font-medium text-white/50 uppercase tracking-wider">Sobrenome</FieldLabel>
+                <FieldLabel htmlFor="lastName" className="text-[0.8rem] font-medium text-muted-foreground uppercase tracking-wider">Sobrenome</FieldLabel>
                 <Input
                   id="lastName"
                   type="text"
@@ -231,7 +231,7 @@ export function OnboardingForm({
 
             {/* companyName full width */}
             <Field>
-              <FieldLabel htmlFor="companyName" className="text-[0.8rem] font-medium text-white/50 uppercase tracking-wider">Nome da empresa</FieldLabel>
+              <FieldLabel htmlFor="companyName" className="text-[0.8rem] font-medium text-muted-foreground uppercase tracking-wider">Nome da empresa</FieldLabel>
               <Input
                 id="companyName"
                 type="text"
@@ -252,8 +252,8 @@ export function OnboardingForm({
               className={cn(
                 "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
                 firstName.trim() && companyName.trim()
-                  ? "bg-white text-[#0a0d14] hover:bg-white/90 active:bg-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
-                  : "bg-white/[0.06] text-white/30 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/40"
+                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+                  : "bg-muted text-muted-foreground border border-border hover:bg-muted/80 hover:text-foreground"
               )}
               disabled={isLoading || !firstName.trim() || !companyName.trim()}
               aria-busy={isLoading}
@@ -267,13 +267,13 @@ export function OnboardingForm({
           </FieldGroup>
         </form>
 
-        <p className="text-center text-[0.75rem] text-white/25 leading-relaxed animate-fade-in-up stagger-3">
+        <p className="text-center text-[0.75rem] text-muted-foreground/60 leading-relaxed animate-fade-in-up stagger-3">
           Ao continuar, você concorda com os{" "}
-          <a href="/termos" target="_blank" className="underline underline-offset-2 hover:text-white/40 transition-colors">
+          <a href="/termos" target="_blank" className="underline underline-offset-2 hover:text-foreground/70 transition-colors">
             Termos de Uso
           </a>{" "}
           e a{" "}
-          <a href="/privacidade" target="_blank" className="underline underline-offset-2 hover:text-white/40 transition-colors">
+          <a href="/privacidade" target="_blank" className="underline underline-offset-2 hover:text-foreground/70 transition-colors">
             Política de Privacidade
           </a>.
         </p>

@@ -717,6 +717,164 @@ export const projectsRoutes = {
   }),
 
   // ==========================================
+  // GET PROJECT CHANNEL — GET /projects/:id/channel
+  // ==========================================
+  getProjectChannel: igniter.query({
+    name: 'Get Project Channel',
+    description: 'Retorna o canal (Connection) ativo vinculado ao agente do projeto via AgentDeployment.',
+    path: '/projects/:id/channel' as const,
+    method: 'GET',
+    use: [authOrApiKeyProcedure({ required: true })],
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = getProjectParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+
+      const database = getDatabase()
+      const project = await database.builderProject.findFirst({
+        where: { id, organizationId: user.currentOrgId },
+        select: { aiAgentId: true },
+      })
+
+      if (!project) return response.notFound('Projeto não encontrado')
+      if (!project.aiAgentId) return response.success({ channel: null })
+
+      const deployment = await database.agentDeployment.findFirst({
+        where: {
+          agentConfigId: project.aiAgentId,
+          status: 'ACTIVE',
+        },
+        include: {
+          connection: {
+            select: {
+              id: true,
+              name: true,
+              phoneNumber: true,
+              status: true,
+              channel: true,
+              provider: true,
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      })
+
+      return response.success({ channel: deployment?.connection ?? null })
+    },
+  }),
+
+  // ==========================================
+  // ATTACH CHANNEL — POST /projects/:id/channel
+  // ==========================================
+  attachChannel: igniter.mutation({
+    name: 'Attach Channel to Project',
+    description: 'Vincula um canal WhatsApp existente ao agente do projeto via AgentDeployment.',
+    path: '/projects/:id/channel' as const,
+    method: 'POST',
+    use: [authOrApiKeyProcedure({ required: true })],
+    body: z.object({ connectionId: z.string().uuid('ID de canal inválido') }),
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = getProjectParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+      const { connectionId } = request.body
+
+      const database = getDatabase()
+
+      const project = await database.builderProject.findFirst({
+        where: { id, organizationId: user.currentOrgId },
+        select: { aiAgentId: true },
+      })
+
+      if (!project) return response.notFound('Projeto não encontrado')
+      if (!project.aiAgentId) return response.badRequest('O Builder ainda não criou o agente para este projeto')
+
+      // Validate connection belongs to org
+      const connection = await database.connection.findFirst({
+        where: { id: connectionId, organizationId: user.currentOrgId },
+        select: { id: true, name: true, phoneNumber: true, status: true },
+      })
+
+      if (!connection) return response.notFound('Canal não encontrado ou não pertence à sua organização')
+
+      // Deactivate any existing deployment for this agent
+      await database.agentDeployment.updateMany({
+        where: { agentConfigId: project.aiAgentId, status: 'ACTIVE' },
+        data: { status: 'PAUSED', updatedAt: new Date() },
+      })
+
+      // Create or reactivate deployment for the chosen connection
+      const existing = await database.agentDeployment.findFirst({
+        where: { agentConfigId: project.aiAgentId, connectionId },
+        select: { id: true },
+      })
+
+      if (existing) {
+        await database.agentDeployment.update({
+          where: { id: existing.id },
+          data: { status: 'ACTIVE', updatedAt: new Date() },
+        })
+      } else {
+        await database.agentDeployment.create({
+          data: {
+            agentConfigId: project.aiAgentId,
+            connectionId,
+            mode: 'CHAT',
+            status: 'ACTIVE',
+          },
+        })
+      }
+
+      return response.success({ connectionId, name: connection.name })
+    },
+  }),
+
+  // ==========================================
+  // DETACH CHANNEL — DELETE /projects/:id/channel
+  // ==========================================
+  detachChannel: igniter.mutation({
+    name: 'Detach Channel from Project',
+    description: 'Remove o vínculo entre o canal ativo e o agente do projeto.',
+    path: '/projects/:id/channel' as const,
+    method: 'DELETE',
+    use: [authOrApiKeyProcedure({ required: true })],
+    body: z.object({}).optional(),
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = getProjectParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+
+      const database = getDatabase()
+      const project = await database.builderProject.findFirst({
+        where: { id, organizationId: user.currentOrgId },
+        select: { aiAgentId: true },
+      })
+
+      if (!project) return response.notFound('Projeto não encontrado')
+      if (!project.aiAgentId) return response.success({ detached: false })
+
+      await database.agentDeployment.updateMany({
+        where: { agentConfigId: project.aiAgentId, status: 'ACTIVE' },
+        data: { status: 'PAUSED', updatedAt: new Date() },
+      })
+
+      return response.success({ detached: true })
+    },
+  }),
+
+  // ==========================================
   // PLAYGROUND STREAM — POST /projects/:id/playground/stream
   // ==========================================
   playgroundStream: igniter.mutation({

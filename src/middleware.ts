@@ -33,11 +33,13 @@ const ONBOARDING_PATHS = ['/onboarding'];
  * abaixo porque `startsWith('/')` daria match em tudo.
  */
 const PROTECTED_PATHS = [
-  '/integracoes',
   '/projetos',
-  '/recursos',
+  '/canais',
   '/admin',
+  '/conta',
+  '/org',
   '/dashboard',
+  '/docs',
   '/instances',
   '/organizations',
   '/projects',
@@ -50,7 +52,7 @@ const PROTECTED_PATHS = [
 /**
  * Rotas que requerem role de System Admin
  */
-const ADMIN_ONLY_PATHS = ['/admin'];
+const ADMIN_ONLY_PATHS = ['/admin', '/docs'];
 
 /**
  * Middleware principal
@@ -59,7 +61,9 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Permitir rotas públicas sem autenticação
-  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
+  // startsWith sozinho daria match em prefixos parciais (ex: '/login' matcharia
+  // '/login-admin'). Verificamos o separador de segmento para evitar bypass.
+  if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'))) {
     return NextResponse.next();
   }
 
@@ -132,6 +136,11 @@ export async function middleware(request: NextRequest) {
   }
 
   // 9. Adicionar informações do usuário aos headers (para uso em Server Components)
+  // IMPORTANTE: estes headers são gerados AQUI a partir do JWT verificado.
+  // Route Handlers e Server Components NUNCA devem usá-los como fonte primária
+  // de autenticação — sempre revalidar via JWT ou session no handler. Eles
+  // existem apenas como conveniência de leitura para Server Components que já
+  // estão atrás desta camada de middleware.
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-user-id', payload.userId);
   requestHeaders.set('x-user-email', payload.email);

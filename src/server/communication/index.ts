@@ -1,7 +1,7 @@
 /**
  * Communication Module - Public Exports
  *
- * Messages, Instances, Connections, Bots, Files and real-time features
+ * Messages, Instances, Connections, Bots and real-time features
  */
 
 // Messages
@@ -21,6 +21,3 @@ export { instancesController } from './instances/controllers/instances.controlle
 
 // SSE
 export { sseController } from './sse/controllers/sse.controller'
-
-// Files
-export { filesController } from './files/controllers/files.controller'

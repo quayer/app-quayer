@@ -22,6 +22,7 @@ import {
 import { updateStateSummary } from '../../services/context-summary.service'
 import { compactIfNeeded } from './compact-if-needed'
 import { persistAssistantMessage, persistErrorMessage } from './persist-message'
+import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +33,8 @@ export interface StreamAgentResponseParams {
   conversationId: string
   organizationId: string
   userId: string
+  /** BuilderProject ID — enables project-level credential override */
+  projectId?: string
   /** The fresh user message content (already persisted). */
   userMessage: string
   /** Optional pre-existing project state summary to include as banner. */
@@ -124,6 +127,23 @@ export async function* streamAgentResponse(
     return
   }
 
+  // Resolve the agent's AI provider so we can honour the org's BYOK key
+  // configured in OrganizationProvider (the integrations page).
+  // We need the agentConfig's provider field — load it here with a minimal
+  // select so we avoid a second full fetch when the runtime repeats the load.
+  const agentConfigForProvider = await database.aIAgentConfig.findUnique({
+    where: { id: params.agentConfigId },
+    select: { provider: true },
+  })
+  const agentProvider = agentConfigForProvider?.provider ?? 'anthropic'
+
+  const resolvedCredentials = await credentialResolver.resolve(
+    'AI',
+    agentProvider,
+    { organizationId: params.organizationId, projectId: params.projectId },
+  )
+  const orgApiKey = resolvedCredentials?.credentials?.apiKey as string | undefined
+
   // Synthetic IDs (Option A) — the Builder chat is NOT a WhatsApp
   // conversation. The runtime tolerates this: buildConversationContext
   // returns [] for unknown sessionIds, and tools get these IDs purely
@@ -135,6 +155,7 @@ export async function* streamAgentResponse(
     connectionId: 'builder-internal',
     organizationId: params.organizationId,
     messageContent: built.augmented,
+    apiKey: orgApiKey,
   }
 
   let accumulatedText = ''

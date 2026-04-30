@@ -47,6 +47,7 @@ const baseInput: PromptWriterInput = {
   brief: 'Atendimento de barbearia, agenda cortes, tom descontraído e jovem.',
   nicho: 'barbearia',
   objetivo: 'Qualificar clientes e agendar cortes de cabelo',
+  attachedTools: [],
 }
 
 const wellFormedMarkdown = `# Papel

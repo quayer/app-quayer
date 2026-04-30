@@ -7,8 +7,8 @@
 //   [1] AUTH & IDENTITY        — User, Organization, UserOrganization, Session,
 //                                RefreshToken, TempUser, VerificationCode,
 //                                Invitation, PasskeyCredential, PasskeyChallenge,
-//                                TotpDevice, RecoveryCode, DeviceSession, IpRule,
-//                                CustomRole, VerifiedDomain, ScimToken
+//                                TotpDevice, RecoveryCode, DeviceSession,
+//                                CustomRole, VerifiedDomain
 //   [2] CONNECTIONS & MESSAGING — Connection, ConnectionSettings, ConnectionEvent,
 //                                 ChatSession, Message
 //   [3] ORGANIZATIONS & TEAMS  — Department, Project, ApiKey, Invitation
@@ -21,7 +21,7 @@
 //
 // NOTES:
 //   - Tables without @@map() use PascalCase in PostgreSQL (legacy, matches init migration)
-//   - DeviceSession and IpRule were added via raw SQL migrations (no Prisma migrate)
+//   - DeviceSession was added via raw SQL migration (no Prisma migrate)
 //   - GeoAlertMode enum added via raw SQL migration
 //   - AccessLevel and SystemConfig are DEPRECATED — use CustomRole and SystemSettings
 // ══════════════════════════════════════════════════════════════════════════════
@@ -93,20 +93,22 @@ model Organization {
   useOwnDatabase Boolean @default(false) // Usar próprio PostgreSQL
   useOwnStorage  Boolean @default(false) // Usar próprio S3/Storage
 
+  // Builder IA — vertical & language
+  vertical      String? // barbearia, clinica, imobiliaria, etc.
+  agentLanguage String? @default("pt-BR")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        UserOrganization[]
-  connections  Connection[]
-  projects     Project[]
-  webhooks     Webhook[]
-  auditLogs    AuditLog[]
-  chatSessions ChatSession[]
+  users           UserOrganization[]
+  connections     Connection[]
+  projects        Project[]
+  webhooks        Webhook[]
+  auditLogs       AuditLog[]
+  chatSessions    ChatSession[]
   providers       OrganizationProvider[]
   customRoles     CustomRole[]
   verifiedDomains VerifiedDomain[]
-  scimTokens      ScimToken[]
-  ipRules         IpRule[]
   invitations     Invitation[]
   subscriptions   Subscription[]
   invoices        Invoice[]
@@ -147,9 +149,9 @@ model CustomRole {
   name           String
   slug           String
   description    String?
-  permissions    Json     // Matches PERMISSIONS_MATRIX structure: { resource: [action, ...] }
+  permissions    Json // Matches PERMISSIONS_MATRIX structure: { resource: [action, ...] }
   isSystem       Boolean  @default(false)
-  priority       Int      // 3=master, 2=manager, 1=user
+  priority       Int // 3=master, 2=manager, 1=user
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -166,10 +168,10 @@ model VerifiedDomain {
   id                 String    @id @default(uuid())
   organizationId     String
   domain             String
-  verificationMethod String    // DNS_TXT or EMAIL
+  verificationMethod String // DNS_TXT or EMAIL
   verificationToken  String
   verifiedAt         DateTime?
-  defaultRoleId      String?   // FK to CustomRole for auto-join
+  defaultRoleId      String? // FK to CustomRole for auto-join
   autoJoin           Boolean   @default(false)
   createdAt          DateTime  @default(now())
 
@@ -183,14 +185,14 @@ model VerifiedDomain {
 }
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  password         String?
-  name             String
-  emailVerified    DateTime?
-  currentOrgId     String? // Org ativa no momento
-  role             String    @default("user") // admin (sistema), user
-  isActive         Boolean   @default(true)
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String?
+  name          String
+  emailVerified DateTime?
+  currentOrgId  String? // Org ativa no momento
+  role          String    @default("user") // admin (sistema), user
+  isActive      Boolean   @default(true)
 
   // Onboarding
   onboardingCompleted Boolean @default(false)
@@ -202,31 +204,37 @@ model User {
   // Two-Factor Authentication
   twoFactorEnabled Boolean @default(false)
 
+  // Profile / Agency (Builder IA)
+  isAgency  Boolean @default(false)
+  language  String? @default("pt-BR")
+  timezone  String? @default("America/Sao_Paulo")
+  avatarUrl String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  preferences         UserPreferences?
+  preferences             UserPreferences?
+  notificationPreferences NotificationPreferences?
 
   sessions            Session[]
   refreshTokens       RefreshToken[]
-  invitations         Invitation[]         @relation("InvitedBy")
+  invitations         Invitation[]       @relation("InvitedBy")
   organizations       UserOrganization[]
   auditLogs           AuditLog[]
   verificationCodes   VerificationCode[]
   files               File[]
-  assignedConnections Connection[]         @relation("AssignedCustomer")
+  assignedConnections Connection[]       @relation("AssignedCustomer")
 
   passkeyCredentials PasskeyCredential[]
   totpDevices        TotpDevice[]
   recoveryCodes      RecoveryCode[]
   deviceSessions     DeviceSession[]
-  createdIpRules     IpRule[]       @relation("IpRuleCreatedBy")
   promptVersions     AgentPromptVersion[]
 
   // Builder (home-chat-builder)
-  builderProjects              BuilderProject[]
-  builderProjectConversations  BuilderProjectConversation[]
-  builderPublishedPromptVersions BuilderPromptVersion[] @relation("BuilderPromptVersionPublisher")
+  builderProjects                BuilderProject[]
+  builderProjectConversations    BuilderProjectConversation[]
+  builderPublishedPromptVersions BuilderPromptVersion[]       @relation("BuilderPromptVersionPublisher")
 
   @@index([email])
   @@index([currentOrgId])
@@ -245,6 +253,23 @@ model UserPreferences {
   updatedAt            DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ── Notification Preferences (per-user channel opt-ins) ──────────────────────
+
+model NotificationPreferences {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailSecurity   Boolean  @default(true)
+  emailProduct    Boolean  @default(true)
+  emailMarketing  Boolean  @default(false)
+  pushEnabled     Boolean  @default(false)
+  pushMentions    Boolean  @default(true)
+  pushDeployments Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("notification_preferences")
 }
 
 // ── Passkeys / WebAuthn ──────────────────────────────────────────────────────
@@ -309,10 +334,10 @@ model TempUser {
 model VerificationCode {
   id         String   @id @default(uuid())
   userId     String?
-  identifier String   // email address or phone number
+  identifier String // email address or phone number
   code       String
-  type       String   // OTP, MAGIC_LINK, RESET_PASSWORD, EMAIL_VERIFICATION, WHATSAPP_OTP, TOTP_DISABLE
-  token      String?  // For magic links (JWT token)
+  type       String // OTP, MAGIC_LINK, RESET_PASSWORD, EMAIL_VERIFICATION, WHATSAPP_OTP, TOTP_DISABLE
+  token      String? // For magic links (JWT token)
   used       Boolean  @default(false)
   expiresAt  DateTime
   createdAt  DateTime @default(now())
@@ -474,14 +499,14 @@ model Connection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project                Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assignedCustomer       User?                   @relation("AssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
-  webhooks               Webhook[]
-  chatSessions           ChatSession[]
-  messages               Message[]
-  n8nCallLogs            N8nCallLog[]
-  agentDeployments       AgentDeployment[]
+  organization     Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedCustomer User?             @relation("AssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
+  webhooks         Webhook[]
+  chatSessions     ChatSession[]
+  messages         Message[]
+  n8nCallLogs      N8nCallLog[]
+  agentDeployments AgentDeployment[]
 
   // Advanced Settings
   settings ConnectionSettings?
@@ -771,7 +796,6 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-
 // ── Chat Sessions & Messages ──────────────────────────────────────────────────
 
 model ChatSession {
@@ -850,11 +874,11 @@ model ChatSession {
   closedAt  DateTime?
 
   // Relacionamentos
-  connection         Connection          @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department         Department?         @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
-  aiAgentConfig      AIAgentConfig?      @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
-  messages           Message[]
+  connection    Connection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department    Department?    @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  aiAgentConfig AIAgentConfig? @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
+  messages      Message[]
 
   @@index([contactPhone])
   @@index([connectionId])
@@ -895,9 +919,9 @@ enum AutoPauseBehavior {
 
 // Geo Alert Mode — added via migration add_geo_alert_and_country_code
 enum GeoAlertMode {
-  off     // Sem alerta
-  notify  // Notifica admin quando login de país novo
-  block   // Bloqueia login de país diferente do último
+  off // Sem alerta
+  notify // Notifica admin quando login de país novo
+  block // Bloqueia login de país diferente do último
 }
 
 model Message {
@@ -1103,8 +1127,8 @@ model MessageTemplate {
   headerContent  String?
   body           String   @db.Text
   footer         String?
-  buttons        Json?    // Array of buttons (quick_reply, url, phone_number)
-  metaTemplateId String?  // ID retornado pela Meta API após aprovação
+  buttons        Json? // Array of buttons (quick_reply, url, phone_number)
+  metaTemplateId String? // ID retornado pela Meta API após aprovação
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -1226,9 +1250,15 @@ model OrganizationProvider {
   id             String @id @default(uuid())
   organizationId String
 
+  // Label amigável (ex: "Chave Prod", "Chave Dev")
+  name String @default("")
+
   // Tipo do provedor
   category ProviderCategory
   provider String // openai, anthropic, redis, supabase, etc
+
+  // Escopo: null = organização, set = override de um projeto Builder específico
+  builderProjectId String?
 
   // Configuração
   isActive  Boolean @default(true)
@@ -1251,15 +1281,16 @@ model OrganizationProvider {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  builderProject BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
 
-  @@unique([organizationId, category, provider, priority])
+  @@unique([organizationId, category, provider, builderProjectId, priority])
   @@index([organizationId, category])
   @@index([organizationId, isActive])
   @@index([category, provider])
+  @@index([builderProjectId])
   @@map("organization_providers")
 }
-
 
 // ── Short Links with Click Tracking (Features module) ────────────────────────
 
@@ -1351,13 +1382,13 @@ model AIAgentConfig {
   updatedAt DateTime @updatedAt
 
   // Relacionamentos
-  sessions   ChatSession[]
+  sessions       ChatSession[]
   promptVersions AgentPromptVersion[]
   deployments    AgentDeployment[]
 
   // Builder (home-chat-builder)
-  builderProject         BuilderProject?
-  builderPromptVersions  BuilderPromptVersion[]
+  builderProject        BuilderProject?
+  builderPromptVersions BuilderPromptVersion[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -1367,20 +1398,20 @@ model AIAgentConfig {
 // ── Agent Prompt Versions ─────────────────────────────────────────────────────
 
 model AgentPromptVersion {
-  id             String              @id @default(uuid())
-  agentConfigId  String
-  version        Int                 // Auto-increment per agent
-  systemPrompt   String              @db.Text
-  isActive       Boolean             @default(false)
-  status         PromptVersionStatus @default(ARCHIVED)
-  changelog      String?
-  createdBy      String?
+  id            String              @id @default(uuid())
+  agentConfigId String
+  version       Int // Auto-increment per agent
+  systemPrompt  String              @db.Text
+  isActive      Boolean             @default(false)
+  status        PromptVersionStatus @default(ARCHIVED)
+  changelog     String?
+  createdBy     String?
 
   // Metrics (aggregated)
-  totalMessages    Int   @default(0)
-  totalTransfers   Int   @default(0)
-  totalCost        Float @default(0)
-  avgResponseTime  Float @default(0)
+  totalMessages   Int   @default(0)
+  totalTransfers  Int   @default(0)
+  totalCost       Float @default(0)
+  avgResponseTime Float @default(0)
 
   createdAt DateTime @default(now())
 
@@ -1402,9 +1433,9 @@ model AgentTool {
   name           String
   description    String
   type           AgentToolType @default(CUSTOM)
-  parameters     Json?         // JSON Schema for tool parameters
-  webhookUrl     String?       // For CUSTOM type tools
-  webhookSecret  String?       // Optional secret for webhook auth
+  parameters     Json? // JSON Schema for tool parameters
+  webhookUrl     String? // For CUSTOM type tools
+  webhookSecret  String? // Optional secret for webhook auth
   webhookTimeout Int           @default(10000) // Timeout in ms
   isActive       Boolean       @default(true)
 
@@ -1420,12 +1451,12 @@ model AgentTool {
 // ── Agent Deployments ─────────────────────────────────────────────────────────
 
 model AgentDeployment {
-  id             String            @id @default(uuid())
-  agentConfigId  String
-  connectionId   String
-  mode           AgentDeployMode   @default(CHAT)
-  status         AgentDeployStatus @default(DRAFT)
-  config         Json?             // Mode-specific configuration (webhook URL, etc.)
+  id            String            @id @default(uuid())
+  agentConfigId String
+  connectionId  String
+  mode          AgentDeployMode   @default(CHAT)
+  status        AgentDeployStatus @default(DRAFT)
+  config        Json? // Mode-specific configuration (webhook URL, etc.)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1460,10 +1491,12 @@ model BuilderProject {
   updatedAt      DateTime             @updatedAt
   archivedAt     DateTime?
 
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User           @relation(fields: [userId], references: [id])
-  aiAgent      AIAgentConfig? @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
-  conversation BuilderProjectConversation?
+  organization      Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User                        @relation(fields: [userId], references: [id])
+  aiAgent           AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  conversation      BuilderProjectConversation?
+  deployments       BuilderDeployment[]
+  projectProviders  OrganizationProvider[]
 
   @@index([organizationId, type, status])
   @@index([userId, updatedAt(sort: Desc)])
@@ -1551,6 +1584,99 @@ enum BuilderPromptVersionCreatedBy {
   chat
   manual
   rollback
+}
+
+// ── Builder Deployments (saga state for cross-module publish) ────────────────
+// Tracks the publish → create-instance → attach-connection flow.
+// Allows observability, resume-on-failure, and compensating rollback.
+
+model BuilderDeployment {
+  id              String                  @id @default(uuid())
+  projectId       String
+  aiAgentId       String
+  promptVersionId String
+  instanceId      String? // WhatsApp UAZ instance id (communication/instances)
+  connectionId    String? // communication/connections
+  status          BuilderDeploymentStatus @default(pending)
+  failureStep     String? // which saga step failed (publish | create_instance | attach)
+  failureReason   String?                 @db.Text
+  rolledBack      Boolean                 @default(false)
+  startedAt       DateTime                @default(now())
+  completedAt     DateTime?
+  triggeredBy     String // userId
+
+  project BuilderProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@index([aiAgentId])
+  @@index([startedAt])
+  @@map("builder_deployments")
+}
+
+enum BuilderDeploymentStatus {
+  pending
+  publishing
+  instance_creating
+  attaching
+  live
+  failed
+  rolled_back
+}
+
+// ── Builder Tool Calls (observability of meta-agent tool invocations) ────────
+// Every time the Builder LLM calls a tool (create-agent, attach-tool, etc),
+// we log the invocation for debugging, cost tracking, and replay.
+
+model BuilderToolCall {
+  id           String                @id @default(uuid())
+  messageId    String // FK BuilderProjectMessage (the assistant message that invoked)
+  toolName     String                @db.VarChar(100)
+  input        Json
+  output       Json?
+  status       BuilderToolCallStatus @default(pending)
+  errorMessage String?               @db.Text
+  tokensIn     Int?
+  tokensOut    Int?
+  latencyMs    Int?
+  createdAt    DateTime              @default(now())
+
+  @@index([messageId])
+  @@index([toolName, createdAt])
+  @@index([status, createdAt])
+  @@map("builder_tool_calls")
+}
+
+enum BuilderToolCallStatus {
+  pending
+  success
+  error
+  approved // human-in-the-loop approval pending → granted
+  rejected // human-in-the-loop rejected
+}
+
+// ── Builder Context Snapshots (audit trail of context-budget compactions) ────
+// When shouldCompact() triggers, we record what was compacted + summary produced.
+// Enables debugging of context loss bugs and tuning of compaction thresholds.
+
+model BuilderContextSnapshot {
+  id                String                        @id @default(uuid())
+  conversationId    String
+  summary           String                        @db.Text
+  messagesCompacted Int // how many old messages were replaced by summary
+  tokensBefore      Int?
+  tokensAfter       Int?
+  tokensReclaimed   Int?
+  triggeredBy       BuilderContextSnapshotTrigger @default(auto)
+  createdAt         DateTime                      @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("builder_context_snapshots")
+}
+
+enum BuilderContextSnapshotTrigger {
+  auto // shouldCompact returned true
+  manual // user called /chat/compact
+  exhausted // ContextBudgetExhaustedError recovery
 }
 
 // ── System Settings ───────────────────────────────────────────────────────────
@@ -1860,7 +1986,7 @@ model DeviceSession {
   ipAddress    String?
   userAgent    String?
   location     String?
-  countryCode  String?   // Added via migration add_geo_alert_and_country_code
+  countryCode  String? // Added via migration add_geo_alert_and_country_code
   lastActiveAt DateTime  @default(now())
   isRevoked    Boolean   @default(false)
   revokedAt    DateTime?
@@ -1872,53 +1998,6 @@ model DeviceSession {
   @@index([isRevoked])
   @@index([lastActiveAt])
   @@map("device_sessions")
-}
-
-// ── IP Rules ──────────────────────────────────────────────────────────────────
-
-enum IpRuleType {
-  ALLOW
-  BLOCK
-}
-
-model IpRule {
-  id             String      @id @default(uuid())
-  type           IpRuleType
-  ipAddress      String
-  description    String?
-  organizationId String?
-  createdById    String
-  isActive       Boolean     @default(true)
-  expiresAt      DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  createdBy    User           @relation("IpRuleCreatedBy", fields: [createdById], references: [id])
-
-  @@index([ipAddress])
-  @@index([type, isActive])
-  @@index([organizationId])
-  @@index([expiresAt])
-  @@map("ip_rules")
-}
-
-// ── SCIM Provisioning ────────────────────────────────────────────────────────
-
-model ScimToken {
-  id             String    @id @default(uuid())
-  organizationId String
-  name           String // Friendly name for the token (e.g., "Okta SCIM")
-  tokenHash      String // bcrypt hash of the 64-byte hex token
-  lastUsedAt     DateTime?
-  expiresAt      DateTime?
-  revokedAt      DateTime?
-  createdAt      DateTime  @default(now())
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId])
-  @@map("scim_tokens")
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2019,12 +2098,12 @@ model Plan {
   currency     String @default("BRL")
 
   // Limits
-  maxUsers      Int
-  maxInstances  Int
-  maxMessages   Int
-  maxStorage    Int // MB
-  maxAiCredits  Int
-  maxContacts   Int
+  maxUsers     Int
+  maxInstances Int
+  maxMessages  Int
+  maxStorage   Int // MB
+  maxAiCredits Int
+  maxContacts  Int
 
   // Feature flags (explicit booleans, NOT Json)
   hasWebhooks        Boolean @default(false)
@@ -2051,7 +2130,7 @@ model Plan {
 // ── Subscription ─────────────────────────────────────────────────────────────
 
 model Subscription {
-  id             String             @id @default(uuid())
+  id             String @id @default(uuid())
   organizationId String
   planId         String
 
@@ -2066,10 +2145,10 @@ model Subscription {
   trialEndsAt     DateTime?
 
   // Payment gateway
-  gateway              PaymentGateway @default(EFI)
-  gatewayCustomerId    String?
-  gatewaySubId         String?
-  pixAuthorizationId   String?
+  gateway            PaymentGateway @default(EFI)
+  gatewayCustomerId  String?
+  gatewaySubId       String?
+  pixAuthorizationId String?
 
   paymentMethod   PaymentMethod @default(PIX_AUTO)
   lastPaymentDate DateTime?
@@ -2102,7 +2181,7 @@ model Invoice {
   subscriptionId String
   organizationId String
 
-  number      Int           @default(autoincrement())
+  number      Int    @default(autoincrement())
   description String
   totalCents  Int
 
@@ -2199,10 +2278,10 @@ model DeviceAuthRequest {
   status DeviceAuthStatus @default(PENDING)
 
   // After approval — links to created API key
-  apiKeyId       String?
+  apiKeyId        String?
   apiKeyPlaintext String? // Temporarily stores full key until CLI polls it, then cleared
-  userId         String? // Who approved it
-  organizationId String? // Which org was selected
+  userId          String? // Who approved it
+  organizationId  String? // Which org was selected
 
   // Expiration
   expiresAt DateTime // 15 minutes from creation
@@ -2223,4 +2302,3 @@ enum DeviceAuthStatus {
   DENIED
   EXPIRED
 }
-

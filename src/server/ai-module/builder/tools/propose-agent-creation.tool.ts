@@ -27,7 +27,7 @@ export function proposeAgentCreationTool(_ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: false },
     tool: tool({
       description:
-        'Proposes creating a new agent and waits for user confirmation before actually calling create_agent. Use this to render a confirmation card with name + short description + Confirm/Adjust buttons. This is a presentational tool — it does NOT write to the database. Only call create_agent after the user confirms via the card.',
+        'Proposes creating a new agent by rendering a confirmation card with name + description + "Criar Agente" / "Ajustar" buttons. Call this ONCE to show the proposal. This is a presentational tool — it does NOT write to the database. IMPORTANT: After the user sends any confirmation (e.g., "Pode criar, tá bom assim. 👍", "Pode criar", "Criar agente", "Cria", "Ok", "Sim", "Vai"), call create_agent IMMEDIATELY. Do NOT call propose_agent_creation again after confirmation.',
       inputSchema: z.object({
         name: z
           .string()
@@ -47,7 +47,8 @@ export function proposeAgentCreationTool(_ctx: BuilderToolExecutionContext) {
           success: true as const,
           proposedName: input.name,
           proposedDescription: input.description,
-          message: 'Aguardando confirmação do usuário na ApprovalCard.',
+          message:
+            'Card de aprovação exibido. AGUARDE a próxima mensagem do usuário. Se o usuário confirmar (qualquer mensagem positiva como "Pode criar", "tá bom assim", "Criar agente", "Sim", "Ok", "Vai"), chame create_agent IMEDIATAMENTE com o nome e prompt já gerados. NÃO chame propose_agent_creation novamente.',
         }
       },
     }),

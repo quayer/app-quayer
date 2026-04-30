@@ -63,13 +63,8 @@ export default async function AuthLayout({
   // ============================================================
   return (
     <div
-      className={`${dmSans.variable} ${dmMono.variable} relative min-h-screen overflow-x-hidden bg-[#fafafa] dark:bg-[#0a0d14]`}
-      style={{
-        '--ring': 'oklch(0.708 0 0)',
-        '--color-ring': 'var(--ring)',
-        '--primary': 'oklch(0.95 0 0)',
-        '--primary-foreground': 'oklch(0.13 0 0)',
-      } as React.CSSProperties}
+      data-auth-surface
+      className={`${dmSans.variable} ${dmMono.variable} relative min-h-screen overflow-x-hidden bg-[#F5F2ED] dark:bg-black`}
     >
       <div className="flex min-h-screen">
         {/* ── Form Panel (left) ────────────────────────────── */}

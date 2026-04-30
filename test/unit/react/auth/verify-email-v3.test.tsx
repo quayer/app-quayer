@@ -102,7 +102,7 @@ describe('VerifyEmailV3', () => {
     })
   })
 
-  it('clicking Continuar after success calls router.push to /integracoes', async () => {
+  it('clicking Continuar after success calls router.push to /', async () => {
     const user = userEvent.setup()
     render(<VerifyEmailV3 />)
     const inputs = screen.getAllByRole('textbox')
@@ -114,6 +114,6 @@ describe('VerifyEmailV3', () => {
       expect(screen.getByRole('button', { name: /Continuar/i })).toBeInTheDocument()
     })
     await user.click(screen.getByRole('button', { name: /Continuar/i }))
-    expect(pushMock).toHaveBeenCalledWith('/integracoes')
+    expect(pushMock).toHaveBeenCalledWith('/')
   })
 })

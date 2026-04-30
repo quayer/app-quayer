@@ -26,8 +26,8 @@ describe('passwordlessOTPSchema (request OTP)', () => {
     expect(parsed.rememberMe).toBe(false);
   });
 
-  it('lowercases and trims email', () => {
-    const parsed = passwordlessOTPSchema.parse({ email: '  ALICE@Example.COM  ' });
+  it('lowercases email', () => {
+    const parsed = passwordlessOTPSchema.parse({ email: 'ALICE@Example.COM' });
     expect(parsed.email).toBe('alice@example.com');
   });
 

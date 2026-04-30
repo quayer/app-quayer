@@ -1,28 +1,20 @@
 "use client"
 
-import { useCallback, useRef, useState, useTransition } from "react"
-import Link from "next/link"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import {
-  ArrowUp,
-  Bot,
-  ChevronDown,
-  Loader2,
-  Mic,
-  Paperclip,
-  Sparkles,
-  Square,
-  X,
-} from "lucide-react"
+import Link from "next/link"
+import { Bot, ChevronDown, Paperclip, Sparkles, X } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
+import { MessageInput } from "@/client/components/ds/message-input"
 import { ClaudeIcon, CodexIcon } from "@/client/components/ds/model-icons"
+import { EmptyState } from "@/client/components/custom/empty-state"
 import {
   PROJECT_STATUS_LABEL,
   getProjectStatusStyle,
 } from "@/lib/project-status"
 import type { ProjectStatus } from "@/client/components/projetos/types"
-import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
+import { api } from "@/igniter.client"
 
 interface Project {
   id: string
@@ -31,20 +23,11 @@ interface Project {
   type: string
 }
 
-interface ResourceTimelineItem {
-  slug: string
-  title: string
-  categoryLabel: string
-  description: string
-  publishedAt: string
-}
-
 interface HomePageProps {
   recentProjects: Project[]
-  recentResources?: ResourceTimelineItem[]
 }
 
-type Tab = "my-projects" | "learn" | "team-projects"
+type Tab = "my-projects" | "team-projects"
 
 interface ModelOption {
   id: string
@@ -72,7 +55,6 @@ function formatFileSize(bytes: number): string {
 
 export function HomePage({
   recentProjects,
-  recentResources = [],
 }: HomePageProps) {
   const router = useRouter()
   const { tokens } = useAppTokens()
@@ -85,6 +67,7 @@ export function HomePage({
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>("my-projects")
+  const createProject = api.builder.createProject as any
 
   const pickFile = () => fileInputRef.current?.click()
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,28 +84,13 @@ export function HomePage({
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  // Web Speech API — transcrição ao vivo pro textarea
-  const appendTranscript = useCallback((text: string) => {
-    setPrompt((prev) => (prev ? `${prev} ${text}`.trim() : text.trim()))
+  // Auto-focus no mount — cobre navegação via ⌘K e clique em "Nova conversa"
+  useEffect(() => {
+    textareaRef.current?.focus()
   }, [])
 
-  const {
-    isSupported: speechSupported,
-    isListening,
-    start: startRecording,
-    stop: stopRecording,
-    error: speechError,
-  } = useSpeechToText({
-    lang: "pt-BR",
-    onFinalTranscript: appendTranscript,
-  })
 
-  const toggleRecording = () => {
-    if (isListening) stopRecording()
-    else startRecording()
-  }
-
-  const submit = () => {
+  const submit = useCallback(() => {
     const trimmed = prompt.trim()
     if (trimmed.length < 10) {
       setError("Descreva com mais detalhe (mínimo 10 caracteres).")
@@ -131,68 +99,18 @@ export function HomePage({
     setError(null)
     startTransition(async () => {
       try {
-        const res = await fetch("/api/v1/builder/projects/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: trimmed, type: "ai_agent" }),
+        const result = await createProject.mutate({
+          body: { prompt: trimmed, type: "ai_agent" },
         })
-
-        // Captura raw text primeiro — evita perder diagnóstico quando
-        // o body está vazio ou não é JSON válido.
-        const rawText = await res.text()
-        let parsed: unknown = null
-        try {
-          parsed = rawText ? JSON.parse(rawText) : null
-        } catch {
-          parsed = null
-        }
-
-        // Unwrap recursivo até achar um objeto com projectId OU error
-        type Envelope = {
-          data?: Envelope | { projectId?: string; conversationId?: string }
-          error?: { code?: string; message?: string }
-          message?: string
-          success?: boolean
-        }
-        const envelope = (parsed ?? {}) as Envelope
-        const projectId =
-          (envelope.data as { projectId?: string } | undefined)?.projectId ??
-          (
-            (envelope.data as Envelope | undefined)?.data as
-              | { projectId?: string }
-              | undefined
-          )?.projectId
-
-        if (!res.ok || envelope.error || !projectId) {
-          const msg =
-            envelope.error?.message ??
-            envelope.message ??
-            rawText ??
-            `HTTP ${res.status} ${res.statusText}`
-          console.error("[home] create project failed:", {
-            status: res.status,
-            statusText: res.statusText,
-            rawText,
-            parsed,
-          })
-          throw new Error(msg)
-        }
-
+        const projectId = result?.data?.data?.projectId
+        if (!projectId) throw new Error("Projeto criado mas ID não retornado")
         router.push(`/projetos/${projectId}`)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
       }
     })
-  }
+  }, [prompt, router, createProject])
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault()
-      submit()
-    }
-  }
-
-  const canSubmit = prompt.trim().length >= 10 && !isPending
 
   return (
     <div
@@ -209,7 +127,7 @@ export function HomePage({
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255,214,10,0.05), transparent 70%)",
+            "radial-gradient(ellipse 70% 40% at 50% -10%, rgba(255,214,10,0.10), transparent 65%)",
         }}
       />
 
@@ -232,15 +150,6 @@ export function HomePage({
                 Build locally with{" "}
                 <span style={{ fontWeight: 700 }}>QuayerCLI</span>
               </span>
-              <span
-                className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]"
-                style={{
-                  backgroundColor: "rgba(255,214,10,0.18)",
-                  color: tokens.brand,
-                }}
-              >
-                em breve
-              </span>
             </div>
           </div>
 
@@ -259,59 +168,46 @@ export function HomePage({
             </h1>
           </div>
 
-          {/* Input card */}
-          <div
-            className="rounded-2xl border transition-all focus-within:border-[rgba(255,214,10,0.45)] focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
-            style={{
-              backgroundColor: tokens.bgSurface,
-              borderColor: error
-                ? "rgba(239,68,68,0.45)"
-                : tokens.borderStrong,
-              boxShadow: "0 16px 48px -16px rgba(0,0,0,0.75)",
-            }}
-          >
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_FILE_TYPES}
-              onChange={handleFileChange}
-              className="hidden"
-              aria-hidden
-            />
+          {/* Input — hidden file trigger fora do MessageInput */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_FILE_TYPES}
+            onChange={handleFileChange}
+            className="hidden"
+            aria-hidden
+          />
 
-            {/* Attached file chip */}
-            {attachedFile && (
-              <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
-                style={{
-                  borderColor:
-                    tokens.divider,
-                }}
+          <MessageInput
+            value={prompt}
+            onChange={(v) => { setPrompt(v); if (error) setError(null) }}
+            onSend={submit}
+            disabled={isPending}
+            placeholder={INPUT_PLACEHOLDER}
+            minLength={10}
+            rows={3}
+            sendOnEnter
+            tokens={tokens}
+            borderColor={error ? "rgba(239,68,68,0.45)" : undefined}
+            textareaRef={textareaRef}
+            textareaProps={{ id: "builder-home-input" }}
+            aboveTextarea={attachedFile ? (
+              <div
+                className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
+                style={{ borderColor: tokens.divider }}
               >
                 <div className="flex min-w-0 flex-1 items-center gap-2.5">
                   <div
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
-                    style={{
-                      backgroundColor: "rgba(255,214,10,0.1)",
-                      color: tokens.brand,
-                    }}
+                    style={{ backgroundColor: "rgba(255,214,10,0.1)", color: tokens.brand }}
                   >
                     <Paperclip className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p
-                      className="truncate text-[13px] font-medium"
-                      style={{ color: tokens.textPrimary }}
-                    >
+                    <p className="truncate text-[13px] font-medium" style={{ color: tokens.textPrimary }}>
                       {attachedFile.name}
                     </p>
-                    <p
-                      className="text-[11px]"
-                      style={{
-                        color:
-                          tokens.textTertiary,
-                      }}
-                    >
+                    <p className="text-[11px]" style={{ color: tokens.textTertiary }}>
                       {formatFileSize(attachedFile.size)}
                     </p>
                   </div>
@@ -320,52 +216,24 @@ export function HomePage({
                   type="button"
                   onClick={removeFile}
                   className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
-                  style={{
-                    color: tokens.textTertiary,
-                  }}
+                  style={{ color: tokens.textTertiary }}
                   aria-label="Remover anexo"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-            )}
-
-            {/* Textarea */}
-            <textarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(e) => {
-                setPrompt(e.target.value)
-                if (error) setError(null)
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={INPUT_PLACEHOLDER}
-              rows={3}
-              disabled={isPending}
-              className="w-full resize-none rounded-t-2xl bg-transparent px-5 pt-5 pb-3 text-[15px] leading-relaxed outline-none placeholder:opacity-55 disabled:opacity-50"
-              style={{ color: tokens.textPrimary }}
-            />
-
-            {/* Action row */}
-            <div className="flex items-center justify-between gap-2 px-3 pb-3">
-              {/* Left: attach + model picker */}
+            ) : undefined}
+            leftSlot={
               <div className="flex items-center gap-1.5">
-                {/* Attach */}
                 <button
                   type="button"
                   onClick={pickFile}
                   disabled={isPending}
                   className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
                   style={{
-                    borderColor: attachedFile
-                      ? tokens.brandBorder
-                      : tokens.border,
-                    backgroundColor: attachedFile
-                      ? "rgba(255,214,10,0.08)"
-                      : "transparent",
-                    color: attachedFile
-                      ? tokens.brand
-                      : tokens.textPrimary,
+                    borderColor: attachedFile ? tokens.brandBorder : tokens.border,
+                    backgroundColor: attachedFile ? "rgba(255,214,10,0.08)" : "transparent",
+                    color: attachedFile ? tokens.brand : tokens.textSecondary,
                   }}
                   aria-label="Anexar arquivo"
                   title="Anexar imagem, PDF ou texto (até 10 MB)"
@@ -373,7 +241,6 @@ export function HomePage({
                   <Paperclip className="h-4 w-4" />
                 </button>
 
-                {/* Model picker */}
                 <div className="relative">
                   <button
                     type="button"
@@ -382,11 +249,7 @@ export function HomePage({
                     aria-haspopup="listbox"
                     aria-expanded={modelOpen}
                     className="flex h-9 items-center gap-2 rounded-full border px-3 text-[13px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                    style={{
-                      borderColor:
-                        tokens.border,
-                      color: tokens.textPrimary,
-                    }}
+                    style={{ borderColor: tokens.border, color: tokens.textPrimary }}
                   >
                     <selectedModel.icon size={14} />
                     {selectedModel.label}
@@ -395,20 +258,14 @@ export function HomePage({
 
                   {modelOpen && (
                     <>
-                      <div
-                        aria-hidden
-                        className="fixed inset-0 z-10"
-                        onClick={() => setModelOpen(false)}
-                      />
+                      <div aria-hidden className="fixed inset-0 z-10" onClick={() => setModelOpen(false)} />
                       <div
                         role="listbox"
                         className="absolute bottom-11 left-0 z-20 min-w-[160px] overflow-hidden rounded-xl border p-1 shadow-xl"
                         style={{
                           backgroundColor: tokens.bgElevated,
-                          borderColor:
-                            tokens.border,
-                          boxShadow:
-                            "0 12px 40px -12px rgba(0,0,0,0.8)",
+                          borderColor: tokens.border,
+                          boxShadow: "0 12px 40px -12px rgba(0,0,0,0.8)",
                         }}
                       >
                         {MODELS.map((model) => {
@@ -420,18 +277,11 @@ export function HomePage({
                               type="button"
                               role="option"
                               aria-selected={selected}
-                              onClick={() => {
-                                setSelectedModel(model)
-                                setModelOpen(false)
-                              }}
+                              onClick={() => { setSelectedModel(model); setModelOpen(false) }}
                               className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-white/5"
                               style={{
-                                backgroundColor: selected
-                                  ? "rgba(255,214,10,0.08)"
-                                  : "transparent",
-                                color: selected
-                                  ? tokens.brand
-                                  : tokens.textPrimary,
+                                backgroundColor: selected ? "rgba(255,214,10,0.08)" : "transparent",
+                                color: selected ? tokens.brand : tokens.textPrimary,
                               }}
                             >
                               <Icon size={14} />
@@ -444,78 +294,12 @@ export function HomePage({
                   )}
                 </div>
               </div>
+            }
+          />
 
-              {/* Right: audio + send */}
-              <div className="flex items-center gap-1.5">
-                {speechSupported && (
-                  <button
-                    type="button"
-                    onClick={toggleRecording}
-                    disabled={isPending}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50"
-                    style={{
-                      borderColor: isListening
-                        ? "rgba(239,68,68,0.45)"
-                        : tokens.border,
-                      backgroundColor: isListening
-                        ? "rgba(239,68,68,0.12)"
-                        : "transparent",
-                      color: isListening
-                        ? "#ef4444"
-                        : tokens.textPrimary,
-                    }}
-                    aria-label={
-                      isListening ? "Parar gravação" : "Gravar por áudio"
-                    }
-                    aria-pressed={isListening}
-                    title={
-                      isListening
-                        ? "Parar gravação"
-                        : "Falar em vez de digitar"
-                    }
-                  >
-                    {isListening ? (
-                      <Square
-                        className="h-3.5 w-3.5 animate-pulse"
-                        fill="currentColor"
-                      />
-                    ) : (
-                      <Mic className="h-4 w-4" />
-                    )}
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!canSubmit}
-                  className="flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-30"
-                  style={{
-                    backgroundColor: canSubmit ? tokens.brand : tokens.hoverBg,
-                    color: canSubmit ? tokens.textInverse : tokens.textTertiary,
-                    boxShadow: canSubmit
-                      ? "0 4px 12px -2px rgba(255,214,10,0.35)"
-                      : "none",
-                  }}
-                  aria-label="Criar projeto"
-                >
-                  {isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {(error || speechError) && (
-            <p
-              className="mt-3 text-center text-sm"
-              role="alert"
-              style={{ color: "#ef4444" }}
-            >
-              {error ?? speechError}
+          {error && (
+            <p className="mt-3 text-center text-sm" role="alert" style={{ color: "#ef4444" }}>
+              {error}
             </p>
           )}
 
@@ -542,12 +326,6 @@ export function HomePage({
                 badge={recentProjects.length}
               />
               <TabButton
-                active={activeTab === "learn"}
-                onClick={() => setActiveTab("learn")}
-                label="Aprender"
-                badge={recentResources.length}
-              />
-              <TabButton
                 active={activeTab === "team-projects"}
                 onClick={() => setActiveTab("team-projects")}
                 label="Do Time"
@@ -561,112 +339,11 @@ export function HomePage({
             {activeTab === "my-projects" && (
               <MyProjectsTab projects={recentProjects} />
             )}
-            {activeTab === "learn" && (
-              <LearnTab resources={recentResources} />
-            )}
             {activeTab === "team-projects" && <TeamTab />}
           </div>
         </div>
       </div>
     </div>
-  )
-}
-
-// ---------- Aprender (timeline) ----------
-
-function LearnTab({
-  resources,
-}: {
-  resources: ResourceTimelineItem[]
-}) {
-  const { tokens } = useAppTokens()
-  if (resources.length === 0) {
-    return (
-      <EmptyState
-        icon={Sparkles}
-        title="Biblioteca em construção"
-        description="Em breve guias, workshops e cheatsheets aqui."
-      />
-    )
-  }
-
-  return (
-    <ol className="flex flex-col">
-      {resources.map((resource, i) => {
-        const date = new Date(resource.publishedAt)
-        const formatted = new Intl.DateTimeFormat("pt-BR", {
-          day: "2-digit",
-          month: "short",
-        }).format(date)
-        const isLast = i === resources.length - 1
-        return (
-          <li
-            key={resource.slug}
-            className="relative flex gap-4 pb-6 last:pb-0"
-          >
-            {!isLast && (
-              <div
-                aria-hidden
-                className="absolute left-[9px] top-6 bottom-0 w-px"
-                style={{
-                  backgroundColor:
-                    tokens.divider,
-                }}
-              />
-            )}
-            <div
-              aria-hidden
-              className="relative z-10 mt-1.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
-              style={{
-                backgroundColor: tokens.bgBase,
-                border: `2px solid ${tokens.brandBorder}`,
-              }}
-            >
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: tokens.brand }}
-              />
-            </div>
-            <Link
-              href={`/recursos/${resource.slug}`}
-              className="group flex-1 rounded-lg p-3 transition-colors hover:bg-white/[0.02]"
-            >
-              <div className="mb-1 flex items-center gap-2">
-                <span
-                  className="text-[10px] font-semibold uppercase tracking-[0.14em]"
-                  style={{ color: tokens.brand }}
-                >
-                  {resource.categoryLabel}
-                </span>
-                <span
-                  className="text-[10px]"
-                  style={{
-                    color:
-                      tokens.textTertiary,
-                  }}
-                >
-                  · {formatted}
-                </span>
-              </div>
-              <h3
-                className="mb-1 text-[15px] font-semibold leading-snug transition-colors group-hover:underline"
-                style={{ color: tokens.textPrimary }}
-              >
-                {resource.title}
-              </h3>
-              <p
-                className="line-clamp-2 text-[13px] leading-[1.55]"
-                style={{
-                  color: tokens.textSecondary,
-                }}
-              >
-                {resource.description}
-              </p>
-            </Link>
-          </li>
-        )
-      })}
-    </ol>
   )
 }
 
@@ -715,7 +392,7 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
   if (projects.length === 0) {
     return (
       <EmptyState
-        icon={Bot}
+        icon={<Bot className="h-5 w-5" />}
         title="Você ainda não criou nada"
         description="Descreva sua ideia lá em cima e o Builder cria o primeiro agente em segundos."
       />
@@ -727,14 +404,13 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
       {projects.slice(0, 6).map((project) => {
         const statusStyle = getProjectStatusStyle(project.status)
         return (
-          <a
+          <Link
             key={project.id}
             href={`/projetos/${project.id}`}
             className="group flex items-center gap-4 rounded-xl border p-4 transition-all hover:-translate-y-0.5"
             style={{
               backgroundColor: tokens.bgSurface,
-              borderColor:
-                tokens.border,
+              borderColor: tokens.border,
             }}
           >
             <div
@@ -777,16 +453,16 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
               {PROJECT_STATUS_LABEL[project.status as ProjectStatus] ??
                 project.status}
             </span>
-          </a>
+          </Link>
         )
       })}
-      <a
+      <Link
         href="/projetos"
         className="mt-1 text-center text-xs transition-colors hover:underline"
         style={{ color: tokens.brand }}
       >
         Ver todos os projetos →
-      </a>
+      </Link>
     </div>
   )
 }
@@ -794,54 +470,9 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
 function TeamTab() {
   return (
     <EmptyState
-      icon={Bot}
+      icon={<Bot className="h-5 w-5" />}
       title="Projetos do time em breve"
       description="Veja o que outras pessoas da sua organização estão construindo."
     />
-  )
-}
-
-function EmptyState({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: typeof Bot
-  title: string
-  description: string
-}) {
-  const { tokens } = useAppTokens()
-  return (
-    <div
-      className="flex flex-col items-center justify-center gap-3 rounded-2xl border py-14 text-center"
-      style={{
-        backgroundColor: tokens.bgSurface,
-        borderColor: tokens.divider,
-      }}
-    >
-      <div
-        className="flex h-12 w-12 items-center justify-center rounded-2xl"
-        style={{
-          backgroundColor: "rgba(255,214,10,0.08)",
-          color: tokens.brand,
-        }}
-      >
-        <Icon className="h-5 w-5" />
-      </div>
-      <h3
-        className="text-sm font-semibold"
-        style={{ color: tokens.textPrimary }}
-      >
-        {title}
-      </h3>
-      <p
-        className="max-w-sm text-xs"
-        style={{
-          color: tokens.textTertiary,
-        }}
-      >
-        {description}
-      </p>
-    </div>
   )
 }

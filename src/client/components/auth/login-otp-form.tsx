@@ -345,11 +345,11 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
     <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
       {/* Header */}
       <div className="space-y-3 animate-fade-in-up stagger-1">
-        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-white leading-tight flex items-center gap-2">
+        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight flex items-center gap-2">
           Verificar código
           {phone && <WhatsAppIcon className="h-5 w-5 text-[#25D366]" />}
         </h1>
-        <p className="text-[0.875rem] text-white/40 leading-relaxed">
+        <p className="text-[0.875rem] text-muted-foreground leading-relaxed">
           {phone
             ? <>Enviado via <span className="text-[#25D366] font-medium">WhatsApp</span> para {formatPhoneDisplay(phone)}</>
             : `Enviamos um código de 6 dígitos para ${email || "seu email"}.`
@@ -363,7 +363,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
           {error && (
             <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
               <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-              <p className="text-sm text-red-300" role="alert" aria-live="assertive">{error}</p>
+              <p className="text-sm text-red-600 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
             </div>
           )}
           <Field className="flex flex-col space-y-2">
@@ -387,14 +387,14 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
                     <InputOTPSlot
                       key={i}
                       index={i}
-                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-lg !border !border-white/[0.08] !bg-white/[0.04] !text-white data-[active=true]:!border-white/30 data-[active=true]:!ring-white/10"
+                      className="!flex-1 !w-0 !h-14 !text-xl !rounded-lg !border !border-border !bg-muted/50 !text-foreground data-[active=true]:!border-ring data-[active=true]:!ring-ring/20"
                     />
                   ))}
                 </InputOTPGroup>
               </InputOTP>
             </div>
             {!phone && (
-              <FieldDescription className="text-left mt-2 text-white/30">
+              <FieldDescription className="text-left mt-2 text-muted-foreground">
                 Verifique sua caixa de entrada
               </FieldDescription>
             )}
@@ -406,8 +406,8 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
             className={cn(
               "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
               otp.length === 6
-                ? "bg-white text-[#0a0d14] hover:bg-white/90 active:bg-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
-                : "bg-white/[0.06] text-white/30 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white/40"
+                ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]"
+                : "bg-muted text-muted-foreground border border-border hover:bg-muted/80 hover:text-foreground"
             )}
             disabled={isLoading || otp.length !== 6}
             aria-busy={isLoading}
@@ -422,25 +422,25 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
             )}
           </Button>
 
-          <FieldDescription className="text-left text-white/30">
+          <FieldDescription className="text-left text-muted-foreground">
             {phone ? 'Não recebeu no WhatsApp?' : 'Não recebeu o código?'}{" "}
             {canResend ? (
               <button
                 type="button"
                 onClick={handleResend}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center text-white hover:text-white/80 font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center text-foreground hover:text-foreground/80 font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm"
               >
                 Reenviar
               </button>
             ) : (
-              <span className="text-white/20" aria-live="polite" aria-atomic="true">
+              <span className="text-muted-foreground/50" aria-live="polite" aria-atomic="true">
                 Aguarde {countdown}s
               </span>
             )}
           </FieldDescription>
 
           <FieldDescription className="text-left">
-            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-white/50 hover:text-white font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 rounded-sm">
+            <Link href="/login" className="inline-flex min-h-[44px] items-center gap-1 text-muted-foreground hover:text-foreground font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2 rounded-sm">
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
               Voltar
             </Link>

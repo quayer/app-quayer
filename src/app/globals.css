@@ -75,6 +75,74 @@
   --sidebar-ring: oklch(0.5 0 0);
 }
 
+/* ========================================
+   Quayer DS v3 Tokens
+   Definidos como CSS variables para eliminar flash de tema:
+   next-themes injeta o class ("dark"/"light") via script inline
+   antes do React hidratar, então as variáveis já estão corretas
+   no primeiro paint — sem useEffect, sem mounted guard.
+   ======================================== */
+
+/* Dark default — app é dark-first; sem classe = dark */
+:root {
+  --q-bg-base:              #000000;
+  --q-bg-surface:           #060402;
+  --q-bg-elevated:          #0C0804;
+  --q-border:               rgba(255,255,255,0.12);
+  --q-border-strong:        rgba(255,255,255,0.18);
+  --q-divider:              rgba(255,255,255,0.10);
+  --q-text-primary:         #FFFFFF;
+  --q-text-secondary:       rgba(255,255,255,0.72);
+  --q-text-tertiary:        rgba(255,255,255,0.48);
+  --q-text-disabled:        rgba(255,255,255,0.32);
+  --q-brand:                #FFD60A;
+  --q-brand-subtle:         rgba(255,214,10,0.10);
+  --q-brand-border:         rgba(255,214,10,0.30);
+  --q-brand-text:           #FFE566;
+  --q-hover-bg:             rgba(255,255,255,0.06);
+  --q-text-inverse:         #1A0800;
+  --q-shadow:               0 16px 48px -16px rgba(0,0,0,0.75);
+  --q-sidebar-bg:           #0B0704;
+  --q-admin-nav-bg:         #0B0704;
+  --q-sidebar-active-bg:    rgba(255,214,10,0.14);
+  --q-sidebar-active-text:  #FFE566;
+  --q-sidebar-active-border:rgba(255,214,10,0.55);
+  --q-sidebar-brand-dim:    rgba(255,214,10,0.55);
+  --q-sidebar-cta-border:   rgba(255,255,255,0.16);
+  --q-sidebar-kbd-bg:       rgba(255,255,255,0.08);
+  --q-sidebar-kbd-text:     rgba(255,255,255,0.48);
+}
+
+/* Light override — next-themes adiciona class="light" */
+.light {
+  --q-bg-base:              #F5F2ED;
+  --q-bg-surface:           #FFFFFF;
+  --q-bg-elevated:          #FFFFFF;
+  --q-border:               rgba(26,8,0,0.12);
+  --q-border-strong:        rgba(26,8,0,0.20);
+  --q-divider:              rgba(26,8,0,0.08);
+  --q-text-primary:         #1A0800;
+  --q-text-secondary:       rgba(26,8,0,0.68);
+  --q-text-tertiary:        rgba(26,8,0,0.45);
+  --q-text-disabled:        rgba(26,8,0,0.30);
+  --q-brand:                #9A3D08;
+  --q-brand-subtle:         rgba(232,64,0,0.10);
+  --q-brand-border:         rgba(154,61,8,0.32);
+  --q-brand-text:           #9A3D08;
+  --q-hover-bg:             rgba(26,8,0,0.05);
+  --q-text-inverse:         #FFFFFF;
+  --q-shadow:               0 12px 36px -12px rgba(26,8,0,0.18);
+  --q-sidebar-bg:           #F5F2ED;
+  --q-admin-nav-bg:         #FFFFFF;
+  --q-sidebar-active-bg:    rgba(232,64,0,0.10);
+  --q-sidebar-active-text:  #9A3D08;
+  --q-sidebar-active-border:rgba(154,61,8,0.55);
+  --q-sidebar-brand-dim:    rgba(154,61,8,0.55);
+  --q-sidebar-cta-border:   rgba(26,8,0,0.20);
+  --q-sidebar-kbd-bg:       rgba(26,8,0,0.07);
+  --q-sidebar-kbd-text:     rgba(26,8,0,0.65);
+}
+
 :root {
   /* Alias legado — componentes usam var(--font-dm-sans). Mapeia pro
      var(--font-sans) que o next/font injeta via layout.tsx. */
@@ -152,9 +220,13 @@
   }
 
   input:focus-visible,
-  textarea:focus-visible,
   select:focus-visible {
     @apply outline-2 outline-primary ring-2 ring-primary/20 border-primary;
+  }
+
+  /* textarea usa focus-within no card pai — ring interno causaria duplo indicador */
+  textarea:focus-visible {
+    outline: none;
   }
 
   .skip-link {
@@ -284,15 +356,51 @@
   .stagger-5 { animation-delay: 320ms; }
   .stagger-6 { animation-delay: 400ms; }
 
+  @keyframes audio-bar {
+    0%, 100% { transform: scaleY(0.3); }
+    50% { transform: scaleY(1); }
+  }
+
+  .audio-bar {
+    width: 2px;
+    border-radius: 2px;
+    height: 10px;
+    flex-shrink: 0;
+    transform-origin: bottom;
+    animation: audio-bar 0.8s ease-in-out infinite;
+  }
+  .audio-bar-1 { animation-delay: 0ms; }
+  .audio-bar-2 { animation-delay: 160ms; }
+  .audio-bar-3 { animation-delay: 320ms; }
+
   /* ========================================
      Auth page specific styles
      ======================================== */
 
+  /* Tokens semânticos calibrados para fundo #F5F2ED (creme quente) em light
+     e #000000 (preto DS v3) em dark — iguais ao AppShellClient */
+  [data-auth-surface] {
+    --foreground:        #1A0800;
+    --muted:             rgba(26,8,0,0.06);
+    --muted-foreground:  rgba(26,8,0,0.50);
+    --border:            rgba(26,8,0,0.12);
+    --ring:              rgba(26,8,0,0.20);
+    --background:        #F5F2ED;
+  }
+  .dark [data-auth-surface] {
+    --foreground:        #FFFFFF;
+    --muted:             rgba(255,255,255,0.06);
+    --muted-foreground:  rgba(255,255,255,0.50);
+    --border:            rgba(255,255,255,0.10);
+    --ring:              rgba(255,255,255,0.20);
+    --background:        #000000;
+  }
+
   .auth-input {
-    @apply bg-white/[0.04] border-white/[0.08] text-white placeholder:text-white/25
+    @apply bg-muted/50 border-border text-foreground placeholder:text-muted-foreground
            transition-all duration-200
-           hover:border-white/[0.15] hover:bg-white/[0.06]
-           focus-visible:bg-white/[0.07] focus-visible:border-white/30 focus-visible:ring-white/10;
+           hover:border-border/80 hover:bg-muted
+           focus-visible:bg-muted focus-visible:border-ring focus-visible:ring-ring/20;
   }
 
   .auth-btn-primary {
@@ -513,14 +621,16 @@
    Fonte: quayer-ds-v3.html
    ============================================================ */
 @layer utilities {
-  [data-auth-v3="true"] {
+  .dark [data-auth-v3="true"] {
     color: var(--color-text-primary);
   }
 
   [data-auth-v3="true"] h1 {
-    color: var(--color-text-primary);
     font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
     letter-spacing: -0.02em;
+  }
+  .dark [data-auth-v3="true"] h1 {
+    color: var(--color-text-primary);
   }
 
   [data-auth-v3="true"] a {
@@ -530,12 +640,12 @@
     color: var(--color-brand) !important;
   }
 
-  [data-auth-v3="true"] button[type="submit"].bg-white {
+  [data-auth-v3="true"] button[type="submit"].bg-foreground {
     background-color: var(--color-brand) !important;
     color: var(--color-text-inverse) !important;
     box-shadow: 0 0 0 3px rgba(255, 214, 10, 0.2) !important;
   }
-  [data-auth-v3="true"] button[type="submit"].bg-white:hover {
+  [data-auth-v3="true"] button[type="submit"].bg-foreground:hover {
     background-color: var(--color-brand-hover) !important;
   }
 
@@ -555,18 +665,13 @@
     border-color: var(--color-border-default);
   }
 
-  [data-auth-v3="true"] .auth-input {
-    background-color: var(--color-bg-elevated) !important;
-    border-color: var(--color-border-default) !important;
-    color: var(--color-text-primary) !important;
-  }
   [data-auth-v3="true"] .auth-input:focus,
   [data-auth-v3="true"] .auth-input:focus-visible {
     border-color: var(--color-brand) !important;
     box-shadow: 0 0 0 3px var(--color-brand-subtle) !important;
   }
 
-  [data-auth-v3="true"] label.uppercase {
+  .dark [data-auth-v3="true"] label.uppercase {
     color: var(--color-text-tertiary) !important;
   }
 
@@ -676,6 +781,22 @@
     --sidebar-accent-foreground: #9a3d08;
     --sidebar-border: rgba(26, 8, 0, 0.10);
     --sidebar-ring: #9a3d08;
+  }
+
+  /* ─── Builder Sidebar — focus-visible ring (WCAG 2.4.7) ─── */
+  /* Usa box-shadow dupla: inner = bg (gap), outer = brand (ring).
+     Cores dependem do tema via .dark selector. */
+  [data-app-v3="true"] .bsb-focus-ring {
+    outline: none;
+  }
+  [data-app-v3="true"] .bsb-focus-ring:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #0b0704, 0 0 0 4px #ffd60a;
+  }
+  html:not(.dark) [data-app-v3="true"] .bsb-focus-ring:focus-visible {
+    /* Sem inner ring — cream-on-cream ficaria invisível.
+       3px amber sólido garante visibilidade + AA contrast em #F5F2ED. */
+    box-shadow: 0 0 0 3px #9a3d08;
   }
 
   /* Table e headings (não dependem de tema — usam vars) */

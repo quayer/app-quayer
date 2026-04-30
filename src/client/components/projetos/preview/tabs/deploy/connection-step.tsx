@@ -46,24 +46,8 @@ export function deriveChecklist(project: WorkspaceProject): ChecklistItem[] {
     {
       key: "whatsapp",
       label: "Canal WhatsApp conectado",
-      // Derived from BuilderDeployment.status === 'live' && connectionId != null.
-      // Set server-side in page.tsx → WorkspaceProject.hasWhatsAppConnection.
       met: project.hasWhatsAppConnection,
       hint: "Conecte uma instância do WhatsApp ao agente.",
-    },
-    {
-      key: "plan",
-      label: "Plano ativo",
-      // TODO: wire to org billing query (out of scope for this task)
-      met: false,
-      hint: "Ative um plano para publicar em produção.",
-    },
-    {
-      key: "byok",
-      label: "BYOK configurado",
-      // TODO: wire to org settings/BYOK query (out of scope for this task)
-      met: false,
-      hint: "Configure sua chave de API (Bring Your Own Key).",
     },
   ]
 }

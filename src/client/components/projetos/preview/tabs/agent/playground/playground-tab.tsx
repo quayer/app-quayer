@@ -11,11 +11,13 @@
  */
 
 import * as React from "react"
-import { Bot, Play, Send, Trash2, User, Wrench, Loader2 } from "lucide-react"
+import { Bot, Play, Send, Trash2, Wrench, Loader2 } from "lucide-react"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { Avatar, AvatarFallback } from "@/client/components/ui/avatar"
 import { Button } from "@/client/components/ui/button"
-import { Card } from "@/client/components/ui/card"
+import { UserBubble } from "@/client/components/projetos/chat/chat-message"
+import { MarkdownContent } from "@/client/components/projetos/chat/markdown-content"
+import { parseSseBuffer } from "@/client/components/projetos/chat/utils/parse-sse-buffer"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -31,36 +33,6 @@ interface PlaygroundMessage {
   toolCalls?: Array<{ toolName: string; args: unknown }>
 }
 
-type SseEvent =
-  | { type: "text-delta"; text: string }
-  | { type: "tool-call"; toolName: string; args: Record<string, unknown> }
-  | { type: "tool-result"; toolName: string; result: unknown }
-  | { type: "finish" }
-  | { type: "error"; message: string }
-
-// ── SSE parser (same logic as use-chat-stream) ────────────────────────────
-
-function parseSseBuffer(buffer: string): { events: SseEvent[]; rest: string } {
-  const events: SseEvent[] = []
-  const parts = buffer.split("\n\n")
-  const rest = parts.pop() ?? ""
-  for (const raw of parts) {
-    if (!raw.trim()) continue
-    const dataLines: string[] = []
-    for (const line of raw.split("\n")) {
-      if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart())
-    }
-    if (dataLines.length === 0) continue
-    const payload = dataLines.join("\n")
-    try {
-      events.push(JSON.parse(payload) as SseEvent)
-    } catch {
-      // ignore malformed frames
-    }
-  }
-  return { events, rest }
-}
-
 function createId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID()
@@ -71,28 +43,6 @@ function createId(): string {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 type Tokens = ReturnType<typeof useAppTokens>["tokens"]
-
-function UserBubble({ content, tokens }: { content: string; tokens: Tokens }) {
-  return (
-    <div className="flex flex-row-reverse items-start gap-3">
-      <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback style={{ backgroundColor: tokens.brand, color: tokens.textInverse }}>
-          <User className="h-4 w-4" />
-        </AvatarFallback>
-      </Avatar>
-      <Card
-        className="max-w-[85%] border-0 px-4 py-2.5 text-[14px] leading-relaxed shadow-none"
-        style={{
-          backgroundColor: tokens.brand,
-          color: tokens.textInverse,
-          borderRadius: "16px 16px 4px 16px",
-        }}
-      >
-        {content}
-      </Card>
-    </div>
-  )
-}
 
 function AssistantBubble({
   content,
@@ -114,11 +64,12 @@ function AssistantBubble({
       </Avatar>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {content && (
-          <div
-            className="max-w-[95%] whitespace-pre-wrap text-[14px] leading-relaxed"
-            style={{ color: tokens.textPrimary }}
-          >
-            {content}
+          <>
+            <MarkdownContent
+              content={content}
+              tokens={tokens}
+              className="max-w-[95%]"
+            />
             {streaming && (
               <span
                 className="ml-0.5 inline-block animate-pulse"
@@ -128,7 +79,7 @@ function AssistantBubble({
                 ▊
               </span>
             )}
-          </div>
+          </>
         )}
         {toolCalls && toolCalls.length > 0 && (
           <div className="flex flex-col gap-1">
@@ -148,7 +99,7 @@ function AssistantBubble({
                     executando
                   </span>
                 ) : (
-                  <span style={{ color: tokens.textTertiary }}>concluido</span>
+                  <span style={{ color: tokens.textTertiary }}>concluído</span>
                 )}
               </div>
             ))}
@@ -213,6 +164,7 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
     setStreamingText("")
     setStreamingToolCalls([])
     setError(null)
+    inputRef.current?.focus()
   }, [])
 
   const sendMessage = React.useCallback(
@@ -296,6 +248,7 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
       } finally {
         setIsStreaming(false)
+        inputRef.current?.focus()
       }
     },
     [isStreaming, messages, project.id, project.aiAgentId]

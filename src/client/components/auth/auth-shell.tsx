@@ -23,17 +23,12 @@ export interface AuthShellProps {
 export function AuthShell({ children, showImage = true, className = '' }: AuthShellProps) {
   return (
     <div
-      className={`relative min-h-screen overflow-x-hidden ${className}`}
-      style={{
-        fontFamily: 'var(--font-dm-sans), system-ui, sans-serif',
-        backgroundColor: 'var(--color-bg-base, #000000)',
-        color: 'var(--color-text-primary, #ffffff)',
-      }}
+      data-auth-surface
+      className={`relative min-h-screen overflow-x-hidden bg-[#F5F2ED] dark:bg-black text-[#1A0800] dark:text-white ${className}`}
+      style={{ fontFamily: 'var(--font-dm-sans), system-ui, sans-serif' }}
     >
       <div className="flex min-h-screen">
-        {/* Left panel — form area. Background usa var(--color-bg-base)=#000000
-            do DS v3 quayer-ds-v3.html (nao mais o #0a0d14 do v2). */}
-        <main className="flex-1 flex flex-col min-h-screen" style={{ backgroundColor: 'var(--color-bg-base, #000000)' }}>
+        <main className="flex-1 flex flex-col min-h-screen bg-[#F5F2ED] dark:bg-black">
           {/* Logo top-left (mesmo posicionamento do v2: px-8 pt-8 lg:px-12 lg:pt-10) */}
           <div className="px-8 pt-8 lg:px-12 lg:pt-10">
             <Logo size={32} variant="color" />
@@ -51,8 +46,7 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
           <aside
             role="complementary"
             aria-hidden="true"
-            className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden"
-            style={{ backgroundColor: 'var(--color-bg-base, #000000)' }}
+            className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden bg-[#F5F2ED] dark:bg-black"
           >
             <Image
               src="/images/auth/login-hero.webp"
@@ -63,16 +57,9 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
               sizes="(max-width: 1280px) 42vw, 45vw"
               className="object-cover"
             />
-            {/* Mascara gradient esquerda: 0-25% preto puro, 25-50% fade,
-                50%-100% transparente. Esconde a costura com o painel do form
-                enquanto preserva sombra, reflexo do chao e feixes de luz. */}
             <div
               aria-hidden="true"
-              className="absolute inset-y-0 left-0 w-[50%] pointer-events-none"
-              style={{
-                background:
-                  'linear-gradient(to right, var(--color-bg-base, #000000) 0%, var(--color-bg-base, #000000) 25%, transparent 100%)',
-              }}
+              className="absolute inset-y-0 left-0 w-[50%] pointer-events-none bg-gradient-to-r from-[#F5F2ED] dark:from-black to-transparent"
             />
           </aside>
         )}
