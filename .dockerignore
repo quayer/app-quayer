@@ -121,3 +121,6 @@ dump.rdb
 *.tmp
 *.bak
 *.backup
+
+# Data volumes (Docker postgres - never include in build context)
+data/
