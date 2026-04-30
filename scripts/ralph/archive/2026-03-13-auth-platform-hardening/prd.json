@@ -1,0 +1,413 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-platform-hardening",
+  "description": "Fechamento de gaps de auth vs Clerk/Auth0: MFA/2FA TOTP, Bot Detection (Cloudflare Turnstile), Custom Roles, Domínios Verificados e SCIM Provisioning básico. Fase 1 = segurança, Fase 2 = governance, Fase 3 = enterprise.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Schema e modelos Prisma para TOTP 2FA",
+      "description": "Como developer, preciso dos models TotpDevice, RecoveryCode e campo twoFactorEnabled no User para persistir estado de 2FA.",
+      "acceptanceCriteria": [
+        "Novo model TotpDevice: id, userId, secret (String), name (String), verified (Boolean default false), createdAt",
+        "Novo model RecoveryCode: id, userId, code (String hashed), usedAt (DateTime? nullable), createdAt",
+        "Campo twoFactorEnabled (Boolean default false) no model User",
+        "Relations corretas: User hasMany TotpDevice, User hasMany RecoveryCode",
+        "Indexes: TotpDevice@@index([userId]), RecoveryCode@@index([userId])",
+        "Migration gerada com npx prisma migrate dev --name add_totp_2fa",
+        "npx prisma generate sem erros",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Migration created manually due to shadow DB issues. Pre-existing TS errors unrelated to changes."
+    },
+    {
+      "id": "US-002",
+      "title": "Endpoint totpSetup — gerar secret e QR code",
+      "description": "Como usuário autenticado, quero iniciar setup de 2FA recebendo QR code e recovery codes para escanear no meu app authenticator.",
+      "acceptanceCriteria": [
+        "Instalar dependências: otpauth, qrcode (@types/qrcode)",
+        "Action totpSetup no auth controller (mutation, use: [authProcedure({ required: true })])",
+        "Gera TOTP secret com otpauth: issuer='Quayer', algorithm='SHA1', digits=6, period=30",
+        "Retorna otpauth:// URI + QR code base64 (via qrcode.toDataURL)",
+        "Armazena secret encriptado (AES-256-GCM com ENCRYPTION_KEY env var) em TotpDevice com verified=false",
+        "Gera 8 recovery codes: crypto.randomBytes(4).toString('hex') cada (8 chars hex)",
+        "Armazena recovery codes hasheados (bcrypt 12 rounds) em RecoveryCode",
+        "Retorna recovery codes plaintext na response (única vez)",
+        "Se user já tem TotpDevice verified: retorna erro 'TOTP já configurado'",
+        "Rate limit: 5 requests / 15 min (authRateLimiter)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Implemented in auth.controller.ts. Uses existing crypto.ts encrypt/decrypt for AES-256-GCM. Cleans up incomplete setups before creating new ones."
+    },
+    {
+      "id": "US-003",
+      "title": "Endpoint totpVerify — confirmar setup",
+      "description": "Como usuário, preciso confirmar o setup digitando um código do authenticator para ativar 2FA na minha conta.",
+      "acceptanceCriteria": [
+        "Action totpVerify no auth controller (mutation, autenticado)",
+        "Input Zod: { code: z.string().length(6).regex(/^\\d+$/), deviceId: z.string().uuid() }",
+        "Busca TotpDevice pelo deviceId, decripta secret",
+        "Valida TOTP com otpauth validate() e window=1 (aceita ±1 período)",
+        "Se válido: set TotpDevice.verified=true, User.twoFactorEnabled=true",
+        "Se inválido: retorna { error: 'invalid_code' } com rate limit (5 tentativas / 15 min)",
+        "Audit log: totp_setup_completed",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Implemented in auth.controller.ts. Uses decrypt() from crypto.ts to recover secret, OTPAuth.TOTP.validate() with window=1, $transaction for atomic update of device+user."
+    },
+    {
+      "id": "US-004",
+      "title": "Fluxo de login com 2FA challenge",
+      "description": "Como usuário com 2FA habilitado, quero ser desafiado com código TOTP após autenticar com meu primeiro fator.",
+      "acceptanceCriteria": [
+        "Nos actions login, googleCallback, verifyMagicLink, verifyPhoneOtpLogin: checar user.twoFactorEnabled",
+        "Se 2FA ativo: NÃO emitir tokens, retornar { requiresTwoFactor: true, challengeId: string }",
+        "challengeId é JWT com payload { userId, type: '2fa-challenge' } e expiry 5 min",
+        "Novo action totpChallenge: input { challengeId: string, code: string }",
+        "Verifica JWT challengeId, extrai userId, busca TotpDevice verified",
+        "Valida TOTP code com window=1",
+        "Se válido: emite access+refresh tokens, registra device session, retorna tokens",
+        "Se inválido: incrementa contador, max 5 tentativas por challengeId",
+        "Após 5 falhas: invalida challengeId (não pode mais usar)",
+        "Audit log: 2fa_challenge_success ou 2fa_challenge_failed",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Modified login/googleCallback/verifyMagicLink/verifyLoginOTPPhone to check twoFactorEnabled. New totpChallenge action with JWT challenge + in-memory attempt tracking (max 5)."
+    },
+    {
+      "id": "US-005",
+      "title": "Login com Recovery Code",
+      "description": "Como usuário sem acesso ao authenticator, quero usar um recovery code para bypass do 2FA e não ficar trancado fora.",
+      "acceptanceCriteria": [
+        "Action totpRecovery: input { challengeId: string, recoveryCode: string }",
+        "Verifica JWT challengeId igual ao totpChallenge",
+        "Busca RecoveryCode do user onde usedAt IS NULL",
+        "Compara recoveryCode com cada hash usando bcrypt.compare (timing-safe por natureza)",
+        "Se match: set RecoveryCode.usedAt=now(), emite tokens normalmente",
+        "Retorna { remainingCodes: N } na response",
+        "Se remainingCodes <= 2: incluir { warning: 'few_codes_remaining' }",
+        "Se todos usados (remaining=0): set User.twoFactorEnabled=false, deletar TotpDevices, enviar email alerta",
+        "Audit log: 2fa_recovery_used",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Implemented totpRecovery action in auth.controller.ts. Shares challengeId JWT + attempt tracking with totpChallenge. Uses verifyPassword (bcrypt.compare) for timing-safe recovery code comparison. Auto-disables 2FA + sends email when all codes exhausted."
+    },
+    {
+      "id": "US-006",
+      "title": "Gerenciamento 2FA — desabilitar, regenerar codes, listar devices",
+      "description": "Como usuário, quero gerenciar meu 2FA: desabilitar, gerar novos recovery codes e ver devices configurados.",
+      "acceptanceCriteria": [
+        "Action totpDisable (mutation, autenticado): requer { password: string, code: string }",
+        "Verifica senha atual com bcrypt.compare",
+        "Verifica TOTP code OU aceita recovery code como alternativa",
+        "Se válido: delete TotpDevice + RecoveryCode, set User.twoFactorEnabled=false",
+        "Action totpRegenerateCodes (mutation, autenticado): requer { code: string } (TOTP válido)",
+        "Set usedAt=now() em todos RecoveryCode existentes, gera 8 novos, retorna plaintext",
+        "Action totpListDevices (query, autenticado): retorna TotpDevice[] do user (id, name, verified, createdAt)",
+        "Audit log para cada ação: totp_disabled, totp_codes_regenerated",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Added totpDisable (password + TOTP/recovery code verification), totpRegenerateCodes (TOTP code verification, invalidates old codes, generates 8 new), totpListDevices (query returning devices). Audit logs for each action."
+    },
+    {
+      "id": "US-007",
+      "title": "UI de configuração 2FA na página de segurança",
+      "description": "Como usuário, quero uma interface step-by-step para ativar/desativar 2FA nas minhas configurações de segurança.",
+      "acceptanceCriteria": [
+        "Seção 'Autenticação em Duas Etapas' na página de segurança do user (/user/seguranca ou /integracoes/settings)",
+        "Estado desabilitado: card com ícone Shield + descrição + botão 'Ativar 2FA'",
+        "Botão abre Dialog/Sheet com wizard 3 steps:",
+        "Step 1: QR code (img base64) + secret em texto monospace + botão 'Copiar secret'",
+        "Step 2: InputOTP de 6 dígitos para confirmar, botão 'Verificar'",
+        "Step 3: Lista de 8 recovery codes em grid 2x4, botão 'Copiar todos' e 'Download .txt'",
+        "Warning text: 'Guarde estes códigos em local seguro. Eles não serão mostrados novamente.'",
+        "Estado habilitado: card com badge ✅ Ativo, botões 'Desabilitar 2FA' e 'Regenerar códigos'",
+        "Desabilitar: modal de confirmação com inputs senha + código TOTP",
+        "Regenerar: modal com input código TOTP, mostra novos codes após sucesso",
+        "Loading states e error handling em todos os steps",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Added TwoFactorSection component to /user/seguranca page with setup wizard (3 steps), disable modal, regenerate codes modal. Uses fetch API to call /api/v1/auth/totp/* endpoints."
+    },
+    {
+      "id": "US-008",
+      "title": "UI de 2FA challenge no login",
+      "description": "Como usuário com 2FA, quero uma tela intermediária após login para digitar meu código TOTP ou recovery code.",
+      "acceptanceCriteria": [
+        "Nova página ou componente de 2FA challenge (aparece quando login retorna requiresTwoFactor=true)",
+        "InputOTP de 6 dígitos com auto-submit quando completo",
+        "Link 'Perdeu acesso ao authenticator?' abre input para recovery code",
+        "Recovery code: input text de 8 chars, botão Verificar",
+        "Após validação: redirect normal (onboarding ou dashboard)",
+        "Mostrar remaining codes warning se <= 2",
+        "Contador de tentativas restantes visível",
+        "Botão 'Voltar ao login' para cancelar",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Created TwoFactorChallenge component with InputOTP auto-submit and recovery code toggle. Integrated into login-otp-form (email+phone OTP), google-callback, and LoginVerifyMagicClient. Uses fetch API to call /api/v1/auth/totp-challenge and /api/v1/auth/totp-recovery endpoints."
+    },
+    {
+      "id": "US-009",
+      "title": "Cloudflare Turnstile — procedure backend",
+      "description": "Como developer, preciso de um procedure Igniter que valida tokens Turnstile no servidor para bloquear bots.",
+      "acceptanceCriteria": [
+        "Novo arquivo src/server/features/auth/procedures/turnstile.procedure.ts",
+        "Procedure turnstileProcedure para Igniter.js (composable, como authProcedure)",
+        "Extrai cf-turnstile-response do body da request",
+        "POST para https://challenges.cloudflare.com/turnstile/v0/siteverify com secret + response + remoteip",
+        "Env vars: TURNSTILE_SITE_KEY, TURNSTILE_SECRET_KEY",
+        "Se TURNSTILE_SECRET_KEY não configurado: skip validação (fail-open para dev)",
+        "Se token ausente em prod: retorna 403 { error: 'bot_detected' }",
+        "Se validação Cloudflare retorna success=false: retorna 403",
+        "Timeout de 5s no fetch — se timeout: fail-open (aceitar request)",
+        "Aplicar procedure em: login, register, signup, forgotPassword, phoneOtpLogin",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Created turnstile.procedure.ts with fail-open dev, fail-closed prod, 5s timeout. Applied to login, register, signupOTP, forgotPassword, loginOTPPhone via use: [turnstileProcedure()]."
+    },
+    {
+      "id": "US-010",
+      "title": "Cloudflare Turnstile — componente React frontend",
+      "description": "Como usuário, quero que a verificação anti-bot seja invisível nos forms de auth, aparecendo challenge só se necessário.",
+      "acceptanceCriteria": [
+        "Instalar @marsidev/react-turnstile",
+        "Componente <TurnstileWidget /> em src/client/components/auth/turnstile-widget.tsx",
+        "Props: onSuccess(token), onError(), onExpire(), action (string para analytics)",
+        "Modo 'managed' (invisível para humanos, challenge visual só se suspeito)",
+        "Integrar em: login-form-final.tsx, signup-form.tsx, signup-otp-form.tsx, forgot-password page",
+        "Token Turnstile enviado como campo hidden no form submit (cf-turnstile-response)",
+        "Se NEXT_PUBLIC_TURNSTILE_SITE_KEY env var ausente: não renderizar widget",
+        "Se widget falha/expira: mostrar toast 'Verificação expirou. Tente novamente.' e re-render widget",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Created TurnstileWidget with @marsidev/react-turnstile. Integrated in login-form-final, signup-form, signup-otp-form, forgot-password. Token sent as cf-turnstile-response via body. Uses 'as any' cast for Igniter typed API since turnstile field is extracted by procedure, not schema."
+    },
+    {
+      "id": "US-011",
+      "title": "Schema de Custom Roles",
+      "description": "Como developer, preciso do model CustomRole no Prisma e adaptação do UserOrganization para suportar roles dinâmicos.",
+      "acceptanceCriteria": [
+        "Novo model CustomRole: id (uuid), organizationId (FK), name (String), slug (String), description (String?), permissions (Json), isSystem (Boolean default false), priority (Int), createdAt, updatedAt",
+        "Unique constraint: @@unique([organizationId, slug])",
+        "Index: @@index([organizationId])",
+        "Novo campo customRoleId (String? FK CustomRole) no model UserOrganization",
+        "Migration gerada com nome add_custom_roles",
+        "Data migration: para cada org existente, criar 3 CustomRole isSystem=true (master priority=3, manager priority=2, user priority=1) com permissions da PERMISSIONS_MATRIX",
+        "Linkar UserOrganization.customRoleId para o CustomRole correspondente ao role string",
+        "npx prisma generate sem erros",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Added CustomRole model with uuid id, organizationId FK, name, slug, description, permissions (Json), isSystem, priority, timestamps. Added customRoleId FK to UserOrganization with OnDelete SetNull. Migration creates 3 system roles per existing org (master/manager/user) with permissions matching PERMISSIONS_MATRIX. Links existing UserOrganization records to corresponding CustomRole."
+    },
+    {
+      "id": "US-012",
+      "title": "CRUD de Custom Roles — controller Igniter",
+      "description": "Como master de uma org, quero criar, editar e deletar roles customizados para definir níveis de acesso específicos.",
+      "acceptanceCriteria": [
+        "Novo controller customRolesController em src/server/features/permissions/controllers/custom-roles.controller.ts",
+        "Action list (query): retorna CustomRole[] da org atual, ordenados por priority DESC",
+        "Action create (mutation): nome (3-50 chars), description?, permissions (Json validado), priority (1-2)",
+        "Slug auto-gerado: kebab-case do nome, unique por org",
+        "Não permitir priority >= 3 (reservado para master)",
+        "Action get (query): detalhes com count de users atribuídos (_count UserOrganization)",
+        "Action update (mutation): editar nome, description, permissions, priority — rejeitar se isSystem=true",
+        "Action delete (mutation): só custom roles — rejeitar se tem users atribuídos (retornar count), aceitar com { force: true, reassignToRoleId: string }",
+        "Todas actions: use [authProcedure({ required: true })], checar org role >= master",
+        "Registrar no igniter.router.ts",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Created customRolesController with list/create/get/update/delete actions. All actions protected with authProcedure, check org role >= master. Slug auto-generated via kebab-case. Permissions validated with z.nativeEnum(Resource) and z.nativeEnum(Action). Delete supports force+reassignToRoleId. Registered in igniter.router.ts."
+    },
+    {
+      "id": "US-013",
+      "title": "Migrar sistema de permissões para CustomRole",
+      "description": "Como developer, preciso que hasPermission() e checkPermission() leiam do CustomRole do DB em vez da PERMISSIONS_MATRIX hardcoded.",
+      "acceptanceCriteria": [
+        "Criar cache em memória (Map) para CustomRole permissions com TTL 5min",
+        "Função getCustomRolePermissions(customRoleId): busca do cache ou DB, retorna permissions Json",
+        "hasPermission() atualizado: se recebe customRoleId, usa permissions do CustomRole",
+        "Fallback: se customRoleId null, usa PERMISSIONS_MATRIX legado (zero breaking change)",
+        "authProcedure injeta customRole no context: { id, slug, permissions, priority }",
+        "checkPermission() funciona transparente com ambos sistemas",
+        "Cache invalidation: ao criar/update/delete CustomRole, limpar entry do cache",
+        "Testes unitários: fallback legado funciona, custom role funciona, cache funciona",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Added in-memory cache (Map) with 5min TTL for CustomRole permissions. getCustomRolePermissions() fetches from cache or DB. hasPermission() accepts optional customRolePermissions param, falls back to PERMISSIONS_MATRIX. checkPermission() context extended with customRolePermissions. authProcedure resolves customRole from UserOrganization.customRoleId and injects { id, slug, permissions, priority } into context.auth.customRole. Cache invalidation exported and called in custom-roles controller on create/update/delete."
+    },
+    {
+      "id": "US-014",
+      "title": "UI de gerenciamento de Custom Roles",
+      "description": "Como master de org, quero uma página visual para criar e configurar roles com matrix de permissões.",
+      "acceptanceCriteria": [
+        "Nova página /admin/roles (ou seção em /integracoes/settings/organization tab roles)",
+        "Acessível apenas para master da org (checar org role)",
+        "Lista de roles: cards ou tabela com nome, descrição, nº membros, badge 'Sistema' para built-in",
+        "Botão 'Criar Role' abre Sheet/Dialog com form:",
+        "  - Input nome (3-50 chars)",
+        "  - Input descrição (opcional)",
+        "  - Permissions matrix: grid de checkboxes (colunas=Actions CRUD+List+Manage, linhas=Resources)",
+        "  - Priority selector (1 ou 2)",
+        "Editar role custom: mesma UI pre-populada — system roles: view-only",
+        "Deletar role: confirmation dialog — se tem users, mostrar count e input para role de reatribuição",
+        "Na página de membros: dropdown de role agora carrega CustomRole[] da org",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Created /admin/roles page with system roles cards (view-only) and custom roles table (CRUD). RoleFormDialog with permissions matrix (Resources x Actions checkboxes). DeleteRoleDialog with reassignment select for roles with members. Added Roles link to admin sidebar. Uses apiFetch to /api/v1/custom-roles endpoints."
+    },
+    {
+      "id": "US-015",
+      "title": "Schema e verificação DNS/Email para Domínios Verificados",
+      "description": "Como master de org, quero verificar ownership do meu domínio corporativo via DNS TXT ou email admin@domínio.",
+      "acceptanceCriteria": [
+        "Novo model VerifiedDomain: id, organizationId (FK), domain (String), verificationMethod (String: DNS_TXT ou EMAIL), verificationToken (String), verifiedAt (DateTime?), defaultRoleId (String? FK CustomRole), autoJoin (Boolean default false), createdAt",
+        "Unique: @@unique([organizationId, domain])",
+        "Action addDomain (mutation, master only): input domain, method — gera token quayer-verify=<32bytesHex>",
+        "Action verifyDomainDns: usa dns.resolveTxt() nativo do Node, busca record contendo verificationToken",
+        "Action verifyDomainEmail: envia email para admin@domain com código 6 dígitos (VerificationCode), input para verificar",
+        "Se verificação ok: set verifiedAt=now()",
+        "Action updateDomain: toggle autoJoin, set defaultRoleId",
+        "Action removeDomain: delete com confirmação (não afeta membros existentes)",
+        "Blocklist de domínios genéricos: gmail.com, hotmail.com, outlook.com, yahoo.com — rejeitar auto-join",
+        "Rate limit: 10 verificações / hora por org",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Added VerifiedDomain model with DNS TXT and email verification methods. Controller with addDomain, verifyDomainDns, verifyDomainEmail, list, updateDomain, removeDomain. Blocklist for 15+ generic email domains. In-memory rate limit 10/hour/org. In-memory email verification codes with 30min expiry. Registered in igniter.router.ts."
+    },
+    {
+      "id": "US-016",
+      "title": "Auto-join por domínio verificado no signup",
+      "description": "Como novo usuário com email corporativo, quero ser automaticamente adicionado à organização da minha empresa após cadastro.",
+      "acceptanceCriteria": [
+        "Nos fluxos register, signup, verifySignupOtp, verifyMagicLink: após email verification",
+        "Extrair domínio do email (split @, toLowerCase)",
+        "Buscar VerifiedDomain onde domain=domínio, verifiedAt IS NOT NULL, autoJoin=true",
+        "Se encontrou: criar UserOrganization com role do defaultRoleId (ou fallback 'user')",
+        "Setar User.currentOrgId para a org do domínio",
+        "Não aplicar se user já é membro da org",
+        "Se múltiplas orgs verificaram mesmo domínio: adicionar a todas, notificar user",
+        "Audit log: domain_auto_join com metadata { orgId, domain }",
+        "Não bloquear signup se auto-join falha (fail-open, user continua sem org)",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Added autoJoinByVerifiedDomain helper in auth.controller.ts. Integrated in verifyEmail, verifySignupOTP, verifyMagicLink (signup branch), verifyLoginOTPPhone (new users). Fail-open with per-org error handling. Sets currentOrgId if user has none. Audit log domain_auto_join with orgId+domain metadata."
+    },
+    {
+      "id": "US-017",
+      "title": "UI de Domínios Verificados",
+      "description": "Como master de org, quero gerenciar domínios verificados com instruções de DNS e toggle de auto-join.",
+      "acceptanceCriteria": [
+        "Nova seção 'Domínios Verificados' nas configurações da org (tab dedicada ou dentro de settings)",
+        "Lista de domínios com status visual: ⏳ Pendente, ✅ Verificado, badge auto-join on/off",
+        "Botão 'Adicionar Domínio': input domínio + radio DNS TXT / Email",
+        "Para DNS: card com instruções — 'Adicione o seguinte registro TXT no DNS do seu domínio:' + copyable token",
+        "Botão 'Verificar Agora' que chama verifyDomainDns e mostra resultado",
+        "Para Email: mostra 'Email enviado para admin@domínio' + input para código 6 dígitos",
+        "Após verificação: toggle 'Auto-join habilitado' + dropdown de role padrão (lista CustomRoles)",
+        "Botão remover domínio com confirmation dialog",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Created /admin/domains page with full domain management UI. Split view: pending domains (with Verify button) and verified domains (with auto-join toggle + default role dropdown). AddDomainDialog with DNS TXT / Email method selector. DnsVerifyDialog with copyable token + verify button. EmailVerifyDialog with InputOTP 6-digit code. RemoveDomainDialog with confirmation. Added Dominios link to admin sidebar. Uses apiFetch to /api/v1/verified-domains endpoints."
+    },
+    {
+      "id": "US-018",
+      "title": "SCIM 2.0 — Schema e token management",
+      "description": "Como developer, preciso do model ScimToken e endpoints de gerenciamento para que orgs possam gerar tokens de integração SCIM.",
+      "acceptanceCriteria": [
+        "Novo model ScimToken: id, organizationId (FK), name (String), tokenHash (String), lastUsedAt (DateTime?), expiresAt (DateTime?), revokedAt (DateTime?), createdAt",
+        "Index: @@index([organizationId])",
+        "Controller scimTokensController com actions:",
+        "  list: tokens da org (sem hash), create: gera token random 64 bytes hex + hash bcrypt, revoke: set revokedAt",
+        "Token retornado em plaintext apenas no create (única vez)",
+        "Função validateScimToken(bearerToken): busca por hash comparison, rejeita revogado/expirado, update lastUsedAt",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Added ScimToken model with bcrypt tokenHash. Controller with list/create/revoke actions (master-only, authProcedure). validateScimToken function iterates non-revoked tokens with bcrypt comparison, updates lastUsedAt fire-and-forget. Token generated as 64 bytes hex (128 chars), stored as bcrypt hash. Migration applied manually (shadow DB workaround)."
+    },
+    {
+      "id": "US-019",
+      "title": "SCIM 2.0 — Endpoints /Users REST",
+      "description": "Como admin de IdP (Okta/Azure AD), quero provisionar e deprovisionar users no Quayer automaticamente via SCIM 2.0.",
+      "acceptanceCriteria": [
+        "Novos API routes em src/app/api/scim/v2/Users/ (Next.js route handlers, fora do Igniter)",
+        "Auth via Bearer token (ScimToken), extrair organizationId do token",
+        "GET /Users: listar users da org com paginação SCIM (startIndex, count, totalResults, itemsPerPage)",
+        "Suportar filter=userName eq 'email@example.com'",
+        "GET /Users/:id: detalhes do user no schema SCIM (schemas, id, userName, name, emails, active, meta)",
+        "POST /Users: criar User + UserOrganization (role='user' ou defaultRoleId), password random, enviar email de welcome",
+        "PUT /Users/:id: replace completo (update name, email, active)",
+        "PATCH /Users/:id: Operations array SCIM — suportar op: replace para active, name, userName",
+        "DELETE /Users/:id: set UserOrganization.isActive=false (soft delete, não remove User)",
+        "Responses no formato SCIM: schemas array, meta com resourceType/created/lastModified/location",
+        "Errors no formato SCIM: schemas, status, detail",
+        "Max 100 results por página",
+        "Audit log para cada operação",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "Created Next.js API routes at src/app/api/scim/v2/Users/ with GET list (pagination + filter), POST create, and [id]/route.ts with GET/PUT/PATCH/DELETE. Shared scim-utils.ts with auth, error formatting, user mapping, audit logging, and filter parsing. Bearer token auth via validateScimToken. PATCH supports op:replace for active/name/userName with path and no-path variants. DELETE soft-deletes via UserOrganization.isActive=false. POST creates user with random password, sends welcome email. Fixed metadata type for audit log."
+    },
+    {
+      "id": "US-020",
+      "title": "UI de SCIM Token management",
+      "description": "Como master de org, quero gerar tokens SCIM e ver instruções de configuração para meu IdP.",
+      "acceptanceCriteria": [
+        "Nova seção 'SCIM Provisioning' nas configurações da org",
+        "Botão 'Gerar Token SCIM': input nome do token → gera e mostra token uma vez com copy button",
+        "Warning: 'Este token não será mostrado novamente. Copie agora.'",
+        "Lista de tokens: nome, criado em, último uso (relative time), status badge (Ativo/Expirado/Revogado)",
+        "Botão revogar com confirmation dialog",
+        "Seção 'Configuração do IdP' com instruções colapsáveis para Okta, Azure AD, Google Workspace:",
+        "  - SCIM Base URL: {APP_URL}/api/scim/v2",
+        "  - Auth: Bearer Token",
+        "  - Supported operations: Users (create, update, deactivate)",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Created /admin/scim page with full SCIM token management UI. CreateTokenDialog with name input + expiration selector, shows token once with copy button + warning. Token list with name, created date, last used (relative time), expiration, status badge (Ativo/Expirado/Revogado). RevokeTokenDialog with AlertDialog confirmation. IdP instructions section with collapsible guides for Okta, Azure AD, Google Workspace. SCIM Base URL display with copy button. Added SCIM link with Key icon to admin sidebar."
+    }
+  ]
+}

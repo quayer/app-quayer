@@ -1,0 +1,143 @@
+{
+  "project": "app-quayer",
+  "branchName": "ralph/repo-cleanup-test-automation",
+  "description": "Limpeza completa do repositório (arquivos obsoletos, gitignored presentes, docs desatualizados) + recriação da esteira de testes do zero (Vitest unit/api + Playwright E2E) com CI/CD funcional no GitHub Actions.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Deletar arquivos gitignored e lixo local da raiz",
+      "description": "Como desenvolvedor, quero que a raiz do projeto não tenha arquivos temporários, logs e caches de build presentes localmente.",
+      "acceptanceCriteria": [
+        "Deletar UsersgabriAppDataLocalTempinit.sql da raiz (se presente)",
+        "Deletar *.tsbuildinfo e tsconfig-WIN-QVULKCTEEEN.tsbuildinfo (se presentes)",
+        "Deletar build.log, test-output.log, test-results-unit.log da raiz (se presentes)",
+        "Deletar pasta playwright-report/ (conteúdo desatualizado de 2026-02-16)",
+        "Deletar pasta test-results/ (conteúdo desatualizado de 2026-02-16)",
+        "git status não mostra nenhum desses arquivos após exclusão",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Remover arquivos tracked obsoletos via git rm",
+      "description": "Como desenvolvedor, quero remover documentação desatualizada e configs duplicadas do histórico git.",
+      "acceptanceCriteria": [
+        "AGENT.md removido com git rm (se existir na raiz)",
+        "IMPLEMENTATION_STATUS.md removido com git rm (se existir)",
+        "INFRASTRUCTURE_COMPLETE.md removido com git rm (se existir)",
+        "docker-compose.prod.yml removido com git rm (apenas docker-compose.quayer.yml mantido)",
+        "docker-compose.yml removido com git rm (duplicado)",
+        ".eslintrc.json removido com git rm (duplicado de eslint.config.mjs)",
+        "src/test/example.test.ts removido com git rm",
+        "test/dashboard.test.tsx.skip removido com git rm (se existir)",
+        "Commit criado com todos os git rm agrupados",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Deletar pasta test/ completa e recriar estrutura limpa",
+      "description": "Como desenvolvedor, quero começar do zero com uma estrutura de testes clara, deletando os 93 arquivos/31.500 linhas de testes acumulados.",
+      "acceptanceCriteria": [
+        "Pasta test/ atual deletada completamente via git rm -r test/",
+        "Nova estrutura criada: test/unit/, test/api/, test/e2e/",
+        "test/unit/utils.test.ts criado com 1 teste real de uma função utilitária do projeto (ex: src/lib/utils.ts)",
+        "test/api/health.test.ts criado com 1 teste que chama GET /api/health e verifica status 200",
+        "test/e2e/auth.spec.ts criado com 1 teste Playwright que acessa /login e verifica que a página carrega",
+        "Commit com a nova estrutura",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Refatorar vitest.config.ts e deletar config duplicada",
+      "description": "Como desenvolvedor, quero uma única config Vitest que cubra corretamente unit e api tests.",
+      "acceptanceCriteria": [
+        "vitest.config.integration.ts deletado com git rm",
+        "vitest.config.ts atualizado: include: ['test/unit/**/*.test.ts', 'test/api/**/*.test.ts']",
+        "vitest.config.ts tem environment: 'node', globals: true, testTimeout: 30000",
+        "npm run test executa e encontra os testes em test/unit/ e test/api/",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Limpar scripts de test no package.json",
+      "description": "Como desenvolvedor, quero scripts de teste com nomes claros, sem os 36 scripts redundantes atuais.",
+      "acceptanceCriteria": [
+        "Scripts mantidos: test, test:watch, test:coverage, test:unit, test:api, test:e2e, test:e2e:ui, test:e2e:headed, test:e2e:debug, test:ci",
+        "Todos os scripts test:real:*, test:massive, test:admin:*, test:uazapi, test:integration removidos",
+        "test:ci definido como: npm run lint && npx tsc --noEmit && npm run test && npm run build",
+        "npm run test:ci completa sem erros (exceto build failures pré-existentes no projeto)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Atualizar playwright.config.ts",
+      "description": "Como desenvolvedor, quero que o Playwright aponte apenas para test/e2e/ e inicie o servidor automaticamente.",
+      "acceptanceCriteria": [
+        "testDir configurado como './test/e2e'",
+        "webServer configurado: command 'npm run dev', url 'http://localhost:3000', reuseExistingServer: !process.env.CI",
+        "reporter: process.env.CI ? 'github' : 'list'",
+        "fullyParallel: false mantido",
+        "retries: process.env.CI ? 2 : 0 mantido",
+        "Apenas project chromium configurado",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Recriar .github/workflows/ci.yml funcional",
+      "description": "Como desenvolvedor, quero uma esteira de CI que rode automaticamente em cada PR com lint, typecheck, unit tests e build.",
+      "acceptanceCriteria": [
+        "ci.yml recriado do zero (arquivo atual tem permissão corrompida — verificar conteúdo via git show antes de recriar)",
+        "Stage lint: npm run lint",
+        "Stage typecheck: npx tsc --noEmit",
+        "Stage unit: npm run test (vitest)",
+        "Stage build: npm run build",
+        "Stage e2e: roda apenas quando PR tem label 'e2e' usando contains(github.event.pull_request.labels.*.name, 'e2e')",
+        "Cache de node_modules com actions/cache baseado em hash de package-lock.json",
+        "Node.js 20, ubuntu-latest",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "ci.yml tem permissão corrompida no sistema de arquivos — usar git show HEAD:.github/workflows/ci.yml para ler o conteúdo antes de recriar."
+    },
+    {
+      "id": "US-008",
+      "title": "Atualizar .gitignore para prevenir lixo futuro",
+      "description": "Como desenvolvedor, quero que o .gitignore impeça que resultados de testes, logs e caches entrem no repositório.",
+      "acceptanceCriteria": [
+        "test-results/ adicionado ao .gitignore (se não existir)",
+        "playwright-report/ adicionado ao .gitignore (se não existir)",
+        "*.tsbuildinfo adicionado ao .gitignore (se não existir)",
+        "Usersgabri* adicionado ao .gitignore para evitar arquivos de temp do Windows",
+        "git status limpo após rodar npm run test localmente",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

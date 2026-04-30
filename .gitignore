@@ -1,4 +1,10 @@
 # ===========================================
+# 🤖 AI IDE CONFIGS (contém tokens/configs locais)
+# ===========================================
+.cursor/
+.gemini/
+
+# ===========================================
 # 📦 DEPENDENCIES
 # ===========================================
 node_modules/
@@ -136,6 +142,7 @@ htmlcov/
 test-results/
 playwright-report/
 playwright/.cache/
+test/.auth/
 
 # Vitest
 vitest.config.js.timestamp-*
@@ -229,3 +236,10 @@ pids/
 local/
 *.local.*
 .cleanup-backup/
+
+# Playwright MCP screenshots
+.playwright-mcp/
+
+# Data volumes (Docker postgres)
+data/
+.claude/worktrees/

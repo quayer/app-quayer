@@ -1,59 +1,70 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Playwright E2E Test Configuration
- * Tests all user interactions and frontend functionality
+ * Playwright E2E Test Configuration — Quayer Testing Pipeline (US-107A)
  *
- * AMBIENTES:
- * - Desenvolvimento: http://localhost:3000 (padrao)
- * - Producao: https://app.quayer.com (via BASE_URL env)
+ * Three projects:
+ *   - local: roda contra http://localhost:3000 (servidor local — npm run dev)
+ *   - homol: roda contra https://homol.quayer.com
+ *   - prod : roda contra https://app.quayer.com — APENAS specs marcadas como
+ *            smoke (test/e2e/smoke-prod.spec.ts). NUNCA login/signup completos.
  *
- * Exemplo:
- * BASE_URL=https://app.quayer.com npx playwright test --headed
+ * O usuário deve rodar `npm run dev` separadamente antes dos testes locais.
+ * Não há webServer configurado de propósito — controle explícito do servidor.
  */
 export default defineConfig({
-  testDir: './test',
-  testMatch: '**/*.spec.ts',
+  testDir: './test/e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1, // Serializado para testes interativos
+  workers: process.env.CI ? 1 : undefined,
+  timeout: 30_000,
+  expect: {
+    timeout: 10_000,
+  },
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'playwright-report' }],
+    ['html', { outputFolder: 'test-results/html' }],
   ],
-  timeout: 300000, // 5 minutos para testes interativos
   outputDir: 'test-results',
 
   use: {
-    // PRODUCAO por padrao para testes de auth
-    baseURL: process.env.BASE_URL || 'https://app.quayer.com',
-    trace: 'on',
-    screenshot: 'on',
-    video: 'on', // Gravar video de todos os testes
-    // Block SSE endpoint to prevent networkidle timeout
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+    // Header usado por rotas de teste (preservado da config anterior)
     extraHTTPHeaders: {
       'X-Test-Mode': 'true',
     },
-    // Viewport desktop
-    viewport: { width: 1280, height: 720 },
-    // Localizacao Brasil
-    locale: 'pt-BR',
-    timezoneId: 'America/Sao_Paulo',
   },
 
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: 'local',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://localhost:3000',
+      },
+    },
+    {
+      name: 'homol',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'https://homol.quayer.com',
+      },
+    },
+    {
+      name: 'prod',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'https://app.quayer.com',
+      },
+      // Restrição CRÍTICA: prod NUNCA roda login/signup completos.
+      // Apenas specs explicitamente marcadas como smoke-prod.
+      testMatch: /smoke-prod\.spec\.ts$/,
     },
   ],
 
-  // Comentado para usar servidor já rodando
-  // webServer: {
-  //   command: 'npm run dev',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: true,
-  //   timeout: 120000,
-  // },
+  // webServer intencionalmente ausente — usuário roda `npm run dev`
+  // separadamente. Ver test/e2e/README.md.
 })

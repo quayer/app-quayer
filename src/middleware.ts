@@ -16,8 +16,7 @@ const PUBLIC_PATHS = [
   '/login',
   '/signup',
   '/connect',
-  '/forgot-password',
-  '/reset-password',
+  '/compartilhar',
   '/google-callback',
   '/verify',
 ];
@@ -29,22 +28,31 @@ const ONBOARDING_PATHS = ['/onboarding'];
 
 /**
  * Rotas protegidas (requerem autenticação)
+ *
+ * Nota: a rota raiz `/` (home nova do Builder) é tratada separadamente
+ * abaixo porque `startsWith('/')` daria match em tudo.
  */
 const PROTECTED_PATHS = [
-  '/integracoes',
-  '/conversas',
+  '/projetos',
+  '/canais',
   '/admin',
+  '/conta',
+  '/org',
   '/dashboard',
+  '/docs',
   '/instances',
   '/organizations',
   '/projects',
   '/settings',
+  '/user',
+  '/onboarding',
+  '/auth/device',
 ];
 
 /**
  * Rotas que requerem role de System Admin
  */
-const ADMIN_ONLY_PATHS = ['/admin'];
+const ADMIN_ONLY_PATHS = ['/admin', '/docs'];
 
 /**
  * Middleware principal
@@ -53,12 +61,18 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Permitir rotas públicas sem autenticação
-  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
+  // startsWith sozinho daria match em prefixos parciais (ex: '/login' matcharia
+  // '/login-admin'). Verificamos o separador de segmento para evitar bypass.
+  if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'))) {
     return NextResponse.next();
   }
 
   // 2. Verificar se é rota protegida
-  const isProtected = PROTECTED_PATHS.some((path) => pathname.startsWith(path));
+  // Match exato em `/` (home nova do Builder) OU startsWith nas demais
+  const isRoot = pathname === '/';
+  const isProtected =
+    isRoot ||
+    PROTECTED_PATHS.some((path) => pathname.startsWith(path));
 
   if (!isProtected) {
     return NextResponse.next();
@@ -72,7 +86,9 @@ export async function middleware(request: NextRequest) {
   // 4. Se não há token, redirecionar para login
   if (!token) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
+    // Preservar query params na URL de redirect (ex: /auth/device?code=ABCD-1234)
+    const search = request.nextUrl.search;
+    loginUrl.searchParams.set('redirect', search ? `${pathname}${search}` : pathname);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -87,10 +103,14 @@ export async function middleware(request: NextRequest) {
 
     const response = NextResponse.redirect(loginUrl);
     response.cookies.delete('accessToken'); // Limpar cookie inválido
+    response.cookies.delete('refreshToken');
     return response;
   }
 
-  // 6. Verificar onboarding
+  // 6. [IP check removido do middleware — Edge runtime não pode fazer fetch bloqueante]
+  // IP blocking é aplicado na camada de API quando necessário.
+
+  // 7. Verificar onboarding
   // Se usuário não completou onboarding E não está em rota de onboarding, redirecionar
   const isOnboardingPath = ONBOARDING_PATHS.some((path) => pathname.startsWith(path));
 
@@ -100,22 +120,27 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(onboardingUrl);
   }
 
-  // Se usuário JÁ completou onboarding mas está na rota de onboarding, redirecionar para dashboard
+  // Se usuário JÁ completou onboarding mas está na rota de onboarding, redirecionar para home
   if (!payload.needsOnboarding && isOnboardingPath) {
-    const dashboardUrl = new URL('/integracoes', request.url);
+    const dashboardUrl = new URL('/', request.url);
     return NextResponse.redirect(dashboardUrl);
   }
 
-  // 7. Verificar se rota requer System Admin
+  // 8. Verificar se rota requer System Admin
   const isAdminOnlyPath = ADMIN_ONLY_PATHS.some((path) => pathname.startsWith(path));
 
   if (isAdminOnlyPath && !isSystemAdmin(payload.role as UserRole)) {
-    // Usuário não é admin do sistema - redirecionar silenciosamente para a área do usuário
-    const redirectUrl = new URL('/integracoes', request.url);
+    // Usuário não é admin do sistema - redirecionar silenciosamente para a home
+    const redirectUrl = new URL('/', request.url);
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 8. Adicionar informações do usuário aos headers (para uso em Server Components)
+  // 9. Adicionar informações do usuário aos headers (para uso em Server Components)
+  // IMPORTANTE: estes headers são gerados AQUI a partir do JWT verificado.
+  // Route Handlers e Server Components NUNCA devem usá-los como fonte primária
+  // de autenticação — sempre revalidar via JWT ou session no handler. Eles
+  // existem apenas como conveniência de leitura para Server Components que já
+  // estão atrás desta camada de middleware.
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-user-id', payload.userId);
   requestHeaders.set('x-user-email', payload.email);
@@ -133,7 +158,7 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('x-organization-role', payload.organizationRole);
   }
 
-  // 9. Continuar com headers atualizados
+  // 10. Continuar com headers atualizados
   return NextResponse.next({
     request: {
       headers: requestHeaders,

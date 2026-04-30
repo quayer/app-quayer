@@ -1,0 +1,117 @@
+name: Synthetic Monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { url: "https://homol.quayer.com/api/health", expect: "200", name: "homol-health" }
+          - { url: "https://app.quayer.com/api/health",   expect: "200", name: "prod-health" }
+          - { url: "https://app.quayer.com/login",        expect: "200", name: "prod-login" }
+          - { url: "https://flows.quayer.com/",           expect: "200", name: "n8n" }
+          - { url: "https://chat.quayer.com/",            expect: "302", name: "chatwoot" }
+          - { url: "https://supabase.quayer.com/",        expect: "503", name: "supabase" }
+    steps:
+      - name: Check ${{ matrix.target.name }}
+        id: check
+        run: |
+          set +e
+          RESPONSE=$(curl -sI -o /dev/null \
+            -w "%{http_code},%{time_total}" \
+            --max-time 15 \
+            -A "QuayerSyntheticMonitor/1.0 (+github-actions)" \
+            "${{ matrix.target.url }}")
+          CURL_EXIT=$?
+          set -e
+
+          STATUS=$(echo "$RESPONSE" | cut -d, -f1)
+          TIME=$(echo "$RESPONSE" | cut -d, -f2)
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "time=$TIME"     >> "$GITHUB_OUTPUT"
+
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "::error::${{ matrix.target.name }} curl failed (exit=$CURL_EXIT) url=${{ matrix.target.url }}"
+            exit 1
+          fi
+          if [ "$STATUS" != "${{ matrix.target.expect }}" ]; then
+            echo "::error::${{ matrix.target.name }} returned $STATUS (expected ${{ matrix.target.expect }}), time=${TIME}s"
+            exit 1
+          fi
+          echo "::notice::${{ matrix.target.name }} OK ($STATUS in ${TIME}s)"
+
+      # ---------------------------------------------------------------
+      # Auth page HTML presence check (only for prod-login)
+      #
+      # RULES — this step MUST respect these constraints at all times:
+      #   - NO real login (no credentials, no cookies, no session)
+      #   - NO credentials of any kind are sent or stored
+      #   - NO OTP fixo / hardcoded OTP
+      #   - NO form submission (only GET of the HTML body)
+      #
+      # Purpose: prove the /login page is the real Quayer app shell
+      # (not a Cloudflare error page, not a blank 200) by asserting:
+      #   1. the HTML contains a <form element
+      #   2. the HTML contains the substring "quayer" (case-insensitive)
+      # ---------------------------------------------------------------
+      - name: Verify login HTML contains form and brand
+        if: matrix.target.name == 'prod-login'
+        run: |
+          set -e
+          BODY=$(curl -sL \
+            --max-time 15 \
+            -A "QuayerSyntheticMonitor/1.0 (+github-actions)" \
+            "${{ matrix.target.url }}")
+
+          if ! echo "$BODY" | grep -q "<form"; then
+            echo "::error::prod-login HTML missing <form element — page may be broken or replaced by an error page"
+            exit 1
+          fi
+          if ! echo "$BODY" | grep -qi "quayer"; then
+            echo "::error::prod-login HTML does not contain 'quayer' substring — likely a Cloudflare/WAF error page"
+            exit 1
+          fi
+          echo "::notice::prod-login HTML OK (form present, brand present)"
+
+      - name: Write log line
+        if: always()
+        run: |
+          mkdir -p monitor-logs
+          echo "$(date -u +%FT%TZ),${{ matrix.target.name }},${{ steps.check.outputs.status }},${{ steps.check.outputs.time }},${{ job.status }}" \
+            > "monitor-logs/${{ matrix.target.name }}.csv"
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log-${{ matrix.target.name }}-${{ github.run_id }}
+          path: monitor-logs/
+          retention-days: 7
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL not configured — skipping alert"
+            exit 0
+          fi
+          PAYLOAD=$(cat <<EOF
+          {
+            "content": ":rotating_light: **Synthetic Monitor FAIL**\nTarget: \`${{ matrix.target.name }}\`\nURL: ${{ matrix.target.url }}\nExpected: ${{ matrix.target.expect }}\nGot: ${{ steps.check.outputs.status }} (time=${{ steps.check.outputs.time }}s)\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          )
+          curl -sS -X POST -H "Content-Type: application/json" \
+            -d "$PAYLOAD" "$WEBHOOK" || echo "::warning::Webhook POST failed"

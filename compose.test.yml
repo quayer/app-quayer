@@ -1,0 +1,22 @@
+# Docker compose for integration tests only (US-106A)
+# Not for dev, not for prod. Port 5433 to avoid dev DB conflict.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quayer-test-postgres
+    restart: "no"
+    environment:
+      POSTGRES_USER: quayer_test
+      POSTGRES_PASSWORD: quayer_test
+      POSTGRES_DB: quayer_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - quayer-test-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quayer_test -d quayer_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+volumes:
+  quayer-test-pgdata:

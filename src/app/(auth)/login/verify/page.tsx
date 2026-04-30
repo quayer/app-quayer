@@ -1,52 +1,43 @@
-'use client'
-
 import { Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import Image from "next/image"
-import Link from "next/link"
-import { LoginOTPForm } from "@/components/auth/login-otp-form"
-import { AuthLayout } from "@/components/auth/auth-layout"
+import { cookies } from 'next/headers'
+import { isAuthV3Enabled } from '@/lib/feature-flags/auth-v3'
+import { AuthShell } from '@/client/components/auth/auth-shell'
+import { LoginVerifyV2Client } from './LoginVerifyV2Client'
 
-function LoginVerifyContent() {
-  const searchParams = useSearchParams()
-  const email = searchParams.get('email')
+export default async function LoginVerifyPage() {
+  const cookieStore = await cookies()
+  const override = cookieStore.get('auth-v3-override')?.value ?? null
+  const v3 = isAuthV3Enabled(null, override)
 
-  return (
-    <AuthLayout>
-      <div className="flex w-full flex-col gap-6">
-        <Link
-          href="/login"
-          className="flex items-center justify-center gap-2 font-medium group"
-          aria-label="Voltar para login"
-        >
-          <div className="relative">
-            <Image
-              src="/logo.svg"
-              alt="Quayer"
-              width={140}
-              height={32}
-              priority
-              className="relative z-10 transition-transform duration-300 group-hover:scale-105"
-            />
-            <div className="absolute inset-0 blur-xl bg-gradient-to-r from-purple-500/30 to-pink-500/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+  if (v3) {
+    return (
+      <Suspense fallback={
+        <div className="flex items-center justify-center min-h-[300px]" role="status">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 rounded-full border-2 border-ds-border border-t-ds-fg animate-spin" />
+            <span className="text-ds-sm text-ds-muted">Carregando...</span>
           </div>
-        </Link>
-        <LoginOTPForm email={email || undefined} />
-      </div>
-    </AuthLayout>
-  )
-}
+        </div>
+      }>
+        <AuthShell>
+          <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
+            <LoginVerifyV2Client />
+          </div>
+        </AuthShell>
+      </Suspense>
+    )
+  }
 
-export default function LoginVerifyPage() {
   return (
     <Suspense fallback={
-      <AuthLayout>
-        <div className="flex items-center justify-center">
-          <p className="text-muted-foreground">Carregando...</p>
+      <div className="flex items-center justify-center min-h-[300px]" role="status">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+          <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
-      </AuthLayout>
+      </div>
     }>
-      <LoginVerifyContent />
+      <LoginVerifyV2Client />
     </Suspense>
   )
 }

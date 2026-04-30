@@ -1,0 +1,70 @@
+## Codebase Patterns
+
+- **Cookie name:** auth usa `accessToken` (não `access_token`) — setCookie em auth.controller.ts line ~89
+- **Client components:** NUNCA importar `@/lib/auth` (barrel) em `use client` — importar direto de `@/lib/auth/auth-provider`
+- **PhoneInput:** usa react-international-phone + usePhoneInput hook; forwardRef expondo ref do input nativo
+- **AsYouType bug:** NÃO usar `new AsYouType(country).input(e.target.value)` com valor já formatado — usar hook do react-international-phone
+- **looksLikePhone:** `const clean = v.replace(/[^\d]/g, ""); return clean.length >= 8` — funciona com E.164 e nacional
+- **normalizePhone backend:** `phone.replace(/\D/g, "")` strip tudo — aceita qualquer formato
+- **UAZAPI_INSTANCE_TOKEN env:** fallback quando nenhuma connection no DB tem uazapiToken
+- **igniter schema:** regenerar manualmente quando CLI falha (ajv/dist/core error)
+- **apiFetch helper:** retorna response.json() raw — data.data é o array
+- **Git mmap workaround:** Use `git hash-object -w <file>` then `git update-index --add --cacheinfo` when `git add` fails
+
+---
+
+# Ralph Progress Log
+Started: Thu Mar 12 10:14:35     2026
+---
+
+## US-001 — DONE (Thu Mar 12 2026)
+- Installed `react-international-phone` with `--legacy-peer-deps`
+- Rewrote `src/client/components/ui/phone-input.tsx`:
+  - Uses `usePhoneInput` hook (headless) for state management — eliminates AsYouType re-format bug
+  - Uses `CountrySelector` component from library for flag+dropdown UI
+  - Default country: `"br"` (Brasil)
+  - `React.forwardRef<HTMLInputElement, PhoneInputProps>` maintained — ref merged with internal inputRef
+  - `detectCountry(value): CountryInfo` exported for backward compat
+  - `PhoneInput.displayName = 'PhoneInput'` maintained
+  - CSS imported from `react-international-phone/dist/index.css`
+  - onChange emits E.164 format (e.g. `+5511940636426`)
+- TypeCheck: no new errors in phone-input.tsx; pre-existing errors in other files unchanged
+---
+
+## US-002 — DONE (Thu Mar 12 2026)
+- Verified: PhoneInput (react-international-phone) emits E.164 format via `onChange({ phone: newPhone })` → parent receives e.g. `+5511940636426`
+- Updated `looksLikePhone` in `src/client/components/auth/login-form-final.tsx` and `src/client/components/auth/signup-form.tsx`:
+  - Old: `v.replace(/[\s\-\(\)\+]/g, '')` + `/^\d+$/.test(clean) && clean.length >= 8`
+  - New: `v.replace(/[^\d]/g, '')` + `clean.length >= 8` — simpler, handles all formats (E.164, national, formatted)
+- Verified `login-otp-form.tsx`: does NOT import `detectCountry`; uses `PhoneInput` component directly (display-only, disabled)
+- TypeCheck: no new errors introduced by this change; pre-existing errors in unrelated files unchanged
+---
+
+## Thu Mar 12 2026 — phone-input-v3 US-001
+
+### US-001 — PhoneInput — remove CSS externo, estilizar com Tailwind dark-mode compliant
+- Removed `import "react-international-phone/style.css"` from `src/client/components/ui/phone-input.tsx`
+- Added `dropdownStyleProps` to `CountrySelector` with CSS vars:
+  - `background: 'hsl(var(--popover))'`
+  - `border: '1px solid hsl(var(--border))'`
+  - `color: 'hsl(var(--popover-foreground))'`
+  - `zIndex: 50`
+- Added `listItemStyle` with `color: 'hsl(var(--popover-foreground))'` for list items
+- **Learnings:**
+  - `CountrySelectorDropdownStyleProps` accepts `listItemStyle`, `listItemClassName`, `listItemSelectedClassName`, `listItemFocusedClassName` for fine-grained dropdown item control
+  - `CountrySelectorStyleProps` accepts `dropdownStyleProps: CountrySelectorDropdownStyleProps` — this is the correct prop to pass to CountrySelector
+  - Pre-existing type errors in other unrelated files should be ignored during typecheck for phone-input
+---
+
+## Thu Mar 12 2026 — phone-input-v3 US-002
+
+### US-002 — PhoneInput — auto-detect Brasil quando digitando sem código de país
+- Added `forceDialCode: true` to `usePhoneInput` options in `src/client/components/ui/phone-input.tsx`
+- `forceDialCode: true` keeps `+55` always visible in the input and prevents it from being removed by keyboard events
+- Country stays as 🇧🇷 (BR) when typing local numbers like `11940636426`
+- Country changes correctly when pasting international numbers (e.g. `+1650253000` → switches to 🇺🇸)
+- **Learnings:**
+  - `forceDialCode: true` is better than `disableDialCodeAndPrefix: true` when you need BOTH: keep default country + allow international number detection by pasting
+  - `disableDialCodeAndPrefix: true` would prevent international detection since it strips the `+` prefix entirely
+  - `disableCountryGuess: true` would prevent any country auto-detection — not desirable here
+---

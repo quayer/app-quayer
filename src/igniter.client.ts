@@ -12,45 +12,6 @@ import { createIgniterClient, useIgniterQueryClient } from '@igniter-js/core/cli
 import type { AppRouterType } from './igniter.router'
 
 /**
- * Sanitiza o basePath para evitar bug do Git Bash no Windows
- * O Git Bash converte /api/v1 para C:/Program Files/Git/api/v1
- */
-function sanitizeBasePath(path: string): string {
-  // Remove prefixos de path do Windows (C:/, D:/, etc) e Git paths
-  const sanitized = path
-    .replace(/^[A-Z]:\/Program Files\/Git/i, '')
-    .replace(/^[A-Z]:\//i, '/')
-  return sanitized.startsWith('/') ? sanitized : `/${sanitized}`
-}
-
-/**
- * Get authentication token from cookies
- */
-export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null
-
-  const cookies = document.cookie.split(';')
-  for (const cookie of cookies) {
-    const [name, value] = cookie.trim().split('=')
-    if (name === 'accessToken') {
-      return value
-    }
-  }
-  return null
-}
-
-/**
- * Get authentication headers for API calls
- */
-export function getAuthHeaders(): Record<string, string> {
-  const token = getAuthToken()
-  if (token) {
-    return { 'Authorization': `Bearer ${token}` }
-  }
-  return {}
-}
-
-/**
  * Type-safe API client generated from your Igniter router
  *
  * Usage in Server Components:
@@ -58,16 +19,49 @@ export function getAuthHeaders(): Record<string, string> {
  *
  * Usage in Client Components:
  * const { data } = api.users.list.useQuery()
- *
- * For authenticated API calls, pass headers option:
- * api.users.list.query({ headers: getAuthHeaders() })
  */
 export const api = createIgniterClient<AppRouterType>({
   baseURL: process.env.NEXT_PUBLIC_IGNITER_API_URL || 'http://localhost:3000',
-  basePATH: sanitizeBasePath(process.env.NEXT_PUBLIC_IGNITER_API_BASE_PATH || '/api/v1'),
+  basePATH: process.env.NEXT_PUBLIC_IGNITER_API_BASE_PATH || '/api/v1',
   router: () => {
     if (typeof window === 'undefined') {
-      return require('./igniter.router').AppRouter
+      // Server-side: try to load the full router (for Server Components that use
+      // api.*.query() with direct DB access). If the router fails to initialize
+      // (e.g. during build when Redis/BullMQ are unavailable), fall back to a
+      // router-shaped stub so SSR pre-rendering of "use client" pages doesn't crash.
+      try {
+        const router = require('./igniter.router').AppRouter
+        if (router) return router
+      } catch {
+        // ignore – fall through to stub
+      }
+      // Build a deep Proxy stub so any api.controller.action.useQuery/useMutation call
+      // returns safe no-op defaults during SSR prerendering (when Redis/BullMQ are unavailable).
+      const noopResult = { data: undefined, isLoading: true, error: null, refetch: () => {} }
+      const mutationResult = { mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null }
+      const makeActionStub = (): any => {
+        const fn: any = () => noopResult
+        fn.useQuery = () => noopResult
+        fn.useMutation = () => mutationResult
+        fn.query = () => noopResult
+        fn.mutate = () => noopResult
+        return new Proxy(fn, {
+          get(target: any, prop: string) {
+            if (prop in target) return target[prop]
+            return makeActionStub()
+          },
+        })
+      }
+      const callerStub = new Proxy({} as Record<string, unknown>, {
+        get(_target, _ctrl) {
+          return new Proxy({} as Record<string, unknown>, {
+            get(_t, _action) {
+              return makeActionStub()
+            },
+          })
+        },
+      })
+      return { caller: callerStub }
     }
 
     // Client-side: use schema for type-safe API calls
@@ -76,3 +70,26 @@ export const api = createIgniterClient<AppRouterType>({
 })
 
 export { useIgniterQueryClient }
+
+/**
+ * Get authentication token.
+ * With httpOnly cookies, the token is sent automatically by the browser.
+ * This function is kept for backward compatibility but returns null
+ * since tokens are no longer stored in localStorage.
+ *
+ * @deprecated Tokens are now managed via httpOnly cookies set by the backend.
+ */
+export function getAuthToken(): string | null {
+  return null
+}
+
+/**
+ * Get authentication headers for API calls.
+ * With httpOnly cookies, credentials are sent automatically.
+ * This function is kept for backward compatibility.
+ *
+ * @deprecated Tokens are now managed via httpOnly cookies set by the backend.
+ */
+export function getAuthHeaders(): Record<string, string> {
+  return {}
+}

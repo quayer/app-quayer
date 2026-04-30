@@ -1,0 +1,34 @@
+## Codebase Patterns
+
+- migrate.js usa pg diretamente (não prisma CLI) — evita dependência do effect/fast-check
+- Prisma 7 CLI precisa de 'effect' + 'fast-check' (cadeia pesada, não incluir no Docker runner)
+- Docker standalone build copia apenas o que está explicitamente no COPY do Dockerfile
+- O postgres usa bind mount em /opt/quayer/data/postgres — NÃO deletar no git clean
+- git clean -fd -e .env -e data/ -e backups/ é o padrão correto no deploy script
+- migrate.js verifica _prisma_migrations.finished_at IS NOT NULL para saber quais migrations já foram aplicadas
+- Para pré-marcar migrations como aplicadas: INSERT INTO _prisma_migrations com finished_at definido
+- gen_random_uuid() está disponível no Postgres 13+ (estamos no 15)
+- **IMPORTANTE:** prisma migrate diff não funciona no Windows MINGW64 - usar geração manual de SQL ou executar em Linux/Docker
+- Git em OneDrive no Windows pode ter erros de mmap - considerar mover repositório para fora do OneDrive
+
+---
+
+## 2026-03-11 15:30 - US-001
+- **Implementation:** Created initial migration SQL file at `prisma/migrations/00000000000000_init/migration.sql`
+- **Content:** 442 lines including:
+  - 14 CREATE TABLE statements for all Prisma models
+  - 46 CREATE INDEX statements
+  - 14 ALTER TABLE ADD CONSTRAINT statements (foreign keys)
+  - INSERT statements to pre-mark 4 existing incremental migrations as applied
+- **Files changed:**
+  - Created: `prisma/migrations/00000000000000_init/migration.sql`
+- **Learnings for future iterations:**
+  - Prisma 7.4.2 `migrate diff` command does not work on Windows MINGW64 environment - produces no output
+  - Workaround: Manually create CREATE TABLE SQL based on schema.prisma models
+  - The migration file must include INSERT INTO _prisma_migrations to pre-mark existing migrations
+  - gen_random_uuid() is available in Postgres 13+ for generating migration IDs
+- **Blockers:**
+  - Git mmap error prevents committing: `fatal: mmap failed: Invalid argument`
+  - This is a known Windows/OneDrive/Git issue on this system
+  - Files are created and ready to commit but git commands are failing
+---

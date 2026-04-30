@@ -1,0 +1,147 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/auth-multimodal",
+  "description": "Auth Multimodal — 3 melhorias: (1) Passkey Conditional UI: browser detecta passkeys automaticamente no campo de email via useBrowserAutofill:true sem botão extra; (2) OTP via WhatsApp: quando usuário digita telefone, envia código via uazClient.sendMessage usando connection.uazapiInstanceId + connection.uazapiToken do DB; (3) Login aceita email OU telefone. Spec confirmada por uazapi-openapi.yaml + UAZAPI_Complete_Collection.postman. Auth UAZAPI: header 'token'. Phone format: '5511999999999' (só dígitos).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Schema — adicionar `phone` e `phoneVerified` ao model User",
+      "description": "Como sistema, preciso armazenar o número de telefone do usuário para enviar OTP via WhatsApp.",
+      "acceptanceCriteria": [
+        "Adicionar `phone String?` ao model User em prisma/schema.prisma (após campo `email`)",
+        "Adicionar `phoneVerified Boolean @default(false)` ao model User (após `emailVerified`)",
+        "Adicionar `@@index([phone])` ao model User",
+        "Criar arquivo prisma/migrations/20260312120000_add_user_phone/migration.sql com: ALTER TABLE \"User\" ADD COLUMN IF NOT EXISTS \"phone\" TEXT; ALTER TABLE \"User\" ADD COLUMN IF NOT EXISTS \"phoneVerified\" BOOLEAN NOT NULL DEFAULT false; CREATE INDEX IF NOT EXISTS \"User_phone_idx\" ON \"User\"(\"phone\");",
+        "Executar migration: npx prisma db execute --file prisma/migrations/20260312120000_add_user_phone/migration.sql",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Backend — endpoint POST /auth/passkey/login/challenge (Conditional UI sem email)",
+      "description": "Como sistema, preciso de um endpoint público que gere WebAuthn challenge anônimo para o Conditional UI — o browser detecta passkeys disponíveis sem precisar de email.",
+      "acceptanceCriteria": [
+        "Adicionar action `passkeyConditionalChallenge` em src/server/features/auth/controllers/auth.controller.ts (após passkeyLoginVerify)",
+        "Path: POST /passkey/login/challenge, sem body, sem authProcedure (público)",
+        "Usar `generateAuthenticationOptions` já importado no arquivo: `generateAuthenticationOptions({ rpID: process.env.RP_ID || 'localhost', allowCredentials: [], userVerification: 'preferred' })`",
+        "Criar: `const challenge = await db.passkeyChallenge.create({ data: { challenge: options.challenge, userId: null, email: null, type: 'conditional', expiresAt: new Date(Date.now() + 5 * 60 * 1000) } })`",
+        "Retornar: `response.success({ ...options, challengeId: challenge.id })`",
+        "curl -X POST http://localhost:3000/api/v1/auth/passkey/login/challenge retorna 200 com { data: { challenge, rpId, timeout, allowCredentials: [], challengeId } }",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Backend — endpoint POST /auth/passkey/login/verify-conditional",
+      "description": "Como sistema, preciso verificar a credencial retornada pelo Conditional UI identificando o usuário pelo credentialId sem ter o email previamente.",
+      "acceptanceCriteria": [
+        "Adicionar action `passkeyConditionalVerify` em src/server/features/auth/controllers/auth.controller.ts (após passkeyConditionalChallenge)",
+        "Path: POST /passkey/login/verify-conditional, sem authProcedure",
+        "Body: z.object({ response: z.any(), challengeId: z.string() })",
+        "1) Buscar challenge: `const challenge = await db.passkeyChallenge.findFirst({ where: { id: body.challengeId, type: 'conditional', expiresAt: { gt: new Date() } } })` — se !challenge: return response.badRequest('Challenge inválido ou expirado')",
+        "2) Buscar credencial: `const credential = await db.passkeyCredential.findFirst({ where: { credentialId: body.response.id }, include: { user: { include: { organizations: { where: { isActive: true }, include: { organization: true } } } } } })` — se !credential: return response.badRequest('Passkey não reconhecida')",
+        "3) Chamar verifyAuthenticationResponse (já importado) com expectedChallenge: challenge.challenge, expectedOrigin: process.env.EXPECTED_ORIGIN || 'http://localhost:3000', expectedRPID: process.env.RP_ID || 'localhost', credential: { id: credential.credentialId, publicKey: Buffer.from(credential.publicKey, 'base64'), counter: Number(credential.counter), transports: credential.transports as any }",
+        "4) Se verified: deletar challenge, atualizar credential.counter e lastUsedAt, gerar tokens e setar cookies (copiar padrão exato de passkeyLoginVerify ~linha 2296-2340), return response.success({ needsOnboarding: !user.onboardingCompleted, user: { id, email, name, role } })",
+        "5) Se !verified: return response.badRequest('Autenticação com passkey falhou')",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Frontend — Conditional UI no campo de email do login (login-form-final.tsx)",
+      "description": "Como usuário com passkey cadastrada, quando abro /login o browser mostra automaticamente a passkey no autocompletar do campo de email — sem nenhum botão visível.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-form-final.tsx, adicionar `autoComplete='username webauthn'` ao <Input id='email'>",
+        "Adicionar import no topo: `import { startAuthentication } from '@simplewebauthn/browser'`",
+        "Adicionar useEffect com deps [] que roda uma vez ao montar: todo código dentro de try/catch silencioso",
+        "Dentro do useEffect try: (1) const res = await fetch('/api/v1/auth/passkey/login/challenge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include' }); if (!res.ok) return; (2) const { data: optionsWithId } = await res.json(); (3) const authResp = await startAuthentication({ optionsJSON: optionsWithId, useBrowserAutofill: true }); (4) const verifyRes = await fetch('/api/v1/auth/passkey/login/verify-conditional', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ response: authResp, challengeId: optionsWithId.challengeId }) }); if (!verifyRes.ok) return; (5) const { data: result } = await verifyRes.json(); (6) if (result.needsOnboarding) router.push('/onboarding'); else if (result.user?.role === 'admin') router.push('/admin'); else router.push('/integracoes')",
+        "Catch captura qualquer erro silenciosamente: apenas console.debug('[Conditional UI]', err) — nunca exibir toast ou alterar estado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login, inspecionar o elemento input#email e confirmar atributo autocomplete='username webauthn' no HTML renderizado"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Utilitário sendWhatsAppOTP — src/lib/uaz/whatsapp-otp.ts",
+      "description": "Como sistema, preciso de uma função que envie OTP pelo WhatsApp usando a primeira instância UAZAPI conectada do banco — identificada por connection.uazapiInstanceId + connection.uazapiToken.",
+      "acceptanceCriteria": [
+        "Criar arquivo src/lib/uaz/whatsapp-otp.ts",
+        "Exportar: `export function normalizePhone(phone: string): string` — (1) remover tudo que não é dígito; (2) se resultado tiver < 12 dígitos prefixar com '55'; (3) retornar string de dígitos pura ex: '5511999999999'",
+        "Exportar: `export async function sendWhatsAppOTP(phone: string, code: string): Promise<void>`",
+        "Dentro de sendWhatsAppOTP: (1) const normalized = normalizePhone(phone); (2) const conn = await database.connection.findFirst({ where: { uazapiToken: { not: null }, uazapiInstanceId: { not: null } }, select: { uazapiInstanceId: true, uazapiToken: true }, orderBy: { createdAt: 'asc' } }); (3) if (!conn?.uazapiInstanceId || !conn?.uazapiToken) throw new Error('Nenhuma instância WhatsApp disponível'); (4) await uazClient.sendMenu(conn.uazapiInstanceId, { number: normalized, type: 'button', text: `🔐 Seu código de acesso Quayer é: *${code}*`, choices: [`${code}|copy:${code}`], footerText: 'Válido por 10 minutos. Não compartilhe.' }, conn.uazapiToken)",
+        "Nota: NÃO filtrar por status (campo status usa enum do Prisma — evitar hardcode incorreto); a prioridade é ter uazapiToken e uazapiInstanceId preenchidos",
+        "Imports no topo: `import { uazClient } from './uaz.client'` e `import { database } from '@/server/services/database'`",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Backend — ações loginOTPPhone e verifyLoginOTPPhone no auth.controller.ts + schemas",
+      "description": "Como sistema, preciso de dois endpoints para OTP via WhatsApp: solicitar código e verificar.",
+      "acceptanceCriteria": [
+        "Adicionar em src/server/features/auth/auth.schemas.ts: `export const phoneOTPSchema = z.object({ phone: z.string().min(8).max(20) })` e `export const verifyPhoneOTPSchema = z.object({ phone: z.string(), code: z.string().length(6) })`",
+        "Adicionar action `loginOTPPhone` em auth.controller.ts: path '/login-otp-phone', method POST, body: phoneOTPSchema, sem authProcedure",
+        "loginOTPPhone: (1) importar { normalizePhone, sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp'; (2) const normalized = normalizePhone(body.phone); (3) const code = Math.floor(100000 + Math.random() * 900000).toString(); (4) await db.verificationCode.deleteMany({ where: { email: normalized, type: 'WHATSAPP_OTP' } }); (5) await db.verificationCode.create({ data: { email: normalized, code, type: 'WHATSAPP_OTP', expiresAt: new Date(Date.now() + 10 * 60 * 1000) } }); (6) await sendWhatsAppOTP(normalized, code); (7) return response.success({ sent: true })",
+        "Adicionar action `verifyLoginOTPPhone` em auth.controller.ts: path '/verify-login-otp-phone', method POST, body: verifyPhoneOTPSchema, sem authProcedure",
+        "verifyLoginOTPPhone: (1) const normalized = normalizePhone(body.phone); (2) const vc = await db.verificationCode.findFirst({ where: { email: normalized, type: 'WHATSAPP_OTP', expiresAt: { gt: new Date() } } }); (3) if (!vc || vc.code !== body.code) return response.badRequest('Código inválido ou expirado'); (4) const user = await db.user.findFirst({ where: { phone: normalized }, include: { organizations: { where: { isActive: true }, include: { organization: true } } } }); (5) if (!user) return response.badRequest('Nenhuma conta com este número. Cadastre-se primeiro.'); (6) await db.verificationCode.delete({ where: { id: vc.id } }); (7) gerar tokens e setar cookies (copiar padrão exato de verifyLoginOTP ~linha 1700-1750 do auth.controller.ts); (8) return response.success({ needsOnboarding: !user.onboardingCompleted, user: { id, email, name, role, currentOrgId } })",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Frontend — login-form-final.tsx aceita email ou telefone",
+      "description": "Como usuário, quero digitar meu número de telefone no campo de login e receber o código pelo WhatsApp.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-form-final.tsx, mudar input de type='email' para type='text' com inputMode='email'",
+        "Label muda para 'Email ou Telefone'",
+        "Placeholder muda para 'email@exemplo.com ou +55 11 99999-9999'",
+        "Adicionar função local `function looksLikePhone(v: string): boolean` — retorna true se, após remover espaços, hífens, parênteses e '+', o resultado contiver APENAS dígitos E tiver comprimento ≥ 8",
+        "Em handleOTPRequest: se looksLikePhone(email.trim()): (1) const res = await fetch('/api/v1/auth/login-otp-phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ phone: email.trim() }) }); (2) const data = await res.json(); (3) if (!res.ok) { setError(data?.error?.message || 'Erro ao enviar código'); return; } (4) router.push('/login/verify?phone=' + encodeURIComponent(email.trim()))",
+        "Se não looksLikePhone: manter lógica atual com api.auth.loginOTP.mutate",
+        "Remover o atributo `required` do input (sem required, browser não bloqueia submit para telefone)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: abrir /login, confirmar label 'Email ou Telefone' e placeholder com '+55'"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Frontend — login-otp-form.tsx suporta verificação por telefone (WhatsApp OTP)",
+      "description": "Como usuário que fez login com telefone, quero ver a tela de OTP com mensagem 'código via WhatsApp' e verificação pelo endpoint correto.",
+      "acceptanceCriteria": [
+        "Em src/client/components/auth/login-otp-form.tsx, adicionar `phone?: string` na interface LoginOTPFormProps",
+        "Em src/app/(auth)/login/verify/page.tsx: extrair `const phone = searchParams.get('phone')` e passar `<LoginOTPForm email={email || undefined} phone={phone || undefined} />`",
+        "Em login-otp-form.tsx: adicionar `const identifier = phone || email` — usado para validar se há identificador",
+        "Início de handleSubmit e handleResend: `if (!identifier) { setError('Identificador não encontrado. Volte e tente novamente.'); return }`",
+        "CardDescription: se phone: `Enviamos um código de 6 dígitos para ${phone} pelo WhatsApp 📱`; se email: manter texto atual",
+        "handleSubmit quando phone presente: (1) const res = await fetch('/api/v1/auth/verify-login-otp-phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ phone, code: otp }) }); (2) const data = await res.json(); (3) if (!res.ok) { setError(data?.error?.message || 'Código inválido'); setIsLoading(false); return; } (4) setSuccess(true); setTimeout(() => { const r = data.data; if (r.needsOnboarding) window.location.href='/onboarding'; else window.location.href = r.user?.role === 'admin' ? '/admin' : '/integracoes'; }, 1500)",
+        "handleResend quando phone presente: fetch POST /api/v1/auth/login-otp-phone com body { phone } e credentials: 'include'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: navegar para /login/verify?phone=%2B5511999999999, confirmar que CardDescription contém 'WhatsApp' e formulário OTP aparece"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

@@ -30,7 +30,7 @@ export interface Organization {
   secondaryColor?: string;
 
   // Provider settings
-  providerType?: 'UAZAPI' | 'EVOLUTION' | 'BAILEYS' | 'CLOUDAPI';
+  providerType?: 'UAZAPI' | 'CLOUDAPI' | 'INSTAGRAM';
   providerUrl?: string;
   providerToken?: string;
 
@@ -70,6 +70,18 @@ export interface OrganizationUpdateInput {
 // USER TYPES
 // ============================================
 
+export interface UserPreferences {
+  id: string;
+  messageSignature?: {
+    enabled: boolean;
+    format: 'first_name' | 'full_name' | 'name_department' | 'custom';
+    department?: string;
+    customText?: string;
+    showPreview: boolean;
+  } | null;
+  aiSuggestionsEnabled: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -78,10 +90,10 @@ export interface User {
   isActive: boolean;
   onboardingCompleted: boolean;
   currentOrgId?: string;
-  lastOrganizationId?: string;
   createdAt: string;
   updatedAt: string;
   organizations?: UserOrganization[];
+  preferences?: UserPreferences | null;
 }
 
 export interface UserOrganization {
@@ -108,7 +120,7 @@ export interface Instance {
   organizationId: string;
   uazapiToken?: string;
   uazapiInstanceId?: string;
-  providerType: 'UAZAPI' | 'EVOLUTION' | 'BAILEYS' | 'CLOUDAPI';
+  providerType: 'UAZAPI' | 'CLOUDAPI' | 'INSTAGRAM';
   cloudApiAccessToken?: string;
   cloudApiPhoneNumberId?: string;
   cloudApiWabaId?: string;
@@ -298,23 +310,12 @@ export interface Message {
   createdAt: string;
 }
 
-export interface Contact {
-  id: string;
-  phoneNumber: string;
-  name?: string;
-  profilePicUrl?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ChatSession {
   id: string;
-  contactId: string;
   connectionId: string;
   organizationId: string;
   status: 'ACTIVE' | 'WAITING' | 'CLOSED';
   assignedUserId?: string;
   lastMessageAt?: string;
   createdAt: string;
-  contact?: Contact;
 }

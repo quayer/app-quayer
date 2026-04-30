@@ -1,0 +1,341 @@
+{
+  "project": "app-quayer",
+  "branchName": "ralph/admin-security-overhaul",
+  "description": "Reestruturação estratégica do painel admin: eliminar páginas desnecessárias, consolidar funcionalidades duplicadas, corrigir vulnerabilidades críticas de segurança (tokens em localStorage, cookies sem httpOnly), e criar Security Center com gestão de dispositivos e IP management inspirado no 1Password.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix crítico: mover tokens de localStorage para httpOnly cookies",
+      "description": "Como admin de segurança, quero que tokens JWT sejam armazenados exclusivamente em cookies httpOnly+Secure para eliminar vulnerabilidade XSS.",
+      "acceptanceCriteria": [
+        "Em src/lib/auth/auth-context.tsx, remover todas as chamadas localStorage.setItem('accessToken', ...) e localStorage.setItem('refreshToken', ...)",
+        "Em src/lib/auth/auth-context.tsx, remover todas as chamadas localStorage.getItem('accessToken') e localStorage.getItem('refreshToken')",
+        "Login deve fazer SET via response headers do backend (Set-Cookie httpOnly), não via document.cookie no client",
+        "Logout deve limpar cookies via backend response, não via document.cookie no client",
+        "loadUser() não deve depender de localStorage — verificar sessão via API call (api.auth.me)",
+        "Nenhuma referência a localStorage para tokens em todo o projeto",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "VULNERABILIDADE P0. Arquivos afetados: src/lib/auth/auth-context.tsx (linhas 39, 55-56, 70-72, 76, 101-103), src/app/(auth)/login/verify-magic/LoginVerifyMagicClient.tsx, src/app/(auth)/signup/verify-magic/SignupVerifyMagicClient.tsx. O backend (auth controller) precisa setar Set-Cookie com flags: httpOnly, Secure, SameSite=Lax, path=/."
+    },
+    {
+      "id": "US-002",
+      "title": "Backend: setar cookies httpOnly no auth controller (login/refresh/logout)",
+      "description": "Como desenvolvedor, quero que o auth controller sete cookies httpOnly nas responses de login, refresh e logout.",
+      "acceptanceCriteria": [
+        "No handler de login, response inclui Set-Cookie header com accessToken (httpOnly, Secure, SameSite=Lax, path=/, max-age=900)",
+        "No handler de login, response inclui Set-Cookie header com refreshToken (httpOnly, Secure, SameSite=Lax, path=/api/v1/auth/refresh, max-age=604800)",
+        "No handler de refresh, response inclui novo Set-Cookie para accessToken",
+        "No handler de logout, response inclui Set-Cookie com max-age=0 para ambos tokens",
+        "Response body de login ainda retorna user data mas NÃO retorna tokens no JSON",
+        "Middleware em src/middleware.ts continua lendo token de cookies (já faz isso)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Ler src/server/features/auth/controllers/auth.controller.ts para o controller atual. O middleware já lê de cookie 'accessToken' (middleware.ts:69-72)."
+    },
+    {
+      "id": "US-003",
+      "title": "Remover JWT secret fallback inseguro",
+      "description": "Como admin de segurança, quero que o sistema falhe ao iniciar se JWT_SECRET não estiver configurado, em vez de usar um fallback hardcoded.",
+      "acceptanceCriteria": [
+        "Em src/lib/auth/jwt.ts linha 13, remover fallback '|| your_random_secret_key_here_change_in_production'",
+        "JWT_SECRET lança erro se process.env.JWT_SECRET não estiver definido",
+        "JWT_REFRESH_SECRET lança erro se process.env.JWT_REFRESH_SECRET não estiver definido (fallback para JWT_SECRET é OK)",
+        "Mensagem de erro clara: 'JWT_SECRET environment variable is required'",
+        "Atualizar .env.example com JWT_SECRET=change_me_to_random_64_chars",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Arquivo: src/lib/auth/jwt.ts linhas 13-14."
+    },
+    {
+      "id": "US-004",
+      "title": "Schema Prisma: criar tabela DeviceSession para tracking de dispositivos",
+      "description": "Como admin, quero rastrear todos os dispositivos que acessam a plataforma para poder gerenciar sessões e detectar acessos suspeitos.",
+      "acceptanceCriteria": [
+        "Criar model DeviceSession no schema.prisma com campos: id (cuid), userId (relation User), deviceName (String, ex: 'Chrome on Windows'), ipAddress (String), userAgent (String), location (String optional, ex: 'São Paulo, BR'), lastActiveAt (DateTime), createdAt (DateTime), isRevoked (Boolean default false), revokedAt (DateTime optional)",
+        "Índices em: userId, ipAddress, lastActiveAt, isRevoked",
+        "Relation: User hasMany DeviceSession",
+        "Gerar migration com npx prisma migrate dev --name add_device_sessions",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Inspirado no modelo 1Password: cada login cria/atualiza um DeviceSession. Admin pode ver todos os devices e revogar."
+    },
+    {
+      "id": "US-005",
+      "title": "Schema Prisma: criar tabela IpRule para allowlist/blocklist",
+      "description": "Como admin, quero poder bloquear IPs suspeitos e configurar IP allowlist para acesso exclusivo.",
+      "acceptanceCriteria": [
+        "Criar model IpRule no schema.prisma com campos: id (cuid), type (enum IpRuleType: ALLOW, BLOCK), ipAddress (String), description (String optional), organizationId (String optional, relation Organization — null = global), createdBy (String, relation User), isActive (Boolean default true), expiresAt (DateTime optional), createdAt (DateTime)",
+        "Índices em: ipAddress, type, organizationId, isActive",
+        "Criar enum IpRuleType com valores ALLOW e BLOCK",
+        "Gerar migration com npx prisma migrate dev --name add_ip_rules",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Permite tanto blocklist global (admin) quanto allowlist por organização (master pode restringir IPs da org)."
+    },
+    {
+      "id": "US-006",
+      "title": "Backend: registrar DeviceSession em cada login",
+      "description": "Como sistema, quero criar/atualizar um DeviceSession automaticamente em cada login bem-sucedido.",
+      "acceptanceCriteria": [
+        "Após login bem-sucedido no auth controller, criar ou atualizar DeviceSession com IP, user-agent e device name",
+        "Device name extraído do user-agent (ex: 'Chrome 120 on Windows 11')",
+        "Se já existe DeviceSession com mesmo userId + userAgent, atualizar lastActiveAt em vez de criar novo",
+        "IP extraído via request headers (x-forwarded-for ou x-real-ip ou connection.remoteAddress)",
+        "Location obtido via IP geocoding se src/lib/geocoding/ existir, senão deixar null",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Ler src/lib/geocoding/ para ver se há funcionalidade de geocoding disponível. User-agent parser: usar lib ua-parser-js ou regex simples."
+    },
+    {
+      "id": "US-007",
+      "title": "Backend: verificar IpRule (blocklist/allowlist) no middleware",
+      "description": "Como admin, quero que IPs bloqueados sejam impedidos de acessar e que IPs fora da allowlist sejam rejeitados quando allowlist está ativa.",
+      "acceptanceCriteria": [
+        "No middleware.ts, após extrair IP do request, verificar na tabela IpRule",
+        "Se existe IpRule type=BLOCK + isActive=true + (organizationId=null OR organizationId=user.currentOrgId) para o IP → retornar 403",
+        "Se existem IpRules type=ALLOW para a org do usuário E o IP não está na allowlist → retornar 403",
+        "Blocklist global (organizationId=null) se aplica a todos",
+        "Regras expiradas (expiresAt < now) são ignoradas",
+        "Mensagem de erro: 'Acesso bloqueado. Contate o administrador.'",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Middleware roda em Edge Runtime — verificar se Prisma Edge client está disponível ou usar fetch para API interna. Considerar cache de 5min para não consultar DB em cada request."
+    },
+    {
+      "id": "US-008",
+      "title": "Backend: controller de DeviceSessions (list, revoke, revokeAll)",
+      "description": "Como admin/usuário, quero endpoints para listar e revogar sessões de dispositivos.",
+      "acceptanceCriteria": [
+        "Criar controller device-sessions em src/server/features/device-sessions/",
+        "Action list: retorna DeviceSessions do userId, ordenadas por lastActiveAt desc",
+        "Action listByUser (admin only): retorna DeviceSessions de qualquer userId",
+        "Action revoke: marca isRevoked=true e revokedAt=now para um DeviceSession específico",
+        "Action revokeAll: revoga todas as sessions de um userId (exceto a sessão atual)",
+        "Registrar controller no igniter.router.ts",
+        "Usar authProcedure({ required: true }) em todas as actions",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Seguir padrão Igniter.js dos controllers existentes. Ler src/server/features/ para ver exemplos."
+    },
+    {
+      "id": "US-009",
+      "title": "Backend: controller de IpRules (CRUD + check)",
+      "description": "Como admin, quero endpoints para gerenciar regras de IP (criar, listar, atualizar, deletar).",
+      "acceptanceCriteria": [
+        "Criar controller ip-rules em src/server/features/ip-rules/",
+        "Action list: retorna IpRules, filtráveis por type (ALLOW/BLOCK) e organizationId",
+        "Action create: cria nova IpRule com validação Zod (ipAddress required, type required)",
+        "Action update: atualiza isActive, description, expiresAt",
+        "Action delete: remove IpRule por id",
+        "Action check: verifica se um IP está bloqueado/permitido (para teste manual)",
+        "Usar authProcedure com verificação de role admin",
+        "Registrar controller no igniter.router.ts",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Validar formato de IP com regex simples (IPv4 e IPv6). Seguir padrão dos controllers em src/server/features/."
+    },
+    {
+      "id": "US-010",
+      "title": "Eliminar página /admin/webhooks e consolidar em Settings",
+      "description": "Como desenvolvedor, quero remover a página duplicada de webhooks do admin já que a funcionalidade existe em Settings > Webhook tab.",
+      "acceptanceCriteria": [
+        "Deletar src/app/admin/webhooks/page.tsx",
+        "Remover link 'Webhooks' do sidebar em src/client/components/app-sidebar.tsx (seção admin)",
+        "Verificar que Settings > Webhook tab continua funcionando normalmente",
+        "Nenhuma referência a /admin/webhooks restante no código",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Página webhooks tem botão 'Novo Webhook' que é stub (toast vazio). Settings > Webhook tab já tem a funcionalidade completa."
+    },
+    {
+      "id": "US-011",
+      "title": "Simplificar página /admin (dashboard) para stats compacto",
+      "description": "Como admin, quero que o dashboard mostre stats úteis sem ser uma página inteira dedicada a 4 cards.",
+      "acceptanceCriteria": [
+        "Página /admin/page.tsx simplificada: manter os 4 cards de stats mas adicionar links rápidos para ações frequentes",
+        "Adicionar seção 'Ações Rápidas' com links: Nova Organização, Ver Sessões Ativas, Configurações",
+        "Adicionar seção 'Alertas' mostrando: instâncias desconectadas (count), convites expirados (count)",
+        "Stats de usuários deve usar COUNT(*) em vez de findMany().length",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "getDashboardStatsAction em src/app/admin/actions.ts faz findMany e usa .length para contar usuários — trocar por count()."
+    },
+    {
+      "id": "US-012",
+      "title": "Consolidar convites dentro de Organizations (inline)",
+      "description": "Como admin, quero poder criar convites diretamente do painel de organizações, sem ir para página separada.",
+      "acceptanceCriteria": [
+        "No OrgSheet (src/app/admin/organizations/components/OrgSheet.tsx), na aba Usuários, adicionar botão 'Convidar por Email'",
+        "Botão abre inline form com: email, role (master/manager/user), dias de expiração",
+        "Form usa createInvitationAction de src/app/admin/invitations/actions.ts",
+        "Toast de sucesso mostra link de convite copiável",
+        "Página /admin/invitations continua existindo mas como 'Histórico de Convites' (read-only, sem botão criar)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Ler src/app/admin/organizations/components/OrgSheet.tsx para entender a estrutura de abas. createInvitationAction está em src/app/admin/invitations/actions.ts."
+    },
+    {
+      "id": "US-013",
+      "title": "Simplificar Audit Log: stats + exportar JSON + remover tabela",
+      "description": "Como admin, quero que a página de audit log mostre apenas resumo estatístico e botão de exportar, sem a tabela completa.",
+      "acceptanceCriteria": [
+        "Página /admin/audit/page.tsx mostra apenas seção de stats (top ação, top recurso, usuário mais ativo, total 7 dias)",
+        "Adicionar botão 'Exportar JSON' que faz download dos logs filtrados como arquivo .json",
+        "Adicionar botão 'Exportar CSV' que faz download dos logs filtrados como arquivo .csv",
+        "Remover tabela completa de logs (substituir por texto: 'Use Claude Code para análise detalhada de logs')",
+        "Manter filtros de data para controlar período do export",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Página atual em src/app/admin/audit/page.tsx tem ~500 linhas. Stats estão nas linhas 207-268."
+    },
+    {
+      "id": "US-014",
+      "title": "Admin UI: criar página Security Center — Dispositivos",
+      "description": "Como admin, quero uma página de Security Center com aba de dispositivos mostrando todos os devices conectados com IP, localização e opção de revogar.",
+      "acceptanceCriteria": [
+        "Criar src/app/admin/security/page.tsx com layout de tabs: Dispositivos, Regras de IP",
+        "Tab Dispositivos: tabela com colunas: Usuário, Device Name, IP, Localização, Último Acesso, Status (ativo/revogado), Ação",
+        "Filtro por: usuário (busca), status (ativo/revogado), período",
+        "Botão 'Revogar' por linha com confirmação",
+        "Botão 'Revogar Todas' por usuário com confirmação",
+        "Usar api.deviceSessions.list (ou listByUser) do controller criado em US-008",
+        "Adicionar link 'Segurança' no sidebar admin",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Inspirado na UI do 1Password: lista de dispositivos com OS icon, IP, localização, último uso. Seguir padrão visual das outras páginas admin (shadcn/ui)."
+    },
+    {
+      "id": "US-015",
+      "title": "Admin UI: Security Center — Regras de IP (tab)",
+      "description": "Como admin, quero gerenciar regras de IP (blocklist e allowlist) visualmente no Security Center.",
+      "acceptanceCriteria": [
+        "Tab 'Regras de IP' na página /admin/security",
+        "Duas sub-seções: 'IPs Bloqueados' (blocklist) e 'IPs Permitidos' (allowlist)",
+        "Tabela de regras com colunas: IP, Tipo (Block/Allow), Organização (global ou nome), Descrição, Expira em, Status, Ação",
+        "Botão 'Adicionar Regra' abre dialog com: IP, tipo (block/allow), organização (opcional), descrição, expiração (opcional)",
+        "Botão toggle para ativar/desativar regra",
+        "Botão deletar com confirmação",
+        "Usar api.ipRules do controller criado em US-009",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Seguir padrão visual das outras páginas admin. IPs bloqueados em vermelho, permitidos em verde."
+    },
+    {
+      "id": "US-016",
+      "title": "User self-service: página Meus Dispositivos",
+      "description": "Como usuário, quero ver e gerenciar meus dispositivos conectados na minha área pessoal.",
+      "acceptanceCriteria": [
+        "Criar src/app/user/seguranca/page.tsx com seção 'Meus Dispositivos'",
+        "Lista dos dispositivos do usuário logado: device name, IP, localização, último acesso",
+        "Dispositivo atual destacado com badge 'Este dispositivo'",
+        "Botão 'Desconectar' por dispositivo (revoga o DeviceSession)",
+        "Botão 'Desconectar Todos os Outros' (revoga tudo exceto atual)",
+        "Usar api.deviceSessions.list filtrando por userId do contexto auth",
+        "Adicionar link 'Segurança' no sidebar do usuário",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Inspirado no 1Password: o usuário vê seus próprios dispositivos e pode revogar. Ler src/client/components/app-sidebar.tsx para entender onde adicionar o link."
+    },
+    {
+      "id": "US-017",
+      "title": "Fix: corrigir role inválido 'admin' na página de convites",
+      "description": "Como admin, quero que o select de role na página de convites mostre apenas roles válidos (master/manager/user) e não 'admin'.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/invitations/page.tsx, remover opção 'Admin' do select de role no form de criação de convite",
+        "Opções válidas: Master, Gerente, Usuário (valores: master, manager, user)",
+        "Verificar que o backend aceita esses 3 roles na criação de convite",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Bug atual: select tem 'admin' como opção mas backend aceita apenas master/manager/user como OrganizationRole."
+    },
+    {
+      "id": "US-018",
+      "title": "Fix: corrigir confirmação obrigatória para promoção a system admin",
+      "description": "Como admin, quero que promover um usuário a system admin exija confirmação explícita com dialog.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/organizations/components/UserManageModal.tsx, no handleSystemRoleChange",
+        "Se newRole === 'admin', mostrar AlertDialog de confirmação antes de executar",
+        "Mensagem: 'Você está prestes a promover {nome} a Administrador do Sistema. Esta ação dará acesso completo ao painel admin. Confirmar?'",
+        "Botão 'Confirmar' em vermelho/destructive",
+        "Se usuário cancelar, não mudar o role",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Arquivo: src/app/admin/organizations/components/UserManageModal.tsx linha 93-105. Atualmente muda role imediatamente sem confirmação."
+    },
+    {
+      "id": "US-019",
+      "title": "Fix: remover exposição de tokens em getEnvDefaultsAction",
+      "description": "Como admin de segurança, quero que server actions nunca retornem tokens/secrets em plaintext.",
+      "acceptanceCriteria": [
+        "Em src/app/admin/actions.ts, encontrar getEnvDefaultsAction",
+        "Mascarar valores sensíveis: UAZAPI_ADMIN_TOKEN, JWT_SECRET, SMTP passwords, API keys",
+        "Formato mascarado: primeiros 4 chars + '****' + últimos 4 chars (ou '****' se menor que 8 chars)",
+        "Adicionar flag 'isMasked: true' no response para UI saber que valor está mascarado",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "VULNERABILIDADE CRÍTICA. Ler src/app/admin/actions.ts para encontrar a action exata e ver quais valores são retornados."
+    },
+    {
+      "id": "US-020",
+      "title": "Atualizar sidebar admin: remover webhooks, adicionar segurança",
+      "description": "Como admin, quero que o sidebar reflita a nova estrutura: sem Webhooks separado, com Security Center.",
+      "acceptanceCriteria": [
+        "Em src/client/components/app-sidebar.tsx, remover item 'Webhooks' da seção admin",
+        "Adicionar item 'Segurança' na seção admin, com ícone Shield, apontando para /admin/security",
+        "Posicionar 'Segurança' antes de 'Configurações' na lista",
+        "Verificar que todos os links admin funcionam (não há links quebrados)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Ler src/client/components/app-sidebar.tsx para entender a estrutura do menu."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+## Codebase Patterns
+
+- Tokens JWT armazenados em localStorage (INSEGURO) — migrar para httpOnly cookies
+- Cookies setados via document.cookie sem httpOnly/Secure flags
+- JWT_SECRET tem fallback hardcoded inseguro em jwt.ts:13
+- Middleware Edge lê token de cookie 'accessToken' (middleware.ts:69-72)
+- Auth controller: src/server/features/auth/controllers/auth.controller.ts
+- Padrão Igniter.js: controller → actions (query/mutation) → handler com authProcedure
+- Sidebar admin: src/client/components/app-sidebar.tsx
+- Admin server actions: src/app/admin/actions.ts (15+ actions, getEnvDefaultsAction expõe tokens)
+- Convites usam raw fetch() em src/app/admin/invitations/actions.ts (inconsistente com Igniter client)
+- Schema Prisma: PasskeyCredential existe mas 2FA/TOTP não
+- Rate limit: 10 req/15min em auth endpoints (src/lib/rate-limit.ts:244-253)
+- Geocoding lib existe em src/lib/geocoding/ mas não é usada em auth
+
+---

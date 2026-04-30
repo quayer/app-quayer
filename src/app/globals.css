@@ -1,85 +1,158 @@
-/* Premium Font - Inter - MUST BE FIRST */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
-@import "tailwindcss";
-
-/* Dashboard Animations & Effects */
-@import "./dashboard-animations.css";
+@import "tailwindcss" source(none);
+@source "../../src";
+@config "../../tailwind.config.ts";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --radius: 0.65rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --radius: 0.625rem;
+  --background: oklch(0.98 0.002 250);
+  --foreground: oklch(0.13 0.02 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.13 0.02 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.606 0.25 292.717);
-  --primary-foreground: oklch(0.969 0.016 293.756);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.65 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.606 0.25 292.717);
-  --sidebar-primary-foreground: oklch(0.969 0.016 293.756);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.65 0 0);
+  --popover-foreground: oklch(0.13 0.02 260);
+  --primary: oklch(0.55 0.17 163);
+  --primary-foreground: oklch(0.98 0.01 163);
+  --secondary: oklch(0.96 0.005 250);
+  --secondary-foreground: oklch(0.2 0.02 260);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.5 0.02 260);
+  --accent: oklch(0.96 0.005 250);
+  --accent-foreground: oklch(0.2 0.02 260);
+  --destructive: oklch(0.58 0.22 28);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.91 0.005 250);
+  --input: oklch(0.91 0.005 250);
+  --ring: oklch(0.55 0.17 163);
+  --chart-1: oklch(0.55 0.17 163);
+  --chart-2: oklch(0.6 0.15 200);
+  --chart-3: oklch(0.45 0.12 240);
+  --chart-4: oklch(0.75 0.14 80);
+  --chart-5: oklch(0.65 0.2 340);
+  --sidebar: oklch(0.98 0.002 250);
+  --sidebar-foreground: oklch(0.13 0.02 260);
+  --sidebar-primary: oklch(0.55 0.17 163);
+  --sidebar-primary-foreground: oklch(0.98 0.01 163);
+  --sidebar-accent: oklch(0.96 0.005 250);
+  --sidebar-accent-foreground: oklch(0.2 0.02 260);
+  --sidebar-border: oklch(0.91 0.005 250);
+  --sidebar-ring: oklch(0.55 0.17 163);
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.541 0.281 293.009);
-  --primary-foreground: oklch(0.969 0.016 293.756);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.45 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.541 0.281 293.009);
-  --sidebar-primary-foreground: oklch(0.969 0.016 293.756);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.14 0.018 255);
+  --foreground: oklch(0.95 0.005 250);
+  --card: oklch(0.17 0.018 255);
+  --card-foreground: oklch(0.95 0.005 250);
+  --popover: oklch(0.17 0.018 255);
+  --popover-foreground: oklch(0.95 0.005 250);
+  --primary: oklch(0.7 0.17 163);
+  --primary-foreground: oklch(0.13 0.05 163);
+  --secondary: oklch(0.2 0.015 255);
+  --secondary-foreground: oklch(0.95 0.005 250);
+  --muted: oklch(0.2 0.015 255);
+  --muted-foreground: oklch(0.6 0.015 255);
+  --accent: oklch(0.2 0.015 255);
+  --accent-foreground: oklch(0.95 0.005 250);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.7 0 0);
+  --chart-1: oklch(0.7 0.17 163);
+  --chart-2: oklch(0.65 0.15 200);
+  --chart-3: oklch(0.7 0.16 80);
+  --chart-4: oklch(0.6 0.2 300);
+  --chart-5: oklch(0.6 0.22 20);
+  --sidebar: oklch(0.08 0.02 255);
+  --sidebar-foreground: oklch(0.78 0.005 250);
+  --sidebar-primary: oklch(0.95 0 0);
+  --sidebar-primary-foreground: oklch(0.08 0 0);
+  --sidebar-accent: oklch(0.13 0.02 255);
+  --sidebar-accent-foreground: oklch(0.95 0.005 250);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.45 0 0);
+  --sidebar-ring: oklch(0.5 0 0);
+}
+
+/* ========================================
+   Quayer DS v3 Tokens
+   Definidos como CSS variables para eliminar flash de tema:
+   next-themes injeta o class ("dark"/"light") via script inline
+   antes do React hidratar, então as variáveis já estão corretas
+   no primeiro paint — sem useEffect, sem mounted guard.
+   ======================================== */
+
+/* Dark default — app é dark-first; sem classe = dark */
+:root {
+  --q-bg-base:              #000000;
+  --q-bg-surface:           #060402;
+  --q-bg-elevated:          #0C0804;
+  --q-border:               rgba(255,255,255,0.12);
+  --q-border-strong:        rgba(255,255,255,0.18);
+  --q-divider:              rgba(255,255,255,0.10);
+  --q-text-primary:         #FFFFFF;
+  --q-text-secondary:       rgba(255,255,255,0.72);
+  --q-text-tertiary:        rgba(255,255,255,0.48);
+  --q-text-disabled:        rgba(255,255,255,0.32);
+  --q-brand:                #FFD60A;
+  --q-brand-subtle:         rgba(255,214,10,0.10);
+  --q-brand-border:         rgba(255,214,10,0.30);
+  --q-brand-text:           #FFE566;
+  --q-hover-bg:             rgba(255,255,255,0.06);
+  --q-text-inverse:         #1A0800;
+  --q-shadow:               0 16px 48px -16px rgba(0,0,0,0.75);
+  --q-sidebar-bg:           #0B0704;
+  --q-admin-nav-bg:         #0B0704;
+  --q-sidebar-active-bg:    rgba(255,214,10,0.14);
+  --q-sidebar-active-text:  #FFE566;
+  --q-sidebar-active-border:rgba(255,214,10,0.55);
+  --q-sidebar-brand-dim:    rgba(255,214,10,0.55);
+  --q-sidebar-cta-border:   rgba(255,255,255,0.16);
+  --q-sidebar-kbd-bg:       rgba(255,255,255,0.08);
+  --q-sidebar-kbd-text:     rgba(255,255,255,0.48);
+}
+
+/* Light override — next-themes adiciona class="light" */
+.light {
+  --q-bg-base:              #F5F2ED;
+  --q-bg-surface:           #FFFFFF;
+  --q-bg-elevated:          #FFFFFF;
+  --q-border:               rgba(26,8,0,0.12);
+  --q-border-strong:        rgba(26,8,0,0.20);
+  --q-divider:              rgba(26,8,0,0.08);
+  --q-text-primary:         #1A0800;
+  --q-text-secondary:       rgba(26,8,0,0.68);
+  --q-text-tertiary:        rgba(26,8,0,0.45);
+  --q-text-disabled:        rgba(26,8,0,0.30);
+  --q-brand:                #9A3D08;
+  --q-brand-subtle:         rgba(232,64,0,0.10);
+  --q-brand-border:         rgba(154,61,8,0.32);
+  --q-brand-text:           #9A3D08;
+  --q-hover-bg:             rgba(26,8,0,0.05);
+  --q-text-inverse:         #FFFFFF;
+  --q-shadow:               0 12px 36px -12px rgba(26,8,0,0.18);
+  --q-sidebar-bg:           #F5F2ED;
+  --q-admin-nav-bg:         #FFFFFF;
+  --q-sidebar-active-bg:    rgba(232,64,0,0.10);
+  --q-sidebar-active-text:  #9A3D08;
+  --q-sidebar-active-border:rgba(154,61,8,0.55);
+  --q-sidebar-brand-dim:    rgba(154,61,8,0.55);
+  --q-sidebar-cta-border:   rgba(26,8,0,0.20);
+  --q-sidebar-kbd-bg:       rgba(26,8,0,0.07);
+  --q-sidebar-kbd-text:     rgba(26,8,0,0.65);
+}
+
+:root {
+  /* Alias legado — componentes usam var(--font-dm-sans). Mapeia pro
+     var(--font-sans) que o next/font injeta via layout.tsx. */
+  --font-dm-sans: var(--font-sans);
 }
 
 @theme inline {
+  --font-family-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-family-display: var(--font-display), Georgia, "Times New Roman", serif;
+  --font-family-mono: var(--font-mono), ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -122,38 +195,11 @@
   * {
     @apply border-border outline-ring/50;
   }
-
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-
-  /* Typography Scale */
-  h1 {
-    @apply text-4xl md:text-5xl font-bold tracking-tight;
-  }
-
-  h2 {
-    @apply text-3xl md:text-4xl font-semibold tracking-tight;
-  }
-
-  h3 {
-    @apply text-2xl md:text-3xl font-semibold;
-  }
-
-  h4 {
-    @apply text-xl md:text-2xl font-semibold;
-  }
-
-  h5 {
-    @apply text-lg md:text-xl font-medium;
-  }
-
-  h6 {
-    @apply text-base md:text-lg font-medium;
   }
 }
 
@@ -162,35 +208,33 @@
    ======================================== */
 
 @layer utilities {
-
   /* Focus Indicators - WCAG 2.1 Success Criterion 2.4.7 */
   *:focus-visible {
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* Improve button focus indicators */
   button:focus-visible,
   a:focus-visible,
   [role="button"]:focus-visible {
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* Input focus indicators */
   input:focus-visible,
-  textarea:focus-visible,
   select:focus-visible {
     @apply outline-2 outline-primary ring-2 ring-primary/20 border-primary;
   }
 
-  /* Keyboard navigation - Skip Link */
+  /* textarea usa focus-within no card pai — ring interno causaria duplo indicador */
+  textarea:focus-visible {
+    outline: none;
+  }
+
   .skip-link {
     @apply absolute left-0 top-0 z-[9999] -translate-y-full bg-primary px-4 py-2 text-primary-foreground;
     @apply focus-visible:translate-y-0;
   }
 
-  /* Reduced Motion - WCAG 2.1 Success Criterion 2.3.3 */
   @media (prefers-reduced-motion: reduce) {
-
     *,
     *::before,
     *::after {
@@ -201,12 +245,10 @@
     }
   }
 
-  /* High Contrast Mode Support */
   @media (prefers-contrast: high) {
     * {
       @apply border-2;
     }
-
     button,
     a,
     [role="button"] {
@@ -214,7 +256,6 @@
     }
   }
 
-  /* Screen Reader Only - Utility Class */
   .sr-only {
     position: absolute;
     width: 1px;
@@ -227,388 +268,615 @@
     border-width: 0;
   }
 
-  /* Focus Within - For containers with focusable children */
   .focus-within-ring:focus-within {
     @apply outline-2 outline-offset-2 outline-primary ring-2 ring-primary/30;
   }
 
-  /* ========================================
-     WCAG 2.2 Target Size Guidelines
-     - 2.5.8 (AA): 24×24px minimum
-     - 2.5.5 (AAA): 44×44px for touch
-
-     Strategy: Responsive sizing
-     - Desktop (>768px): 36px - better aesthetics
-     - Mobile (≤768px): 44px - WCAG AAA touch targets
-     ======================================== */
-
-  /* Desktop: 36px minimum for all interactive elements */
+  /* Interactive Elements - Minimum Target Size 44x44px (WCAG 2.5.5) */
   button,
-  [role="button"],
-  [type="button"],
-  [type="submit"],
-  [type="reset"] {
-    min-height: 36px;
-    min-width: 36px;
-  }
-
-  /* Mobile (≤768px): 44px for touch targets */
-  @media (max-width: 768px) {
-    button:not(.btn-compact),
-    [role="button"]:not(.btn-compact),
-    [type="button"]:not(.btn-compact),
-    [type="submit"]:not(.btn-compact),
-    [type="reset"]:not(.btn-compact) {
-      min-height: 44px;
-      min-width: 44px;
-    }
-  }
-
-  /* Compact button class for small UI elements */
-  .btn-compact {
-    min-height: unset;
-    min-width: unset;
-  }
-
-  /* Small UI elements - keep native sizing (dropdowns, switches, tabs) */
-  [role="menuitem"],
-  [role="tab"],
-  [role="option"],
-  [role="switch"] {
-    min-height: unset !important;
-    min-width: unset !important;
-  }
-
-  /* UX FIX: Cursor pointer for all interactive elements */
-  button,
-  [role="button"],
   a,
-  [type="button"],
-  [type="submit"],
-  [type="reset"],
-  input[type="button"],
-  input[type="submit"],
-  input[type="reset"] {
-    cursor: pointer;
-  }
-
-  /* ✅ CORREÇÃO BRUTAL: Error Feedback Animations */
-  @keyframes shake {
-
-    0%,
-    100% {
-      transform: translateX(0);
-    }
-
-    10%,
-    30%,
-    50%,
-    70%,
-    90% {
-      transform: translateX(-4px);
-    }
-
-    20%,
-    40%,
-    60%,
-    80% {
-      transform: translateX(4px);
-    }
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .error-shake {
-    animation: shake 0.4s ease-in-out;
-  }
-
-  .error-message {
-    animation: fadeIn 0.3s ease-out;
-  }
-
-  /* Input error state with subtle pulse */
-  input[aria-invalid="true"],
-  textarea[aria-invalid="true"] {
-    @apply border-red-500/70 ring-1 ring-red-500/50;
-    animation: shake 0.4s ease-in-out;
-  }
-
-  /* Error text styling */
-  [id$="-error"] {
-    @apply text-red-400 text-xs mt-1;
-    animation: fadeIn 0.3s ease-out;
-  }
-}
-
-/* ===========================================
-   Tiptap Editor Styles
-   =========================================== */
-
-/* Editor base styles */
-.ProseMirror {
-  outline: none;
-}
-
-.ProseMirror p.is-editor-empty:first-child::before {
-  color: var(--muted-foreground);
-  content: attr(data-placeholder);
-  float: left;
-  height: 0;
-  pointer-events: none;
-}
-
-/* Prose styles for editor content */
-.ProseMirror {
-  > * + * {
-    margin-top: 0.75em;
-  }
-
-  h1 {
-    font-size: 2em;
-    font-weight: 700;
-    line-height: 1.2;
-    margin-top: 1em;
-    margin-bottom: 0.5em;
-  }
-
-  h2 {
-    font-size: 1.5em;
-    font-weight: 600;
-    line-height: 1.3;
-    margin-top: 1em;
-    margin-bottom: 0.5em;
-  }
-
-  h3 {
-    font-size: 1.25em;
-    font-weight: 600;
-    line-height: 1.4;
-    margin-top: 1em;
-    margin-bottom: 0.5em;
-  }
-
-  ul, ol {
-    padding-left: 1.5em;
-    margin: 0.5em 0;
-  }
-
-  ul {
-    list-style-type: disc;
-  }
-
-  ol {
-    list-style-type: decimal;
-  }
-
-  li {
-    margin: 0.25em 0;
-  }
-
-  blockquote {
-    border-left: 3px solid var(--border);
-    padding-left: 1em;
-    margin: 1em 0;
-    color: var(--muted-foreground);
-    font-style: italic;
-  }
-
-  code {
-    background-color: var(--muted);
-    border-radius: 0.25em;
-    padding: 0.15em 0.3em;
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.9em;
-  }
-
-  pre {
-    background-color: var(--muted);
-    border-radius: 0.5em;
-    padding: 0.75em 1em;
-    overflow-x: auto;
-
-    code {
-      background: none;
-      padding: 0;
-      font-size: 0.9em;
-    }
-  }
-
-  a {
-    color: var(--primary);
-    text-decoration: underline;
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-
-  hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 1.5em 0;
-  }
-
-  strong {
-    font-weight: 600;
-  }
-
-  em {
-    font-style: italic;
-  }
-
-  u {
-    text-decoration: underline;
-  }
-
-  s {
-    text-decoration: line-through;
-  }
-}
-
-/* Text alignment */
-.ProseMirror [style*="text-align: left"] {
-  text-align: left;
-}
-
-.ProseMirror [style*="text-align: center"] {
-  text-align: center;
-}
-
-.ProseMirror [style*="text-align: right"] {
-  text-align: right;
-}
-
-.ProseMirror [style*="text-align: justify"] {
-  text-align: justify;
-}
-
-/* ========================================
-   Mobile Responsive Utilities
-   ======================================== */
-
-@layer utilities {
-  /* Safe area insets for modern mobile devices (notch, home indicator) */
-  .safe-area-inset-top {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .safe-area-inset-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  /* Touch-friendly tap targets */
-  .touch-target {
+  [role="button"],
+  [role="link"] {
     min-height: 44px;
     min-width: 44px;
   }
 
-  /* Prevent text selection on interactive elements */
-  .no-select {
-    -webkit-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
+  button[aria-label],
+  [role="button"][aria-label] {
+    min-height: 44px;
+    min-width: 44px;
   }
 
-  /* Smooth scrolling container */
-  .scroll-smooth-touch {
-    -webkit-overflow-scrolling: touch;
-    scroll-behavior: smooth;
+  /* ========================================
+     Animations
+     ======================================== */
+
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
-  /* Hide scrollbar but allow scrolling */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
   }
 
-  /* Mobile-first responsive text sizes */
-  .text-responsive-xs {
-    @apply text-xs sm:text-sm;
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
   }
 
-  .text-responsive-sm {
-    @apply text-sm sm:text-base;
+  @keyframes drift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    25% { transform: translate(30px, -20px) scale(1.05); }
+    50% { transform: translate(-15px, 15px) scale(0.95); }
+    75% { transform: translate(20px, 10px) scale(1.02); }
   }
 
-  .text-responsive-base {
-    @apply text-base sm:text-lg;
+  @keyframes glow-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.7; }
   }
 
-  .text-responsive-lg {
-    @apply text-lg sm:text-xl md:text-2xl;
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(16px); }
+    to { opacity: 1; transform: translateX(0); }
   }
 
-  /* Mobile bottom navigation safe area */
-  .pb-safe {
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  @keyframes urgent-pulse {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgb(239 68 68 / 0.04); }
   }
 
-  /* Active state for touch devices */
-  @media (hover: none) and (pointer: coarse) {
-    .touch-active:active {
-      @apply bg-accent/50 transition-colors;
-    }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  /* Landscape orientation adjustments */
-  @media (orientation: landscape) and (max-height: 500px) {
-    .landscape-compact {
-      @apply py-2;
-    }
+  .animate-fade-in {
+    animation: fade-in 0.4s ease-out both;
+  }
+
+  .animate-pulse-dot {
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .stagger-1 { animation-delay: 0ms; }
+  .stagger-2 { animation-delay: 80ms; }
+  .stagger-3 { animation-delay: 160ms; }
+  .stagger-4 { animation-delay: 240ms; }
+  .stagger-5 { animation-delay: 320ms; }
+  .stagger-6 { animation-delay: 400ms; }
+
+  @keyframes audio-bar {
+    0%, 100% { transform: scaleY(0.3); }
+    50% { transform: scaleY(1); }
+  }
+
+  .audio-bar {
+    width: 2px;
+    border-radius: 2px;
+    height: 10px;
+    flex-shrink: 0;
+    transform-origin: bottom;
+    animation: audio-bar 0.8s ease-in-out infinite;
+  }
+  .audio-bar-1 { animation-delay: 0ms; }
+  .audio-bar-2 { animation-delay: 160ms; }
+  .audio-bar-3 { animation-delay: 320ms; }
+
+  /* ========================================
+     Auth page specific styles
+     ======================================== */
+
+  /* Tokens semânticos calibrados para fundo #F5F2ED (creme quente) em light
+     e #000000 (preto DS v3) em dark — iguais ao AppShellClient */
+  [data-auth-surface] {
+    --foreground:        #1A0800;
+    --muted:             rgba(26,8,0,0.06);
+    --muted-foreground:  rgba(26,8,0,0.50);
+    --border:            rgba(26,8,0,0.12);
+    --ring:              rgba(26,8,0,0.20);
+    --background:        #F5F2ED;
+  }
+  .dark [data-auth-surface] {
+    --foreground:        #FFFFFF;
+    --muted:             rgba(255,255,255,0.06);
+    --muted-foreground:  rgba(255,255,255,0.50);
+    --border:            rgba(255,255,255,0.10);
+    --ring:              rgba(255,255,255,0.20);
+    --background:        #000000;
+  }
+
+  .auth-input {
+    @apply bg-muted/50 border-border text-foreground placeholder:text-muted-foreground
+           transition-all duration-200
+           hover:border-border/80 hover:bg-muted
+           focus-visible:bg-muted focus-visible:border-ring focus-visible:ring-ring/20;
+  }
+
+  .auth-btn-primary {
+    @apply bg-white text-[#0a0d14] font-semibold
+           hover:bg-white/90 active:bg-white/80
+           shadow-[0_1px_2px_rgba(0,0,0,0.3)]
+           transition-all duration-200;
+  }
+
+  .auth-btn-ghost {
+    @apply bg-white/[0.04] text-white/70 border border-white/[0.08]
+           hover:bg-white/[0.08] hover:text-white hover:border-white/[0.15]
+           transition-all duration-200;
+  }
+
+  /* react-international-phone overrides */
+  .dark .react-international-phone-country-selector-dropdown {
+    background-color: var(--popover) !important;
+    border-color: var(--border) !important;
+    color: var(--popover-foreground) !important;
+  }
+
+  .dark .react-international-phone-country-selector-dropdown__list-item {
+    color: var(--popover-foreground) !important;
+  }
+
+  .dark .react-international-phone-country-selector-dropdown__list-item:hover,
+  .dark .react-international-phone-country-selector-dropdown__list-item--focused {
+    background-color: var(--accent) !important;
+    color: var(--accent-foreground) !important;
+  }
+
+  .react-international-phone-country-selector-dropdown {
+    background-color: var(--popover);
+    border: 1px solid var(--border);
+    color: var(--popover-foreground);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    z-index: 50;
   }
 }
 
-/* Mobile bottom sheet backdrop */
-.bottom-sheet-backdrop {
-  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+/* ============================================================ */
+/* Auth v3 Design System tokens — now GLOBAL (US-017)            */
+/* Moved from [data-auth-v3="true"] scope to :root so all app    */
+/* pages inherit them. The [data-auth-v3] attribute remains on   */
+/* the auth layout for legacy scoped overrides (see @layer       */
+/* utilities block below).                                       */
+/* Source: quayer-ds-v3.html                                     */
+/* ============================================================ */
+
+:root {
+  /* Primary palette — amber brand */
+  --p-amber-50:  #FFFDE0;
+  --p-amber-100: #FFE880;
+  --p-amber-200: #FFD60A;
+  --p-amber-300: #FF9200;
+  --p-amber-400: #E84000;
+  --p-amber-500: #B82000;
+  --p-amber-600: #881400;
+  --p-amber-700: #580800;
+
+  --p-amber-a04: rgba(255,214,10,.04);
+  --p-amber-a08: rgba(255,214,10,.08);
+  --p-amber-a12: rgba(255,214,10,.12);
+  --p-amber-a20: rgba(255,214,10,.20);
+  --p-amber-a35: rgba(255,214,10,.35);
+
+  --p-white-a06: rgba(255,255,255,.06);
+  --p-white-a10: rgba(255,255,255,.10);
+  --p-white-a18: rgba(255,255,255,.18);
+  --p-white-a28: rgba(255,255,255,.28);
+  --p-white-a30: rgba(255,255,255,.30);
+  --p-white-a40: rgba(255,255,255,.40);
+  --p-white-a45: rgba(255,255,255,.45);
+  --p-white-a55: rgba(255,255,255,.55);
+  --p-white-a75: rgba(255,255,255,.75);
+
+  --p-green-400: #2ECC58;
+  --p-green-a10: rgba(46,204,88,.10);
+  --p-green-a20: rgba(46,204,88,.20);
+  --p-red-400:   #FF4848;
+  --p-red-a10:   rgba(255,72,72,.10);
+  --p-red-a20:   rgba(255,72,72,.20);
+  --p-blue-400:  #4A9EFF;
+  --p-blue-a10:  rgba(74,158,255,.10);
+  --p-blue-a20:  rgba(74,158,255,.20);
+  --p-orange-400: #FF7700;
+  --p-orange-a10: rgba(255,119,0,.10);
+  --p-orange-a20: rgba(255,119,0,.20);
+
+  /* Brand semantics */
+  --color-brand:          var(--p-amber-200);
+  --color-brand-hover:    var(--p-amber-50);
+  --color-brand-muted:    var(--p-amber-a08);
+  --color-brand-subtle:   var(--p-amber-a12);
+  --color-brand-emphasis: var(--p-amber-a35);
+
+  /* Backgrounds */
+  --color-bg-base:     #000000;
+  --color-bg-surface:  #060402;
+  --color-bg-elevated: #0C0804;
+  --color-bg-overlay:  #160E06;
+  --color-bg-inverse:  #F5F2ED;
+
+  /* Borders */
+  --color-border-subtle:       var(--p-white-a06);
+  --color-border-default:      var(--p-white-a10);
+  --color-border-strong:       var(--p-white-a18);
+  --color-border-brand:        var(--p-amber-a20);
+  --color-border-brand-strong: var(--p-amber-a35);
+
+  /* Text */
+  --color-text-primary:   #FFFFFF;
+  --color-text-secondary: var(--p-white-a55);
+  --color-text-tertiary:  var(--p-white-a40);
+  --color-text-disabled:  var(--p-white-a30);
+  --color-text-brand:     var(--p-amber-200);
+  --color-text-inverse:   #1A0800;
+
+  /* Status */
+  --color-success:        var(--p-green-400);
+  --color-success-bg:     var(--p-green-a10);
+  --color-success-border: var(--p-green-a20);
+  --color-error:          var(--p-red-400);
+  --color-error-bg:       var(--p-red-a10);
+  --color-error-border:   var(--p-red-a20);
+  --color-info:           var(--p-blue-400);
+  --color-info-bg:        var(--p-blue-a10);
+  --color-info-border:    var(--p-blue-a20);
+  --color-warning:        var(--p-orange-400);
+  --color-warning-bg:     var(--p-orange-a10);
+  --color-warning-border: rgba(255,119,0,.20);
+
+  /* Typography */
+  --font-sans: 'DM Sans','Helvetica Neue',sans-serif;
+  --font-mono: 'DM Mono','SF Mono','Fira Code',monospace;
+
+  --text-label:   0.625rem;
+  --text-caption: 0.6875rem;
+  --text-meta:    0.8125rem;
+  --text-body:    0.9375rem;
+  --text-body-lg: 1.125rem;
+  --text-heading: 1.5rem;
+  --text-title:   2rem;
+  --text-display: clamp(2rem, 5vw, 3rem);
+  --text-hero:    clamp(2.5rem, 6vw, 4rem);
+  --text-jumbo:   clamp(3rem, 7vw, 5rem);
+
+  --font-regular: 400;
+  --font-medium:  500;
+  --font-bold:    700;
+  --font-black:   900;
+
+  --leading-tight:   1.1;
+  --leading-snug:    1.3;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.7;
+
+  --tracking-tighter: -0.04em;
+  --tracking-tight:   -0.03em;
+  --tracking-snug:    -0.01em;
+  --tracking-normal:   0em;
+  --tracking-wide:     0.06em;
+  --tracking-wider:    0.12em;
+  --tracking-widest:   0.18em;
+
+  /* Spacing — 4px grid */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  /* Radius */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-2xl:  32px;
+  --radius-full: 9999px;
+
+  /* Shadow */
+  --shadow-xs:    0 1px 2px  rgba(0,0,0,.40);
+  --shadow-sm:    0 1px 6px  rgba(0,0,0,.50);
+  --shadow-md:    0 4px 16px rgba(0,0,0,.55);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,.65);
+  --shadow-xl:    0 16px 48px rgba(0,0,0,.75);
+  --shadow-brand: 0 0 0 3px var(--p-amber-a20);
+  --shadow-glow:  0 0 32px  var(--p-amber-a12);
+  --shadow-icon:  drop-shadow(0 4px 12px rgba(180,60,0,.35));
+
+  /* Gradients */
+  --gradient-icon: linear-gradient(
+    135deg,
+    var(--p-amber-50)  0%,
+    var(--p-amber-200) 14%,
+    var(--p-amber-300) 30%,
+    var(--p-amber-400) 46%,
+    var(--p-amber-500) 60%,
+    var(--p-amber-600) 78%,
+    var(--p-amber-700) 100%
+  );
 }
 
-/* Mobile bottom sheet container */
-.bottom-sheet {
-  @apply fixed bottom-0 left-0 right-0 bg-card rounded-t-2xl z-50;
-  @apply transform transition-transform duration-300 ease-out;
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* Mobile drawer handle */
-.drawer-handle {
-  @apply w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto my-3;
-}
-
-/* Reset Next.js portal positioning */
-nextjs-portal {
-  left: unset !important;
-  top: unset !important;
-}
-
-/* ========================================
-   WCAG 2.1 Switch/Toggle Fix
-   Fix para border-radius absurdo (3.40282e+38px)
-   ======================================== */
-
+/* ============================================================
+   Auth v3 — brand overrides para o LoginFormFinal (v2 form) quando
+   renderizado dentro do [data-auth-v3="true"] scope.
+   Envolvido em @layer utilities porque Tailwind v4 strippa regras
+   raw CSS fora de @layer (bug/quirk do processor).
+   Fonte: quayer-ds-v3.html
+   ============================================================ */
 @layer utilities {
-  /* Garantir border-radius seguro para switches/toggles */
-  [data-slot="switch"],
-  [role="switch"] {
-    border-radius: 9999px !important;
+  .dark [data-auth-v3="true"] {
+    color: var(--color-text-primary);
   }
 
-  [data-slot="switch-thumb"] {
-    border-radius: 9999px !important;
+  [data-auth-v3="true"] h1 {
+    font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .dark [data-auth-v3="true"] h1 {
+    color: var(--color-text-primary);
+  }
+
+  [data-auth-v3="true"] a {
+    transition: color 150ms ease;
+  }
+  [data-auth-v3="true"] a:hover {
+    color: var(--color-brand) !important;
+  }
+
+  [data-auth-v3="true"] button[type="submit"].bg-foreground {
+    background-color: var(--color-brand) !important;
+    color: var(--color-text-inverse) !important;
+    box-shadow: 0 0 0 3px rgba(255, 214, 10, 0.2) !important;
+  }
+  [data-auth-v3="true"] button[type="submit"].bg-foreground:hover {
+    background-color: var(--color-brand-hover) !important;
+  }
+
+  [data-auth-v3="true"] button:focus-visible,
+  [data-auth-v3="true"] input:focus-visible,
+  [data-auth-v3="true"] [role="button"]:focus-visible {
+    outline: 2px solid var(--color-brand) !important;
+    outline-offset: 2px !important;
+  }
+
+  [data-auth-v3="true"] input:disabled,
+  [data-auth-v3="true"] button:disabled {
+    opacity: 0.5;
+  }
+
+  [data-auth-v3="true"] [role="separator"] {
+    border-color: var(--color-border-default);
+  }
+
+  [data-auth-v3="true"] .auth-input:focus,
+  [data-auth-v3="true"] .auth-input:focus-visible {
+    border-color: var(--color-brand) !important;
+    box-shadow: 0 0 0 3px var(--color-brand-subtle) !important;
+  }
+
+  .dark [data-auth-v3="true"] label.uppercase {
+    color: var(--color-text-tertiary) !important;
+  }
+
+  /* Neutralize internal "chrome" (min-h-svh wrappers + duplicate logo Link)
+     que 3 V2Clients tem (SignupVerify, verify-email, google-callback).
+     Esses wrappers foram desenhados para renderizar standalone no v2 path.
+     Quando encapsulados em AuthShell, causam double chrome (dois logos,
+     altura total forcada duas vezes, padding top extra). Scoped fix aqui:
+     nao toca os componentes v2 (continuam funcionando standalone). */
+  [data-auth-v3="true"] .min-h-svh {
+    min-height: auto !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  /* Esconde Logo Link interno (Link wrapping Image com alt="Quayer") —
+     AuthShell ja provem o logo top-left do layout v3. Usa :has() selector
+     (supported Chrome 105+, Safari 15.4+, Firefox 121+). */
+  [data-auth-v3="true"] a:has(img[alt="Quayer"]) {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   App v3 — shadcn token overrides para TODAS as páginas autenticadas
+   renderizadas dentro de <AppShell> (que adiciona data-app-v3="true").
+
+   Todas as classes Tailwind que dependem dos tokens shadcn
+   (bg-background, text-foreground, bg-card, border, etc.) recebem
+   automaticamente os valores v3 (preto, amber, DM Sans) sem precisar
+   tocar cada página. Páginas legadas (admin, integracoes, contatos,
+   conversas, ferramentas) imediatamente passam a seguir o design v3.
+
+   Fonte das cores v3: quayer-ds-v3.html + :root block no topo deste arquivo.
+   Envolvido em @layer utilities porque Tailwind v4 strippa regras raw.
+   ============================================================ */
+@layer utilities {
+  /* Dark theme (default) — shadcn token overrides pra tom v3 */
+  [data-app-v3="true"] {
+    --background: #000000;
+    --foreground: #ffffff;
+    --card: #060402;
+    --card-foreground: #ffffff;
+    --popover: #0c0804;
+    --popover-foreground: #ffffff;
+
+    --primary: #ffd60a;
+    --primary-foreground: #1a0800;
+
+    --secondary: #0c0804;
+    --secondary-foreground: #ffffff;
+    --muted: #0c0804;
+    --muted-foreground: rgba(255, 255, 255, 0.72);
+    --accent: rgba(255, 214, 10, 0.12);
+    --accent-foreground: #ffd60a;
+
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+
+    --border: rgba(255, 255, 255, 0.12);
+    --input: rgba(255, 255, 255, 0.12);
+    --ring: #ffd60a;
+
+    --sidebar: #0b0704;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #ffd60a;
+    --sidebar-primary-foreground: #1a0800;
+    --sidebar-accent: rgba(255, 214, 10, 0.10);
+    --sidebar-accent-foreground: #ffd60a;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-ring: #ffd60a;
+
+    font-family: var(--font-sans), "DM Sans", system-ui, sans-serif;
+  }
+
+  /* Light theme — overrides quando html.light (next-themes) */
+  html:not(.dark) [data-app-v3="true"] {
+    --background: #f5f2ed;
+    --foreground: #1a0800;
+    --card: #ffffff;
+    --card-foreground: #1a0800;
+    --popover: #ffffff;
+    --popover-foreground: #1a0800;
+
+    --primary: #9a3d08;
+    --primary-foreground: #ffffff;
+
+    --secondary: #f5f2ed;
+    --secondary-foreground: #1a0800;
+    --muted: #eeeae3;
+    --muted-foreground: rgba(26, 8, 0, 0.65);
+    --accent: rgba(154, 61, 8, 0.10);
+    --accent-foreground: #9a3d08;
+
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+
+    --border: rgba(26, 8, 0, 0.14);
+    --input: rgba(26, 8, 0, 0.14);
+    --ring: #9a3d08;
+
+    --sidebar: #f5f2ed;
+    --sidebar-foreground: #1a0800;
+    --sidebar-primary: #9a3d08;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: rgba(154, 61, 8, 0.08);
+    --sidebar-accent-foreground: #9a3d08;
+    --sidebar-border: rgba(26, 8, 0, 0.10);
+    --sidebar-ring: #9a3d08;
+  }
+
+  /* ─── Builder Sidebar — focus-visible ring (WCAG 2.4.7) ─── */
+  /* Usa box-shadow dupla: inner = bg (gap), outer = brand (ring).
+     Cores dependem do tema via .dark selector. */
+  [data-app-v3="true"] .bsb-focus-ring {
+    outline: none;
+  }
+  [data-app-v3="true"] .bsb-focus-ring:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #0b0704, 0 0 0 4px #ffd60a;
+  }
+  html:not(.dark) [data-app-v3="true"] .bsb-focus-ring:focus-visible {
+    /* Sem inner ring — cream-on-cream ficaria invisível.
+       3px amber sólido garante visibilidade + AA contrast em #F5F2ED. */
+    box-shadow: 0 0 0 3px #9a3d08;
+  }
+
+  /* Table e headings (não dependem de tema — usam vars) */
+  [data-app-v3="true"] table {
+    color: var(--foreground);
+  }
+  [data-app-v3="true"] thead {
+    color: var(--muted-foreground);
+  }
+
+  /* REMOVIDO: o override hardcoded de input/textarea/select que forçava
+     background-color: var(--color-bg-elevated) (sempre #0C0804 dark).
+     Agora cada componente controla seu próprio bg via useAppTokens
+     ou via classes shadcn que leem var(--input), var(--card), etc —
+     e essas vars JÁ SWAPPAM com tema acima. */
+
+  /* Scrollbar — cores por tema via variables shadcn */
+  [data-app-v3="true"] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+  }
+  [data-app-v3="true"] ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  /* Headings usam DM Sans automático */
+  [data-app-v3="true"] h1,
+  [data-app-v3="true"] h2,
+  [data-app-v3="true"] h3,
+  [data-app-v3="true"] h4 {
+    font-family: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* Esconder o <SidebarTrigger> vestigial das páginas legadas — o
+     novo BuilderSidebar é sempre visível em desktop, não precisa de
+     botão de toggle. O componente ainda existe no DOM (evita crash
+     por useSidebar) mas fica invisível. */
+  [data-app-v3="true"] [data-sidebar="trigger"],
+  [data-app-v3="true"] button[data-slot="sidebar-trigger"] {
+    display: none !important;
+  }
+
+  /* Separadores verticais pequenos dos headers legados (ao lado do
+     trigger) também viram vestigiais — esconder o primeiro de cada
+     header. */
+  [data-app-v3="true"] header > div > [data-slot="separator-root"][data-orientation="vertical"],
+  [data-app-v3="true"] header > [data-slot="separator-root"][data-orientation="vertical"] {
+    display: none !important;
+  }
+
+  /* Breadcrumbs legados das páginas /admin/*: cada uma tinha header
+     com 'Administração > X'. A AdminNav já dá contexto suficiente
+     (logo, tag 'Admin', item ativo). Esconder o primeiro <header>
+     direto dentro do main container. */
+  [data-app-v3="true"] main > header:first-child,
+  [data-app-v3="true"] main > div > header:first-child {
+    display: none !important;
+  }
+
+  /* Cards legados ganham um leve destaque de borda e hover lift */
+  [data-app-v3="true"] [data-slot="card"] {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  }
+
+  /* Primary buttons (bg-primary) recebem sombra amber */
+  [data-app-v3="true"] button.bg-primary,
+  [data-app-v3="true"] [data-slot="button"].bg-primary {
+    box-shadow: 0 4px 14px -4px rgba(255, 214, 10, 0.35);
+  }
+
+  /* Links destacados */
+  [data-app-v3="true"] a.text-primary {
+    color: var(--color-brand) !important;
   }
 }

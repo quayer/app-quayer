@@ -1,0 +1,642 @@
+{
+  "project": "Quayer",
+  "branchName": "ralph/ux-audit-all-pages",
+  "description": "Auditoria UX completa de todas as páginas: testar jornadas, capturar logs de browser, verificar WCAG 2.1 AA (contraste, espaçamento, centralização, touch targets, focus), corrigir bugs de front e back end por página.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Audit /login — jornada completa, dark mode, WCAG 2.1",
+      "description": "Como usuário, quero que /login tenha layout centralizado, espaçamento correto, contraste WCAG 2.1 AA, PhoneInput funcionando e sem erros de console.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/login usando browser skill, capturar screenshot e logs de console",
+        "Verificar: card centralizado na viewport (horizontal e vertical), padding interno consistente",
+        "Verificar dark mode: todos os elementos com cores de tema (sem branco hardcoded, sem preto hardcoded)",
+        "PhoneInput: dropdown de países com fundo escuro em dark mode, sem fundo branco, texto legível",
+        "PhoneInput: +55 visível, ao digitar '11940636426' formata como '(11) 94063-6426'",
+        "Verificar WCAG 2.1 AA: contraste texto vs fundo ≥ 4.5:1 nos labels e placeholders",
+        "Verificar focus-visible em todos inputs e botões (anel de foco visível ao tab)",
+        "Sem erros de console (exceto erros de rede esperados quando servidor está offline)",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: screenshot final mostrando form login correto"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Fixed: dropdownStyleProps used hsl(var()) with oklch values — changed to var() direct references. Fixed FieldSeparator bg-background → bg-card (dark mode mismatch inside Card). Fixed Alert error hardcoded red colors → use theme destructive tokens."
+    },
+    {
+      "id": "US-002",
+      "title": "Audit /login/verify (OTP WhatsApp) — ícone, layout, fluxo",
+      "description": "Como usuário, quero que a tela de verificação OTP via WhatsApp tenha ícone correto, layout limpo e fluxo sem delays desnecessários.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/login?phone=5511940636426 e simular envio de OTP",
+        "Verificar: ícone WhatsApp SVG verde (#25D366) aparece no título e na descrição",
+        "Verificar: InputOTP com 6 slots visíveis, espaçados corretamente, focus automático no primeiro slot",
+        "Verificar: contador de reenvio mostra '60s' e conta regressivamente",
+        "Verificar: botão 'Fazer Login' desabilitado até preencher 6 dígitos",
+        "Verificar dark mode: slots OTP com fundo e borda no tema correto",
+        "Sem delays artificiais (setTimeout removidos — verificado na sessão anterior)",
+        "Sem erros de console",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill: screenshot da tela de verificação OTP"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Fixed: InputOTPSeparator imported but unused — removed. Fixed: WhatsAppIcon function was defined between import blocks — moved all imports to top. Fixed: unused useRouter/router/Mail imports removed. Fixed: TS errors with email! non-null assertion and data union type narrowing. Fixed: WhatsAppIcon SVG missing aria-hidden=true."
+    },
+    {
+      "id": "US-003",
+      "title": "Audit /signup — formulário de cadastro, validação, PhoneInput",
+      "description": "Como novo usuário, quero que o cadastro seja claro, com campos corretos, validações inline e feedback imediato.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/signup, capturar screenshot e logs",
+        "Ler src/client/components/auth/signup-form.tsx e src/app/(auth)/signup/page.tsx",
+        "Verificar campos: nome, email/telefone (auto-detecta phone ≥8 dígitos), Google OAuth button",
+        "Verificar: ao digitar número de telefone, PhoneInput ativa com bandeira BR (+55) e formatação",
+        "Verificar: validação inline mostra erros embaixo de cada campo sem recarregar",
+        "Verificar dark mode: todos elementos com cores de tema",
+        "Verificar: link 'Já tem conta?' navega para /login",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Audit /signup/verify — OTP de cadastro (email e phone)",
+      "description": "Como novo usuário, quero verificar meu cadastro com OTP de 6 dígitos, com reenvio e feedback claro.",
+      "acceptanceCriteria": [
+        "Ler src/app/(auth)/signup/verify/page.tsx e src/client/components/auth/signup-otp-form.tsx",
+        "Verificar: 6 slots OTP (formato 3-3 com separador), auto-submit quando completo",
+        "Verificar: contador de reenvio 60s funcional",
+        "Verificar: fallback para sessionStorage quando query params ausentes",
+        "Verificar: tela de sucesso com checkmark e redirect após 1.5s",
+        "Verificar dark mode: slots OTP com tema correto",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Audit /forgot-password e /reset-password/[token] — recuperação de senha",
+      "description": "Como usuário, quero recuperar minha senha com fluxo claro: digitar email, receber link, redefinir senha.",
+      "acceptanceCriteria": [
+        "Ler src/app/(auth)/forgot-password/page.tsx e src/app/(auth)/reset-password/[token]/page.tsx",
+        "Verificar /forgot-password: input email, botão enviar, mensagem de sucesso, link voltar ao login",
+        "Verificar /reset-password/[token]: inputs nova senha + confirmar, indicador de força (weak/medium/strong), validação ≥8 chars",
+        "Verificar: auto-login após reset com redirect correto",
+        "Verificar dark mode: ambas páginas com cores de tema",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Audit /register e /verify-email — cadastro legacy com senha",
+      "description": "Como usuário, quero que o fluxo legacy de cadastro com senha funcione corretamente ou seja deprecado com redirect.",
+      "acceptanceCriteria": [
+        "Ler src/app/(auth)/register/page.tsx e src/app/(auth)/verify-email/page.tsx (se existir)",
+        "Verificar /register: campos nome, email, senha, confirmar senha com validação",
+        "Verificar: indicador de força de senha, feedback inline",
+        "Verificar /verify-email: 6 dígitos OTP, reenvio, redirect correto",
+        "Verificar: links de navegação (já tem conta → /login)",
+        "Decidir: se /register é legacy, adicionar redirect para /signup ou manter funcional",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Audit /onboarding — fluxo pós-cadastro",
+      "description": "Como usuário recém-cadastrado, quero que o onboarding crie minha organização automaticamente ou peça meu nome.",
+      "acceptanceCriteria": [
+        "Ler src/app/(auth)/onboarding/page.tsx e src/client/components/auth/onboarding-form.tsx",
+        "Verificar: step Loading → Auto-create (se tem nome real) → Input nome (se não) → Creating → Complete",
+        "Verificar: API calls corretos (/api/v1/auth/me, /api/v1/auth/profile, /api/v1/organizations, /api/v1/auth/onboarding/complete)",
+        "Verificar: redirect para /integracoes após conclusão",
+        "Verificar: erro ao criar org mostra mensagem e permite retry",
+        "Verificar dark mode",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Audit /google-callback e /login/verify-magic — OAuth e Magic Link",
+      "description": "Como usuário, quero que os callbacks de Google OAuth e Magic Link funcionem sem erros visíveis.",
+      "acceptanceCriteria": [
+        "Ler src/app/(auth)/google-callback/page.tsx e src/app/(auth)/login/verify-magic/LoginVerifyMagicClient.tsx",
+        "Verificar /google-callback: loading spinner durante verificação, mensagem de erro se falhar, redirect correto",
+        "Verificar /login/verify-magic: extrai token da URL, verifica, notifica aba original via BroadcastChannel",
+        "Verificar: redirect correto (needsOnboarding → /onboarding, admin → /admin, else → /integracoes)",
+        "Verificar: fallback quando não consegue fechar aba (redirect em vez de close)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Audit /integracoes — lista de instâncias WhatsApp",
+      "description": "Como usuário, quero ver minhas conexões WhatsApp com status correto, cards organizados e ações funcionando.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes, capturar screenshot e logs",
+        "Ler src/app/integracoes/page.tsx",
+        "Verificar: cards de stats (Conectadas, Conectando, Desconectadas, Total Msgs)",
+        "Verificar: grid de cards de instâncias carrega (ou estado vazio com CTA criar)",
+        "Verificar: botão 'Nova Integração' abre modal funcional",
+        "Verificar: ações por card (Configurar, Delete, Reconectar, QR Code, Compartilhar)",
+        "Verificar: busca e filtro de status funcionam",
+        "Verificar dark mode: cards com cores do tema",
+        "Sem erros de console (ignorar 'Failed to fetch' se não há instâncias)",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Audit /conversas/[sessionId] — chat WhatsApp com SSE",
+      "description": "Como usuário, quero que a interface de chat carregue mensagens, envie texto e receba em tempo real via SSE.",
+      "acceptanceCriteria": [
+        "Ler src/app/conversas/[sessionId]/page.tsx",
+        "Verificar: header com avatar, nome, telefone do contato",
+        "Verificar: scroll area de mensagens agrupadas por data, inbound (cinza) e outbound (verde)",
+        "Verificar: tipos de mensagem renderizam (text, audio, image, video, document, concatenated)",
+        "Verificar: input textarea + botão enviar funcionam",
+        "Verificar: SSE conecta e reconecta com exponential backoff",
+        "Verificar: sidebar com info do contato, tags, quick actions",
+        "Verificar: botão encerrar sessão mostra confirmação",
+        "Verificar: banner de desconectado com reload",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Audit /admin — dashboard admin com stats e quick actions",
+      "description": "Como admin, quero que o painel principal mostre estatísticas corretas e a navegação lateral funcione.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin, capturar screenshot e logs",
+        "Ler src/app/admin/page.tsx",
+        "Verificar: 4 cards de stats (Organizações, Usuários, Instâncias, Webhooks) carregam dados",
+        "Verificar: 3 quick action cards (Nova Org, Ver Sessões, Configurações) linkam corretamente",
+        "Verificar: sidebar admin com 9 links (Dashboard, Organizações, Integrações, Sessões, Convites, Notificações, Auditoria, Segurança, Configurações)",
+        "Verificar: breadcrumb correto",
+        "Verificar dark mode",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Audit /admin/organizations — CRUD orgs + OrgSheet + UserManageModal",
+      "description": "Como admin, quero gerenciar organizações com tabela, busca, paginação e todas as ações CRUD funcionando.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/organizations, capturar screenshot e logs",
+        "Ler src/app/admin/organizations/page.tsx e componentes OrgSheet.tsx, UserManageModal.tsx",
+        "Verificar: tabela com colunas (Nome, Documento, Tipo, Plano, Status, Ações)",
+        "Verificar: busca filtra resultados, paginação funciona",
+        "Verificar: botão 'Nova Organização' abre CreateOrganizationDialog funcional",
+        "Verificar: dropdown ações (Editar, Excluir com confirmação)",
+        "Verificar: click na linha abre OrgSheet com 4 tabs (Usuários, Instâncias, Webhooks, Info)",
+        "Verificar: convite inline no tab Usuários funciona (email + role + expiração)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado (especialmente array guard pattern)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Audit /admin/integracoes — visão global de instâncias",
+      "description": "Como admin, quero ver todas as instâncias do sistema com stats e ações de gerenciamento.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/integracoes, capturar screenshot e logs",
+        "Ler src/app/admin/integracoes/page.tsx",
+        "Verificar: 4 cards stats (Total, Conectadas, Desconectadas, Sem organização)",
+        "Verificar: tabela com colunas (Nome, Telefone, Organização, Provedor, Status, Criado)",
+        "Verificar: busca e filtro de status funcionam",
+        "Verificar: dropdown ações (Detalhes, Editar, Conectar/Reconectar, Compartilhar)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Audit /admin/sessions — sessões de atendimento com filtros e ações",
+      "description": "Como admin, quero monitorar sessões ativas com filtros avançados e ações de controle (pausar, bloquear IA, encerrar).",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/sessions, capturar screenshot e logs",
+        "Ler src/app/admin/sessions/page.tsx",
+        "Verificar: 5 cards stats (Total, Na Fila, Ativos, Pausados, IA Bloqueada)",
+        "Verificar: filtros (Busca, Status, Status IA, Organização) funcionam",
+        "Verificar: tabela com colunas (Contato, Org, Canal, Iniciado, Status, IA, Janela 24h, Msgs, Duração)",
+        "Verificar: dropdown ações (Ver Detalhes dialog, Bloquear/Desbloquear IA, Ativar/Pausar, Encerrar)",
+        "Verificar: paginação funciona",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Audit /admin/invitations — histórico de convites",
+      "description": "Como admin, quero ver histórico de convites com status, reenvio e cancelamento.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/invitations, capturar screenshot e logs",
+        "Ler src/app/admin/invitations/page.tsx e actions.ts",
+        "Verificar: 4 cards stats (Total, Pendentes, Aceitos, Expirados)",
+        "Verificar: tabela (Email, Role, Org, Convidado por, Status, Data, Ações)",
+        "Verificar: filtros por status e busca funcionam",
+        "Verificar: ações (Reenviar, Renovar expirado, Cancelar com confirmação)",
+        "Verificar: carrega SEM erro 'Token não encontrado' (bug do cookie name corrigido)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Audit /admin/notificacoes — gerenciamento de notificações",
+      "description": "Como admin, quero criar, editar e gerenciar notificações do sistema para usuários/orgs/roles.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/notificacoes, capturar screenshot e logs",
+        "Ler src/app/admin/notificacoes/NotificationsAdminPageClient.tsx",
+        "Verificar: 4 cards stats (Total, Globais, Ativas, Agendadas)",
+        "Verificar: tabela (Tipo, Título, Destino, Leituras, Status, Criado, Ações)",
+        "Verificar: filtros (Busca, 8 tipos: MESSAGE/USER/WARNING/INFO/SUCCESS/ERROR/SYSTEM/CONNECTION)",
+        "Verificar: criar notificação com targeting (global/user/org/role), agendamento e expiração",
+        "Verificar: editar e excluir funcionam",
+        "Verificar: 'Limpar Expiradas' funciona",
+        "Verificar: carrega SEM erro de JWT_SECRET",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Audit /admin/audit — logs de auditoria com export",
+      "description": "Como admin, quero ver logs de auditoria filtrados por ação/recurso e exportar em JSON/CSV.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/audit, capturar screenshot e logs",
+        "Ler src/app/admin/audit/page.tsx",
+        "Verificar: 4 cards stats (Total 7d, Top Ação, Top Recurso, Usuário Mais Ativo)",
+        "Verificar: filtros (Ação, Recurso) com dropdowns populados pela API",
+        "Verificar: tabela (Data/Hora, Usuário, Ação badge, Recurso, Detalhes)",
+        "Verificar: exportar JSON e CSV baixam arquivos corretos",
+        "Verificar: paginação funciona",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Audit /admin/security — dispositivos e regras de IP (2 tabs)",
+      "description": "Como admin, quero gerenciar device sessions e regras de IP com todas as ações funcionando.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/security, capturar screenshot e logs",
+        "Ler src/app/admin/security/page.tsx",
+        "Verificar Tab Dispositivos: 3 cards (Total, Ativos, Revogados), busca, tabela com revogação individual e por usuário",
+        "Verificar Tab Regras IP: 4 cards (Total, Bloqueados, Permitidos, Ativos), criar regra (IP, Tipo, Org, Desc, Expiração), toggle ativo, deletar",
+        "Verificar: carrega SEM erro 'sessions.filter is not a function'",
+        "Verificar: paginação em ambas tabs",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Audit /admin/settings — 8 tabs de configurações globais",
+      "description": "Como admin, quero configurar UAZapi, Webhook, Email, IA, Concatenação, OAuth, Segurança e ver info do Sistema.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/admin/settings, capturar screenshot e logs",
+        "Ler src/app/admin/settings/page.tsx",
+        "Verificar: 8 tabs carregam (UAZapi, Webhook, Email, IA, Concatenação, OAuth, Segurança, Sistema)",
+        "Verificar tab UAZapi: URL base, Admin token (mascarado), Webhook URL",
+        "Verificar tab Email: Provedor SMTP, Host, Port, User, Password, From, Display Name",
+        "Verificar tab IA: Provedor e configuração",
+        "Verificar tab Sistema: Info read-only",
+        "Verificar: salvar alterações persiste (toast de sucesso)",
+        "Verificar: URL atualiza ao trocar tab (?tab=value)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Audit /integracoes/dashboard — métricas e gráficos Recharts",
+      "description": "Como usuário, quero ver métricas de conversas/mensagens com gráficos interativos (area, bar, pie).",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes/dashboard, capturar screenshot e logs",
+        "Ler src/app/integracoes/dashboard/page.tsx",
+        "Verificar: cards de stats com animação CountUp carregam dados",
+        "Verificar: gráficos Recharts (area, bar, pie) renderizam sem erro",
+        "Verificar: métricas de conversas e mensagens populam corretamente",
+        "Verificar dark mode: gráficos com cores do tema",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Audit /integracoes/conversations — chat multi-coluna",
+      "description": "Como usuário, quero enviar e receber mensagens WhatsApp na interface de chat 3 colunas (instâncias → conversas → mensagens).",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes/conversations, capturar screenshot e logs",
+        "Ler src/app/integracoes/conversations/page.tsx",
+        "Verificar: coluna 1 (lista instâncias), coluna 2 (lista conversas com busca), coluna 3 (mensagens)",
+        "Verificar: seleção de instância filtra conversas",
+        "Verificar: envio de texto funciona, upload de arquivo/imagem com preview",
+        "Verificar: auto-scroll para novas mensagens",
+        "Verificar: status indicators (entregue, lido, etc.)",
+        "Verificar: estado vazio informativo quando não há conversas",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Audit /integracoes/users — gerenciar membros da organização",
+      "description": "Como usuário master/manager, quero gerenciar membros da minha org com convites e roles.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes/users, capturar screenshot e logs",
+        "Ler src/app/integracoes/users/page.tsx",
+        "Verificar: cards de stats, tabela com sorting/filtering (React Table)",
+        "Verificar: dialog de convite (email + role) funciona",
+        "Verificar: paginação funciona",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Audit /integracoes/settings — configurações pessoais (perfil, tema, senha)",
+      "description": "Como usuário, quero configurar meu perfil, tema, horários comerciais, notificações e senha.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes/settings, capturar screenshot e logs",
+        "Ler src/app/integracoes/settings/page.tsx",
+        "Verificar: card de perfil (nome, avatar), seletor de tema (light/dark/system)",
+        "Verificar: inputs de horário comercial e timezone funcionam",
+        "Verificar: switches de notificações funcionam",
+        "Verificar: formulário de troca de senha com validação",
+        "Verificar: salvar persiste alterações (toast de sucesso)",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Audit /integracoes/settings/organization — 8 tabs de config org",
+      "description": "Como master/manager, quero configurar minha organização em 8 tabs (geral, sessões, provider, branding, team, smtp, domain, infra).",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/integracoes/settings/organization, capturar screenshot e logs",
+        "Ler src/app/integracoes/settings/organization/page.tsx",
+        "Verificar: 8 tabs carregam sem erro (geral, sessões, provider, branding, team, smtp, domain, infraestrutura)",
+        "Verificar: cada tab mostra conteúdo relevante (não vazio)",
+        "Verificar: formulários salvam corretamente",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Audit /integracoes/[instanceId]/settings — config avançada por instância (6 tabs)",
+      "description": "Como usuário, quero configurar cada instância individualmente: concatenação, IA, geocoding, WhatsApp, commands, webhooks.",
+      "acceptanceCriteria": [
+        "Ler src/app/integracoes/[instanceId]/settings/page.tsx",
+        "Verificar: 6 tabs carregam (concatenação, IA, geocoding, WhatsApp compliance, commands, webhooks)",
+        "Verificar: sliders, toggles, model selectors funcionam",
+        "Verificar: webhook URL e n8n integration info exibem corretamente",
+        "Verificar: salvar/reset persiste alterações",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Audit /ferramentas — hub + respostas rápidas + webhooks + chatwoot",
+      "description": "Como usuário, quero acessar ferramentas (respostas rápidas, webhooks, chatwoot) com CRUD funcional.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/ferramentas, capturar screenshot e logs",
+        "Ler src/app/ferramentas/page.tsx, respostas-rapidas/page.tsx, webhooks/page.tsx, chatwoot/page.tsx",
+        "Verificar /ferramentas: cards de ferramentas com status badges (ativo/beta/coming soon)",
+        "Verificar /ferramentas/respostas-rapidas: CRUD completo, busca, filtro por categoria, stats",
+        "Verificar /ferramentas/webhooks: tabela, criação/edição, delivery logs, retest",
+        "Verificar /ferramentas/chatwoot: formulário de integração com API key e sync status",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Audit /contatos e /contatos/[id] — lista e perfil de contatos",
+      "description": "Como usuário, quero ver lista de contatos com busca/filtro e perfil detalhado com notas e histórico.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/contatos, capturar screenshot e logs",
+        "Ler src/app/contatos/page.tsx e src/app/contatos/[id]/page.tsx",
+        "Verificar /contatos: tabela paginada (avatar, nome, telefone, email, tags, última interação), busca, filtros",
+        "Verificar /contatos/[id]: header com avatar/nome/telefone, tabs (overview, notas, histórico)",
+        "Verificar: adicionar/deletar notas (observations) funciona",
+        "Verificar: lista de sessões do contato carrega",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Audit /user/dashboard e /user/seguranca — dashboard pessoal e device sessions",
+      "description": "Como usuário, quero ver meu dashboard pessoal e gerenciar dispositivos conectados.",
+      "acceptanceCriteria": [
+        "Navegar para http://localhost:3000/user/dashboard e /user/seguranca, capturar screenshots e logs",
+        "Ler src/app/user/dashboard/page.tsx e src/app/user/seguranca/page.tsx",
+        "Verificar /user/dashboard: stats (total, conectadas, desconectadas), lista de instâncias, timeline",
+        "Verificar /user/seguranca: lista de device sessions com IP/localização, botão revogar, 'desconectar todos os outros'",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Audit /(dashboard)/organizacao — config da org (horários, plano)",
+      "description": "Como master/manager, quero editar dados da organização, horários comerciais e ver limites do plano.",
+      "acceptanceCriteria": [
+        "Ler src/app/(dashboard)/organizacao/page.tsx",
+        "Verificar: formulário com nome, documento (read-only), slug (read-only), tipo (read-only)",
+        "Verificar: config de horários comerciais (start/end time, 7 day toggles, timezone)",
+        "Verificar: badge de plano e limites (max instances, max users)",
+        "Verificar: role badge (GOD/Master/Manager/User) e modo read-only para users",
+        "Verificar: salvar persiste no backend",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Audit páginas públicas — compartilhar, connect, docs, privacidade, termos",
+      "description": "Como visitante, quero acessar QR code público, aceitar convites, ver docs da API e páginas legais.",
+      "acceptanceCriteria": [
+        "Ler src/app/(public)/compartilhar/[token]/page.tsx — QR code público com polling progressivo",
+        "Ler src/app/(public)/connect/[token]/page.tsx — aceitar convite (state machine: validating→info→create-account→success)",
+        "Ler src/app/(public)/docs/page.tsx — Scalar API docs widget",
+        "Ler src/app/(public)/privacidade/page.tsx — LGPD privacy policy (13 seções)",
+        "Ler src/app/(public)/termos/page.tsx — Termos de uso (14 seções)",
+        "Verificar: QR code polling com backoff (2s→5s→10s)",
+        "Verificar: convite valida token, mostra info, cria conta ou adiciona à org",
+        "Verificar: docs carrega Scalar widget corretamente",
+        "Verificar: privacidade e termos com TOC, navegação e layout correto",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "Audit /integracoes/compartilhar/[token] e /integracoes/admin/clients",
+      "description": "Como usuário, quero compartilhar QR code protegido e como admin ver lista de clientes.",
+      "acceptanceCriteria": [
+        "Ler src/app/integracoes/compartilhar/[token]/page.tsx — QR code protegido com timer e refresh",
+        "Ler src/app/integracoes/admin/clients/page.tsx — tabela admin de todos os clientes do sistema",
+        "Verificar: QR code com countdown, refresh button, status card",
+        "Verificar: clients page com busca, stats (total/ativos/inativos), tabela com ações",
+        "Sem erros de console",
+        "Corrigir qualquer bug encontrado",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

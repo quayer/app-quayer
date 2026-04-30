@@ -1,20 +1,20 @@
 name: Production Deploy
 
 # ============================================
+<<<<<<< HEAD
 # DEPLOY: push na main -> ambiente 'production'
+=======
+# DEPLOY: manual only -> ambiente 'production'
+# Auth: SSH key (ed25519) — NUNCA password
+>>>>>>> ralph/builder-architecture-patterns
 # Para ativar aprovação manual:
 #   GitHub -> Settings -> Environments -> production
 #   -> Required reviewers -> add yourself
 # ============================================
 
+# NOTA: enquanto o projeto estiver em iteração rápida pré-clientes,
+# este workflow só roda manual via workflow_dispatch (igual ao deploy-homol).
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.vscode/**'
   workflow_dispatch:
     inputs:
       no_cache:
@@ -30,23 +30,43 @@ jobs:
     # -------------------------------------------------------
     # APROVACAO MANUAL: Configure no GitHub -> Settings ->
     # Environments -> production -> Required reviewers
+<<<<<<< HEAD
+=======
+    #
+    # SECRETS: este job usa SSH key (PROD_SSH_KEY) com user
+    # não-root (PROD_USER). Após validar o primeiro deploy
+    # com essa config, REMOVA do GitHub os secrets antigos:
+    #   - HOST
+    #   - USERNAME
+    #   - PASSWORD
+    # Eles não são mais usados e representam risco de credencial.
+>>>>>>> ralph/builder-architecture-patterns
     # -------------------------------------------------------
     environment: production
 
     steps:
       - name: Deploy to Production Server
+<<<<<<< HEAD
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
           port: 22
+=======
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+>>>>>>> ralph/builder-architecture-patterns
           command_timeout: 30m
           script: |
             set -e
 
             APP_DIR="/opt/quayer"
-            COMPOSE_FILE="docker-compose.quayer.yml"
+            COMPOSE_FILE="compose.yml"
             NO_CACHE="${{ github.event.inputs.no_cache }}"
             BACKUP_DIR="/opt/quayer/backups"
 

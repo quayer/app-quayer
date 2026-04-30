@@ -1,0 +1,55 @@
+name: Smoke Prod (read-only)
+
+on:
+  workflow_run:
+    workflows: ["Production Deploy"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke-prod spec (read-only)
+        run: npx playwright test --project=prod
+
+      - name: Validate security headers
+        run: |
+          set -e
+          URL="https://app.quayer.com/login"
+          HEADERS=$(curl -sI -A "QuayerSmoke/1.0" "$URL")
+          echo "$HEADERS"
+          echo "$HEADERS" | grep -qi "strict-transport-security" || { echo "MISSING HSTS"; exit 1; }
+          echo "$HEADERS" | grep -qi "x-frame-options\|content-security-policy" || { echo "MISSING frame protection"; exit 1; }
+
+      - name: Upload playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-prod-report
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Notify Discord on failure
+        if: failure() && secrets.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -sS -H "Content-Type: application/json" \
+            -d '{"content":"Smoke PROD FAILED on commit '"${{ github.sha }}"' - ROLLBACK CANDIDATE"}' \
+            "${{ secrets.DISCORD_WEBHOOK_URL }}" || true

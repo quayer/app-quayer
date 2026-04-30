@@ -1,0 +1,66 @@
+## Codebase Patterns
+
+- **Auth modules:** src/server/core/auth/ (backend), src/client/components/auth/ (frontend v2)
+- **Auth passwordless only:** endpoints register/login-password/forgot/reset REMOVIDOS; magic-link KEEP (wired em email gen auth.controller.ts:1279,1516,1559)
+- **Padrao Igniter:** controller -> actions (query/mutation) -> handler com authProcedure
+- **Schema Prisma:** models Organization (type pf/pj), User (emailVerified nullable), VerificationCode (OTPs nao hasheados, type=MAGIC_LINK)
+- **Cookie name:** auth usa accessToken (nao access_token)
+- **Client components:** NUNCA importar @/lib/auth (barrel) em 'use client' — usar @/lib/auth/auth-provider direto
+
+## Infra de teste (Release 1 commits 3f12ac5..02f1201)
+
+5 camadas: static (husky+static.yml), unit backend (66 cases), unit react (33 GREEN), api integration (direct invocation via nextRouteHandlerAdapter, postgres :5433), contract (bootstrap mode), e2e playwright 3-projects.
+Helpers: test/api/db.ts (withTransaction+RollbackSentinel), test/e2e/auth/helpers.ts (getLatestOtp, generateTestEmail).
+Workflows CI: static.yml, test-api.yml, smoke-homol.yml, smoke-prod.yml, synthetic-monitor.yml.
+Skills: testing-pipeline.md, release-checklist.md. CLAUDE.md atualizado.
+
+## Release 2 Phase A (commit 278c1f0)
+
+Instrumentacao de 5 rotas candidatas com logger src/lib/auth/cleanup-audit-logger.ts (SHA256 IP hash).
+**CRITICAL:** /login/verify-magic e /signup/verify-magic NAO sao legacy — wired em email gen. Reclassificadas STRONG KEEP.
+Soh 3 candidatos validos: /register, /forgot-password, /reset-password. BLOQUEADO 14d para decisao (Phase B).
+docs/auth/CLEANUP_AUDIT.md tem mapa completo de referencias.
+
+## Release 3 — Auth Rebrand v3 (ATUAL)
+
+**Prereqs confirmados:**
+- quayer-ds-v3.html existe na raiz (source do DS)
+- imagem/Gemini_Generated_Image_ua01asua01asua01.png existe (hero da login)
+- Storybook NAO instalado — usar rota dev /dev/ds-showcase
+- public/images/ NAO existe — criar em US-302
+
+**Arquivos que NAO devem ser tocados:**
+- src/igniter.client.ts, src/igniter.schema.ts (auto-generados)
+- src/client/components/auth/*v2* (codigo v2 atual — dual-render preserva)
+- Backend de auth (FR-3)
+- middleware.ts (exceto talvez adicionar /dev/ds-showcase protection)
+
+**Escopo desta sessao:**
+- Executar: Phase A (301-305), Phase B (306-312), Phase C (313-315), Phase D parcial (316, 318)
+- BLOQUEADO: US-317 (perf em homol, precisa deploy), US-319-322 (rollout 0->10->50->100, precisa prod + janelas 48h/7d/30d)
+
+**CSS isolation critica:** tokens v3 via [data-auth-v3="true"] — NAO global, evita vazar para dashboard.
+**LCP critico:** next/image do hero com priority=true.
+**next/font:** DM Sans + DM Mono apenas no layout de auth, nao global.
+**Dual-render:** paginas verificam isAuthV3Enabled() no server component e renderizam v2 OU v3.
+**Contract preservation:** formularios v3 chamam MESMOS endpoints que v2 (contract tests da Release 1 garantem).
+
+## Rotas ativas pos-cleanup (para Release 3)
+
+- /login, /login/verify, /login/verify-magic
+- /signup, /signup/verify, /signup/verify-magic
+- /verify-email
+- /onboarding
+- /google-callback (auditar em US-312)
+
+## Regras duras
+
+- Zero any, TypeScript strict
+- FR-3 Release 3: ZERO mudanca no backend de auth
+- Zod em todos os inputs client
+- Escopar tokens v3 via [data-auth-v3]
+- LCP image priority=true no hero
+
+---
+
+<!-- Iteracoes do Ralph entram abaixo desta linha -->

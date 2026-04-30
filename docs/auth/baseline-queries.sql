@@ -1,0 +1,117 @@
+-- docs/auth/baseline-queries.sql
+-- Queries de baseline para metricas de conversao e saude do fluxo de auth.
+-- NAO executadas automaticamente. Rodar manualmente quando houver dados de
+-- usuarios reais. Todas assumem Postgres (Supabase) e schema Prisma vigente
+-- em 2026-04-08.
+--
+-- Como usar:
+--   psql $DATABASE_URL -f docs/auth/baseline-queries.sql
+-- ou colar bloco individual no Supabase SQL editor.
+--
+-- ---------------------------------------------------------------------------
+-- 1. Funil de signup: criados x onboarding completo (ultimos 30 dias)
+-- ---------------------------------------------------------------------------
+-- Premissa: tabela "users" com colunas created_at e onboarding_completed_at
+-- (ou equivalente no schema atual: "User.createdAt" + flag de onboarding
+-- concluido, que hoje mora em "User.currentOrgId NOT NULL" OR "UserPreferences").
+-- TODO: confirmar o marker canonico de "onboarding done" antes de usar em
+-- prod. Candidatos: (a) presenca de Organization ligada ao user, (b) flag
+-- dedicada em UserPreferences, (c) OnboardingCompletedAt adicionado ao User.
+
+-- SELECT
+--   date_trunc('day', u."createdAt") AS day,
+--   COUNT(*) AS signups,
+--   COUNT(*) FILTER (WHERE u."currentOrgId" IS NOT NULL) AS onboarded,
+--   ROUND(
+--     100.0 * COUNT(*) FILTER (WHERE u."currentOrgId" IS NOT NULL) / NULLIF(COUNT(*), 0),
+--     2
+--   ) AS conversion_pct
+-- FROM "User" u
+-- WHERE u."createdAt" >= NOW() - INTERVAL '30 days'
+-- GROUP BY 1
+-- ORDER BY 1 DESC;
+
+-- Agregado unico (para copiar direto pra BASELINES.md):
+-- SELECT
+--   COUNT(*) AS signups_30d,
+--   COUNT(*) FILTER (WHERE u."currentOrgId" IS NOT NULL) AS onboarded_30d,
+--   ROUND(
+--     100.0 * COUNT(*) FILTER (WHERE u."currentOrgId" IS NOT NULL) / NULLIF(COUNT(*), 0),
+--     2
+--   ) AS conversion_pct
+-- FROM "User" u
+-- WHERE u."createdAt" >= NOW() - INTERVAL '30 days';
+
+-- ---------------------------------------------------------------------------
+-- 2. OTP success rate: verificados / enviados (ultimos 30 dias)
+-- ---------------------------------------------------------------------------
+-- Premissa: tabela "OtpVerification" (ou "otp_verifications") com colunas
+-- "createdAt", "status" IN ('PENDING','VERIFIED','EXPIRED','FAILED') e
+-- "purpose" IN ('LOGIN','SIGNUP','MAGIC_LINK').
+-- TODO: confirmar nome exato da tabela no schema.prisma atual. O nome pode
+-- ter migrado pra "EmailVerification" ou "VerificationToken".
+
+-- SELECT
+--   "purpose",
+--   COUNT(*) AS sent,
+--   COUNT(*) FILTER (WHERE "status" = 'VERIFIED') AS verified,
+--   COUNT(*) FILTER (WHERE "status" = 'EXPIRED') AS expired,
+--   COUNT(*) FILTER (WHERE "status" = 'FAILED')  AS failed,
+--   ROUND(
+--     100.0 * COUNT(*) FILTER (WHERE "status" = 'VERIFIED') / NULLIF(COUNT(*), 0),
+--     2
+--   ) AS success_pct
+-- FROM "OtpVerification"
+-- WHERE "createdAt" >= NOW() - INTERVAL '30 days'
+-- GROUP BY "purpose"
+-- ORDER BY "purpose";
+
+-- Time-to-verify (mediana) por purpose:
+-- SELECT
+--   "purpose",
+--   percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("verifiedAt" - "createdAt"))) AS p50_seconds,
+--   percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("verifiedAt" - "createdAt"))) AS p95_seconds
+-- FROM "OtpVerification"
+-- WHERE "status" = 'VERIFIED'
+--   AND "createdAt" >= NOW() - INTERVAL '30 days'
+-- GROUP BY "purpose";
+
+-- ---------------------------------------------------------------------------
+-- 3. Error rate em /api/v1/auth/*
+-- ---------------------------------------------------------------------------
+-- Premissa: nao temos ainda uma tabela canonica de request logs. Opcoes:
+--   (a) AuditLog (src/server/features-module/audit) — registra eventos de
+--       negocio mas NAO cobre 4xx/5xx puros.
+--   (b) Tabela "request_logs" — NAO EXISTE ainda. TODO: provisionar ou
+--       integrar APM externo (Sentry / Datadog / Axiom).
+--
+-- Enquanto nao ha tabela, a fonte e stdout dos containers (Docker logs) e
+-- headers de resposta capturados no client. Este bloco fica como
+-- placeholder para quando a instrumentacao existir.
+
+-- Hipotetico (assume tabela "request_logs" com path, status_code, timestamp):
+-- SELECT
+--   date_trunc('hour', timestamp) AS hour,
+--   COUNT(*) AS total,
+--   COUNT(*) FILTER (WHERE status_code >= 500) AS server_errors,
+--   COUNT(*) FILTER (WHERE status_code BETWEEN 400 AND 499) AS client_errors,
+--   ROUND(
+--     100.0 * COUNT(*) FILTER (WHERE status_code >= 500) / NULLIF(COUNT(*), 0),
+--     2
+--   ) AS error_rate_5xx_pct
+-- FROM request_logs
+-- WHERE path LIKE '/api/v1/auth/%'
+--   AND timestamp >= NOW() - INTERVAL '30 days'
+-- GROUP BY 1
+-- ORDER BY 1 DESC;
+
+-- Fallback via AuditLog (so captura eventos explicitos, subestima):
+-- SELECT
+--   "action",
+--   "resource",
+--   COUNT(*) AS events
+-- FROM "AuditLog"
+-- WHERE "createdAt" >= NOW() - INTERVAL '30 days'
+--   AND "resource" IN ('auth.login','auth.signup','auth.otp','auth.magic_link')
+-- GROUP BY 1,2
+-- ORDER BY events DESC;

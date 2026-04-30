@@ -1,5 +1,30 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// ══════════════════════════════════════════════════════════════════════════════
+// Quayer — Prisma Schema
+// Docs: https://pris.ly/d/prisma-schema
+// Last updated: 2026-03-14
+//
+// DOMAIN MAP:
+//   [1] AUTH & IDENTITY        — User, Organization, UserOrganization, Session,
+//                                RefreshToken, TempUser, VerificationCode,
+//                                Invitation, PasskeyCredential, PasskeyChallenge,
+//                                TotpDevice, RecoveryCode, DeviceSession,
+//                                CustomRole, VerifiedDomain
+//   [2] CONNECTIONS & MESSAGING — Connection, ConnectionSettings, ConnectionEvent,
+//                                 ChatSession, Message
+//   [3] ORGANIZATIONS & TEAMS  — Department, Project, ApiKey, Invitation
+//   [4] AI & AGENTS            — AIAgentConfig, AIPrompt, OrganizationProvider,
+//                                IntegrationConfig, N8nCallLog, BuilderProject*
+//   [5] PLATFORM & INFRA       — Webhook, WebhookDelivery, AuditLog, LogEntry,
+//                                LogAnalysis, Notification, NotificationRead,
+//                                File, SystemSettings, EmailTemplate, SystemConfig
+//   [6] CAMPAIGNS              — Campaign, CampaignRecipient, MessageTemplate (dormant)
+//
+// NOTES:
+//   - Tables without @@map() use PascalCase in PostgreSQL (legacy, matches init migration)
+//   - DeviceSession was added via raw SQL migration (no Prisma migrate)
+//   - GeoAlertMode enum added via raw SQL migration
+//   - AccessLevel and SystemConfig are DEPRECATED — use CustomRole and SystemSettings
+// ══════════════════════════════════════════════════════════════════════════════
 
 generator client {
   provider = "prisma-client-js"
@@ -9,15 +34,15 @@ datasource db {
   provider = "postgresql"
 }
 
-// ============================================
-// ORGANIZATIONS & USERS (Multi-tenancy)
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [1] AUTH & IDENTITY
+// ══════════════════════════════════════════════════════════════════════════════
 
 model Organization {
   id           String  @id @default(uuid())
   name         String
   slug         String  @unique
-  document     String  @unique // CPF ou CNPJ
+  document     String? @unique // CPF ou CNPJ (nullable via migration make_document_optional)
   type         String // "pf" ou "pj"
   maxInstances Int     @default(1)
   maxUsers     Int     @default(1)
@@ -44,16 +69,15 @@ model Organization {
   autoPauseWaitMinutes     Int               @default(30) // Minutos para aguardar cliente (se WAIT_CUSTOMER)
   autoPauseDurationMinutes Int               @default(15) // Duração padrão do auto-pause
 
-  // Group Chat Settings
-  groupDefaultMode    GroupMode           @default(DISABLED) // Modo padrão para novos grupos
-  groupAiResponseMode GroupAIResponseMode @default(PRIVATE) // Modo de resposta IA padrão
-
   // White-label Branding
   logoUrl        String? // URL do logo customizado
   primaryColor   String  @default("#000000") // Cor primária da marca
   secondaryColor String? // Cor secundária
   supportEmail   String? // Email de suporte personalizado
   customDomain   String? // Domínio customizado
+
+  // Geo Alert (added via migration add_geo_alert_and_country_code)
+  geoAlertMode GeoAlertMode @default(off)
 
   // Provider Configuration (Quayer Managed vs Own UAZapi)
   providerType String  @default("quayer") // "quayer" (managed) or "uazapi" (own)
@@ -69,18 +93,30 @@ model Organization {
   useOwnDatabase Boolean @default(false) // Usar próprio PostgreSQL
   useOwnStorage  Boolean @default(false) // Usar próprio S3/Storage
 
+  // Builder IA — vertical & language
+  vertical      String? // barbearia, clinica, imobiliaria, etc.
+  agentLanguage String? @default("pt-BR")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        UserOrganization[]
-  connections  Connection[]
-  projects     Project[]
-  webhooks     Webhook[]
-  auditLogs    AuditLog[]
-  chatSessions ChatSession[]
-  calls        Call[]
-  providers     OrganizationProvider[]
-  quickReplies QuickReply[]
+  users           UserOrganization[]
+  connections     Connection[]
+  projects        Project[]
+  webhooks        Webhook[]
+  auditLogs       AuditLog[]
+  chatSessions    ChatSession[]
+  providers       OrganizationProvider[]
+  customRoles     CustomRole[]
+  verifiedDomains VerifiedDomain[]
+  invitations     Invitation[]
+  subscriptions   Subscription[]
+  invoices        Invoice[]
+  usageRecords    UsageRecord[]
+
+  // Builder (home-chat-builder)
+  builderProjects      BuilderProject[]
+  builderConversations BuilderProjectConversation[]
 
   @@index([document])
   @@index([slug])
@@ -92,65 +128,151 @@ model UserOrganization {
   userId         String
   organizationId String
   role           String // master, manager, user
+  customRoleId   String? // FK to CustomRole (nullable for legacy compatibility)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customRole   CustomRole?  @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
 
   @@unique([userId, organizationId])
   @@index([userId])
   @@index([organizationId])
   @@index([role])
+  @@index([customRoleId])
+}
+
+model CustomRole {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  permissions    Json // Matches PERMISSIONS_MATRIX structure: { resource: [action, ...] }
+  isSystem       Boolean  @default(false)
+  priority       Int // 3=master, 2=manager, 1=user
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userOrganizations UserOrganization[]
+  verifiedDomains   VerifiedDomain[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("custom_roles")
+}
+
+model VerifiedDomain {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  domain             String
+  verificationMethod String // DNS_TXT or EMAIL
+  verificationToken  String
+  verifiedAt         DateTime?
+  defaultRoleId      String? // FK to CustomRole for auto-join
+  autoJoin           Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  defaultRole  CustomRole?  @relation(fields: [defaultRoleId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, domain])
+  @@index([organizationId])
+  @@index([domain])
+  @@map("verified_domains")
 }
 
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  password         String
-  name             String
-  emailVerified    DateTime?
-  currentOrgId     String? // Org ativa no momento
-  role             String    @default("user") // admin (sistema), user
-  isActive         Boolean   @default(true)
-  resetToken       String? // Token para recuperação de senha
-  resetTokenExpiry DateTime? // Expiração do token de recuperação
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String?
+  name          String
+  emailVerified DateTime?
+  currentOrgId  String? // Org ativa no momento
+  role          String    @default("user") // admin (sistema), user
+  isActive      Boolean   @default(true)
 
-  // Onboarding and organization management
+  // Onboarding
   onboardingCompleted Boolean @default(false)
-  lastOrganizationId  String?
 
-  // Message signature and AI preferences
-  messageSignature     Json?   @db.JsonB // { enabled, format, department, customText, showPreview }
-  aiSuggestionsEnabled Boolean @default(true)
+  // Phone (added via migration add_user_phone)
+  phone         String?
+  phoneVerified Boolean @default(false)
+
+  // Two-Factor Authentication
+  twoFactorEnabled Boolean @default(false)
+
+  // Profile / Agency (Builder IA)
+  isAgency  Boolean @default(false)
+  language  String? @default("pt-BR")
+  timezone  String? @default("America/Sao_Paulo")
+  avatarUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  preferences             UserPreferences?
+  notificationPreferences NotificationPreferences?
+
   sessions            Session[]
   refreshTokens       RefreshToken[]
-  invitations         Invitation[]         @relation("InvitedBy")
+  invitations         Invitation[]       @relation("InvitedBy")
   organizations       UserOrganization[]
   auditLogs           AuditLog[]
   verificationCodes   VerificationCode[]
-  contactObservations ContactObservation[]
   files               File[]
-  calls               Call[]
-  assignedConnections Connection[]         @relation("AssignedCustomer")
+  assignedConnections Connection[]       @relation("AssignedCustomer")
 
   passkeyCredentials PasskeyCredential[]
-  sessionNotes       SessionNote[]  // Notas criadas pelo usuário
-  quickReplies       QuickReply[]   // Respostas rápidas criadas pelo usuário
+  totpDevices        TotpDevice[]
+  recoveryCodes      RecoveryCode[]
+  deviceSessions     DeviceSession[]
+  promptVersions     AgentPromptVersion[]
+
+  // Builder (home-chat-builder)
+  builderProjects                BuilderProject[]
+  builderProjectConversations    BuilderProjectConversation[]
+  builderPublishedPromptVersions BuilderPromptVersion[]       @relation("BuilderPromptVersionPublisher")
 
   @@index([email])
   @@index([currentOrgId])
   @@index([role])
-  @@index([resetToken])
+  @@index([phone])
 }
 
-// ============================================
-// PASSKEY / WEBAUTHN CREDENTIALS
-// ============================================
+// ── User Preferences ─────────────────────────────────────────────────────────
+
+model UserPreferences {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  messageSignature     Json?    @db.JsonB // { enabled, format, department, customText, showPreview }
+  aiSuggestionsEnabled Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ── Notification Preferences (per-user channel opt-ins) ──────────────────────
+
+model NotificationPreferences {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailSecurity   Boolean  @default(true)
+  emailProduct    Boolean  @default(true)
+  emailMarketing  Boolean  @default(false)
+  pushEnabled     Boolean  @default(false)
+  pushMentions    Boolean  @default(true)
+  pushDeployments Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
+// ── Passkeys / WebAuthn ──────────────────────────────────────────────────────
 
 model PasskeyCredential {
   id                   String   @id @default(uuid())
@@ -210,19 +332,19 @@ model TempUser {
 
 // Verification codes (OTP, Magic Link, etc)
 model VerificationCode {
-  id        String   @id @default(uuid())
-  userId    String?
-  email     String
-  code      String
-  type      String // OTP, MAGIC_LINK, RESET_PASSWORD, EMAIL_VERIFICATION
-  token     String? // For magic links (JWT token)
-  used      Boolean  @default(false)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  userId     String?
+  identifier String // email address or phone number
+  code       String
+  type       String // OTP, MAGIC_LINK, RESET_PASSWORD, EMAIL_VERIFICATION, WHATSAPP_OTP, TOTP_DISABLE
+  token      String? // For magic links (JWT token)
+  used       Boolean  @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([email, type])
+  @@index([identifier, type])
   @@index([code])
   @@index([token])
   @@index([expiresAt])
@@ -268,7 +390,8 @@ model Invitation {
   expiresAt      DateTime
   createdAt      DateTime  @default(now())
 
-  invitedBy User @relation("InvitedBy", fields: [invitedById], references: [id])
+  invitedBy    User         @relation("InvitedBy", fields: [invitedById], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([invitedById])
   @@index([organizationId])
@@ -276,9 +399,9 @@ model Invitation {
   @@index([expiresAt])
 }
 
-// ============================================
-// DEPARTMENTS (Hierarchical Organization)
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [3] ORGANIZATIONS & TEAMS
+// ══════════════════════════════════════════════════════════════════════════════
 
 model Department {
   id             String   @id @default(uuid())
@@ -300,9 +423,7 @@ model Department {
   @@index([isActive])
 }
 
-// ============================================
-// PROJECTS & INSTANCES
-// ============================================
+// ── Projects ──────────────────────────────────────────────────────────────────
 
 model Project {
   id             String   @id @default(uuid())
@@ -319,9 +440,9 @@ model Project {
   @@index([organizationId])
 }
 
-// ============================================
-// CONNECTIONS (WhatsApp/Instagram/Telegram Integrations)
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [2] CONNECTIONS & MESSAGING
+// ══════════════════════════════════════════════════════════════════════════════
 
 model Connection {
   id   String @id @default(uuid())
@@ -378,16 +499,14 @@ model Connection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project                Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assignedCustomer       User?                   @relation("AssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
-  webhooks               Webhook[]
-  chatSessions           ChatSession[]
-  messages               Message[]
-  tabulationIntegrations TabulationIntegration[]
-  calls                  Call[]
-  n8nCallLogs            N8nCallLog[]
-  groupChats             GroupChat[]
+  organization     Organization?     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedCustomer User?             @relation("AssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
+  webhooks         Webhook[]
+  chatSessions     ChatSession[]
+  messages         Message[]
+  n8nCallLogs      N8nCallLog[]
+  agentDeployments AgentDeployment[]
 
   // Advanced Settings
   settings ConnectionSettings?
@@ -407,9 +526,7 @@ model Connection {
   @@map("connections")
 }
 
-// ============================================
-// CONNECTION SETTINGS (Advanced Configuration per Instance)
-// ============================================
+// ── Connection Settings ───────────────────────────────────────────────────────
 
 model ConnectionSettings {
   id           String @id @default(uuid())
@@ -492,9 +609,7 @@ enum ConnectionStatus {
   ERROR
 }
 
-// ============================================
-// CONNECTION EVENTS (Connection/Disconnection History)
-// ============================================
+// ── Connection Events ─────────────────────────────────────────────────────────
 
 model ConnectionEvent {
   id           String @id @default(uuid())
@@ -537,9 +652,7 @@ enum ConnectionEventType {
   RECONNECTING // Attempting to reconnect
 }
 
-// ============================================
-// N8N CALL LOGS (Monitoring & Audit)
-// ============================================
+// ── N8n Call Logs ─────────────────────────────────────────────────────────────
 
 model N8nCallLog {
   id           String @id @default(uuid())
@@ -568,9 +681,9 @@ model N8nCallLog {
   @@map("n8n_call_logs")
 }
 
-// ============================================
-// WEBHOOKS & AUDIT LOGS
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [5] PLATFORM & INFRA
+// ══════════════════════════════════════════════════════════════════════════════
 
 model Webhook {
   id             String   @id @default(uuid())
@@ -644,9 +757,8 @@ model AuditLog {
   @@index([createdAt])
 }
 
-// ============================================
-// ACCESS LEVELS & PERMISSIONS (Sistema Dinâmico)
-// ============================================
+// ── Permissions (DB-driven RBAC) ─────────────────────────────────────────────
+// ⚠️  AccessLevel below is DEPRECATED — use CustomRole in [1] Auth instead
 
 // Define recursos e ações disponíveis no sistema
 model PermissionResource {
@@ -684,88 +796,11 @@ model RolePermission {
   @@map("role_permissions")
 }
 
-// Access Levels customizados por organização
-model AccessLevel {
-  id             String   @id @default(uuid())
-  name           String // "Custom Manager", "Limited User", etc
-  permissions    Json // { "instances": ["create", "read"], "users": ["read"] }
-  organizationId String? // null = global/system level
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([organizationId])
-  @@index([isActive])
-}
-
-// ============================================
-// CHAT SESSIONS & MESSAGES (WhatsApp Conversations)
-// ============================================
-
-model Contact {
-  id            String  @id @default(uuid())
-  phoneNumber   String  @unique
-  name          String?
-  email         String? // ❌ ADDED: Contact email
-  profilePicUrl String?
-
-  // WhatsApp Info
-  isBusiness   Boolean @default(false)
-  verifiedName String?
-
-  // Organization & Source
-  organizationId String? // ❌ ADDED: Organization link
-  source         String? // ❌ ADDED: Integration/Instance ID que originou o contato
-  externalId     String? // ❌ ADDED: ID externo (ex: CRM ID)
-  bypassBots     Boolean @default(false) // ❌ ADDED: Bypass AI/Bots for this contact
-
-  // Metadata
-  tags         String[] @default([])
-  customFields Json?
-
-  // Custom Fields (inspired by UAZapi/Chatwoot fieldMap)
-  contactField01 String? @db.VarChar(255)
-  contactField02 String? @db.VarChar(255)
-  contactField03 String? @db.VarChar(255)
-  contactField04 String? @db.VarChar(255)
-  contactField05 String? @db.VarChar(255)
-  contactField06 String? @db.VarChar(255)
-  contactField07 String? @db.VarChar(255)
-  contactField08 String? @db.VarChar(255)
-  contactField09 String? @db.VarChar(255)
-  contactField10 String? @db.VarChar(255)
-  contactField11 String? @db.VarChar(255)
-  contactField12 String? @db.VarChar(255)
-  contactField13 String? @db.VarChar(255)
-  contactField14 String? @db.VarChar(255)
-  contactField15 String? @db.VarChar(255)
-  contactField16 String? @db.VarChar(255)
-  contactField17 String? @db.VarChar(255)
-  contactField18 String? @db.VarChar(255)
-  contactField19 String? @db.VarChar(255)
-  contactField20 String? @db.VarChar(255)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  chatSessions        ChatSession[]
-  messages            Message[]
-  contactTabulations  ContactTabulation[] // ❌ ADDED: Tabulations relation
-  contactAttributes   ContactAttribute[] // Contact-specific attribute values
-  contactObservations ContactObservation[]
-  calls               Call[]
-  groupParticipations GroupParticipant[] // Participações em grupos
-
-  @@index([phoneNumber])
-  @@index([name])
-  @@index([organizationId])
-  @@index([source])
-  @@index([externalId])
-}
+// ── Chat Sessions & Messages ──────────────────────────────────────────────────
 
 model ChatSession {
   id             String @id @default(uuid())
-  contactId      String
+  contactPhone   String // WhatsApp phone number (formerly linked to Contact)
   connectionId   String
   organizationId String
 
@@ -793,6 +828,10 @@ model ChatSession {
   aiAgentTarget   String? // Target/objetivo do agente (ex: "vendas", "suporte")
   aiAgentBehavior String? // Comportamento específico do agente
   aiAgentContext  Json? // Contexto adicional do agente
+
+  // Sticky agent version pinning (Builder US-004)
+  // When set, conversation stays on this version until 24h idle
+  pinnedAgentVersion Int?
 
   // Customer Journey Tracking
   customerJourney       String?   @default("new") // new, returning, qualified, etc
@@ -835,17 +874,13 @@ model ChatSession {
   closedAt  DateTime?
 
   // Relacionamentos
-  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  connection         Connection          @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department         Department?         @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
-  aiAgentConfig      AIAgentConfig?      @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
-  messages           Message[]
-  sessionTabulations SessionTabulation[]
-  groupParticipants  GroupParticipant[] // Participantes de grupo vinculados a esta sessão
-  notes              SessionNote[] // Notas internas do atendente
+  connection    Connection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department    Department?    @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  aiAgentConfig AIAgentConfig? @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
+  messages      Message[]
 
-  @@index([contactId])
+  @@index([contactPhone])
   @@index([connectionId])
   @@index([organizationId])
   @@index([status])
@@ -859,6 +894,7 @@ model ChatSession {
   @@index([externalId])
   @@index([aiAgentConfigId])
   @@index([customerJourney])
+  @@index([pinnedAgentVersion])
 }
 
 enum SessionStatus {
@@ -874,218 +910,24 @@ enum SessionStartedBy {
   AGENT // Iniciada por agente
 }
 
-// ============================================
-// AUTO-PAUSE BEHAVIOR (Hybrid Model)
-// ============================================
+// ── Auto-Pause & Group Enums ──────────────────────────────────────────────────
 
 enum AutoPauseBehavior {
   CLOSE_SESSION // Encerra sessão imediatamente quando auto-pause expira
   WAIT_CUSTOMER // Aguarda cliente por X minutos, depois fecha
 }
 
-// ============================================
-// GROUP CHAT (WhatsApp Groups Support)
-// ============================================
-
-enum GroupMode {
-  DISABLED // Bot não processa mensagens do grupo
-  MONITOR_ONLY // Bot escuta mas não responde (analytics, coleta de leads)
-  ACTIVE // Bot escuta e pode responder
-}
-
-enum GroupAIResponseMode {
-  IN_GROUP // IA responde diretamente no grupo
-  PRIVATE // IA responde no privado do participante
-  HYBRID // IA decide baseado no contexto
-}
-
-model GroupChat {
-  id             String @id @default(uuid())
-  groupJid       String @unique // ID do grupo WhatsApp (ex: 5552199998888-123456@g.us)
-  connectionId   String
-  organizationId String
-
-  // Group Info (synced from WhatsApp)
-  name        String?
-  description String?
-  pictureUrl  String?
-  ownerJid    String? // JID do dono do grupo
-  createdAtWa DateTime? // Data de criação no WhatsApp
-
-  // Configuration
-  mode            GroupMode           @default(DISABLED)
-  aiEnabled       Boolean             @default(false)
-  aiResponseMode  GroupAIResponseMode @default(PRIVATE)
-  aiAgentConfigId String? // Qual agente IA usa neste grupo
-
-  // Session (grupos não expiram como contatos individuais)
-  sessionStatus SessionStatus @default(ACTIVE)
-
-  // Analytics
-  totalMessages     Int       @default(0)
-  totalParticipants Int       @default(0)
-  lastMessageAt     DateTime?
-  lastSyncAt        DateTime?
-
-  // Metadata
-  metadata Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  connection    Connection         @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  aiAgentConfig AIAgentConfig?     @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
-  participants  GroupParticipant[]
-  messages      GroupMessage[]
-
-  @@index([connectionId])
-  @@index([organizationId])
-  @@index([mode])
-  @@index([sessionStatus])
-  @@index([lastMessageAt])
-  @@map("group_chats")
-}
-
-model GroupParticipant {
-  id             String @id @default(uuid())
-  groupId        String
-  participantJid String // Número do participante (ex: 5552199998888@s.whatsapp.net)
-
-  // Link com contato existente (se houver)
-  contactId String?
-
-  // Sessão privada vinculada (para responder no privado)
-  privateSessionId String?
-
-  // Role no grupo
-  role String @default("participant") // admin, superadmin, participant
-
-  // Tracking
-  lastMessageAt DateTime?
-  messageCount  Int       @default(0)
-  joinedAt      DateTime?
-  leftAt        DateTime?
-
-  // Status
-  isActive Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  group          GroupChat    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  privateSession ChatSession? @relation(fields: [privateSessionId], references: [id], onDelete: SetNull)
-
-  @@unique([groupId, participantJid])
-  @@index([groupId])
-  @@index([contactId])
-  @@index([participantJid])
-  @@index([isActive])
-  @@map("group_participants")
-}
-
-model GroupMessage {
-  id             String @id @default(uuid())
-  groupId        String
-  participantJid String // Quem enviou a mensagem
-
-  // Message Info
-  waMessageId String      @unique
-  type        MessageType
-  content     String      @db.Text
-
-  // Media (se aplicável)
-  mediaUrl  String?
-  mediaType String?
-  mimeType  String?
-  fileName  String?
-
-  // AI Response (se bot respondeu)
-  isAiResponse Boolean @default(false)
-  aiModel      String?
-  aiCost       Float?
-
-  createdAt DateTime @default(now())
-
-  // Relations
-  group GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
-
-  @@index([groupId])
-  @@index([participantJid])
-  @@index([waMessageId])
-  @@index([createdAt])
-  @@map("group_messages")
-}
-
-// ============================================
-// SESSION NOTES (Internal Notes for Agents)
-// ============================================
-
-model SessionNote {
-  id        String @id @default(uuid())
-  sessionId String
-  authorId  String // ID do usuário que criou a nota
-
-  // Content
-  content String @db.Text
-  isPinned Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  author  User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId])
-  @@index([authorId])
-  @@index([createdAt])
-  @@map("session_notes")
-}
-
-// ============================================
-// QUICK REPLIES (Canned Responses for Agents)
-// ============================================
-
-model QuickReply {
-  id             String  @id @default(uuid())
-  organizationId String
-  createdById    String  // User who created
-
-  // Content
-  shortcut  String // e.g. "/ola", "/preco", "/horario"
-  title     String // Display title
-  content   String @db.Text // The actual message content
-  category  String? // Optional category for grouping
-
-  // Usage stats
-  usageCount Int @default(0)
-
-  // Visibility
-  isGlobal  Boolean @default(true) // Available to all org users
-  isActive  Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, shortcut]) // Shortcut must be unique per org
-  @@index([organizationId])
-  @@index([createdById])
-  @@index([category])
-  @@index([isActive])
-  @@map("quick_replies")
+// Geo Alert Mode — added via migration add_geo_alert_and_country_code
+enum GeoAlertMode {
+  off // Sem alerta
+  notify // Notifica admin quando login de país novo
+  block // Bloqueia login de país diferente do último
 }
 
 model Message {
   id           String @id @default(uuid())
   sessionId    String
-  contactId    String
+  contactPhone String // WhatsApp phone number (formerly linked to Contact)
   connectionId String
 
   // Mensagem
@@ -1167,11 +1009,10 @@ model Message {
 
   // Relacionamentos
   session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
   connection Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
-  @@index([contactId])
+  @@index([contactPhone])
   @@index([connectionId])
   @@index([waMessageId])
   @@index([concatGroupId])
@@ -1226,220 +1067,78 @@ enum MessageAuthor {
   AGENT_PLATFORM // Plataforma de agente
 }
 
-// ============================================
-// TABULATIONS (Contact & Session Tags/Labels)
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [6] CAMPAIGNS & TEMPLATES (dormant — kept for Communication module)
+// ══════════════════════════════════════════════════════════════════════════════
 
-model Tabulation {
-  id              String   @id @default(uuid())
-  organizationId  String
-  name            String
-  description     String?
-  backgroundColor String   @default("#ffffff")
-  labelId         String?  @default("NaN") // Compatibility with falecomigo.ai
-  autoTabulation  Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  contactTabulations     ContactTabulation[]
-  sessionTabulations     SessionTabulation[]
-  tabulationIntegrations TabulationIntegration[]
-  tabulationSettings     TabulationSetting[]
-  kanbanColumns          KanbanColumn[] // Link Kanban columns to tabulations
-
-  @@index([organizationId])
-  @@index([name])
-}
-
-model ContactTabulation {
-  id           String   @id @default(uuid())
-  contactId    String
-  tabulationId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  contact    Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([contactId, tabulationId])
-  @@index([contactId])
-  @@index([tabulationId])
-}
-
-model SessionTabulation {
-  id           String   @id @default(uuid())
-  sessionId    String
-  tabulationId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now())
-
-  session    ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  tabulation Tabulation  @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, tabulationId])
-  @@index([sessionId])
-  @@index([tabulationId])
-}
-
-// ============================================
-// TABULATION INTEGRATIONS (Link to Instances)
-// ============================================
-
-model TabulationIntegration {
-  id           String   @id @default(uuid())
-  tabulationId String
-  connectionId String
-  externalId   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-
-  @@unique([tabulationId, connectionId])
-  @@index([tabulationId])
-  @@index([connectionId])
-}
-
-model TabulationSetting {
-  id           String   @id @default(uuid())
-  tabulationId String
-  key          String // Setting key (e.g., "webhookUrl", "autoAssign")
-  value        String   @db.Text // Setting value (JSON)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  tabulation Tabulation @relation(fields: [tabulationId], references: [id], onDelete: Cascade)
-
-  @@unique([tabulationId, key])
-  @@index([tabulationId])
-}
-
-// ============================================
-// ATTRIBUTES (Custom Contact Fields)
-// ============================================
-
-model Attribute {
-  id             String   @id @default(uuid())
+model Campaign {
+  id             String    @id @default(uuid())
   organizationId String
-  name           String // Field name (e.g., "Telefone alternativo")
-  description    String?
-  type           String // TEXT, DATE, DATETIME, INTEGER, FLOAT, DOCUMENT
-  isRequired     Boolean  @default(false)
-  defaultValue   String? // Default value for this attribute
-  options        Json? // For select/enum types: ["Option 1", "Option 2"]
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  contactAttributes ContactAttribute[]
-
-  @@index([organizationId])
-  @@index([type])
-  @@index([isActive])
-}
-
-model ContactAttribute {
-  id          String   @id @default(uuid())
-  contactId   String
-  attributeId String
-  value       String   @db.Text // Stored as string, cast based on Attribute.type
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  contact   Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-
-  @@unique([contactId, attributeId])
-  @@index([contactId])
-  @@index([attributeId])
-}
-
-// ============================================
-// KANBAN (Sales & Leads Pipeline)
-// ============================================
-
-model KanbanBoard {
-  id             String   @id @default(uuid())
-  organizationId String
+  connectionId   String
   name           String
-  description    String?
-  isActive       Boolean  @default(true)
+  status         String    @default("draft") // draft | scheduled | running | completed | failed | cancelled
+  scheduledAt    DateTime?
+  message        String    @db.Text
+  mediaUrl       String?
+  recipientCount Int       @default(0)
+  sentCount      Int       @default(0)
+  failedCount    Int       @default(0)
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  recipients CampaignRecipient[]
+
+  @@index([organizationId])
+  @@index([connectionId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("campaigns")
+}
+
+model CampaignRecipient {
+  id          String    @id @default(uuid())
+  campaignId  String
+  contactId   String?
+  phoneNumber String
+  status      String    @default("pending") // pending | sent | delivered | failed
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("campaign_recipients")
+}
+
+// ── Message Templates HSM (Communication module) ─────────────────────────────
+
+model MessageTemplate {
+  id             String   @id @default(uuid())
+  organizationId String
+  connectionId   String?
+  name           String
+  category       String   @default("UTILITY") // MARKETING | UTILITY | AUTHENTICATION
+  language       String   @default("pt_BR")
+  status         String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  headerType     String   @default("NONE") // NONE | TEXT | IMAGE | VIDEO | DOCUMENT
+  headerContent  String?
+  body           String   @db.Text
+  footer         String?
+  buttons        Json? // Array of buttons (quick_reply, url, phone_number)
+  metaTemplateId String? // ID retornado pela Meta API após aprovação
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  columns KanbanColumn[]
-
   @@index([organizationId])
-  @@index([isActive])
-}
-
-model KanbanColumn {
-  id              String   @id @default(uuid())
-  boardId         String
-  name            String
-  position        Int // Order position in board
-  backgroundColor String   @default("#ffffff")
-  tabulationId    String? // Link to Tabulation for auto-assignment
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  board      KanbanBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  tabulation Tabulation? @relation(fields: [tabulationId], references: [id], onDelete: SetNull)
-
-  @@index([boardId])
-  @@index([position])
-  @@index([tabulationId])
-}
-
-// ============================================
-// LABELS (Category System - Different from Tabulations)
-// ============================================
-
-model Label {
-  id              String   @id @default(uuid())
-  organizationId  String
-  name            String
-  slug            String
-  description     String?
-  backgroundColor String   @default("#ffffff")
-  icon            String? // Icon name or emoji
-  category        String? // Category grouping
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([organizationId, slug])
-  @@index([organizationId])
+  @@index([status])
   @@index([category])
-  @@index([isActive])
+  @@map("message_templates")
 }
 
-// ============================================
-// CONTACT OBSERVATIONS (Notes for Contacts)
-// ============================================
-
-model ContactObservation {
-  id        String   @id @default(uuid())
-  contactId String
-  userId    String // Author of observation
-  content   String   @db.Text
-  type      String   @default("note") // note, warning, important
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id])
-
-  @@index([contactId])
-  @@index([userId])
-  @@index([type])
-  @@index([createdAt])
-}
-
-// ============================================
-// FILES (File Management & Storage)
-// ============================================
+// ── Files ─────────────────────────────────────────────────────────────────────
 
 model File {
   id             String   @id @default(uuid())
@@ -1461,69 +1160,9 @@ model File {
   @@index([createdAt])
 }
 
-// ============================================
-// CALLS (WhatsApp Call Management)
-// ============================================
-
-model Call {
-  id             String @id @default(uuid())
-  connectionId   String
-  contactId      String
-  organizationId String
-
-  // Call details
-  direction   CallDirection
-  status      CallStatus    @default(INITIATED)
-  externalId  String?       @unique
-  initiatedBy String?
-
-  // Timestamps
-  startedAt  DateTime  @default(now())
-  answeredAt DateTime?
-  endedAt    DateTime?
-  duration   Int?
-
-  // Metadata
-  metadata Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  connection   Connection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [initiatedBy], references: [id], onDelete: SetNull)
-
-  @@index([connectionId])
-  @@index([contactId])
-  @@index([organizationId])
-  @@index([initiatedBy])
-  @@index([status])
-  @@index([direction])
-  @@index([externalId])
-  @@index([startedAt])
-}
-
-enum CallDirection {
-  INCOMING // Chamada recebida
-  OUTGOING // Chamada feita
-}
-
-enum CallStatus {
-  INITIATED // Chamada iniciada
-  RINGING // Tocando
-  ANSWERED // Atendida
-  MISSED // Perdida
-  REJECTED // Rejeitada
-  BUSY // Ocupado
-  FAILED // Falhou
-  ENDED // Finalizada
-}
-
-// ============================================
-// INTEGRATION CONFIGURATIONS (Provider Settings)
-// ============================================
+// ══════════════════════════════════════════════════════════════════════════════
+// [4] AI & AGENTS
+// ══════════════════════════════════════════════════════════════════════════════
 
 model IntegrationConfig {
   id             String          @id @default(uuid())
@@ -1595,9 +1234,7 @@ enum IntegrationType {
   CUSTOM
 }
 
-// ============================================
-// PROVIDER CATEGORY (BYOC Architecture)
-// ============================================
+// ── BYOC Provider (Bring Your Own Credentials) ───────────────────────────────
 
 enum ProviderCategory {
   AI // LLMs: openai, anthropic, google, openrouter
@@ -1607,17 +1244,21 @@ enum ProviderCategory {
   AUXILIARY // google-maps, email, sms
 }
 
-// ============================================
-// ORGANIZATION PROVIDER (BYOC Credentials)
-// ============================================
+// ── Organization Providers ────────────────────────────────────────────────────
 
 model OrganizationProvider {
   id             String @id @default(uuid())
   organizationId String
 
+  // Label amigável (ex: "Chave Prod", "Chave Dev")
+  name String @default("")
+
   // Tipo do provedor
   category ProviderCategory
   provider String // openai, anthropic, redis, supabase, etc
+
+  // Escopo: null = organização, set = override de um projeto Builder específico
+  builderProjectId String?
 
   // Configuração
   isActive  Boolean @default(true)
@@ -1640,31 +1281,49 @@ model OrganizationProvider {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  builderProject BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
 
-  @@unique([organizationId, category, provider, priority])
+  @@unique([organizationId, category, provider, builderProjectId, priority])
   @@index([organizationId, category])
   @@index([organizationId, isActive])
   @@index([category, provider])
+  @@index([builderProjectId])
   @@map("organization_providers")
 }
 
-// Configurations at system/admin level (global defaults)
-model SystemConfig {
-  id          String  @id @default(uuid())
-  key         String  @unique
-  value       String
-  type        String  @default("string") // string, number, boolean, json
-  category    String  @default("general")
-  description String?
-  isEncrypted Boolean @default(false)
-  isEditable  Boolean @default(true)
+// ── Short Links with Click Tracking (Features module) ────────────────────────
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model ShortLink {
+  id             String    @id @default(uuid())
+  organizationId String
+  originalUrl    String    @db.Text
+  slug           String    @unique
+  clicks         Int       @default(0)
+  createdById    String
+  expiresAt      DateTime?
+  createdAt      DateTime  @default(now())
 
-  @@index([category])
-  @@index([key])
+  clickEvents ShortLinkClick[]
+
+  @@index([organizationId])
+  @@index([slug])
+  @@map("short_links")
+}
+
+model ShortLinkClick {
+  id          String   @id @default(uuid())
+  shortLinkId String
+  ipAddress   String?
+  userAgent   String?
+  countryCode String?
+  clickedAt   DateTime @default(now())
+
+  shortLink ShortLink @relation(fields: [shortLinkId], references: [id], onDelete: Cascade)
+
+  @@index([shortLinkId])
+  @@index([clickedAt])
+  @@map("short_link_clicks")
 }
 
 // AI Agent Configuration per Organization
@@ -1723,17 +1382,305 @@ model AIAgentConfig {
   updatedAt DateTime @updatedAt
 
   // Relacionamentos
-  sessions   ChatSession[]
-  groupChats GroupChat[] // Grupos que usam este agente IA
+  sessions       ChatSession[]
+  promptVersions AgentPromptVersion[]
+  deployments    AgentDeployment[]
+
+  // Builder (home-chat-builder)
+  builderProject        BuilderProject?
+  builderPromptVersions BuilderPromptVersion[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
   @@index([isActive])
 }
 
-// ============================================
-// SYSTEM SETTINGS (Global Platform Config)
-// ============================================
+// ── Agent Prompt Versions ─────────────────────────────────────────────────────
+
+model AgentPromptVersion {
+  id            String              @id @default(uuid())
+  agentConfigId String
+  version       Int // Auto-increment per agent
+  systemPrompt  String              @db.Text
+  isActive      Boolean             @default(false)
+  status        PromptVersionStatus @default(ARCHIVED)
+  changelog     String?
+  createdBy     String?
+
+  // Metrics (aggregated)
+  totalMessages   Int   @default(0)
+  totalTransfers  Int   @default(0)
+  totalCost       Float @default(0)
+  avgResponseTime Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  agentConfig AIAgentConfig @relation(fields: [agentConfigId], references: [id], onDelete: Cascade)
+  creator     User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([agentConfigId, version])
+  @@index([agentConfigId])
+  @@index([isActive])
+  @@map("agent_prompt_versions")
+}
+
+// ── Agent Tools ───────────────────────────────────────────────────────────────
+
+model AgentTool {
+  id             String        @id @default(uuid())
+  organizationId String
+  name           String
+  description    String
+  type           AgentToolType @default(CUSTOM)
+  parameters     Json? // JSON Schema for tool parameters
+  webhookUrl     String? // For CUSTOM type tools
+  webhookSecret  String? // Optional secret for webhook auth
+  webhookTimeout Int           @default(10000) // Timeout in ms
+  isActive       Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([type])
+  @@map("agent_tools")
+}
+
+// ── Agent Deployments ─────────────────────────────────────────────────────────
+
+model AgentDeployment {
+  id            String            @id @default(uuid())
+  agentConfigId String
+  connectionId  String
+  mode          AgentDeployMode   @default(CHAT)
+  status        AgentDeployStatus @default(DRAFT)
+  config        Json? // Mode-specific configuration (webhook URL, etc.)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  agentConfig AIAgentConfig @relation(fields: [agentConfigId], references: [id], onDelete: Cascade)
+  connection  Connection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([agentConfigId])
+  @@index([connectionId])
+  @@index([status])
+  @@map("agent_deployments")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [X] HOME CHAT BUILDER — Projects, Conversations, Linear Prompt Versions
+// Owner: tasks/prd-quayer-builder.md  (US-001, US-002, US-003, US-004)
+// Naming: prefixed "Builder*" to avoid collision with pre-existing CRM `Project`
+// and `AgentPromptVersion` models.
+// ══════════════════════════════════════════════════════════════════════════════
+
+model BuilderProject {
+  id             String               @id @default(uuid())
+  organizationId String
+  userId         String
+  type           BuilderProjectType   @default(ai_agent)
+  name           String               @db.VarChar(255)
+  status         BuilderProjectStatus @default(draft)
+  aiAgentId      String?              @unique // 1:1 with AIAgentConfig
+  metadata       Json?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  archivedAt     DateTime?
+
+  organization      Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User                        @relation(fields: [userId], references: [id])
+  aiAgent           AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  conversation      BuilderProjectConversation?
+  deployments       BuilderDeployment[]
+  projectProviders  OrganizationProvider[]
+
+  @@index([organizationId, type, status])
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([archivedAt])
+  @@map("builder_projects")
+}
+
+enum BuilderProjectType {
+  ai_agent
+  // Future: wa_campaign, ig_automation, wa_tracking, wa_flow, custom_tool, message_template, wa_group
+}
+
+enum BuilderProjectStatus {
+  draft
+  production
+  paused
+  archived
+}
+
+// ── Builder Project Conversations ─────────────────────────────────────────────
+
+model BuilderProjectConversation {
+  id             String    @id @default(uuid())
+  projectId      String    @unique // 1:1 with BuilderProject
+  organizationId String
+  userId         String
+  stateSummary   String?   @db.Text // auto-generated summary of project state (saves tokens in LLM ctx)
+  lastMessageAt  DateTime?
+  createdAt      DateTime  @default(now())
+
+  project      BuilderProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organization Organization            @relation(fields: [organizationId], references: [id])
+  user         User                    @relation(fields: [userId], references: [id])
+  messages     BuilderProjectMessage[]
+
+  @@index([organizationId, userId])
+  @@map("builder_project_conversations")
+}
+
+model BuilderProjectMessage {
+  id             String                    @id @default(uuid())
+  conversationId String
+  role           BuilderProjectMessageRole
+  content        String                    @db.Text
+  toolCalls      Json? // array of tool call objects
+  toolResults    Json? // array of tool results
+  metadata       Json? // tokens in/out, model, latency, provider
+  createdAt      DateTime                  @default(now())
+
+  conversation BuilderProjectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("builder_project_messages")
+}
+
+enum BuilderProjectMessageRole {
+  user
+  assistant
+  tool
+  system_banner // injected info messages, not fake user messages
+}
+
+// ── Builder Prompt Versions (linear, per AIAgentConfig) ──────────────────────
+
+model BuilderPromptVersion {
+  id            String                        @id @default(uuid())
+  aiAgentId     String
+  versionNumber Int // linear, starts at 1, auto-increments per agent
+  content       String                        @db.Text // the full system prompt
+  description   String?                       @db.VarChar(500) // human-readable change description
+  createdBy     BuilderPromptVersionCreatedBy @default(chat)
+  publishedAt   DateTime?
+  publishedBy   String?
+  createdAt     DateTime                      @default(now())
+
+  aiAgent   AIAgentConfig @relation(fields: [aiAgentId], references: [id], onDelete: Cascade)
+  publisher User?         @relation("BuilderPromptVersionPublisher", fields: [publishedBy], references: [id], onDelete: SetNull)
+
+  @@unique([aiAgentId, versionNumber])
+  @@index([aiAgentId, publishedAt])
+  @@map("builder_prompt_versions")
+}
+
+enum BuilderPromptVersionCreatedBy {
+  chat
+  manual
+  rollback
+}
+
+// ── Builder Deployments (saga state for cross-module publish) ────────────────
+// Tracks the publish → create-instance → attach-connection flow.
+// Allows observability, resume-on-failure, and compensating rollback.
+
+model BuilderDeployment {
+  id              String                  @id @default(uuid())
+  projectId       String
+  aiAgentId       String
+  promptVersionId String
+  instanceId      String? // WhatsApp UAZ instance id (communication/instances)
+  connectionId    String? // communication/connections
+  status          BuilderDeploymentStatus @default(pending)
+  failureStep     String? // which saga step failed (publish | create_instance | attach)
+  failureReason   String?                 @db.Text
+  rolledBack      Boolean                 @default(false)
+  startedAt       DateTime                @default(now())
+  completedAt     DateTime?
+  triggeredBy     String // userId
+
+  project BuilderProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, status])
+  @@index([aiAgentId])
+  @@index([startedAt])
+  @@map("builder_deployments")
+}
+
+enum BuilderDeploymentStatus {
+  pending
+  publishing
+  instance_creating
+  attaching
+  live
+  failed
+  rolled_back
+}
+
+// ── Builder Tool Calls (observability of meta-agent tool invocations) ────────
+// Every time the Builder LLM calls a tool (create-agent, attach-tool, etc),
+// we log the invocation for debugging, cost tracking, and replay.
+
+model BuilderToolCall {
+  id           String                @id @default(uuid())
+  messageId    String // FK BuilderProjectMessage (the assistant message that invoked)
+  toolName     String                @db.VarChar(100)
+  input        Json
+  output       Json?
+  status       BuilderToolCallStatus @default(pending)
+  errorMessage String?               @db.Text
+  tokensIn     Int?
+  tokensOut    Int?
+  latencyMs    Int?
+  createdAt    DateTime              @default(now())
+
+  @@index([messageId])
+  @@index([toolName, createdAt])
+  @@index([status, createdAt])
+  @@map("builder_tool_calls")
+}
+
+enum BuilderToolCallStatus {
+  pending
+  success
+  error
+  approved // human-in-the-loop approval pending → granted
+  rejected // human-in-the-loop rejected
+}
+
+// ── Builder Context Snapshots (audit trail of context-budget compactions) ────
+// When shouldCompact() triggers, we record what was compacted + summary produced.
+// Enables debugging of context loss bugs and tuning of compaction thresholds.
+
+model BuilderContextSnapshot {
+  id                String                        @id @default(uuid())
+  conversationId    String
+  summary           String                        @db.Text
+  messagesCompacted Int // how many old messages were replaced by summary
+  tokensBefore      Int?
+  tokensAfter       Int?
+  tokensReclaimed   Int?
+  triggeredBy       BuilderContextSnapshotTrigger @default(auto)
+  createdAt         DateTime                      @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("builder_context_snapshots")
+}
+
+enum BuilderContextSnapshotTrigger {
+  auto // shouldCompact returned true
+  manual // user called /chat/compact
+  exhausted // ContextBudgetExhaustedError recovery
+}
+
+// ── System Settings ───────────────────────────────────────────────────────────
+// ⚠️  SystemConfig below is DEPRECATED — use SystemSettings instead
 
 model SystemSettings {
   id        String  @id @default(uuid())
@@ -1788,9 +1735,7 @@ model AIPrompt {
   @@index([name])
 }
 
-// ============================================
-// API KEYS (Programmatic API Access)
-// ============================================
+// ── API Keys ──────────────────────────────────────────────────────────────────
 
 model ApiKey {
   id   String @id @default(uuid())
@@ -1831,9 +1776,7 @@ model ApiKey {
   @@map("api_keys")
 }
 
-// ============================================
-// SYSTEM LOGS (Real-time Logging & AI Analysis)
-// ============================================
+// ── System Logs ───────────────────────────────────────────────────────────────
 
 model LogEntry {
   id        String   @id @default(uuid())
@@ -1932,9 +1875,7 @@ model LogAnalysis {
   @@map("log_analyses")
 }
 
-// ============================================
-// NOTIFICATIONS (User & System Notifications)
-// ============================================
+// ── Notifications ─────────────────────────────────────────────────────────────
 
 model Notification {
   id        String   @id @default(uuid())
@@ -2005,4 +1946,359 @@ enum NotificationType {
   ERROR // Erro
   SYSTEM // Sistema
   CONNECTION // Status de conexão
+}
+
+// ── TOTP 2FA ─────────────────────────────────────────────────────────────────
+
+model TotpDevice {
+  id        String   @id @default(uuid())
+  userId    String
+  secret    String // Encrypted TOTP secret
+  name      String // Device/app name (e.g., "Google Authenticator")
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("totp_devices")
+}
+
+model RecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  code      String // Hashed recovery code (bcrypt)
+  usedAt    DateTime? // Null if not yet used
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+// ── Device Sessions ───────────────────────────────────────────────────────────
+
+model DeviceSession {
+  id           String    @id @default(uuid())
+  userId       String
+  deviceName   String?
+  ipAddress    String?
+  userAgent    String?
+  location     String?
+  countryCode  String? // Added via migration add_geo_alert_and_country_code
+  lastActiveAt DateTime  @default(now())
+  isRevoked    Boolean   @default(false)
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRevoked])
+  @@index([lastActiveAt])
+  @@map("device_sessions")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [7] BILLING & SUBSCRIPTIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  SUSPENDED
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum PaymentGateway {
+  EFI
+  ASAAS
+}
+
+enum PaymentMethod {
+  PIX_AUTO
+  PIX_MANUAL
+  CREDIT_CARD
+  BOLETO
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  PAID
+  OVERDUE
+  CANCELED
+  REFUNDED
+}
+
+enum NfseStatus {
+  PENDING_NFSE
+  SCHEDULED
+  SYNCHRONIZED
+  AUTHORIZED
+  PROCESSING_CANCELLATION
+  CANCELED
+  CANCELLATION_DENIED
+  ERROR_NFSE
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+// ── AI Agent Enums ──────────────────────────────────────────────────────────
+
+enum AgentToolType {
+  BUILTIN
+  CUSTOM
+  MCP
+}
+
+enum AgentDeployMode {
+  CHAT
+  N8N
+  CLAUDE_CODE
+}
+
+enum AgentDeployStatus {
+  ACTIVE
+  PAUSED
+  DRAFT
+}
+
+enum PromptVersionStatus {
+  ACTIVE
+  TESTING
+  ARCHIVED
+}
+
+// ── Plan ─────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id          String  @id @default(uuid())
+  name        String
+  slug        String  @unique
+  description String?
+
+  // Pricing (centavos — 14900 = R$ 149,00)
+  priceMonthly Int
+  priceYearly  Int?
+  currency     String @default("BRL")
+
+  // Limits
+  maxUsers     Int
+  maxInstances Int
+  maxMessages  Int
+  maxStorage   Int // MB
+  maxAiCredits Int
+  maxContacts  Int
+
+  // Feature flags (explicit booleans, NOT Json)
+  hasWebhooks        Boolean @default(false)
+  hasApi             Boolean @default(false)
+  hasCustomRoles     Boolean @default(false)
+  hasSso             Boolean @default(false)
+  hasAiAgents        Boolean @default(false)
+  hasPrioritySupport Boolean @default(false)
+
+  isActive  Boolean @default(true)
+  isFree    Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("plans")
+}
+
+// ── Subscription ─────────────────────────────────────────────────────────────
+
+model Subscription {
+  id             String @id @default(uuid())
+  organizationId String
+  planId         String
+
+  status       SubscriptionStatus @default(ACTIVE)
+  billingCycle BillingCycle       @default(MONTHLY)
+  isCurrent    Boolean            @default(true)
+
+  startDate       DateTime
+  endDate         DateTime?
+  nextBillingDate DateTime?
+  canceledAt      DateTime?
+  trialEndsAt     DateTime?
+
+  // Payment gateway
+  gateway            PaymentGateway @default(EFI)
+  gatewayCustomerId  String?
+  gatewaySubId       String?
+  pixAuthorizationId String?
+
+  paymentMethod   PaymentMethod @default(PIX_AUTO)
+  lastPaymentDate DateTime?
+
+  // Pricing snapshot (centavos)
+  currentPriceCents Int
+  discountCents     Int @default(0)
+
+  // Grace period
+  gracePeriodEndsAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices     Invoice[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([nextBillingDate])
+  @@index([isCurrent])
+  @@map("subscriptions")
+}
+
+// ── Invoice ──────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id             String @id @default(uuid())
+  subscriptionId String
+  organizationId String
+
+  number      Int    @default(autoincrement())
+  description String
+  totalCents  Int
+
+  status   InvoiceStatus @default(PENDING)
+  issuedAt DateTime
+  dueDate  DateTime
+  paidAt   DateTime?
+
+  // Payment gateway
+  gateway          PaymentGateway
+  gatewayPaymentId String?
+  gatewayPixTxId   String?
+
+  // NFS-e
+  nfseStatus NfseStatus?
+  nfseId     String?
+  nfseUrl    String?
+
+  pdfUrl   String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, number])
+  @@index([organizationId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+// ── Usage Record ─────────────────────────────────────────────────────────────
+
+model UsageRecord {
+  id             String @id @default(uuid())
+  organizationId String
+
+  period        String // e.g. "2026-04"
+  messagesUsed  Int    @default(0)
+  storageUsedMb Int    @default(0)
+  aiCreditsUsed Int    @default(0)
+  contactsCount Int    @default(0)
+  apiCallsCount Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, period])
+  @@map("usage_records")
+}
+
+// ── Webhook Event (idempotency) ──────────────────────────────────────────────
+
+model WebhookEvent {
+  id             String             @id @default(uuid())
+  gatewayEventId String
+  gateway        PaymentGateway
+  eventType      String
+  status         WebhookEventStatus @default(RECEIVED)
+  payload        Json
+  processedAt    DateTime?
+  errorMessage   String?
+  createdAt      DateTime           @default(now())
+
+  @@unique([gateway, gatewayEventId])
+  @@index([gateway])
+  @@index([eventType])
+  @@index([status])
+  @@map("webhook_events")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [7] DEVICE AUTHORIZATION FLOW
+// ══════════════════════════════════════════════════════════════════════════════
+
+model DeviceAuthRequest {
+  id String @id @default(uuid())
+
+  // Device identification
+  deviceCode String @unique // Random 40-char hex — used by CLI to poll
+  userCode   String @unique // Human-readable 8-char code (ABCD-1234 format)
+
+  // What gets created on approval
+  scopes  String[] @default(["read", "write"])
+  keyName String   @default("CLI") // Name for the API key that will be created
+
+  // Status
+  status DeviceAuthStatus @default(PENDING)
+
+  // After approval — links to created API key
+  apiKeyId        String?
+  apiKeyPlaintext String? // Temporarily stores full key until CLI polls it, then cleared
+  userId          String? // Who approved it
+  organizationId  String? // Which org was selected
+
+  // Expiration
+  expiresAt DateTime // 15 minutes from creation
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([deviceCode])
+  @@index([userCode])
+  @@index([status])
+  @@map("device_auth_requests")
+}
+
+enum DeviceAuthStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
 }

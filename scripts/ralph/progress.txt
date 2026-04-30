@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## Codebase Patterns
 
 - migrate.js usa pg diretamente (não prisma CLI) — evita dependência do effect/fast-check
@@ -114,3 +115,78 @@
   - `git add -f` is needed for files in gitignored directories
   - Commits on OneDrive repos may randomly fail with mmap errors — retry or split into separate commits
 ---
+=======
+# Ralph Progress — quayer-builder
+
+**Branch:** `ralph/quayer-builder`
+**PRD:** `tasks/prd-quayer-builder.md`
+**Architecture:** `specs/home-chat-builder/architecture-v5.md`
+**Started:** 2026-04-08
+
+## Codebase patterns (reference before implementing)
+
+- **Auth modules:** `src/server/core/auth/` (backend), `src/client/components/auth/` (frontend v3 already done)
+- **AI agents:** `src/server/ai-module/ai-agents/` has CRUD + runtime + 6 builtin tools (transfer_to_human, pause_session, notify_team, schedule_callback, create_lead, search_contacts) — **Builder reuses 100%**
+- **Communication:** `src/server/communication/` has instances (QR + share link), campaigns, templates — reuse
+- **Igniter pattern:** controller → actions (query/mutation) → handler with `authProcedure`
+- **Prisma schema:** `prisma/schema.prisma` (migrations need founder approval)
+- **Cookie name:** auth uses `accessToken` (not `access_token`)
+- **Client components:** NEVER import `@/lib/auth` (barrel) in `use client` — use `@/lib/auth/auth-provider` direct
+- **Design tokens:** `quayer-ds-v3.html` is source of truth; tokens currently scoped in `[data-auth-v3="true"]` → US-017 migrates to `:root` global
+- **Testing pipeline (Release 1):** static, unit backend, unit react, api integration, contract, e2e playwright 3-projects
+- **Feature flags:** pattern established in Release 3 (`docs/auth/FEATURE_FLAGS.md`)
+
+## Key decisions from founder (do not re-debate)
+
+1. **Scope v1 = só Agente IA** (1A) — templates/ferramentas/campanhas vão pro backlog
+2. **Validação com users já feita** — pula fase de discovery
+3. **Tokens v3 globais** (3D) — migrar de `[data-auth-v3]` pra `:root`
+4. **Claude Sonnet default + fallback auto** (4C) — BYOK só enterprise
+5. **Design refactor completo** — fases J (/configuracoes/*) + K (/admin/*) fazem reskin visual seguindo padrão `(auth)/*`
+6. **Sticky versioning** (Opção C) — conversas ativas seguem versão antiga até silenciar 24h
+7. **Versões = só prompt** — não snapshot do agente inteiro
+8. **Builder AI = um agente Quayer** — vive em `ai-module/ai-agents` com tools especializadas
+9. **CRM off** — sidebar hidden, backend preservado (feature flag FEATURE_CRM_ENABLED default false)
+10. **Admin preservado** — todas as rotas `/admin/*` mantidas (user decision)
+
+## Ralph rules (critical)
+
+- **1 story per iteration** — don't bundle multiple
+- **Stop immediately if story seems too big** — report it, don't half-complete
+- **Check `git status` before starting** — must be clean
+- **Run typecheck after every change** — `npx tsc --noEmit`
+- **Migrations need founder approval** — stop and ask before `prisma migrate`
+- **Never edit `src/igniter.client.ts` or `src/igniter.schema.ts`** — auto-generated
+- **UI stories:** verify in browser using dev-browser skill before marking passes=true
+- **Tests pass:** `npm run test:all` must be green before marking passes=true
+- **One iteration = one story** — if story has subtasks, split into multiple stories (update PRD)
+
+## Current state
+
+- Zero stories started.
+- Foundation phase (A) is first: schemas + endpoints.
+- Builder AI phase (B) depends on A.
+- Design Tokens phase (C) depends on A (US-017 is critical for all subsequent UI).
+- Frontend phase (D) depends on A, B, C.
+- Phase J and K (refactor) depend on C (tokens must be global first).
+
+## Execution order (phases)
+
+1. **Phase A** (US-001 to US-007) — Schema + endpoints — 7 stories
+2. **Phase B** (US-008 to US-016) — Builder AI + tools — 9 stories
+3. **Phase C** (US-017 to US-019) — Design tokens global — 3 stories
+4. **Phase D** (US-020 to US-028) — Frontend Builder — 9 stories
+5. **Phase E** (US-029 to US-030) — Sticky versioning runtime — 2 stories
+6. **Phase F** (US-031 to US-033) — Mobile + A11y — 3 stories
+7. **Phase G** (US-034 to US-037) — Migration + cleanup — 4 stories
+8. **Phase H** (US-038 to US-039) — Feature flag + rollout — 2 stories
+9. **Phase I** (US-040 to US-043) — Tests — 4 stories
+10. **Phase J** (US-044 to US-055) — Refactor /configuracoes/* — 12 stories
+11. **Phase K** (US-056 to US-066) — Refactor /admin/* — 11 stories
+
+**Total: 66 stories across 11 phases.**
+
+---
+
+## Iteration log (Ralph appends here after each story)
+>>>>>>> ralph/builder-architecture-patterns
