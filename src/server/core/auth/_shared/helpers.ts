@@ -19,10 +19,13 @@ export function getClientIdentifier(request: { headers: { get?: (key: string) =>
     if (typeof headers.get === 'function') return headers.get(key) ?? undefined;
     return headers[key];
   };
-  const forwarded = get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
+  // Priority: Cloudflare real IP → Caddy real IP → forwarded (last resort, client-controlled)
+  const cfIp = get('cf-connecting-ip');
+  if (cfIp) return cfIp;
   const realIp = get('x-real-ip');
   if (realIp) return realIp;
+  const forwarded = get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
   return 'unknown';
 }
 
@@ -219,8 +222,9 @@ export async function registerDeviceSession(userId: string, request: any): Promi
 
     const userAgent = get('user-agent') || 'Unknown';
     const ip =
-      get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      get('cf-connecting-ip') ||
       get('x-real-ip') ||
+      get('x-forwarded-for')?.split(',')[0]?.trim() ||
       'Unknown';
 
     const deviceName = parseDeviceName(userAgent);

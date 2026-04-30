@@ -25,7 +25,7 @@ import { csrfProcedure } from "../procedures/csrf.procedure";
 import { turnstileProcedure } from "../procedures/turnstile.procedure";
 import { UserRole, OrganizationRole } from "@/lib/auth/roles";
 import { emailService } from "@/lib/email";
-import { authRateLimiter } from "@/lib/rate-limit/rate-limiter";
+import { RateLimiter, authRateLimiter } from "@/lib/rate-limit/rate-limiter";
 import { checkOtpRateLimit } from "@/lib/rate-limit/otp-rate-limit";
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "@/lib/auth/csrf";
 import { getIpGeolocation } from "@/lib/geocoding/ip-geolocation";
@@ -38,6 +38,12 @@ import {
   getChallengeAttempts, incrementChallengeAttempts, MAX_2FA_ATTEMPTS,
   parseDeviceName, registerDeviceSession, autoJoinByVerifiedDomain,
 } from "../_shared/helpers";
+
+const meRateLimiter = new RateLimiter({
+  limit: 120,
+  window: 60,
+  prefix: 'ratelimit:me',
+});
 
 export const identityController = igniter.controller({
   name: "auth-identity",
@@ -53,10 +59,16 @@ export const identityController = igniter.controller({
       path: '/me',
       method: 'GET',
       use: [authProcedure({ required: true })],
-      handler: async ({ response, context }) => {
+      handler: async ({ request, response, context }) => {
         const authUser = context.auth?.session?.user;
         if (!authUser) {
           return response.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const clientIp = getClientIdentifier(request);
+        const rateLimit = await meRateLimiter.check(authUser.id + ':' + clientIp);
+        if (!rateLimit.success) {
+          return response.status(429).json({ error: 'Too many requests' });
         }
 
         const user = await db.user.findUnique({
@@ -66,7 +78,12 @@ export const identityController = igniter.controller({
               where: { isActive: true },
               include: { organization: true },
             },
-            preferences: true,
+            preferences: {
+              select: {
+                messageSignature: true,
+                aiSuggestionsEnabled: true,
+              },
+            },
           },
         });
 
@@ -140,7 +157,12 @@ export const identityController = igniter.controller({
               where: { isActive: true },
               include: { organization: true },
             },
-            preferences: true,
+            preferences: {
+              select: {
+                messageSignature: true,
+                aiSuggestionsEnabled: true,
+              },
+            },
           },
         });
 

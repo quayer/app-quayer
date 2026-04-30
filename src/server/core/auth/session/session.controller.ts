@@ -38,6 +38,12 @@ const sessionRefreshRateLimiter = new RateLimiter({
   window: 600,
   prefix: 'ratelimit:session-refresh',
 });
+
+const logoutRateLimiter = new RateLimiter({
+  limit: 10,
+  window: 60,
+  prefix: 'ratelimit:logout',
+});
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "@/lib/auth/csrf";
 import { getIpGeolocation } from "@/lib/geocoding/ip-geolocation";
 import { encrypt, decrypt } from "@/lib/crypto";
@@ -148,6 +154,15 @@ export const sessionController = igniter.controller({
       body: logoutSchema,
       use: [csrfProcedure()],
       handler: async ({ request, response }) => {
+        const clientIp = getClientIdentifier(request);
+        const rateLimit = await logoutRateLimiter.check(clientIp);
+        if (!rateLimit.success) {
+          return response.status(429).json({
+            error: 'Too many logout attempts',
+            retryAfter: rateLimit.retryAfter,
+          });
+        }
+
         const { everywhere } = request.body;
 
         // Read refreshToken from httpOnly cookie (primary) or body (fallback)

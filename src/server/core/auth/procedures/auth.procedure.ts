@@ -62,21 +62,16 @@ export const authProcedure = igniter.procedure({
 
     const effectiveAuthHeader = authHeader || (cookieToken ? `Bearer ${cookieToken}` : null);
 
-    console.log('[AuthProcedure] authHeader:', effectiveAuthHeader ? 'present' : 'absent');
-    console.log('[AuthProcedure] required:', required);
-
     // Instanciar repository
     const authRepo = new AuthRepository(context.db);
 
     // Se não há header e auth é obrigatória, retornar 401
     if (!effectiveAuthHeader && required) {
-      console.log('[AuthProcedure] No auth header, auth required');
       return Response.json({ error: "Token não fornecido" }, { status: 401 });
     }
 
     // Se não há header mas auth é opcional, retornar contexto com user null
     if (!effectiveAuthHeader && !required) {
-      console.log('[AuthProcedure] No auth header, auth optional');
       return {
         auth: {
           session: {
@@ -93,17 +88,12 @@ export const authProcedure = igniter.procedure({
       ? effectiveAuthHeader.slice(7)
       : effectiveAuthHeader;
 
-    console.log('[AuthProcedure] Token extracted:', token ? token.substring(0, 20) + '...' : 'null');
-
     try {
       // Verificar JWT token
       const payload = await verifyAccessToken(token as string);
 
-      console.log('[AuthProcedure] JWT payload:', payload);
-
       if (!payload) {
         if (required) {
-          console.log('[AuthProcedure] Invalid JWT, auth required');
           return Response.json({ error: "Token inválido" }, { status: 401 });
         }
         // Auth opcional e sem payload
@@ -131,8 +121,7 @@ export const authProcedure = igniter.procedure({
 
       if (!user) {
         if (required) {
-          console.log('[AuthProcedure] User not found');
-          return Response.json({ error: "Usuário não encontrado" }, { status: 401 });
+          return Response.json({ error: "Token inválido" }, { status: 401 });
         }
         return {
           auth: {
@@ -147,9 +136,8 @@ export const authProcedure = igniter.procedure({
 
       // Verificar se usuário está ativo
       if (user.isActive === false) {
-        console.log('[AuthProcedure] User inactive');
         if (required) {
-          return Response.json({ error: "Usuário inativo" }, { status: 401 });
+          return Response.json({ error: "Token inválido" }, { status: 401 });
         }
         return {
           auth: {
@@ -205,7 +193,6 @@ export const authProcedure = igniter.procedure({
       }
 
       // Sucesso - retornar contexto com usuário
-      console.log('[AuthProcedure] User authenticated:', user.email);
       return {
         auth: {
           session: {
@@ -216,7 +203,6 @@ export const authProcedure = igniter.procedure({
         },
       };
     } catch (error) {
-      console.error('[AuthProcedure] Error:', error);
       if (required) {
         return Response.json({ error: "Erro ao validar token" }, { status: 401 });
       }

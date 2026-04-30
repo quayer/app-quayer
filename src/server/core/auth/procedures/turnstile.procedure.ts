@@ -45,7 +45,6 @@ export const turnstileProcedure = igniter.procedure({
 
     // Fail-open: no secret key configured (dev environment)
     if (!secretKey) {
-      console.log('[TurnstileProcedure] No TURNSTILE_SECRET_KEY configured, skipping validation');
       return {};
     }
 
@@ -63,7 +62,6 @@ export const turnstileProcedure = igniter.procedure({
         );
       }
       // In non-production with key configured but no token: fail-open
-      console.log('[TurnstileProcedure] Missing token in non-production, skipping');
       return {};
     }
 
@@ -98,14 +96,25 @@ export const turnstileProcedure = igniter.procedure({
       }
 
       // Verification successful
-      console.log('[TurnstileProcedure] Token verified successfully');
       return {};
     } catch (error: unknown) {
-      // Timeout or network error: fail-open
+      const isProduction = process.env.NODE_ENV === 'production';
       if (error instanceof DOMException && error.name === 'AbortError') {
-        console.warn('[TurnstileProcedure] Cloudflare API timeout (5s), failing open');
+        if (isProduction) {
+          return Response.json(
+            { error: 'verification_unavailable', message: 'Verificação anti-bot indisponível. Tente novamente.' },
+            { status: 503 }
+          );
+        }
+        console.warn('[TurnstileProcedure] Cloudflare API timeout (5s), failing open in non-production');
       } else {
-        console.error('[TurnstileProcedure] Error verifying token, failing open:', error);
+        if (isProduction) {
+          return Response.json(
+            { error: 'verification_error', message: 'Erro na verificação anti-bot. Tente novamente.' },
+            { status: 503 }
+          );
+        }
+        console.error('[TurnstileProcedure] Error verifying token, failing open in non-production:', error);
       }
       return {};
     }
