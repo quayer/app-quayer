@@ -19,6 +19,8 @@
     "incremental": true,
     "baseUrl": ".",
     "paths": {
+      "@/components/*": ["./src/client/components/*"],
+      "@/hooks/*": ["./src/client/hooks/*"],
       "@/*": [
         "./src/*"
       ]
