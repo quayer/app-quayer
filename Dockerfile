@@ -45,9 +45,6 @@ RUN --mount=type=cache,target=/root/.npm \
 # Copy application code
 COPY . .
 
-# Copy production dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
-
 # Generate Prisma Client
 RUN npx prisma generate
 
