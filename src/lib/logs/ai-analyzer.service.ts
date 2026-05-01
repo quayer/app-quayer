@@ -5,10 +5,6 @@
  */
 
 import { database } from '@/server/services/database'
-// @ts-expect-error Optional dependency - install @langchain/openai if needed
-import { ChatOpenAI } from '@langchain/openai'
-// @ts-expect-error Optional dependency - install @langchain/core if needed
-import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { LogLevel } from '@prisma/client'
 
 export interface LogPattern {
@@ -43,16 +39,20 @@ export interface AnalysisResult {
 }
 
 class AILogAnalyzer {
-  private model: ChatOpenAI | null = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private model: any = null
 
-  private getModel(): ChatOpenAI {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async getModel(): Promise<any> {
     if (!this.model) {
       const apiKey = process.env.OPENAI_API_KEY
       if (!apiKey) {
         throw new Error('OPENAI_API_KEY not configured')
       }
+      // webpackIgnore: true keeps this out of the build bundle (optional dep)
+      const { ChatOpenAI } = await import(/* webpackIgnore: true */ '@langchain/openai')
       this.model = new ChatOpenAI({
-        modelName: 'gpt-4o', // Updated from gpt-4o-mini for better analysis
+        modelName: 'gpt-4o',
         temperature: 0.3,
         openAIApiKey: apiKey,
       })
@@ -164,6 +164,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
   "overallSeverity": 1-10
 }`
 
+      const { HumanMessage, SystemMessage } = await import(/* webpackIgnore: true */ '@langchain/core/messages')
       const response = await model.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(`Analise estes logs do sistema:\n\n${logSummary}`),
@@ -315,6 +316,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
     try {
       const model = this.getModel()
 
+      const { HumanMessage, SystemMessage } = await import(/* webpackIgnore: true */ '@langchain/core/messages')
       const response = await model.invoke([
         new SystemMessage(`Você é um especialista em debugging. Analise este erro e forneça:
 1. Análise detalhada do problema
