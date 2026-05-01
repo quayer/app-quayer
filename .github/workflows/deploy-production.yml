@@ -49,10 +49,10 @@ jobs:
           script: |
             set -e
 
-            APP_DIR="/opt/quayer"
+            APP_DIR="$HOME/quayer"
             COMPOSE_FILE="compose.yml"
             NO_CACHE="${{ github.event.inputs.no_cache }}"
-            BACKUP_DIR="/opt/quayer/backups"
+            BACKUP_DIR="$HOME/quayer-backups"
 
             echo "=== Iniciando Deploy Quayer ==="
 
@@ -62,7 +62,7 @@ jobs:
             fi
 
             echo "Clonando codigo (fresh clone)..."
-            sudo rm -rf "$APP_DIR" 2>/dev/null || { sudo chown -R "$(whoami):$(whoami)" "$APP_DIR" && rm -rf "$APP_DIR"; }
+            rm -rf "$APP_DIR"
             mkdir -p "$APP_DIR"
             git clone --depth 1 --single-branch --branch ralph/builder-architecture-patterns https://github.com/quayer/app-quayer.git "$APP_DIR"
             cd "$APP_DIR"
