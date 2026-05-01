@@ -61,7 +61,7 @@ jobs:
               echo "Repositorio nao encontrado. Clonando..."
               rm -rf "$APP_DIR"
               mkdir -p "$APP_DIR"
-              git clone --depth 1 --single-branch --branch main https://github.com/quayer/app-quayer.git "$APP_DIR"
+              git clone --depth 1 --single-branch --branch ralph/builder-architecture-patterns https://github.com/quayer/app-quayer.git "$APP_DIR"
               cd "$APP_DIR"
             else
               cd "$APP_DIR"
@@ -103,10 +103,10 @@ jobs:
 
             # 3. Atualizar codigo
             echo "Atualizando codigo..."
-            git fetch --depth 1 origin main
-            git reset --hard origin/main
+            git fetch --depth 1 origin ralph/builder-architecture-patterns
+            git reset --hard origin/ralph/builder-architecture-patterns
             git clean -fd -e .env -e data/ -e backups/
-            git pull origin main
+            git pull origin ralph/builder-architecture-patterns
 
             # 4. Infraestrutura
             docker network inspect supabase_default > /dev/null 2>&1 || docker network create supabase_default
