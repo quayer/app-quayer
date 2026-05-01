@@ -126,13 +126,20 @@ jobs:
               $COMPOSE_CMD -f $COMPOSE_FILE build --parallel app
             fi
 
-            # 6. Deploy
+            # 6. Migrations (one-shot, fail-fast antes de subir containers)
+            echo "Rodando migrations (one-shot)..."
+            SKIP_MIGRATIONS=false $COMPOSE_CMD -f $COMPOSE_FILE run --rm --no-deps \
+              -e SKIP_MIGRATIONS=false \
+              app sh -c "node ./prisma/migrate.js && (node ./prisma/create-admin.js || true)"
+
+            # 7. Deploy (containers pulam migrations pois ja rodaram acima)
+            export SKIP_MIGRATIONS=true
             echo "Subindo aplicacao..."
             $COMPOSE_CMD -f $COMPOSE_FILE down --remove-orphans 2>/dev/null || true
             docker rm -f quayer-redis quayer-postgres quayer-app 2>/dev/null || true
             $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
 
-            # 7. Health check robusto em loop (120s timeout)
+            # 8. Health check robusto em loop (120s timeout)
             echo "Aguardando health check (ate 120s)..."
             MAX_WAIT=120
             INTERVAL=10
@@ -175,6 +182,6 @@ jobs:
               exit 1
             fi
 
-            # 8. Limpeza final
+            # 9. Limpeza final
             docker image prune -f || true
             echo "=== Deploy concluido! https://app.quayer.com ==="

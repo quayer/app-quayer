@@ -1,0 +1,102 @@
+name: Hotfix Deploy
+
+# ============================================
+# DEPLOY: manual only -> hotfix fast path
+# Skips full test suite for critical patches.
+# Requires: secrets.PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_SSH_PORT
+# ============================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Hotfix reason (required for audit trail)'
+        required: true
+        type: string
+
+jobs:
+  hotfix:
+    name: Hotfix to Production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy Hotfix to Production Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 20m
+          script: |
+            set -e
+
+            APP_DIR="/opt/quayer"
+            COMPOSE_FILE="compose.yml"
+
+            echo "=== Hotfix Deploy ==="
+            echo "Reason: ${{ github.event.inputs.reason }}"
+            echo "Actor:  ${{ github.actor }}"
+            echo "Ref:    ${{ github.ref }}"
+
+            cd "$APP_DIR"
+
+            if [ ! -f .env ]; then
+              echo "ERRO CRITICO: .env nao encontrado em $APP_DIR"
+              exit 1
+            fi
+
+            if docker compose version > /dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
+
+            # Pull latest code
+            git fetch --depth 1 origin main
+            git reset --hard origin/main
+            git clean -fd -e .env -e data/ -e backups/
+
+            # Build and redeploy
+            export DOCKER_BUILDKIT=1
+            export COMPOSE_DOCKER_CLI_BUILD=1
+            $COMPOSE_CMD -f $COMPOSE_FILE build --parallel app
+
+            # Migrations (one-shot, fail-fast antes de subir containers)
+            echo "Rodando migrations (one-shot)..."
+            SKIP_MIGRATIONS=false $COMPOSE_CMD -f $COMPOSE_FILE run --rm --no-deps \
+              -e SKIP_MIGRATIONS=false \
+              app sh -c "node ./prisma/migrate.js && (node ./prisma/create-admin.js || true)"
+
+            # Subir containers pulando migrations (ja rodaram acima)
+            export SKIP_MIGRATIONS=true
+            $COMPOSE_CMD -f $COMPOSE_FILE up -d --force-recreate --remove-orphans
+
+            # Quick health check (60s)
+            MAX_WAIT=60
+            INTERVAL=10
+            ELAPSED=0
+            HEALTHY=false
+
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              STATUS=$(docker inspect quayer-app --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+              if [ "$STATUS" = "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              echo "  [${ELAPSED}s] Status: $STATUS - aguardando..."
+              sleep $INTERVAL
+              ELAPSED=$((ELAPSED + INTERVAL))
+            done
+
+            if [ "$HEALTHY" = "true" ]; then
+              echo "=== Hotfix aplicado com sucesso! ==="
+            else
+              echo "FALHA: App nao ficou healthy em ${MAX_WAIT}s"
+              docker logs quayer-app --tail 30
+              exit 1
+            fi
