@@ -119,7 +119,7 @@ export const apiKeyProcedure = igniter.procedure({
       // Atualizar lastUsedAt (fire and forget)
       const clientIp = request.headers.get('x-forwarded-for')
         || request.headers.get('x-real-ip')
-        || undefined
+        || null
       apiKeysRepository.updateLastUsed(keyData.id, clientIp).catch(() => {})
 
       // Montar user com org da key
@@ -128,12 +128,6 @@ export const apiKeyProcedure = igniter.procedure({
         currentOrgId: keyData.organizationId,
         organizationId: keyData.organizationId,
       }
-
-      // Injetar headers para compatibilidade com controllers existentes
-      request.headers.set('x-user-id', user.id)
-      request.headers.set('x-user-role', user.role)
-      request.headers.set('x-org-id', keyData.organizationId)
-      request.headers.set('x-api-key-id', keyData.id)
 
       const authRepo = new AuthRepository(context.db)
 
@@ -211,7 +205,7 @@ export const authOrApiKeyProcedure = igniter.procedure({
 
         const clientIp = request.headers.get('x-forwarded-for')
           || request.headers.get('x-real-ip')
-          || undefined
+          || null
         apiKeysRepository.updateLastUsed(keyData.id, clientIp).catch(() => {})
 
         const userWithOrg = {
@@ -219,11 +213,6 @@ export const authOrApiKeyProcedure = igniter.procedure({
           currentOrgId: keyData.organizationId,
           organizationId: keyData.organizationId,
         }
-
-        request.headers.set('x-user-id', user.id)
-        request.headers.set('x-user-role', user.role)
-        request.headers.set('x-org-id', keyData.organizationId)
-        request.headers.set('x-api-key-id', keyData.id)
 
         const authRepo = new AuthRepository(context.db)
 

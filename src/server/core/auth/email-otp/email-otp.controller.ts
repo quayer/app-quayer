@@ -63,6 +63,7 @@ export const emailOtpController = igniter.controller({
       path: '/verify-email',
       method: 'POST',
       body: verifyEmailCodeSchema,
+      use: [csrfProcedure()],
       handler: async ({ request, response }) => {
         const { email, code } = request.body;
 
@@ -185,7 +186,7 @@ export const emailOtpController = igniter.controller({
         // Check if user already exists
         const existingUser = await db.user.findUnique({ where: { email } });
         if (existingUser) {
-          return response.status(400).json({ error: 'Email já cadastrado. Faça login.' });
+          return response.success({ sent: true, message: 'Se este email não estiver cadastrado, um código será enviado.' });
         }
 
         // Generate OTP
@@ -236,6 +237,7 @@ export const emailOtpController = igniter.controller({
       path: '/verify-signup-otp',
       method: 'POST',
       body: verifySignupOTPSchema,
+      use: [csrfProcedure()],
       handler: async ({ request, response }) => {
         if (!isSignupEnabled()) {
           return response.status(403).json({ error: SIGNUP_DISABLED_MESSAGE });
@@ -275,7 +277,7 @@ export const emailOtpController = igniter.controller({
 
         const existingUser = await db.user.findUnique({ where: { email } });
         if (existingUser) {
-          return response.status(400).json({ error: 'Usuário já existe' });
+          return response.status(400).json({ error: 'Código inválido' });
         }
 
         const usersCount = await db.user.count();
@@ -515,6 +517,7 @@ export const emailOtpController = igniter.controller({
       path: '/verify-login-otp',
       method: 'POST',
       body: verifyPasswordlessOTPSchema,
+      use: [csrfProcedure()],
       handler: async ({ request, response }) => {
         const { email, code } = request.body;
 

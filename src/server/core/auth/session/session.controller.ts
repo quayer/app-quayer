@@ -121,6 +121,13 @@ export const sessionController = igniter.controller({
           return response.status(401).json({ error: 'Invalid or expired refresh token' });
         }
 
+        if (!tokenData.user.isActive) {
+          return response.status(401).json({ error: 'Account is disabled' });
+        }
+        // NOTE: deletedAt check omitted — User model does not have a deletedAt field.
+        // If soft-delete is added to User in future, add:
+        // if (tokenData.user.deletedAt) { return response.status(401).json({ error: 'Account not found' }); }
+
         // Obter role na organização atual
         const currentOrgRelation = tokenData.user.organizations.find(
           (org) => org.organizationId === tokenData.user.currentOrgId

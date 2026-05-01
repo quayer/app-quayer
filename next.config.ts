@@ -64,15 +64,14 @@ const nextConfig: NextConfig = {
           // X-XSS-Protection intentionally omitted: deprecated in modern browsers,
           // superseded by CSP, and can introduce XSS vulnerabilities in legacy IE/Edge.
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'Permissions-Policy', value: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
           {
             key: 'Content-Security-Policy',
-            // script-src 'unsafe-inline': required for the synchronous theme-bootstrap
-            // script in src/app/layout.tsx (localStorage read before first paint).
-            // A nonce-based approach would eliminate this but requires per-request
-            // server-side injection — not currently wired up.
             // 'unsafe-eval' removed: not required by Next.js in production builds.
+            // 'unsafe-inline' removed from script-src: replaced by per-request nonce
+            // injected in src/middleware.ts. The theme-bootstrap script in layout.tsx
+            // receives the nonce via the x-nonce request header.
             // connect-src: Sentry browser SDK reports to *.sentry.io;
             //   Cloudflare Turnstile widget makes verification beacons to challenges.cloudflare.com.
             //   Upstash is server-side only — no browser fetch needed.
@@ -80,11 +79,15 @@ const nextConfig: NextConfig = {
             // frame-src: Cloudflare Turnstile renders a challenge iframe from challenges.cloudflare.com.
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+              // Nonce is injected per-request via middleware (src/middleware.ts) for page routes.
+              // This static fallback covers API routes and paths outside the middleware matcher
+              // and intentionally omits 'unsafe-inline' — nonce takes its place for pages.
+              // See: https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy
+              "script-src 'self' https://challenges.cloudflare.com",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https:",
               "font-src 'self' data:",
-              "connect-src 'self' https://*.sentry.io https://challenges.cloudflare.com",
+              "connect-src 'self' https://o4508515203874816.ingest.de.sentry.io https://challenges.cloudflare.com",
               "frame-src 'self' https://challenges.cloudflare.com",
               "object-src 'none'",
               "base-uri 'self'",

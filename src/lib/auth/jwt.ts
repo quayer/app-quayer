@@ -10,9 +10,21 @@ import { UserRole, OrganizationRole } from './roles';
 /**
  * JWT Secrets - Usar variáveis de ambiente em produção
  */
+const KNOWN_PLACEHOLDERS = [
+  'your_random_secret_key_here_change_in_production',
+  'change_me_to_random_64_chars',
+];
+
+function validateSecret(name: string, secret: string): void {
+  if (secret.length < 32 || KNOWN_PLACEHOLDERS.includes(secret)) {
+    throw new Error(`[Auth] ${name} must be at least 32 characters and cannot be a placeholder value.`);
+  }
+}
+
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET environment variable is required');
+  validateSecret('JWT_SECRET', secret);
   return secret;
 }
 const JWT_SECRET = getJwtSecret();
@@ -20,6 +32,7 @@ const JWT_SECRET = getJwtSecret();
 function getJwtRefreshSecret(): string {
   const secret = process.env.JWT_REFRESH_SECRET;
   if (!secret) throw new Error('JWT_REFRESH_SECRET environment variable is required');
+  validateSecret('JWT_REFRESH_SECRET', secret);
   return secret;
 }
 const JWT_REFRESH_SECRET = getJwtRefreshSecret();
@@ -27,6 +40,7 @@ const JWT_REFRESH_SECRET = getJwtRefreshSecret();
 function getJwtMagicLinkSecret(): string {
   const secret = process.env.JWT_MAGIC_LINK_SECRET;
   if (!secret) throw new Error('[Security] JWT_MAGIC_LINK_SECRET is required');
+  validateSecret('JWT_MAGIC_LINK_SECRET', secret);
   return secret;
 }
 const JWT_MAGIC_LINK_SECRET = getJwtMagicLinkSecret();
@@ -34,6 +48,7 @@ const JWT_MAGIC_LINK_SECRET = getJwtMagicLinkSecret();
 function getJwt2faChallengeSecret(): string {
   const secret = process.env.JWT_2FA_CHALLENGE_SECRET;
   if (!secret) throw new Error('[Security] JWT_2FA_CHALLENGE_SECRET is required');
+  validateSecret('JWT_2FA_CHALLENGE_SECRET', secret);
   return secret;
 }
 const JWT_2FA_CHALLENGE_SECRET = getJwt2faChallengeSecret();
@@ -158,6 +173,7 @@ export function signRefreshToken(
 export function verifyAccessToken(token: string): AccessTokenPayload | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET, {
+      algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;
@@ -167,8 +183,8 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
     }
 
     return decoded as AccessTokenPayload;
-  } catch (error) {
-    console.error('Error verifying access token:', error);
+  } catch {
+    console.error('[Auth] Token verification failed');
     return null;
   }
 }
@@ -190,6 +206,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
 export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   try {
     const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
+      algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;
@@ -199,8 +216,8 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
     }
 
     return decoded as RefreshTokenPayload;
-  } catch (error) {
-    console.error('Error verifying refresh token:', error);
+  } catch {
+    console.error('[Auth] Token verification failed');
     return null;
   }
 }
@@ -214,8 +231,8 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
 export function decodeToken(token: string): JwtPayload | null {
   try {
     return jwt.decode(token) as JwtPayload;
-  } catch (error) {
-    console.error('Error decoding token:', error);
+  } catch {
+    console.error('[JWT] Token decode failed');
     return null;
   }
 }
@@ -337,6 +354,7 @@ export function signMagicLinkToken(
 export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | null {
   try {
     const decoded = jwt.verify(token, JWT_MAGIC_LINK_SECRET, {
+      algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-magic-link',
     }) as JwtPayload;
@@ -346,8 +364,8 @@ export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | nul
     }
 
     return decoded as MagicLinkTokenPayload;
-  } catch (error) {
-    console.error('Error verifying magic link token:', error);
+  } catch {
+    console.error('[Auth] Token verification failed');
     return null;
   }
 }
@@ -355,6 +373,7 @@ export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | nul
 export function validateBearerToken(token: string): { userId: string; currentOrgId?: string } | null {
   try {
     const payload = jwt.verify(token, JWT_SECRET, {
+      algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
     }) as JwtPayload;

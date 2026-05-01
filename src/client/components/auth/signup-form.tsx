@@ -244,7 +244,7 @@ export function SignupForm({
                 id="email"
                 name="email"
                 value={email}
-                onChange={(v) => { setEmail(v); setIsPhone(looksLikePhone(v)); if (emailError) setEmailError("") }}
+                onPhoneChange={(v) => { setEmail(v); setIsPhone(looksLikePhone(v)); if (emailError) setEmailError("") }}
                 disabled={isLoading}
                 placeholder="+55 11 99999-9999"
               />

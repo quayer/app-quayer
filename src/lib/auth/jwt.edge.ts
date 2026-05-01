@@ -34,6 +34,7 @@ const JWT_SECRET = getJwtSecret()
 export async function verifyAccessToken(token: string): Promise<AccessTokenPayload | null> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET, {
+      algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
     })

@@ -115,11 +115,8 @@ export function clearAuthCookies(response: any) {
  * 2FA Challenge: sign a short-lived JWT (5 min) that proves first-factor passed.
  */
 export function sign2faChallenge(userId: string): string {
-  if (!process.env.JWT_2FA_CHALLENGE_SECRET) {
-    console.warn('[Security] JWT_2FA_CHALLENGE_SECRET is not set — falling back to JWT_SECRET for 2FA challenges');
-  }
-  const secret = process.env.JWT_2FA_CHALLENGE_SECRET ?? process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET is required');
+  const secret = process.env.JWT_2FA_CHALLENGE_SECRET;
+  if (!secret) throw new Error('[Auth] JWT_2FA_CHALLENGE_SECRET is required and must be set.');
   return jwt.sign({ userId, type: '2fa-challenge' }, secret, { expiresIn: '5m', issuer: 'quayer', audience: 'quayer-2fa' });
 }
 
@@ -128,11 +125,8 @@ export function sign2faChallenge(userId: string): string {
  */
 export function verify2faChallenge(token: string): { userId: string } | null {
   try {
-    if (!process.env.JWT_2FA_CHALLENGE_SECRET) {
-      console.warn('[Security] JWT_2FA_CHALLENGE_SECRET is not set — falling back to JWT_SECRET for 2FA challenges');
-    }
-    const secret = process.env.JWT_2FA_CHALLENGE_SECRET ?? process.env.JWT_SECRET;
-    if (!secret) throw new Error('JWT_SECRET is required');
+    const secret = process.env.JWT_2FA_CHALLENGE_SECRET;
+    if (!secret) throw new Error('[Auth] JWT_2FA_CHALLENGE_SECRET is required and must be set.');
     const payload = jwt.verify(token, secret, { issuer: 'quayer', audience: 'quayer-2fa' }) as any;
     if (payload.type !== '2fa-challenge' || !payload.userId) return null;
     return { userId: payload.userId };

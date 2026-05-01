@@ -156,13 +156,6 @@ export const authProcedure = igniter.procedure({
         organizationId: payload.currentOrgId,
       };
 
-      // Adicionar headers de autenticação à request para uso em controllers
-      request.headers.set('x-user-id', user.id);
-      request.headers.set('x-user-role', user.role);
-      if (payload.currentOrgId) {
-        request.headers.set('x-org-id', payload.currentOrgId);
-      }
-
       // Resolve CustomRole if user has customRoleId in current org
       let customRoleCtx: CustomRoleContext | null = null;
       const currentUserOrg = user.organizations.find(
@@ -282,13 +275,6 @@ export const adminProcedure = igniter.procedure({
         ...user,
         organizationId: payload.currentOrgId,
       };
-
-      // Adicionar headers de autenticação à request para uso em controllers
-      request.headers.set('x-user-id', user.id);
-      request.headers.set('x-user-role', user.role);
-      if (payload.currentOrgId) {
-        request.headers.set('x-org-id', payload.currentOrgId);
-      }
 
       // Retornar contexto com usuário admin (admins don't use CustomRole)
       return {

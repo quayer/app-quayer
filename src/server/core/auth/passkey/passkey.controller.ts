@@ -72,6 +72,18 @@ import {
   parseDeviceName, registerDeviceSession, autoJoinByVerifiedDomain,
 } from "../_shared/helpers";
 
+function getWebAuthnConfig() {
+  const rpId = process.env.RP_ID;
+  const origin = process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.NODE_ENV === 'production' && (!rpId || !origin)) {
+    throw new Error('[Security] RP_ID and NEXT_PUBLIC_APP_URL are required in production for WebAuthn');
+  }
+  return {
+    rpId: rpId || 'localhost',
+    origin: origin || 'http://localhost:3000',
+  };
+}
+
 export const passkeyController = igniter.controller({
   name: "auth-passkey",
   path: "/auth",
@@ -93,7 +105,7 @@ export const passkeyController = igniter.controller({
           where: { userId: user.id },
         });
 
-        const rpID = process.env.RP_ID || 'localhost';
+        const { rpId: rpID } = getWebAuthnConfig();
         const options = await generateRegistrationOptions({
           rpName: process.env.APP_NAME || 'Quayer',
           rpID,
@@ -144,8 +156,7 @@ export const passkeyController = igniter.controller({
         });
         if (!challenge) return response.badRequest('Challenge não encontrado ou expirado');
 
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.RP_ID || 'localhost';
+        const { rpId: rpID, origin } = getWebAuthnConfig();
 
         const { verified, registrationInfo } = await verifyRegistrationResponse({
           response: request.body.response as any,
@@ -272,10 +283,10 @@ export const passkeyController = igniter.controller({
         });
 
         if (!user || user.passkeyCredentials.length === 0) {
-          return response.badRequest('Nenhuma passkey registrada para este email');
+          return response.badRequest('Não foi possível completar a autenticação com passkey');
         }
 
-        const rpID = process.env.RP_ID || 'localhost';
+        const { rpId: rpID } = getWebAuthnConfig();
         const options = await generateAuthenticationOptions({
           rpID,
           allowCredentials: user.passkeyCredentials.map(cred => ({
@@ -333,7 +344,7 @@ export const passkeyController = igniter.controller({
           },
         });
 
-        if (!user) return response.badRequest('Usuário não encontrado');
+        if (!user) return response.badRequest('Não foi possível completar a autenticação com passkey');
 
         const challenge = await db.passkeyChallenge.findFirst({
           where: { userId: user.id, type: 'authentication', expiresAt: { gt: new Date() } },
@@ -346,8 +357,7 @@ export const passkeyController = igniter.controller({
         );
         if (!credential) return response.badRequest('Passkey não encontrada');
 
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const rpID = process.env.RP_ID || 'localhost';
+        const { rpId: rpID, origin } = getWebAuthnConfig();
 
         const { verified, authenticationInfo } = await verifyAuthenticationResponse({
           response: request.body.response as any,
@@ -427,7 +437,7 @@ export const passkeyController = igniter.controller({
         }
 
         const options = await generateAuthenticationOptions({
-          rpID: process.env.RP_ID || 'localhost',
+          rpID: getWebAuthnConfig().rpId,
           allowCredentials: [],
           userVerification: 'preferred',
         });
@@ -486,11 +496,12 @@ export const passkeyController = igniter.controller({
         const user = credential.user;
 
         // 3. Verify authentication response
+        const { rpId: conditionalRpId, origin: conditionalOrigin } = getWebAuthnConfig();
         const { verified, authenticationInfo } = await verifyAuthenticationResponse({
           response: body.response as any,
           expectedChallenge: challenge.challenge,
-          expectedOrigin: process.env.EXPECTED_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-          expectedRPID: process.env.RP_ID || 'localhost',
+          expectedOrigin: conditionalOrigin,
+          expectedRPID: conditionalRpId,
           credential: {
             id: credential.credentialId,
             publicKey: new Uint8Array(credential.publicKey as Buffer),

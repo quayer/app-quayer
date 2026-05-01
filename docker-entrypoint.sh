@@ -3,8 +3,8 @@ set -e
 
 echo "🚀 Starting Quayer Application..."
 
-# Run database migrations if DATABASE_URL is set
-if [ -n "$DATABASE_URL" ]; then
+# Run database migrations if DATABASE_URL is set and SKIP_MIGRATIONS is not true
+if [ -n "$DATABASE_URL" ] && [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
 
     echo "📦 Running database migrations..."
     node ./prisma/migrate.js

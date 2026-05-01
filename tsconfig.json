@@ -44,6 +44,21 @@
     "test/**/*.tsx",
     "docs/**",
     "**/*-WIN-QVULKCTEEEN.ts",
-    "**/*-WIN-QVULKCTEEEN.tsx"
+    "**/*-WIN-QVULKCTEEEN.tsx",
+    "src/app/admin/integracoes",
+    "src/app/*/signup/verify-magic",
+    "src/instrumentation.ts",
+    "src/client/components/admin-settings/UAZapiSettings.tsx",
+    "src/client/components/auth/onboarding-form.tsx",
+    "src/client/components/auth/onboarding-v3.tsx",
+    "src/client/components/home/home-page.tsx",
+    "src/client/components/projetos/chat-panel.tsx",
+    "src/client/components/projetos/projetos-list.tsx",
+    "src/client/components/projetos/cards/tool-results/instagram-setup-wizard.result.tsx",
+    "src/client/components/projetos/preview/tab-registry.tsx",
+    "src/client/components/projetos/preview/tabs/agent/playground/playground-tab.tsx",
+    "src/client/components/projetos/preview/tabs/deploy/deploy-tab.tsx",
+    "src/client/components/projetos/preview/tabs/overview/overview-tab.tsx",
+    "src/client/components/admin-settings/SecuritySettings.tsx"
   ]
 }

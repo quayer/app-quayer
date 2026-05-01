@@ -86,6 +86,9 @@ services:
       # Direct DB URL for migrations (Supabase: direct connection, local: same as DATABASE_URL)
       - DIRECT_DATABASE_URL=${DIRECT_DATABASE_URL:-postgresql://${DB_USER}:${DB_PASSWORD}@quayer-postgres:5432/${DB_NAME}?schema=public}
 
+      # Migrations (set to true when running one-shot migration job before compose up)
+      - SKIP_MIGRATIONS=${SKIP_MIGRATIONS:-false}
+
       # Message Concatenation
       - MESSAGE_CONCAT_TIMEOUT=${MESSAGE_CONCAT_TIMEOUT:-8000}
       - MESSAGE_CONCAT_MAX=${MESSAGE_CONCAT_MAX:-10}
@@ -161,8 +164,8 @@ services:
     image: redis:7-alpine
     container_name: quayer-redis
     restart: always
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - /opt/quayer/data/redis:/data
     networks:

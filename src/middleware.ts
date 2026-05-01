@@ -55,6 +55,26 @@ const PROTECTED_PATHS = [
 const ADMIN_ONLY_PATHS = ['/admin', '/docs'];
 
 /**
+ * Builds a per-request Content-Security-Policy header value.
+ * The nonce eliminates the need for 'unsafe-inline' in script-src.
+ */
+function buildCSP(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://o4508515203874816.ingest.de.sentry.io https://challenges.cloudflare.com",
+    "frame-src 'self' https://challenges.cloudflare.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
+
+/**
  * Middleware principal
  */
 export async function middleware(request: NextRequest) {
@@ -77,11 +97,17 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   SENSITIVE_HEADERS.forEach((h) => requestHeaders.delete(h));
 
+  // Generate per-request nonce for CSP (available in Edge runtime without imports)
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  requestHeaders.set('x-nonce', nonce);
+
   // 1. Permitir rotas públicas sem autenticação
   // startsWith sozinho daria match em prefixos parciais (ex: '/login' matcharia
   // '/login-admin'). Verificamos o separador de segmento para evitar bypass.
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'))) {
-    return NextResponse.next({ request: { headers: requestHeaders } });
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set('Content-Security-Policy', buildCSP(nonce));
+    return response;
   }
 
   // 2. Verificar se é rota protegida
@@ -92,7 +118,9 @@ export async function middleware(request: NextRequest) {
     PROTECTED_PATHS.some((path) => pathname.startsWith(path));
 
   if (!isProtected) {
-    return NextResponse.next({ request: { headers: requestHeaders } });
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set('Content-Security-Policy', buildCSP(nonce));
+    return response;
   }
 
   // 3. Extrair token (cookie ou header Authorization)
@@ -176,11 +204,13 @@ export async function middleware(request: NextRequest) {
   }
 
   // 10. Continuar com headers atualizados
-  return NextResponse.next({
+  const response = NextResponse.next({
     request: {
       headers: requestHeaders,
     },
   });
+  response.headers.set('Content-Security-Policy', buildCSP(nonce));
+  return response;
 }
 
 /**
