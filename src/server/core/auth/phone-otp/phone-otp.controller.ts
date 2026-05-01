@@ -36,6 +36,15 @@ export const phoneOtpController = igniter.controller({
         const normalized = normalizePhone(request.body.phone)
         const clientIp = getClientIdentifier(request)
 
+        // Se o usuário com esse telefone tem 2FA ativo e desabilitou OTP por telefone, bloquear
+        const phoneUser = await db.user.findFirst({
+          where: { phone: normalized },
+          select: { twoFactorEnabled: true, preferences: { select: { otpPhoneDisabled: true } } },
+        });
+        if (phoneUser?.twoFactorEnabled && phoneUser.preferences?.otpPhoneDisabled) {
+          return response.badRequest('OTP por telefone desabilitado. Use seu aplicativo autenticador para fazer login.')
+        }
+
         // Rate-limit: 3 por telefone/15min, 5 por IP/hora
         const rateLimitResult = await checkOtpRateLimit(normalized, clientIp)
         if (!rateLimitResult.success) {

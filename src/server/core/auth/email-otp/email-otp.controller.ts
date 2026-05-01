@@ -401,7 +401,18 @@ export const emailOtpController = igniter.controller({
         }
 
         // Buscar usuário
-        const user = await db.user.findUnique({ where: { email } });
+        const user = await db.user.findUnique({
+          where: { email },
+          include: { preferences: { select: { otpEmailDisabled: true } } },
+        });
+
+        // Se o usuário tem 2FA ativo e desabilitou OTP por email, bloquear
+        if (user && user.twoFactorEnabled && user.preferences?.otpEmailDisabled) {
+          return response.status(403).json({
+            error: 'OTP por email desabilitado. Use seu aplicativo autenticador para fazer login.',
+            code: 'OTP_EMAIL_DISABLED',
+          });
+        }
 
         // 🚀 NOVO: Se usuário não existe, enviar OTP de SIGNUP automaticamente
         if (!user) {
