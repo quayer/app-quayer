@@ -56,15 +56,20 @@ jobs:
 
             echo "=== Iniciando Deploy Quayer ==="
 
-            # 1. Verificar presenca do repositorio e .env
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "Repositorio nao encontrado. Clonando..."
-              rm -rf "$APP_DIR"
-              mkdir -p "$APP_DIR"
-              git clone --depth 1 --single-branch --branch ralph/builder-architecture-patterns https://github.com/quayer/app-quayer.git "$APP_DIR"
-              cd "$APP_DIR"
-            else
-              cd "$APP_DIR"
+            # 1. Verificar .env e fazer fresh clone (evita problemas de permissao no .git)
+            if [ -f "$APP_DIR/.env" ]; then
+              cp "$APP_DIR/.env" /tmp/quayer-env-backup
+            fi
+
+            echo "Clonando codigo (fresh clone)..."
+            rm -rf "$APP_DIR"
+            mkdir -p "$APP_DIR"
+            git clone --depth 1 --single-branch --branch ralph/builder-architecture-patterns https://github.com/quayer/app-quayer.git "$APP_DIR"
+            cd "$APP_DIR"
+
+            if [ -f /tmp/quayer-env-backup ]; then
+              cp /tmp/quayer-env-backup .env
+              rm /tmp/quayer-env-backup
             fi
 
             if [ ! -f .env ]; then
@@ -101,12 +106,7 @@ jobs:
             # Manter apenas os 7 backups mais recentes
             ls -t "$BACKUP_DIR"/pre-deploy-*.sql.gz 2>/dev/null | tail -n +8 | xargs rm -f || true
 
-            # 3. Atualizar codigo
-            echo "Atualizando codigo..."
-            git fetch --depth 1 origin ralph/builder-architecture-patterns
-            git reset --hard origin/ralph/builder-architecture-patterns
-            git clean -fd -e .env -e data/ -e backups/
-            git pull origin ralph/builder-architecture-patterns
+            # 3. Codigo ja atualizado no fresh clone acima
 
             # 4. Infraestrutura
             docker network inspect supabase_default > /dev/null 2>&1 || docker network create supabase_default
