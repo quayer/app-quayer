@@ -27,6 +27,7 @@ export interface ExecuteDeployFlowInput {
   projectId: string
   promptVersionId: string
   userId: string
+  organizationId: string
 }
 
 type BuilderDeploymentDelegate = {
@@ -78,6 +79,9 @@ export async function executeDeployFlow(
 
   if (!project) {
     throw new Error(`Projeto ${input.projectId} não encontrado`)
+  }
+  if (project.organizationId !== input.organizationId) {
+    throw new Error('Projeto não pertence à organização ativa')
   }
   if (!project.aiAgentId) {
     throw new Error(

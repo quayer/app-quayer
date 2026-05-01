@@ -329,6 +329,7 @@ export const deployRunnerSubAgent: SubAgent<
           projectId: parsed.data.projectId,
           promptVersionId: parsed.data.promptVersionId,
           userId: context.userId,
+          organizationId: context.organizationId,
         })
 
         // 5a. Saga completed — `status === 'live'` is the happy signal,

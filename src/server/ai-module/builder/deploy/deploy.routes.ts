@@ -94,6 +94,7 @@ const publish = igniter.mutation({
         projectId,
         promptVersionId,
         userId: user.id,
+        organizationId: user.currentOrgId,
       })
       return response.json({
         success: true,
