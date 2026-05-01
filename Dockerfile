@@ -103,7 +103,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modul
 # Install pg fresh in runner stage — resolves all transitive deps correctly
 # (migrate.js uses pg directly and needs the full dependency tree)
 USER root
-RUN npm install --omit=dev --ignore-scripts --no-save --prefix /app pg@8 \
+RUN npm install --omit=dev --ignore-scripts --no-save --legacy-peer-deps --prefix /app pg@8 \
     && chown -R nextjs:nodejs /app/node_modules/pg /app/node_modules/pg-* /app/node_modules/postgres-* /app/node_modules/xtend /app/node_modules/pg-int8 /app/node_modules/split2 2>/dev/null || true
 USER nextjs
 
