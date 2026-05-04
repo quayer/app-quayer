@@ -155,6 +155,7 @@ jobs:
         env:
           CF_TUNNEL_HOMOL_TOKEN: ${{ secrets.CF_TUNNEL_HOMOL_TOKEN }}
           DEPLOY_IMAGE: ${{ needs.build.outputs.full_image }}
+          DEPLOY_REF_NAME: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           SKIP_BACKUP: ${{ github.event.inputs.skip_backup }}
@@ -163,7 +164,7 @@ jobs:
           username: ${{ secrets.HOMOL_USER }}
           key: ${{ secrets.HOMOL_SSH_KEY }}
           port: ${{ secrets.HOMOL_SSH_PORT }}
-          envs: CF_TUNNEL_HOMOL_TOKEN,DEPLOY_IMAGE,GITHUB_TOKEN,GITHUB_ACTOR,SKIP_BACKUP
+          envs: CF_TUNNEL_HOMOL_TOKEN,DEPLOY_IMAGE,DEPLOY_REF_NAME,GITHUB_TOKEN,GITHUB_ACTOR,SKIP_BACKUP
           command_timeout: 20m
           script: |
             set -e
@@ -232,10 +233,10 @@ jobs:
               fi
             fi
 
-            # Atualizar configs do repo (compose.homol.yml, entrypoint, prisma)
+            # Atualizar configs do repo do mesmo ref que gerou a imagem.
             echo ">> Atualizando configs"
-            git fetch --depth 1 origin develop 2>/dev/null || true
-            git reset --hard origin/develop 2>/dev/null || true
+            git fetch --depth 1 origin "$DEPLOY_REF_NAME" 2>/dev/null || git fetch --depth 1 origin develop 2>/dev/null || true
+            git reset --hard FETCH_HEAD 2>/dev/null || git reset --hard origin/develop 2>/dev/null || true
             git clean -fd -e .env.homol -e data/ -e backups/ 2>/dev/null || true
 
             # Pull da imagem pré-buildada no runner (sem docker build no servidor!)
