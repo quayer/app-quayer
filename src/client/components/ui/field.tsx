@@ -25,8 +25,19 @@ const FieldGroup = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 )
 FieldGroup.displayName = 'FieldGroup'
 
-const FieldSeparator = React.forwardRef<HTMLHRElement, React.HTMLAttributes<HTMLHRElement>>(
-  ({ className, ...props }, ref) => <hr ref={ref} className={cn('border-border', className)} {...props} />
+const FieldSeparator = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ children, className, ...props }, ref) => (
+    <div
+      ref={ref}
+      role="separator"
+      className={cn('flex items-center gap-3 text-xs uppercase text-muted-foreground', className)}
+      {...props}
+    >
+      <div className="h-px flex-1 border-t border-border" />
+      {children ? <span className="shrink-0">{children}</span> : null}
+      <div className="h-px flex-1 border-t border-border" />
+    </div>
+  )
 )
 FieldSeparator.displayName = 'FieldSeparator'
 
