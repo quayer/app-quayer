@@ -86,9 +86,10 @@ function createWrapper() {
       mutations: { retry: false },
     },
   })
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+  function TestQueryClientProvider({ children }: { children: React.ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  }
+  return TestQueryClientProvider
 }
 
 describe('LoginFormFinal', () => {
