@@ -7,6 +7,16 @@
 import { database } from '@/server/services/database'
 import { LogLevel } from '@prisma/client'
 
+type LogEntry = Awaited<ReturnType<typeof database.logEntry.findMany>>[number]
+type LangChainModule = Record<string, new (...args: any[]) => any>
+
+function importOptionalModule<T>(specifier: string): Promise<T> {
+  const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+    specifier: string,
+  ) => Promise<T>
+  return dynamicImport(specifier)
+}
+
 export interface LogPattern {
   type: string
   description: string
@@ -39,10 +49,8 @@ export interface AnalysisResult {
 }
 
 class AILogAnalyzer {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private model: any = null
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async getModel(): Promise<any> {
     if (!this.model) {
       const apiKey = process.env.OPENAI_API_KEY
@@ -50,7 +58,8 @@ class AILogAnalyzer {
         throw new Error('OPENAI_API_KEY not configured')
       }
       // webpackIgnore: true keeps this out of the build bundle (optional dep)
-      const { ChatOpenAI } = await import(/* webpackIgnore: true */ '@langchain/openai')
+      const { ChatOpenAI } =
+        await importOptionalModule<LangChainModule>('@langchain/openai')
       this.model = new ChatOpenAI({
         modelName: 'gpt-4o',
         temperature: 0.3,
@@ -130,7 +139,7 @@ class AILogAnalyzer {
 
     // Call AI for analysis
     try {
-      const model = this.getModel()
+      const model = await this.getModel()
 
       const systemPrompt = `Você é um especialista em análise de logs de sistemas web.
 Analise os logs fornecidos e identifique:
@@ -164,7 +173,8 @@ Responda SEMPRE em JSON válido com esta estrutura:
   "overallSeverity": 1-10
 }`
 
-      const { HumanMessage, SystemMessage } = await import(/* webpackIgnore: true */ '@langchain/core/messages')
+      const { HumanMessage, SystemMessage } =
+        await importOptionalModule<LangChainModule>('@langchain/core/messages')
       const response = await model.invoke([
         new SystemMessage(systemPrompt),
         new HumanMessage(`Analise estes logs do sistema:\n\n${logSummary}`),
@@ -236,7 +246,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
     }
   }
 
-  private prepareLogSummary(logs: any[]): string {
+  private prepareLogSummary(logs: LogEntry[]): string {
     // Group logs by level and source for AI analysis
     const grouped = logs.reduce((acc, log) => {
       const key = `${log.level}:${log.source}`
@@ -257,7 +267,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
     return JSON.stringify(grouped, null, 2)
   }
 
-  private detectBasicPatterns(logs: any[]): LogPattern[] {
+  private detectBasicPatterns(logs: LogEntry[]): LogPattern[] {
     const patterns: LogPattern[] = []
 
     // Detect repeated errors
@@ -286,7 +296,7 @@ Responda SEMPRE em JSON válido com esta estrutura:
     return patterns
   }
 
-  private generateBasicSuggestions(logs: any[], errorRate: number): string[] {
+  private generateBasicSuggestions(logs: LogEntry[], errorRate: number): string[] {
     const suggestions: string[] = []
 
     if (errorRate > 10) {
@@ -314,9 +324,10 @@ Responda SEMPRE em JSON válido com esta estrutura:
     }
 
     try {
-      const model = this.getModel()
+      const model = await this.getModel()
 
-      const { HumanMessage, SystemMessage } = await import(/* webpackIgnore: true */ '@langchain/core/messages')
+      const { HumanMessage, SystemMessage } =
+        await importOptionalModule<LangChainModule>('@langchain/core/messages')
       const response = await model.invoke([
         new SystemMessage(`Você é um especialista em debugging. Analise este erro e forneça:
 1. Análise detalhada do problema

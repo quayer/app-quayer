@@ -21,6 +21,10 @@ interface ProjetoPageProps {
   params: Promise<{ id: string }>
 }
 
+type InitialBuilderMessage = Awaited<ReturnType<typeof getInitialMessages>>[number]
+type ProjectDetail = NonNullable<Awaited<ReturnType<typeof getProjectDetail>>>
+type ProjectDeployment = ProjectDetail['deployments'][number]
+
 // ------------------------------------------------------------------
 // Auth helper: middleware injects x-user-id and x-current-org-id after JWT verify.
 // ------------------------------------------------------------------
@@ -54,12 +58,12 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
   // Cast Prisma output into the stable ChatMessage contract.
   const initialMessages: ChatMessage[] = rawMessages
     .filter(
-      (m) =>
+      (m: InitialBuilderMessage) =>
         m.role === 'user' ||
         m.role === 'assistant' ||
         m.role === 'system_banner',
     )
-    .map((m) => ({
+    .map((m: InitialBuilderMessage) => ({
       id: m.id,
       role: m.role as ChatMessage['role'],
       content: m.content,
@@ -76,7 +80,9 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
   // backward compat with projects deployed before the channel picker was added.
   const hasWhatsAppConnection =
     (project.aiAgent?.deployments?.length ?? 0) > 0 ||
-    project.deployments.some((d) => d.status === 'live' && d.connectionId != null)
+    project.deployments.some(
+      (d: ProjectDeployment) => d.status === 'live' && d.connectionId != null,
+    )
 
   const workspaceProject: WorkspaceProject = {
     id: project.id,
