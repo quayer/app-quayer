@@ -13,14 +13,24 @@ export default function SignupVerifyV2Client() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Ler exclusivamente do sessionStorage — nunca de query params para evitar PII na URL
-    const storedEmail = sessionStorage.getItem('signup-email')
-    const storedName = sessionStorage.getItem('signup-name')
+    let isCancelled = false
 
-    if (storedEmail) setEmail(storedEmail)
-    if (storedName) setName(storedName)
+    queueMicrotask(() => {
+      if (isCancelled) return
 
-    setIsLoading(false)
+      // Ler exclusivamente do sessionStorage — nunca de query params para evitar PII na URL
+      const storedEmail = sessionStorage.getItem('signup-email')
+      const storedName = sessionStorage.getItem('signup-name')
+
+      if (storedEmail) setEmail(storedEmail)
+      if (storedName) setName(storedName)
+
+      setIsLoading(false)
+    })
+
+    return () => {
+      isCancelled = true
+    }
   }, [])
 
   if (isLoading) {

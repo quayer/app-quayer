@@ -84,14 +84,24 @@ export function SecuritySettings() {
 
   useEffect(() => {
     if (settings) {
-      setFormData({
-        accessTokenExpiresIn: settings.accessTokenExpiresIn || '15m',
-        refreshTokenExpiresIn: settings.refreshTokenExpiresIn || '7d',
-        logLevel: settings.logLevel || 'info',
-        rateLimitEnabled: settings.rateLimitEnabled ?? true,
-        rateLimitRequests: settings.rateLimitRequests || 100,
-        rateLimitWindow: settings.rateLimitWindow || '1m',
+      let isCancelled = false
+
+      queueMicrotask(() => {
+        if (isCancelled) return
+
+        setFormData({
+          accessTokenExpiresIn: settings.accessTokenExpiresIn || '15m',
+          refreshTokenExpiresIn: settings.refreshTokenExpiresIn || '7d',
+          logLevel: settings.logLevel || 'info',
+          rateLimitEnabled: settings.rateLimitEnabled ?? true,
+          rateLimitRequests: settings.rateLimitRequests || 100,
+          rateLimitWindow: settings.rateLimitWindow || '1m',
+        })
       })
+
+      return () => {
+        isCancelled = true
+      }
     }
   }, [settings])
 

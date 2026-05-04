@@ -66,19 +66,29 @@ export function UAZapiSettings() {
 
   // Update form when data loads - use env defaults as fallback
   useEffect(() => {
-    if (data) {
-      setFormData({
-        baseUrl: data.baseUrl || envDefaults?.baseUrl || '',
-        adminToken: data.adminToken || envDefaults?.adminToken || '',
-        webhookUrl: data.webhookUrl || envDefaults?.webhookUrl || '',
-      })
-    } else if (envDefaults) {
-      // If no database data, use env defaults
-      setFormData({
-        baseUrl: envDefaults.baseUrl ?? '',
-        adminToken: envDefaults.adminToken ?? '',
-        webhookUrl: envDefaults.webhookUrl ?? '',
-      })
+    let isCancelled = false
+
+    queueMicrotask(() => {
+      if (isCancelled) return
+
+      if (data) {
+        setFormData({
+          baseUrl: data.baseUrl || envDefaults?.baseUrl || '',
+          adminToken: data.adminToken || envDefaults?.adminToken || '',
+          webhookUrl: data.webhookUrl || envDefaults?.webhookUrl || '',
+        })
+      } else if (envDefaults) {
+        // If no database data, use env defaults
+        setFormData({
+          baseUrl: envDefaults.baseUrl ?? '',
+          adminToken: envDefaults.adminToken ?? '',
+          webhookUrl: envDefaults.webhookUrl ?? '',
+        })
+      }
+    })
+
+    return () => {
+      isCancelled = true
     }
   }, [data, envDefaults])
 

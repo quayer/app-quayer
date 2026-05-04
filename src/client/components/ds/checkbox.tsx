@@ -9,14 +9,9 @@ export interface CheckboxProps
   helper?: string
 }
 
-let checkboxUid = 0
 function useUid(prefix: string): string {
-  const ref = React.useRef<string | null>(null)
-  if (ref.current === null) {
-    checkboxUid += 1
-    ref.current = `${prefix}-${checkboxUid}`
-  }
-  return ref.current
+  const uid = React.useId()
+  return `${prefix}-${uid}`
 }
 
 export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
