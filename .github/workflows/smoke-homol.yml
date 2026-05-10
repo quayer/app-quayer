@@ -11,6 +11,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -42,8 +44,8 @@ jobs:
           if-no-files-found: ignore
 
       - name: Notify Discord on failure
-        if: failure() && secrets.DISCORD_WEBHOOK_URL != ''
+        if: failure() && env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -sS -H "Content-Type: application/json" \
             -d '{"content":"Smoke HOMOL FAILED on commit '"${{ github.sha }}"'"}' \
-            "${{ secrets.DISCORD_WEBHOOK_URL }}" || true
+            "$DISCORD_WEBHOOK_URL" || true
