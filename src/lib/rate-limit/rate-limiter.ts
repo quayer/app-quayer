@@ -1,11 +1,14 @@
 /**
  * Rate Limiter Service
  *
- * Sistema de rate limiting usando Redis (Upstash ou local)
- * Implementa sliding window algorithm
+ * Sliding window via Redis sorted set (ZSET com timestamp como score+member).
+ * Usa o singleton ioredis de src/server/services/redis.ts (Redis TCP local
+ * do docker compose — antes era Upstash REST, migrado para reduzir latência
+ * e usar a mesma instância já provisionada).
  */
 
-import { Redis } from '@upstash/redis';
+import type { Redis } from 'ioredis';
+import { getRedis } from '@/server/services/redis';
 
 /**
  * Configuração do Rate Limiter
@@ -77,18 +80,17 @@ export class RateLimiter {
       failClosedInProduction: config.failClosedInProduction ?? false,
     };
 
-    // Tentar conectar ao Upstash Redis
-    const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
-    const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (upstashUrl && upstashToken) {
-      this.redis = new Redis({
-        url: upstashUrl,
-        token: upstashToken,
-      });
-      console.log('✅ Rate Limiter configured with Upstash Redis');
+    // Em homol/prod REDIS_URL é sempre setado pelo compose (homol-quayer-redis
+    // / quayer-redis). Em dev local sem Redis rodando, getRedis() ainda
+    // devolve um client com lazyConnect — operações falham e caem no
+    // try/catch (fail-open ou fail-closed conforme config).
+    if (process.env.REDIS_URL) {
+      this.redis = getRedis();
     } else {
-      console.warn('⚠️  Upstash Redis not configured. Rate limiting disabled.');
+      console.warn(
+        '[RateLimiter] REDIS_URL not set — rate limiting disabled (dev). ' +
+        'Set REDIS_URL in .env or run docker compose up redis.'
+      );
     }
   }
 
@@ -101,7 +103,7 @@ export class RateLimiter {
   async check(identifier: string): Promise<RateLimitResult> {
     // Se Redis não configurado, verificar política de fail-closed
     if (!this.redis) {
-      if (this.config.failClosedInProduction && process.env.NODE_ENV === 'production') {
+      if (this.config.failClosedInProduction && (process.env.NEXT_PUBLIC_APP_ENV ?? process.env.NODE_ENV) === 'production') {
         return { success: false, remaining: 0, limit: this.config.limit, reset: Date.now() + this.config.window * 1000, retryAfter: this.config.window };
       }
       return {
@@ -117,25 +119,29 @@ export class RateLimiter {
     const windowStart = now - this.config.window * 1000;
 
     try {
-      // Usar pipeline para operações atômicas
+      // Pipeline ioredis: zadd é posicional (key, score, member) — diferente
+      // do @upstash/redis que aceitava { score, member } como objeto.
+      // member precisa ser único por chamada — ZADD com mesmo member é no-op,
+      // o que faria duas chamadas no mesmo ms colidirem.
+      const member = `${now}-${Math.random().toString(36).slice(2, 8)}`;
       const pipeline = this.redis.pipeline();
-
-      // 1. Remover timestamps antigos
       pipeline.zremrangebyscore(key, 0, windowStart);
-
-      // 2. Contar requisições na janela
       pipeline.zcard(key);
-
-      // 3. Adicionar timestamp atual
-      pipeline.zadd(key, { score: now, member: now });
-
-      // 4. Definir expiração da chave
+      pipeline.zadd(key, now, member);
       pipeline.expire(key, this.config.window);
 
+      // ATENÇÃO: ioredis retorna `[ [err, value], ... ]` (tuplas), enquanto
+      // @upstash/redis retornava `[ value, ... ]` (flat). Ler results[1][1]
+      // — não results[1]. Sem isso, count vira NaN/array e o limiter
+      // silenciosamente deixa passar tudo (fail-open invisível).
       const results = await pipeline.exec();
 
-      // Resultado do ZCARD (índice 1)
-      const count = (results[1] as number) || 0;
+      if (!results) {
+        throw new Error('pipeline.exec returned null');
+      }
+
+      const zcardEntry = results[1];
+      const count = Number(zcardEntry?.[1] ?? 0);
 
       const remaining = Math.max(0, this.config.limit - count - 1);
       const reset = now + this.config.window * 1000;
@@ -159,7 +165,7 @@ export class RateLimiter {
     } catch (error) {
       console.error('Error checking rate limit:', error);
 
-      if (this.config.failClosedInProduction && process.env.NODE_ENV === 'production') {
+      if (this.config.failClosedInProduction && (process.env.NEXT_PUBLIC_APP_ENV ?? process.env.NODE_ENV) === 'production') {
         return { success: false, remaining: 0, limit: this.config.limit, reset: now + this.config.window * 1000, retryAfter: this.config.window };
       }
       return {

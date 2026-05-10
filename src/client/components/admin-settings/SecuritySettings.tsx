@@ -290,8 +290,8 @@ export function SecuritySettings() {
           <Alert role="note">
             <Info className="h-4 w-4" aria-hidden="true" />
             <AlertDescription>
-              O rate limiting está configurado via variáveis de ambiente.
-              Configure UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN para habilitar.
+              O rate limiting usa o Redis TCP local (REDIS_URL) com sliding window.
+              Sem Redis disponível, rotas de auth marcadas como críticas falham fechado em produção.
             </AlertDescription>
           </Alert>
 
