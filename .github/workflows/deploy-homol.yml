@@ -243,7 +243,11 @@ jobs:
               upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_ADMIN_TOKEN         "$HOMOL_UAZAPI_ADMIN_TOKEN"
               upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_INSTANCE_TOKEN      "$HOMOL_UAZAPI_INSTANCE_TOKEN"
               upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_BASE_URL            "$HOMOL_UAZAPI_BASE_URL"
-              upsert_env "$APP_DIR/$ENV_FILE" SENTRY_DSN                 "$HOMOL_SENTRY_DSN"
+              # SENTRY_DSN: temporariamente desligado em homol (Turbopack bug
+              # #87737/#88844 quebra boot quando @sentry/nextjs carrega).
+              # Re-ativar quando upstream corrigir: descomentar a linha abaixo
+              # e remover o hardcoded SENTRY_DSN= em compose.homol.yml.
+              # upsert_env "$APP_DIR/$ENV_FILE" SENTRY_DSN               "$HOMOL_SENTRY_DSN"
               # SIGNUP_ENABLED é fixo em homol — não vem de secret.
               upsert_env "$APP_DIR/$ENV_FILE" SIGNUP_ENABLED             "false"
               # Limpa backups com mais de 30 dias

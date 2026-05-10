@@ -102,8 +102,11 @@ services:
       # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
 
-      # Observability (Sentry)
-      - SENTRY_DSN=${SENTRY_DSN:-}
+      # Observability (Sentry) — TEMPORARIAMENTE DESLIGADO em homol até
+      # corrigir o bug do Turbopack #87737/#88844. Sem isso, qualquer DSN
+      # populado dispara crash no boot ao carregar instrumentation hook.
+      # Hardcoded vazio aqui ignora o que estiver no .env.homol.
+      - SENTRY_DSN=
 
       # Google OAuth (homol usa redirect URI próprio)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
