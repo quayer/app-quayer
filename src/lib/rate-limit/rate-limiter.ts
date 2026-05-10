@@ -188,10 +188,18 @@ export class RateLimiter {
 
 /**
  * Rate limiter para autenticação (login, register)
- * 5 requisições por 15 minutos
+ *
+ * Production: 5 requisições por 15 minutos (proteção real contra brute force).
+ * Outros ambientes (dev/homol): 50 requisições por 15 minutos para não
+ * travar QA e desenvolvimento. Detectamos ambiente via NEXT_PUBLIC_APP_ENV
+ * (definido em deploy-homol.yml/deploy-production.yml) com fallback para
+ * NODE_ENV.
  */
+const isStrictProd =
+  (process.env.NEXT_PUBLIC_APP_ENV ?? process.env.NODE_ENV) === 'production';
+
 export const authRateLimiter = new RateLimiter({
-  limit: 5,
+  limit: isStrictProd ? 5 : 50,
   window: 900, // 15 minutos
   prefix: 'ratelimit:auth',
   failClosedInProduction: true,

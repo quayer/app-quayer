@@ -10,7 +10,7 @@ export function LoginVerifyV2Client() {
   const magicLinkSessionId = searchParams.get('mlsid')
 
   return (
-    <div className="w-full max-w-[420px]">
+    <div className="w-full">
       <LoginOTPForm
         email={email || undefined}
         phone={phone || undefined}

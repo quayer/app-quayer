@@ -26,21 +26,24 @@ export const phoneOtpController = igniter.controller({
       body: phoneOTPSchema,
       use: [turnstileProcedure()],
       handler: async ({ request, response }) => {
-        // Signup gate — este endpoint serve exclusivamente o fluxo de signup
-        // via WhatsApp (usado no signup-form.tsx). verifyLoginOTPPhone foi
-        // removido, então bloquear o envio bloqueia o signup inteiro.
-        if (!isSignupEnabled()) {
-          return response.forbidden(SIGNUP_DISABLED_MESSAGE)
-        }
-
         const normalized = normalizePhone(request.body.phone)
         const clientIp = getClientIdentifier(request)
 
-        // Se o usuário com esse telefone tem 2FA ativo e desabilitou OTP por telefone, bloquear
+        // Lookup do usuário pelo telefone — define se é login (existente)
+        // ou signup (novo). Para 2FA também precisamos das preferences.
         const phoneUser = await db.user.findFirst({
           where: { phone: normalized },
           select: { twoFactorEnabled: true, preferences: { select: { otpPhoneDisabled: true } } },
         });
+
+        // Signup gate aplicado apenas para usuários NOVOS (alinhado com
+        // googleCallback). Usuários existentes podem continuar fazendo login
+        // via WhatsApp mesmo com signup desabilitado.
+        if (!phoneUser && !isSignupEnabled()) {
+          return response.forbidden(SIGNUP_DISABLED_MESSAGE)
+        }
+
+        // Se o usuário com esse telefone tem 2FA ativo e desabilitou OTP por telefone, bloquear
         if (phoneUser?.twoFactorEnabled && phoneUser.preferences?.otpPhoneDisabled) {
           return response.badRequest('OTP por telefone desabilitado. Use seu aplicativo autenticador para fazer login.')
         }
@@ -68,11 +71,22 @@ export const phoneOtpController = igniter.controller({
           },
         })
 
+        let delivered = false
         try {
-          await sendWhatsAppOTP(normalized, code)
+          delivered = await sendWhatsAppOTP(normalized, code)
         } catch (err) {
-          console.error('[loginOTPPhone] sendWhatsAppOTP failed:', err)
-          return response.badRequest('Serviço WhatsApp temporariamente indisponível. Tente fazer login com email.')
+          console.error('[loginOTPPhone] sendWhatsAppOTP threw:', err)
+          delivered = false
+        }
+
+        if (!delivered) {
+          // sendWhatsAppOTP signaled failure (UAZAPI down, env missing, HTTP non-2xx).
+          // The verification code is in the DB, but we should NOT lie to the
+          // client by returning {sent:true} — that strands the user on a verify
+          // screen waiting for a message that will never arrive.
+          return response.badRequest(
+            'Não foi possível enviar o código pelo WhatsApp. Verifique o número e tente novamente, ou use email.'
+          )
         }
 
         return response.success({ sent: true })

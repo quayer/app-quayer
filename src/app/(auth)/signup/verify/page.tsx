@@ -12,9 +12,16 @@ export default async function SignupVerifyPage() {
 
   if (v3) {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={
+        <div className="flex items-center justify-center min-h-[300px]" role="status" aria-live="polite" aria-busy="true" aria-atomic="true">
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-8 w-8 rounded-full border-2 border-ds-border border-t-ds-fg animate-spin" aria-hidden="true" />
+            <span className="text-ds-sm text-ds-fg/70">Carregando...</span>
+          </div>
+        </div>
+      }>
         <AuthShell>
-          <div className="flex w-full max-w-[420px] flex-col gap-10 mx-auto">
+          <div className="flex w-full max-w-[420px] flex-col gap-8 mx-auto">
             <SignupVerifyV2Client />
           </div>
         </AuthShell>
@@ -24,8 +31,11 @@ export default async function SignupVerifyPage() {
 
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-screen" role="status" aria-live="polite" aria-busy="true">
-        <p className="text-foreground/70">Carregando...</p>
+      <div className="flex items-center justify-center min-h-screen" role="status" aria-live="polite" aria-busy="true" aria-atomic="true">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" aria-hidden="true" />
+          <span className="text-sm text-foreground/70">Carregando...</span>
+        </div>
       </div>
     }>
       <SignupVerifyV2Client />

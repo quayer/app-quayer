@@ -109,7 +109,7 @@ export function LoginVerifyMagicClient() {
       <div className="flex w-full max-w-sm flex-col gap-6">
         <Link
           href="/login"
-          className="flex items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm"
+          className="inline-flex min-h-[44px] items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 rounded-sm transition-opacity hover:opacity-80"
           aria-label="Quayer — voltar ao login"
         >
           <Image
@@ -125,18 +125,18 @@ export function LoginVerifyMagicClient() {
         <div className="flex flex-col gap-8">
           {/* Header — live region announces status changes */}
           <div
-            className="space-y-2"
+            className="space-y-3"
             role={status === 'error' ? 'alert' : 'status'}
             aria-live={status === 'error' ? 'assertive' : 'polite'}
             aria-atomic="true"
             aria-busy={status === 'verifying'}
           >
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground leading-tight">
               {status === 'verifying' && 'Verificando login...'}
               {status === 'success' && 'Login realizado!'}
               {status === 'error' && 'Erro na verificação'}
             </h1>
-            <p className="text-sm text-foreground/70">
+            <p className="text-[0.9375rem] text-foreground/70 leading-relaxed">
               {status === 'verifying' && 'Aguarde enquanto verificamos seu link...'}
               {status === 'success' && 'Redirecionando para o dashboard...'}
               {status === 'error' && error}
@@ -144,30 +144,30 @@ export function LoginVerifyMagicClient() {
           </div>
 
           {/* Status icons */}
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-5">
             {status === 'verifying' && (
               <div className="flex flex-col items-center gap-4">
-                <Loader2 className="h-12 w-12 animate-spin text-foreground/60" aria-hidden="true" />
+                <Loader2 className="h-12 w-12 animate-spin text-foreground/70" aria-hidden="true" />
               </div>
             )}
 
             {status === 'success' && (
               <div className="flex flex-col items-center gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
-                  <CheckCircle2 className="h-6 w-6 text-green-500 dark:text-green-400" aria-hidden="true" />
+                  <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400" aria-hidden="true" />
                 </div>
-                <Loader2 className="h-6 w-6 animate-spin text-foreground/60" aria-hidden="true" />
+                <Loader2 className="h-6 w-6 animate-spin text-foreground/70" aria-hidden="true" />
               </div>
             )}
 
             {status === 'error' && (
-              <div className="flex flex-col items-center gap-4 w-full">
+              <div className="flex flex-col items-center gap-5 w-full">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/20">
-                  <XCircle className="h-6 w-6 text-red-500 dark:text-red-400" aria-hidden="true" />
+                  <XCircle className="h-6 w-6 text-red-600 dark:text-red-400" aria-hidden="true" />
                 </div>
                 <Button
                   onClick={() => router.push('/login')}
-                  className="w-full min-h-[44px] bg-foreground text-background hover:bg-foreground/90 border-transparent"
+                  className="w-full min-h-[44px] bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2"
                 >
                   Fazer login novamente
                 </Button>

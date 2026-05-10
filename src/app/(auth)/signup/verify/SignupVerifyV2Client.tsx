@@ -35,8 +35,8 @@ export default function SignupVerifyV2Client() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-svh flex-col items-center gap-6 px-6 pb-6 pt-[15vh] md:px-10 md:pb-10" role="status" aria-live="polite">
-        <Loader2 className="h-8 w-8 animate-spin text-foreground/60" aria-hidden="true" />
+      <div className="flex min-h-svh flex-col items-center gap-4 px-6 pb-6 pt-[15vh] md:px-10 md:pb-10" role="status" aria-live="polite" aria-busy="true">
+        <Loader2 className="h-8 w-8 animate-spin text-foreground/70" aria-hidden="true" />
         <p className="text-sm text-foreground/70">Carregando...</p>
       </div>
     )
@@ -45,10 +45,10 @@ export default function SignupVerifyV2Client() {
   if (!email || !name) {
     return (
       <div className="flex min-h-svh flex-col items-center gap-6 px-6 pb-6 pt-[15vh] md:px-10 md:pb-10">
-        <div className="flex w-full max-w-sm flex-col gap-6">
+        <div className="flex w-full max-w-sm flex-col gap-8">
           <Link
             href="/signup"
-            className="flex items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm"
+            className="inline-flex min-h-[44px] items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 rounded-sm transition-opacity hover:opacity-80"
             aria-label="Quayer — voltar ao cadastro"
           >
             <Image
@@ -59,14 +59,16 @@ export default function SignupVerifyV2Client() {
               priority
             />
           </Link>
-          <div className="text-center" role="alert">
-            <h1 className="text-2xl font-bold mb-4 text-foreground">Dados incompletos</h1>
-            <p className="text-foreground/70 mb-4">
+          <div className="text-center space-y-3" role="alert">
+            <h1 className="text-2xl font-bold text-foreground leading-tight">Dados incompletos</h1>
+            <p className="text-[0.9375rem] text-foreground/70 leading-relaxed">
               Não encontramos os dados necessários para verificação.
             </p>
-            <Button asChild className="min-h-[44px]">
-              <a href="/signup">Voltar para cadastro</a>
-            </Button>
+            <div className="pt-3">
+              <Button asChild className="min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2">
+                <a href="/signup">Voltar para cadastro</a>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -75,10 +77,10 @@ export default function SignupVerifyV2Client() {
 
   return (
     <div className="flex min-h-svh flex-col items-center gap-6 px-6 pb-6 pt-[15vh] md:px-10 md:pb-10">
-      <div className="flex w-full max-w-sm flex-col gap-6">
+      <div className="flex w-full max-w-sm flex-col gap-8">
         <Link
           href="/signup"
-          className="flex items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm"
+          className="inline-flex min-h-[44px] items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 rounded-sm transition-opacity hover:opacity-80"
           aria-label="Quayer — voltar ao cadastro"
         >
           <Image
