@@ -1,19 +1,27 @@
 import crypto from 'crypto';
 
-const rawKey = process.env.ENCRYPTION_KEY;
-if (!rawKey || rawKey.length < 32) {
-  throw new Error('[Crypto] ENCRYPTION_KEY must be set and at least 32 characters.');
-}
-const ENCRYPTION_KEY = rawKey;
-
 // Fixed salt is intentional: ENCRYPTION_KEY itself carries all the entropy.
 // scryptSync here is used purely for key derivation to produce a fixed-length
 // output — not for password hashing (where per-user random salts are required).
 const SCRYPT_SALT = 'quayer-crypto-salt';
 const KEY_LENGTH = 32;
 
+// Lazy: validate ENCRYPTION_KEY on first use, not at module import. This
+// allows Next.js page-data collection to import this file during build
+// (when env may be absent) without crashing. Runtime callers fail fast.
+let _ENCRYPTION_KEY: string | undefined;
+function getEncryptionKey(): string {
+  if (_ENCRYPTION_KEY) return _ENCRYPTION_KEY;
+  const rawKey = process.env.ENCRYPTION_KEY;
+  if (!rawKey || rawKey.length < 32) {
+    throw new Error('[Crypto] ENCRYPTION_KEY must be set and at least 32 characters.');
+  }
+  _ENCRYPTION_KEY = rawKey;
+  return rawKey;
+}
+
 function deriveKey(): Buffer {
-  return crypto.scryptSync(ENCRYPTION_KEY, SCRYPT_SALT, KEY_LENGTH);
+  return crypto.scryptSync(getEncryptionKey(), SCRYPT_SALT, KEY_LENGTH);
 }
 
 export function encrypt(text: string): string {

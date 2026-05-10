@@ -1,16 +1,25 @@
 import crypto from 'crypto';
 import { database as db } from '@/server/services/database';
 
-const rawEncKey = process.env.ENCRYPTION_KEY;
-if (!rawEncKey || rawEncKey.length < 32) {
-  throw new Error('[SystemSettings] ENCRYPTION_KEY must be set and at least 32 characters.');
-}
-
 const SCRYPT_SALT = 'quayer-settings-salt';
 const KEY_LENGTH = 32;
 
+// Lazy: validate ENCRYPTION_KEY on first use, not at module import,
+// so Next.js page-data collection during build does not crash when
+// env is absent. Runtime call paths still fail fast.
+let _ENCRYPTION_KEY: string | undefined;
+function getEncryptionKey(): string {
+  if (_ENCRYPTION_KEY) return _ENCRYPTION_KEY;
+  const rawEncKey = process.env.ENCRYPTION_KEY;
+  if (!rawEncKey || rawEncKey.length < 32) {
+    throw new Error('[SystemSettings] ENCRYPTION_KEY must be set and at least 32 characters.');
+  }
+  _ENCRYPTION_KEY = rawEncKey;
+  return rawEncKey;
+}
+
 function deriveKey(): Buffer {
-  return crypto.scryptSync(rawEncKey as string, SCRYPT_SALT, KEY_LENGTH);
+  return crypto.scryptSync(getEncryptionKey(), SCRYPT_SALT, KEY_LENGTH);
 }
 
 function encryptValue(text: string): string {
@@ -43,7 +52,7 @@ function decryptValue(ciphertext: string): string {
     const [ivHex, dataHex] = ciphertext.split(':');
     if (!ivHex || !dataHex) return ciphertext;
     const iv = Buffer.from(ivHex, 'hex');
-    const legacyKey = crypto.scryptSync(rawEncKey as string, 'salt', KEY_LENGTH);
+    const legacyKey = crypto.scryptSync(getEncryptionKey(), 'salt', KEY_LENGTH);
     const decipher = crypto.createDecipheriv('aes-256-cbc', legacyKey, iv);
     const decrypted = Buffer.concat([
       decipher.update(Buffer.from(dataHex, 'hex')),
