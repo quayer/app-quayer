@@ -21,37 +21,39 @@ function validateSecret(name: string, secret: string): void {
   }
 }
 
-function getJwtSecret(): string {
+// Lazy initialization — secrets are validated on first use, not at module
+// import time. This lets Next.js page-data collection import this module
+// during build (when env may be absent) without crashing. In runtime any
+// caller path will hit the getter and fail fast if env is misconfigured.
+let _JWT_SECRET: string | undefined;
+function jwtSecret(): string {
+  if (_JWT_SECRET) return _JWT_SECRET;
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET environment variable is required');
   validateSecret('JWT_SECRET', secret);
+  _JWT_SECRET = secret;
   return secret;
 }
-const JWT_SECRET = getJwtSecret();
 
-function getJwtRefreshSecret(): string {
+let _JWT_REFRESH_SECRET: string | undefined;
+function jwtRefreshSecret(): string {
+  if (_JWT_REFRESH_SECRET) return _JWT_REFRESH_SECRET;
   const secret = process.env.JWT_REFRESH_SECRET;
   if (!secret) throw new Error('JWT_REFRESH_SECRET environment variable is required');
   validateSecret('JWT_REFRESH_SECRET', secret);
+  _JWT_REFRESH_SECRET = secret;
   return secret;
 }
-const JWT_REFRESH_SECRET = getJwtRefreshSecret();
 
-function getJwtMagicLinkSecret(): string {
+let _JWT_MAGIC_LINK_SECRET: string | undefined;
+function jwtMagicLinkSecret(): string {
+  if (_JWT_MAGIC_LINK_SECRET) return _JWT_MAGIC_LINK_SECRET;
   const secret = process.env.JWT_MAGIC_LINK_SECRET;
   if (!secret) throw new Error('[Security] JWT_MAGIC_LINK_SECRET is required');
   validateSecret('JWT_MAGIC_LINK_SECRET', secret);
+  _JWT_MAGIC_LINK_SECRET = secret;
   return secret;
 }
-const JWT_MAGIC_LINK_SECRET = getJwtMagicLinkSecret();
-
-function getJwt2faChallengeSecret(): string {
-  const secret = process.env.JWT_2FA_CHALLENGE_SECRET;
-  if (!secret) throw new Error('[Security] JWT_2FA_CHALLENGE_SECRET is required');
-  validateSecret('JWT_2FA_CHALLENGE_SECRET', secret);
-  return secret;
-}
-const JWT_2FA_CHALLENGE_SECRET = getJwt2faChallengeSecret();
 
 /**
  * Token expiration times
@@ -118,7 +120,7 @@ export function signAccessToken(
     type: 'access',
   };
 
-  return jwt.sign(fullPayload as object, JWT_SECRET, {
+  return jwt.sign(fullPayload as object, jwtSecret(), {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-api',
@@ -149,7 +151,7 @@ export function signRefreshToken(
     type: 'refresh',
   };
 
-  return jwt.sign(fullPayload as object, JWT_REFRESH_SECRET, {
+  return jwt.sign(fullPayload as object, jwtRefreshSecret(), {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-api',
@@ -172,7 +174,7 @@ export function signRefreshToken(
  */
 export function verifyAccessToken(token: string): AccessTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, {
+    const decoded = jwt.verify(token, jwtSecret(), {
       algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
@@ -205,7 +207,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
  */
 export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
+    const decoded = jwt.verify(token, jwtRefreshSecret(), {
       algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
@@ -330,7 +332,7 @@ export function signMagicLinkToken(
     ...(payload.name && { name: payload.name }),
   };
 
-  return jwt.sign(fullPayload as object, JWT_MAGIC_LINK_SECRET, {
+  return jwt.sign(fullPayload as object, jwtMagicLinkSecret(), {
     expiresIn: expiresIn as SignOptions['expiresIn'],
     issuer: 'quayer',
     audience: 'quayer-magic-link',
@@ -353,7 +355,7 @@ export function signMagicLinkToken(
  */
 export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_MAGIC_LINK_SECRET, {
+    const decoded = jwt.verify(token, jwtMagicLinkSecret(), {
       algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-magic-link',
@@ -372,7 +374,7 @@ export function verifyMagicLinkToken(token: string): MagicLinkTokenPayload | nul
 
 export function validateBearerToken(token: string): { userId: string; currentOrgId?: string } | null {
   try {
-    const payload = jwt.verify(token, JWT_SECRET, {
+    const payload = jwt.verify(token, jwtSecret(), {
       algorithms: ['HS256'],
       issuer: 'quayer',
       audience: 'quayer-api',
