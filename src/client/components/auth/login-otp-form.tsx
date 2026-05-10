@@ -362,8 +362,8 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         <FieldGroup>
           {error && (
             <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
-              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-              <p className="text-sm text-red-600 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
+              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" aria-hidden="true" />
+              <p id="otp-error" className="text-sm text-red-700 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
             </div>
           )}
           <Field className="flex flex-col space-y-2">
@@ -380,13 +380,17 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
                 autoFocus
                 required
                 aria-required="true"
+                aria-label="Código de verificação de 6 dígitos"
+                aria-describedby={error ? "otp-error" : undefined}
+                aria-invalid={error ? true : undefined}
                 containerClassName="!w-full"
               >
-                <InputOTPGroup className="!w-full gap-2">
+                <InputOTPGroup className="!w-full gap-2" role="group" aria-label="Dígitos do código">
                   {[0, 1, 2, 3, 4, 5].map((i) => (
                     <InputOTPSlot
                       key={i}
                       index={i}
+                      aria-label={`Dígito ${i + 1} de 6`}
                       className="!flex-1 !w-0 !h-14 !text-xl !rounded-lg !border !border-border !bg-muted/50 !text-foreground data-[active=true]:!border-ring data-[active=true]:!ring-ring/20"
                     />
                   ))}
@@ -433,7 +437,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
                 Reenviar
               </button>
             ) : (
-              <span className="text-muted-foreground/50" aria-live="polite" aria-atomic="true">
+              <span className="text-foreground/60" aria-live="polite" aria-atomic="true">
                 Aguarde {countdown}s
               </span>
             )}

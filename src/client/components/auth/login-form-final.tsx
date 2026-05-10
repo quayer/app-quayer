@@ -239,11 +239,11 @@ export function LoginFormFinal({
     <div className={cn("flex flex-col gap-10 w-full", className)} {...props}>
       {/* Header with staggered animation */}
       <div className="space-y-3 animate-fade-in-up stagger-1">
-        <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight">
+        <h1 id="login-form-title" className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight">
           Faça login no Quayer
         </h1>
         {SIGNUP_ENABLED && (
-          <p className="text-[0.875rem] text-muted-foreground leading-relaxed">
+          <p className="text-[0.875rem] text-foreground/70 leading-relaxed">
             Não tem conta?{" "}
             <Link
               href="/signup"
@@ -256,18 +256,18 @@ export function LoginFormFinal({
         )}
       </div>
 
-      <form onSubmit={handleOTPRequest} className="animate-fade-in-up stagger-2">
+      <form onSubmit={handleOTPRequest} aria-labelledby="login-form-title" className="animate-fade-in-up stagger-2">
         <FieldGroup>
           {error && (
             <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
-              <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
+              <div aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
               <p className="text-sm text-red-600 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
             </div>
           )}
 
           {/* Email / Phone input */}
           <Field>
-            <FieldLabel htmlFor={isPhone ? "phone-input" : "email-input"} className="text-[0.8rem] font-medium text-muted-foreground uppercase tracking-wider">
+            <FieldLabel htmlFor={isPhone ? "phone-input" : "email-input"} className="text-[0.8rem] font-medium text-foreground/70 uppercase tracking-wider">
               Email ou Telefone
             </FieldLabel>
 
@@ -278,7 +278,9 @@ export function LoginFormFinal({
                   <button
                     type="button"
                     disabled={isLoading || isGoogleLoading}
-                    aria-label="Selecionar país"
+                    aria-label={`Selecionar país, atual: ${selectedCountry.name} +${selectedCountry.dialCode}`}
+                    aria-haspopup="listbox"
+                    aria-expanded={openCountry}
                     className={cn(
                       "flex items-center justify-center gap-1 h-11 !min-h-11 w-24 shrink-0 leading-none overflow-hidden",
                       "border border-border border-r-0 rounded-l-lg px-2",
@@ -288,8 +290,8 @@ export function LoginFormFinal({
                     )}
                   >
                     <FlagIcon iso2={selectedCountry.iso2} className="h-4 w-5 shrink-0 rounded-[2px]" />
-                    <span className="text-muted-foreground text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
-                    <ChevronsUpDown className="h-3 w-3 opacity-30 shrink-0" aria-hidden="true" />
+                    <span className="text-foreground text-xs font-medium tabular-nums">+{selectedCountry.dialCode}</span>
+                    <ChevronsUpDown className="h-3 w-3 opacity-60 shrink-0" aria-hidden="true" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="p-0 w-[min(320px,calc(100vw-2rem))]" align="start">
@@ -363,7 +365,7 @@ export function LoginFormFinal({
                 "w-full h-11 min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-all duration-300",
                 hasInput
                   ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80"
-                  : "bg-muted text-muted-foreground border border-border hover:bg-muted/80 hover:text-foreground"
+                  : "bg-muted text-foreground/80 border border-border hover:bg-muted/80 hover:text-foreground"
               )}
               disabled={isLoading || isGoogleLoading}
               aria-busy={isLoading}
@@ -387,7 +389,7 @@ export function LoginFormFinal({
             </Button>
           </Field>
 
-          <FieldSeparator>ou</FieldSeparator>
+          <FieldSeparator className="text-foreground/60">ou</FieldSeparator>
 
           {/* Google OAuth */}
           <Field>
@@ -415,11 +417,11 @@ export function LoginFormFinal({
         </FieldGroup>
       </form>
 
-      <p className="text-center text-[0.75rem] text-muted-foreground/70 leading-relaxed animate-fade-in-up stagger-3">
+      <p className="text-center text-[0.75rem] text-foreground/70 leading-relaxed animate-fade-in-up stagger-3">
         Ao entrar, você concorda com os{" "}
-        <Link href="/termos" className="underline underline-offset-2 hover:text-muted-foreground transition-colors">Termos de Serviço</Link>
+        <Link href="/termos" className="underline underline-offset-2 hover:text-foreground transition-colors">Termos de Serviço</Link>
         {" "}e a{" "}
-        <Link href="/privacidade" className="underline underline-offset-2 hover:text-muted-foreground transition-colors">Política de Privacidade</Link>.
+        <Link href="/privacidade" className="underline underline-offset-2 hover:text-foreground transition-colors">Política de Privacidade</Link>.
       </p>
     </div>
   )

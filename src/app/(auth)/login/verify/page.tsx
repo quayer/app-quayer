@@ -12,9 +12,9 @@ export default async function LoginVerifyPage() {
   if (v3) {
     return (
       <Suspense fallback={
-        <div className="flex items-center justify-center min-h-[300px]" role="status">
+        <div className="flex items-center justify-center min-h-[300px]" role="status" aria-live="polite" aria-busy="true">
           <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 rounded-full border-2 border-ds-border border-t-ds-fg animate-spin" />
+            <div className="h-8 w-8 rounded-full border-2 border-ds-border border-t-ds-fg animate-spin" aria-hidden="true" />
             <span className="text-ds-sm text-ds-muted">Carregando...</span>
           </div>
         </div>
@@ -30,9 +30,9 @@ export default async function LoginVerifyPage() {
 
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-[300px]" role="status">
+      <div className="flex items-center justify-center min-h-[300px]" role="status" aria-live="polite" aria-busy="true">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" aria-hidden="true" />
           <span className="text-sm text-muted-foreground">Carregando...</span>
         </div>
       </div>

@@ -24,8 +24,8 @@ export default async function SignupVerifyPage() {
 
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-500 dark:text-gray-400">Carregando...</p>
+      <div className="flex items-center justify-center min-h-screen" role="status" aria-live="polite" aria-busy="true">
+        <p className="text-foreground/70">Carregando...</p>
       </div>
     }>
       <SignupVerifyV2Client />

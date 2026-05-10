@@ -145,7 +145,7 @@ export function OnboardingForm({
   // Loading — evita flash de tela
   if (step === "loading") {
     return (
-      <div className={cn("flex items-center justify-center py-12", className)} {...props}>
+      <div className={cn("flex items-center justify-center py-12", className)} role="status" aria-live="polite" {...props}>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
         <span className="sr-only">Carregando...</span>
       </div>
@@ -155,12 +155,12 @@ export function OnboardingForm({
   // Criando org automaticamente
   if (step === "creating") {
     return (
-      <div className={cn("w-full flex flex-col gap-10", className)} {...props}>
+      <div className={cn("w-full flex flex-col gap-10", className)} role="status" aria-live="polite" aria-busy="true" {...props}>
         <div className="space-y-3 animate-fade-in-up stagger-1">
           <h1 className="text-[1.75rem] font-bold tracking-[-0.03em] text-foreground leading-tight">
             Preparando tudo...
           </h1>
-          <p className="text-[0.875rem] text-muted-foreground leading-relaxed">
+          <p className="text-[0.875rem] text-foreground/70 leading-relaxed">
             Estamos configurando sua conta
           </p>
         </div>
@@ -190,8 +190,8 @@ export function OnboardingForm({
           <FieldGroup>
             {error && (
               <div className="flex items-start gap-2.5 rounded-lg bg-red-500/10 border border-red-500/20 px-3.5 py-3 animate-fade-in">
-                <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                <p className="text-sm text-red-600 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
+                <div className="h-1.5 w-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" aria-hidden="true" />
+                <p className="text-sm text-red-700 dark:text-red-300" role="alert" aria-live="assertive">{error}</p>
               </div>
             )}
 
@@ -267,13 +267,13 @@ export function OnboardingForm({
           </FieldGroup>
         </form>
 
-        <p className="text-center text-[0.75rem] text-muted-foreground/60 leading-relaxed animate-fade-in-up stagger-3">
+        <p className="text-center text-[0.75rem] text-foreground/70 leading-relaxed animate-fade-in-up stagger-3">
           Ao continuar, você concorda com os{" "}
-          <a href="/termos" target="_blank" className="underline underline-offset-2 hover:text-foreground/70 transition-colors">
+          <a href="/termos" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm">
             Termos de Uso
           </a>{" "}
           e a{" "}
-          <a href="/privacidade" target="_blank" className="underline underline-offset-2 hover:text-foreground/70 transition-colors">
+          <a href="/privacidade" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 rounded-sm">
             Política de Privacidade
           </a>.
         </p>

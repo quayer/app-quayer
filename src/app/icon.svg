@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 248" width="32" height="32">
+  <defs>
+    <linearGradient id="qBolt" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFDE0"/>
+      <stop offset="12%" stop-color="#FFD60A"/>
+      <stop offset="28%" stop-color="#FF9200"/>
+      <stop offset="44%" stop-color="#E84000"/>
+      <stop offset="60%" stop-color="#B82000"/>
+      <stop offset="78%" stop-color="#881400"/>
+      <stop offset="100%" stop-color="#580800"/>
+    </linearGradient>
+  </defs>
+  <path d="M 92 6 L 158 6 L 116 122 L 170 122 L 38 242 L 4 242 L 74 118 L 20 118 Z" fill="url(#qBolt)"/>
+</svg>

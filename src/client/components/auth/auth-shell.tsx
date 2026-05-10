@@ -44,7 +44,6 @@ export function AuthShell({ children, showImage = true, className = '' }: AuthSh
             para fundir com o painel #000000 sem costura visivel */}
         {showImage && (
           <aside
-            role="complementary"
             aria-hidden="true"
             className="hidden lg:block lg:w-[42%] xl:w-[45%] relative overflow-hidden bg-[#F5F2ED] dark:bg-black"
           >
