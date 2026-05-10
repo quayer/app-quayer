@@ -7,26 +7,20 @@
 import { igniter } from "@/igniter";
 import { database as db } from "@/server/services/database";
 import crypto from "crypto";
-import jwt from "jsonwebtoken";
-import {
-  generateRegistrationOptions,
-  verifyRegistrationResponse,
-  generateAuthenticationOptions,
-  verifyAuthenticationResponse,
-} from "@simplewebauthn/server";
-import type { AuthenticatorTransportFuture } from "@simplewebauthn/server";
 import { z } from "zod";
 import { googleCallbackSchema } from "../auth.schemas";
-import { normalizePhone, sendWhatsAppOTP } from "@/lib/uaz/whatsapp-otp";
-import { hashPassword, verifyPassword, generateOTPCode, generateRecoveryCodes } from "@/lib/auth/bcrypt";
-import { signAccessToken, signRefreshToken, verifyRefreshToken, getExpirationDate, signMagicLinkToken, verifyMagicLinkToken } from "@/lib/auth/jwt";
-import { authProcedure } from "../procedures/auth.procedure";
-import { csrfProcedure } from "../procedures/csrf.procedure";
-import { turnstileProcedure } from "../procedures/turnstile.procedure";
-import { UserRole, OrganizationRole } from "@/lib/auth/roles";
+import { UserRole } from "@/lib/auth/roles";
 import { emailService } from "@/lib/email";
-import { authRateLimiter, RateLimiter } from "@/lib/rate-limit/rate-limiter";
-import { checkOtpRateLimit } from "@/lib/rate-limit/otp-rate-limit";
+import { RateLimiter } from "@/lib/rate-limit/rate-limiter";
+import {
+  getClientIdentifier, createAuditLog, dashboardUrl, isProduction,
+  registerDeviceSession,
+} from "../_shared/helpers";
+import { isSignupEnabled, SIGNUP_DISABLED_MESSAGE } from "../_shared/signup-gate";
+import { issueSession } from "../_shared/issue-session";
+import { check2faAndIssueChallenge } from "../_shared/two-factor-gate";
+import { finalizeLogin } from "../_shared/finalize-login";
+import { rateLimitProcedure } from "../procedures/rate-limit.procedure";
 
 /**
  * Rate limiters dedicados ao fluxo Google OAuth.
@@ -47,18 +41,6 @@ const oauthGoogleInitRateLimiter = new RateLimiter({
   prefix: 'ratelimit:oauth-google-init',
   failClosedInProduction: true,
 });
-import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "@/lib/auth/csrf";
-import { getIpGeolocation } from "@/lib/geocoding/ip-geolocation";
-import { encrypt, decrypt } from "@/lib/crypto";
-import * as OTPAuth from "otpauth";
-import QRCode from "qrcode";
-import {
-  getClientIdentifier, createAuditLog, appBaseUrl, dashboardUrl, isProduction,
-  setAuthCookies, clearAuthCookies, sign2faChallenge, verify2faChallenge,
-  getChallengeAttempts, incrementChallengeAttempts, MAX_2FA_ATTEMPTS,
-  parseDeviceName, registerDeviceSession, autoJoinByVerifiedDomain,
-} from "../_shared/helpers";
-import { isSignupEnabled, SIGNUP_DISABLED_MESSAGE } from "../_shared/signup-gate";
 
 export const oauthGoogleController = igniter.controller({
   name: "auth-oauth-google",
@@ -79,17 +61,8 @@ export const oauthGoogleController = igniter.controller({
       description: 'Initiate Google OAuth flow',
       path: '/google',
       method: 'GET',
+      use: [rateLimitProcedure({ limiter: oauthGoogleInitRateLimiter })],
       handler: async ({ request, response }) => {
-        // Light rate limit to prevent abuse of the redirect URL generator
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await oauthGoogleInitRateLimiter.check(identifier);
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
         // Generate a cryptographically random CSRF state token (64 hex chars)
         const state = crypto.randomBytes(32).toString('hex');
 
@@ -118,17 +91,8 @@ export const oauthGoogleController = igniter.controller({
       path: '/google/callback',
       method: 'POST',
       body: googleCallbackSchema,
+      use: [rateLimitProcedure({ limiter: oauthGoogleCallbackRateLimiter })],
       handler: async ({ request, response }) => {
-        // Rate limit: 10 callbacks / 10 min por IP
-        const identifier = getClientIdentifier(request);
-        const rateLimit = await oauthGoogleCallbackRateLimiter.check(identifier);
-        if (!rateLimit.success) {
-          return response.status(429).json({
-            error: 'Too many requests',
-            retryAfter: rateLimit.retryAfter,
-          });
-        }
-
         const { code, state } = request.body;
         const { getGoogleTokens, getGoogleUserInfo } = await import('@/lib/auth/google-oauth');
 
@@ -257,62 +221,53 @@ export const oauthGoogleController = igniter.controller({
             isNewGoogleUser = true;
           }
 
-          // 2FA check: if existing user has TOTP enabled, return challenge
-          if (!isNewGoogleUser && user.twoFactorEnabled) {
-            const challengeId = sign2faChallenge(user.id);
-            createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'google' }, user.currentOrgId);
-            return response.success({ requiresTwoFactor: true, challengeId });
+          // 2FA gate: se usuário existente tem TOTP ativo, emitir challenge e encerrar
+          if (!isNewGoogleUser) {
+            const twoFactorGate = await check2faAndIssueChallenge(user, request, 'google');
+            if (twoFactorGate) {
+              return response.success(twoFactorGate);
+            }
           }
 
-          // Gerar tokens JWT
-          const accessToken = signAccessToken({
-            userId: user.id,
-            email: user.email,
-            role: user.role as UserRole,
-            currentOrgId: user.currentOrgId,
-            needsOnboarding: !user.onboardingCompleted, // ✅ Incluir no token para middleware
-          });
-
-          const refreshTokenValue = signRefreshToken({
-            userId: user.id,
-            tokenId: '', // Temporário, será atualizado
-          });
-
-          // Salvar refresh token
-          const savedRefreshToken = await db.refreshToken.create({
-            data: {
-              userId: user.id,
-              token: refreshTokenValue,
-              expiresAt: getExpirationDate('30d'), // 30 dias
-            },
-          });
-
-          // Gerar refresh token final com tokenId correto
-          const refreshToken = signRefreshToken({
-            userId: user.id,
-            tokenId: savedRefreshToken.id,
-          });
-
-          // Atualizar refresh token no banco
-          await db.refreshToken.update({
-            where: { id: savedRefreshToken.id },
-            data: { token: refreshToken },
-          });
-
+          // --- Caminho SIGNUP (novo usuário) ---
           if (isNewGoogleUser) {
+            // issueSession: cria tokens + cookies. Audit logs manuais (ordem importa).
+            await issueSession(response, user);
+
             await emailService.sendWelcomeEmail(user.email, user.name, dashboardUrl);
             await createAuditLog('user.signup', user.id, request, { method: 'google' }, user.currentOrgId);
             await createAuditLog('auth.signup', user.id, request, { method: 'google' }, user.currentOrgId);
-          } else {
-            await createAuditLog('user.login', user.id, request, { method: 'google' }, user.currentOrgId);
-            await createAuditLog('auth.login', user.id, request, { method: 'google' }, user.currentOrgId);
+
+            // Device session non-blocking (signup path: sem geo-block)
+            await registerDeviceSession(user.id, request);
+
+            return response.success({
+              needsOnboarding: !user.onboardingCompleted,
+              user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                currentOrgId: user.currentOrgId,
+              },
+            });
           }
 
-          // Set httpOnly cookies
-          setAuthCookies(response, accessToken, refreshToken);
+          // --- Caminho LOGIN (usuário existente, sem 2FA) ---
+          const loginResult = await finalizeLogin({
+            user,
+            request,
+            response,
+            method: 'google',
+            auditEvents: [
+              { action: 'user.login' },
+              { action: 'auth.login' },
+            ],
+          });
 
-          // Register device session (non-blocking)
-          await registerDeviceSession(user.id, request);
+          if (loginResult.blocked) {
+            return response.status(403).json({ error: 'Login bloqueado por política geográfica da organização' });
+          }
 
           return response.success({
             needsOnboarding: !user.onboardingCompleted,

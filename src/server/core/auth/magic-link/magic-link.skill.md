@@ -4,27 +4,35 @@
 Consumo do magic link (token JWT) e polling do tab original + complete onboarding.
 
 ## Actions (endpoints)
-verifyMagicLink, checkMagicLinkStatus, completeOnboarding
+- `verifyMagicLink`      — POST /auth/verify-magic-link
+- `checkMagicLinkStatus` — POST /auth/check-magic-link-status
+- `completeOnboarding`   — POST /auth/onboarding/complete
 
 ## Arquivos
-- `src/server/core/auth/magic-link/magic-link.controller.ts`
-- `src/server/core/auth/_shared/helpers.ts` (helpers compartilhados)
-- `src/server/core/auth/auth.schemas.ts` (Zod schemas)
+- `magic-link.controller.ts` — composer (~25 LoC); só importa e espalha routes
+- `verify.routes.ts`         — verifyMagicLink: signup path + login path (~230 LoC)
+- `status.routes.ts`         — checkMagicLinkStatus: cross-tab polling (~170 LoC)
+- `onboarding.routes.ts`     — completeOnboarding (~80 LoC)
+
+## Dependencias _shared/
+- `_shared/helpers.ts`         — getClientIdentifier, setAuthCookies, createAuditLog, registerDeviceSession, autoJoinByVerifiedDomain, sign2faChallenge
+- `_shared/issue-session.ts`   — issueSession (access + refresh + cookies)
+- `_shared/two-factor-gate.ts` — check2faAndIssueChallenge
+- `_shared/finalize-login.ts`  — finalizeLogin (device check + issueSession + audit)
+- `_shared/signup-gate.ts`     — isSignupEnabled, SIGNUP_DISABLED_MESSAGE
 
 ## Tabelas Prisma
-MagicLinkSession, User
-
-## Dependencias
-- `@/lib/auth/jwt`, `@/lib/auth/bcrypt`, `@/lib/auth/csrf`
-- `@/lib/rate-limit/*`
-- `_shared/helpers` (setAuthCookies, createAuditLog, registerDeviceSession, etc)
+VerificationCode, TempUser, User, Organization, UserOrganization, RefreshToken, DeviceSession, AuditLog
 
 ## Invariantes
-token assinado via signMagicLinkToken, sessionId UUID para cross-tab polling.
+- Token assinado via `signMagicLinkToken`; `sessionId` UUID para cross-tab polling.
+- `checkMagicLinkStatus` emite access + refresh (comportamento completo de login).
+- `completeOnboarding` emite APENAS access token (refresh existente permanece válido).
+- `verifyMagicLink` tem rate-limit duplo: IP (authRateLimiter no handler) + email/IP (checkOtpRateLimit).
+- Consume atômico do token: `updateMany where used=false` — previne replay concorrente.
 
 ## Como mexer
-1. Ler este arquivo + `_shared/helpers.ts`.
-2. Editar apenas o controller deste subdominio.
-3. Se adicionar/alterar endpoint, atualizar `auth.schemas.ts`.
-4. Rodar `npx tsc --noEmit` e `npx eslint src/server/core/auth/`.
-5. Nao tocar em outros subdominios sem motivo explicito.
+1. Ler este arquivo + o routes file relevante.
+2. Nao editar `auth.schemas.ts` nem `_shared/*` sem motivo explícito.
+3. Rodar `npx tsc --noEmit` e `npx eslint src/server/core/auth/magic-link/`.
+4. Nao alterar nomes de action nem paths — quebra o client gerado pelo Igniter.

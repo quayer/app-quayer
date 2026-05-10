@@ -1,30 +1,39 @@
 # Skill: Auth / Email OTP
 
 ## Responsabilidade
-Fluxos baseados em codigo por email (signup, login, verificacao).
+Fluxos baseados em codigo por email: verificacao de email, signup e login passwordless.
 
 ## Actions (endpoints)
-sendVerification, verifyEmail, signupOTP, verifySignupOTP, resendVerification, loginOTP, verifyLoginOTP
+| Action | Path | File |
+|---|---|---|
+| `verifyEmail` | POST /verify-email | `verify-email.routes.ts` |
+| `signupOTP` | POST /signup-otp | `signup.routes.ts` |
+| `verifySignupOTP` | POST /verify-signup-otp | `signup.routes.ts` |
+| `loginOTP` | POST /login-otp | `login.routes.ts` |
+| `verifyLoginOTP` | POST /verify-login-otp | `login.routes.ts` |
 
-## Arquivos
-- `src/server/core/auth/email-otp/email-otp.controller.ts`
-- `src/server/core/auth/_shared/helpers.ts` (helpers compartilhados)
-- `src/server/core/auth/auth.schemas.ts` (Zod schemas)
+## Arquivos do subdomínio
+- `email-otp.controller.ts` — composer (~33 LoC, so agrega as routes)
+- `verify-email.routes.ts` — verifyEmail
+- `signup.routes.ts` — signupOTP + verifySignupOTP
+- `login.routes.ts` — loginOTP + verifyLoginOTP (inclui helper `sendSignupOtpForUnknownUser`)
+
+## Helpers `_shared/` consumidos
+| Helper | Usado em |
+|---|---|
+| `issueSession()` | verify-email.routes, signup.routes |
+| `check2faAndIssueChallenge()` | login.routes (verifyLoginOTP) |
+| `finalizeLogin()` | login.routes (verifyLoginOTP) |
+| `getClientIdentifier`, `createAuditLog`, `autoJoinByVerifiedDomain` | todos os routes |
+| `isProduction`, `appBaseUrl`, `dashboardUrl` | signup.routes, login.routes |
 
 ## Tabelas Prisma
-User, VerificationCode, RefreshToken, VerifiedDomain (autoJoin)
-
-## Dependencias
-- `@/lib/auth/jwt`, `@/lib/auth/bcrypt`, `@/lib/auth/csrf`
-- `@/lib/rate-limit/*`
-- `_shared/helpers` (setAuthCookies, createAuditLog, registerDeviceSession, etc)
-
-## Invariantes
-codigos 6 digitos TTL 15min, rate limit via authRateLimiter/checkOtpRateLimit, autoJoinByVerifiedDomain apos verify.
+User, TempUser, VerificationCode, RefreshToken, DeviceSession, VerifiedDomain (autoJoin)
 
 ## Como mexer
-1. Ler este arquivo + `_shared/helpers.ts`.
-2. Editar apenas o controller deste subdominio.
-3. Se adicionar/alterar endpoint, atualizar `auth.schemas.ts`.
-4. Rodar `npx tsc --noEmit` e `npx eslint src/server/core/auth/`.
-5. Nao tocar em outros subdominios sem motivo explicito.
+1. Ler este arquivo + o route file do endpoint alvo.
+2. Nao tocar em `_shared/` sem motivo explicito — so consumir os helpers.
+3. Para adicionar/alterar endpoint: editar o route file e atualizar `auth.schemas.ts`.
+4. Rodar `npx tsc --noEmit` e `npx eslint src/server/core/auth/email-otp/`.
+5. Nao alterar action names nem paths (contrato externo `api.auth.*`).
+6. Nao alterar `email-otp.controller.ts` — so adicionar imports de novos route files.
