@@ -58,11 +58,16 @@ ARG NEXT_PUBLIC_IGNITER_API_URL
 ARG NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
 ARG NEXT_PUBLIC_SIGNUP_ENABLED=false
 ARG NEXT_PUBLIC_AUTH_V3=off
+# Workaround para vercel/next.js#87737 + #88844 — passar 1 desativa o
+# wrapping do Sentry/Next no build (auto-instrumentation OTel quebra o
+# Turbopack runtime). Sentry continua via instrumentation.ts em runtime.
+ARG SENTRY_BUILD_DISABLED=1
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_IGNITER_API_URL}
 ENV NEXT_PUBLIC_IGNITER_API_BASE_PATH=${NEXT_PUBLIC_IGNITER_API_BASE_PATH}
 ENV NEXT_PUBLIC_SIGNUP_ENABLED=${NEXT_PUBLIC_SIGNUP_ENABLED}
 ENV NEXT_PUBLIC_AUTH_V3=${NEXT_PUBLIC_AUTH_V3}
+ENV SENTRY_BUILD_DISABLED=${SENTRY_BUILD_DISABLED}
 
 # Build Next.js application
 # This will create .next/standalone for optimal production bundle

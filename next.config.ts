@@ -116,12 +116,34 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  silent: !process.env.CI,
-  widenClientFileUpload: true,
-  sourcemaps: { disable: true },
-  disableLogger: true,
-  automaticVercelMonitors: false,
-});
+// withSentryConfig injeta a OTel auto-instrumentation no bundle do servidor,
+// o que dispara dois bugs do Next.js 16 + Turbopack:
+//   - vercel/next.js#87737: Turbopack referencia `import-in-the-middle` com
+//     hash (`import-in-the-middle-<hash>`) que não existe no node_modules em
+//     runtime. Mesmo declarando em serverExternalPackages, o erro persiste:
+//     "Cannot find module 'import-in-the-middle-<hash>'" — fatal no boot.
+//   - vercel/next.js#88844: o tracer omite estes pacotes do
+//     .next/standalone/node_modules.
+// Symlinks no Dockerfile foram tentados sem sucesso (require ignora os
+// links no contexto do standalone runtime).
+//
+// DECISÃO: temporariamente desativar a integração Sentry/Next quando
+// SENTRY_BUILD_DISABLED=1. Sentry continua disponível em runtime via
+// `instrumentation.ts` lendo SENTRY_DSN; só o "magic wrapping" do Sentry
+// para sourcemaps + auto-instrumentação OTel é desligado.
+//
+// Para reativar quando upstream corrigir os bugs do Turbopack: remover
+// SENTRY_BUILD_DISABLED do build-args do deploy-homol.yml/deploy-production.yml.
+const sentryBuildDisabled = process.env.SENTRY_BUILD_DISABLED === '1';
+
+export default sentryBuildDisabled
+  ? nextConfig
+  : withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      silent: !process.env.CI,
+      widenClientFileUpload: true,
+      sourcemaps: { disable: true },
+      disableLogger: true,
+      automaticVercelMonitors: false,
+    });
