@@ -1,9 +1,15 @@
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { SignupForm } from "@/client/components/auth/signup-form"
 import { AuthShell } from "@/client/components/auth/auth-shell"
 import { isAuthV3Enabled } from "@/lib/feature-flags/auth-v3"
+import { isSignupEnabled } from "@/server/core/auth/_shared/signup-gate"
 
 export default async function SignupPage() {
+  if (!isSignupEnabled()) {
+    redirect('/login')
+  }
+
   const cookieStore = await cookies()
   const seedId = cookieStore.get('accessToken')?.value ?? null
   const override = cookieStore.get('auth-v3-override')?.value ?? null

@@ -19,6 +19,8 @@ const PUBLIC_PATHS = [
   '/compartilhar',
   '/google-callback',
   '/verify',
+  '/termos',
+  '/privacidade',
 ];
 
 /**

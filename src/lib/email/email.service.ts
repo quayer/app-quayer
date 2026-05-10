@@ -135,7 +135,7 @@ class EmailService {
   }
 
   async sendWelcomeEmail(to: string, name: string, dashboardUrl?: string): Promise<void> {
-    const html = getWelcomeEmailTemplate({ name, dashboardUrl });
+    const html = await getWelcomeEmailTemplate({ name, dashboardUrl });
     return this.send({
       to,
       subject: 'Bem-vindo ao Quayer! 🎉',
@@ -144,7 +144,7 @@ class EmailService {
   }
 
   async sendPasswordResetEmail(to: string, name: string, resetUrl: string, expirationMinutes?: number): Promise<void> {
-    const html = getPasswordResetEmailTemplate({ name, resetUrl, expirationMinutes });
+    const html = await getPasswordResetEmailTemplate({ name, resetUrl, expirationMinutes });
     return this.send({
       to,
       subject: 'Recuperação de Senha - Quayer',
@@ -153,7 +153,7 @@ class EmailService {
   }
 
   async sendVerificationEmail(to: string, name: string, code: string, expirationMinutes?: number): Promise<void> {
-    const html = getVerificationEmailTemplate({ name, code, expirationMinutes });
+    const html = await getVerificationEmailTemplate({ name, code, expirationMinutes });
     return this.send({
       to,
       subject: 'Verificação de E-mail - Quayer',
@@ -162,7 +162,7 @@ class EmailService {
   }
 
   async sendLoginCodeEmail(to: string, name: string, code: string, magicLink: string, expirationMinutes?: number): Promise<void> {
-    const html = getLoginCodeEmailTemplate({ name, code, magicLink, expirationMinutes });
+    const html = await getLoginCodeEmailTemplate({ name, code, magicLink, expirationMinutes });
     return this.send({
       to,
       subject: `Código ${code} - Login Quayer 🔐`,
@@ -171,7 +171,7 @@ class EmailService {
   }
 
   async sendWelcomeSignupEmail(to: string, name: string, code: string, magicLink: string, expirationMinutes?: number): Promise<void> {
-    const html = getWelcomeSignupEmailTemplate({ name, code, magicLink, expirationMinutes });
+    const html = await getWelcomeSignupEmailTemplate({ name, code, magicLink, expirationMinutes });
     return this.send({
       to,
       subject: `Código ${code} - Bem-vindo ao Quayer! 🎉`,
@@ -186,7 +186,7 @@ class EmailService {
     invitationUrl: string,
     role: string
   ): Promise<void> {
-    const html = invitationTemplate({
+    const html = await invitationTemplate({
       inviterName,
       organizationName,
       invitationUrl,

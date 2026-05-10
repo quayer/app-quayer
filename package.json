@@ -55,6 +55,7 @@
     "test:e2e:homol": "playwright test --project=homol",
     "test:e2e:prod": "playwright test --project=prod",
     "test:react": "vitest run test/unit/react --config vitest.config.ts",
+    "email:dev": "email dev --dir src/lib/email/templates",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -105,6 +106,8 @@
     "@radix-ui/react-toggle": "^1.1.9",
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
     "@sentry/nextjs": "^10.51.0",
     "@sentry/node": "^10.51.0",
     "@simplewebauthn/browser": "^13.3.0",
@@ -215,6 +218,7 @@
     "msw": "^2.11.3",
     "playwright": "^1.55.1",
     "prisma": "^7.4.2",
+    "react-email": "^6.1.1",
     "shadcn": "^4.0.2",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",

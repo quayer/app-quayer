@@ -1,12 +1,11 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/client/components/ui/button"
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -14,11 +13,11 @@ import {
 } from "@/client/components/ui/field"
 import { Input } from "@/client/components/ui/input"
 import { Alert, AlertDescription } from "@/client/components/ui/alert"
-import { Loader2, Mail, Smartphone, ArrowRight } from "lucide-react"
+import { Loader2, ArrowRight } from "lucide-react"
 import { GoogleIcon } from "@/client/components/ui/google-icon"
+import { WhatsAppIcon } from "@/client/components/auth/whatsapp-icon"
 import Link from "next/link"
 import { api } from "@/igniter.client"
-import { PhoneInput } from "@/client/components/ui/phone-input"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
 import { SIGNUP_ENABLED, SIGNUP_DISABLED_MESSAGE } from "@/lib/config"
 
@@ -33,22 +32,9 @@ export function SignupForm({
   const [success, setSuccess] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
-  const [isPhone, setIsPhone] = useState(false)
   const [nameError, setNameError] = useState("")
   const [emailError, setEmailError] = useState("")
   const [turnstileToken, setTurnstileToken] = useState("")
-  const phoneInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isPhone && phoneInputRef.current) {
-      phoneInputRef.current.focus()
-    }
-  }, [isPhone])
-
-  function looksLikePhone(v: string): boolean {
-    const clean = v.replace(/[^\d]/g, '')
-    return clean.length >= 8
-  }
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,27 +44,8 @@ export function SignupForm({
     setEmailError("")
     setIsLoading(true)
 
-    // Validate and trim inputs
     const trimmedName = name.trim()
     const trimmedEmail = email.trim()
-
-    // Phone flow: send OTP via WhatsApp and redirect to verify
-    if (looksLikePhone(trimmedEmail)) {
-      const res = await fetch('/api/v1/auth/login-otp-phone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ phone: trimmedEmail, 'cf-turnstile-response': turnstileToken }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data?.error?.message || 'Erro ao enviar código')
-        setIsLoading(false)
-        return
-      }
-      router.push('/signup/verify?phone=' + encodeURIComponent(trimmedEmail))
-      return
-    }
 
     if (!trimmedName) {
       setNameError("Informe seu nome")
@@ -94,7 +61,7 @@ export function SignupForm({
 
     try {
       // Send OTP code to email (SIGNUP endpoint - creates TempUser)
-      const { data, error: apiError } = await api.auth.signupOTP.mutate({
+      const { error: apiError } = await api.auth.signupOTP.mutate({
         body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as { name: string; email: string; 'cf-turnstile-response'?: string }
       })
 
@@ -102,7 +69,7 @@ export function SignupForm({
         throw apiError
       }
 
-      setSuccess(`✉️ Código enviado para ${trimmedEmail}! Verifique sua caixa de entrada.`)
+      setSuccess(`Código enviado para ${trimmedEmail}. Verifique sua caixa de entrada.`)
 
       // Save email and name to sessionStorage for resend functionality
       sessionStorage.setItem('signup-email', trimmedEmail)
@@ -119,7 +86,6 @@ export function SignupForm({
       const e = err as Record<string, unknown>
       const errObj = e?.error as Record<string, unknown> | undefined
       if (errObj?.message) {
-        // Check if it's an object with 'error' property
         if (typeof errObj.message === 'object' && errObj.message !== null && (errObj.message as Record<string, unknown>).error) {
           errorMessage = String((errObj.message as Record<string, unknown>).error)
         } else if (typeof errObj.message === 'string') {
@@ -166,7 +132,7 @@ export function SignupForm({
     return (
       <div className={cn("flex flex-col gap-6 max-w-sm mx-auto w-full", className)} {...props}>
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+          <h1 id="signup-form-title" className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
             Cadastro indisponível
           </h1>
         </div>
@@ -191,7 +157,7 @@ export function SignupForm({
     <div className={cn("flex flex-col gap-8 max-w-sm mx-auto w-full", className)} {...props}>
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Crie sua conta</h1>
+        <h1 id="signup-form-title" className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Crie sua conta</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400">
           Já tem conta?{" "}
           <Link href="/login" className="inline-flex items-center gap-0.5 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 dark:focus-visible:ring-gray-500 focus-visible:ring-offset-2 rounded-sm">
@@ -214,58 +180,45 @@ export function SignupForm({
         </Alert>
       )}
 
-      {/* Email/Phone Signup Form — First */}
-      <form onSubmit={handleEmailSignup}>
+      {/* Email Signup Form */}
+      <form onSubmit={handleEmailSignup} aria-labelledby="signup-form-title">
         <FieldGroup>
-          {!isPhone && (
-            <Field>
-              <FieldLabel htmlFor="name" className="text-sm font-medium text-gray-900 dark:text-gray-200">Nome completo</FieldLabel>
-              <Input
-                id="name"
-                type="text"
-                placeholder="João Silva"
-                value={name}
-                onChange={(e) => { setName(e.target.value); if (nameError) setNameError("") }}
-                disabled={isLoading}
-                autoFocus
-                aria-invalid={!!nameError}
-                aria-describedby={nameError ? "name-error" : undefined}
-                className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
-              />
-              {nameError && <FieldError id="name-error">{nameError}</FieldError>}
-            </Field>
-          )}
+          <Field>
+            <FieldLabel htmlFor="name" className="text-sm font-medium text-gray-900 dark:text-gray-200">Nome completo</FieldLabel>
+            <Input
+              id="name"
+              type="text"
+              placeholder="João Silva"
+              value={name}
+              onChange={(e) => { setName(e.target.value); if (nameError) setNameError("") }}
+              disabled={isLoading}
+              autoFocus
+              aria-invalid={!!nameError}
+              aria-describedby={nameError ? "name-error" : undefined}
+              autoComplete="name"
+              className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            />
+            {nameError && <FieldError id="name-error">{nameError}</FieldError>}
+          </Field>
 
           <Field>
-            <FieldLabel htmlFor="email" className="text-sm font-medium text-gray-900 dark:text-gray-200">Email ou Telefone</FieldLabel>
-            {isPhone ? (
-              <PhoneInput
-                ref={phoneInputRef}
-                id="email"
-                name="email"
-                value={email}
-                onPhoneChange={(v) => { setEmail(v); setIsPhone(looksLikePhone(v)); if (emailError) setEmailError("") }}
-                disabled={isLoading}
-                placeholder="+55 11 99999-9999"
-              />
-            ) : (
-              <Input
-                id="email"
-                type="text"
-                inputMode="email"
-                placeholder="email@exemplo.com ou +55 11 99999-9999"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); setIsPhone(looksLikePhone(e.target.value)); if (emailError) setEmailError("") }}
-                disabled={isLoading}
-                aria-invalid={!!emailError}
-                aria-describedby={emailError ? "email-error" : "email-desc"}
-                className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
-              />
-            )}
+            <FieldLabel htmlFor="email" className="text-sm font-medium text-gray-900 dark:text-gray-200">Email</FieldLabel>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              inputMode="email"
+              placeholder="voce@empresa.com"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError("") }}
+              disabled={isLoading}
+              autoComplete="email"
+              aria-required="true"
+              aria-invalid={!!emailError}
+              aria-describedby={emailError ? "email-error" : undefined}
+              className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            />
             {emailError && <FieldError id="email-error">{emailError}</FieldError>}
-            <FieldDescription id="email-desc" className="text-gray-500 dark:text-gray-400">
-              {isPhone ? 'Enviaremos um código via WhatsApp' : 'Enviaremos um código de login para seu email'}
-            </FieldDescription>
           </Field>
 
           <TurnstileWidget
@@ -277,31 +230,30 @@ export function SignupForm({
             <Button
               type="submit"
               disabled={isLoading || isGoogleLoading}
-              className={cn(
-                "w-full min-h-[44px] transition-colors",
-                email.trim()
-                  ? "bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 border-transparent"
-                  : "bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
-              )}
               aria-busy={isLoading}
+              aria-label="Continuar com WhatsApp"
+              className={cn(
+                "w-full min-h-[44px] rounded-lg font-semibold text-[0.875rem] transition-colors",
+                "bg-[#075E54] text-white hover:bg-[#054C44] active:bg-[#043A34]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#075E54]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                "disabled:opacity-60"
+              )}
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
                   Enviando código...
                 </>
-              ) : isPhone ? (
-                <>
-                  <Smartphone className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Cadastrar com WhatsApp
-                </>
               ) : (
                 <>
-                  <Mail className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Cadastrar com Email
+                  <WhatsAppIcon className="mr-2 h-[18px] w-[18px] text-white" />
+                  Continuar com WhatsApp
                 </>
               )}
             </Button>
+            <p className="mt-2 text-center text-[0.75rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+              Enviaremos um código de verificação para você.
+            </p>
           </Field>
         </FieldGroup>
       </form>
