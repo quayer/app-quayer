@@ -73,7 +73,9 @@ const nextConfig: NextConfig = {
           // X-XSS-Protection intentionally omitted: deprecated in modern browsers,
           // superseded by CSP, and can introduce XSS vulnerabilities in legacy IE/Edge.
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()' },
+          // browsing-topics replaces the deprecated interest-cohort (FLoC, retired Jul/2022).
+          // Keeping the empty allowlist preserves the original opt-out intent for interest-based tracking.
+          { key: 'Permissions-Policy', value: 'accelerometer=(), browsing-topics=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
           {
             key: 'Content-Security-Policy',
