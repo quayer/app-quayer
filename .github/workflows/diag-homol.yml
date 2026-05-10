@@ -1,0 +1,53 @@
+name: Diag Homol
+
+# Workflow de diagnóstico: faz SSH no servidor de homol e captura
+# logs/estado dos containers SEM fazer deploy. Use quando o deploy falha
+# e precisa de visibilidade sobre o motivo.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Capture homol diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture container logs and state
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOMOL_HOST }}
+          username: ${{ secrets.HOMOL_USER }}
+          key: ${{ secrets.HOMOL_SSH_KEY }}
+          port: ${{ secrets.HOMOL_SSH_PORT }}
+          command_timeout: 5m
+          script: |
+            set +e
+            APP_DIR="/opt/quayer-homol"
+            cd "$APP_DIR" || exit 1
+
+            echo "=== docker compose ps ==="
+            docker compose -f compose.homol.yml ps -a
+
+            echo
+            echo "=== homol-quayer-app logs (last 250) ==="
+            docker logs homol-quayer-app --tail 250 2>&1 || echo "(no app logs)"
+
+            echo
+            echo "=== homol-quayer-postgres logs (last 50) ==="
+            docker logs homol-quayer-postgres --tail 50 2>&1 || echo "(no postgres logs)"
+
+            echo
+            echo "=== homol-quayer-redis logs (last 50) ==="
+            docker logs homol-quayer-redis --tail 50 2>&1 || echo "(no redis logs)"
+
+            echo
+            echo "=== homol-quayer-app inspect (Health) ==="
+            docker inspect homol-quayer-app --format='Health: {{json .State.Health}}' 2>&1 || true
+
+            echo
+            echo "=== .env.homol keys (NO VALUES) ==="
+            grep -oE '^[A-Z_]+=' "$APP_DIR/.env.homol" 2>/dev/null | sort -u || true
+
+            echo
+            echo "=== Free RAM ==="
+            free -h
