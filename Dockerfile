@@ -103,11 +103,32 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modul
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
 # Sentry OTel instrumentation hooks. O tracer do Next.js 16 + Turbopack tem
-# regressão (vercel/next.js#88844) que omite estes pacotes do .next/standalone/
-# node_modules mesmo quando declarados em serverExternalPackages — copiar
-# explicitamente garante que estão presentes em runtime.
+# regressão (vercel/next.js#88844): além de omitir os pacotes import-in-the-middle
+# e require-in-the-middle do .next/standalone/node_modules, ele também os
+# referencia *com hash sufixado* nos chunks (ex.: `import-in-the-middle-8c7f9689dc1aad0b`).
+# Em runtime o `require` falha porque o nome com hash não existe no node_modules.
+#
+# Workaround:
+#   1. Copia os pacotes reais (sem hash).
+#   2. Lê os chunks já buildados em /app/.next/server/chunks e cria symlinks
+#      dos nomes hashados apontando para o pacote canônico.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/import-in-the-middle ./node_modules/import-in-the-middle
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/require-in-the-middle ./node_modules/require-in-the-middle
+
+USER root
+RUN set -e; \
+    cd /app/node_modules; \
+    for pkg in import-in-the-middle require-in-the-middle; do \
+      grep -rohE "${pkg}-[a-f0-9]+" /app/.next/server/chunks 2>/dev/null \
+        | sort -u \
+        | while read -r hashed; do \
+            [ -e "$hashed" ] && continue; \
+            ln -sf "$pkg" "$hashed"; \
+            echo "[sentry-shim] linked $hashed -> $pkg"; \
+          done; \
+    done; \
+    chown -h -R nextjs:nodejs /app/node_modules/import-in-the-middle* /app/node_modules/require-in-the-middle*
+USER nextjs
 
 # Install pg fresh in runner stage — resolves all transitive deps correctly
 # (migrate.js uses pg directly and needs the full dependency tree)
