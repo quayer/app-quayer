@@ -247,8 +247,9 @@ export function SignupForm({
         return
       }
 
-      if (data && 'authUrl' in data && data.authUrl) {
-        window.location.href = data.authUrl
+      const authUrl = (data as { authUrl?: string } | null)?.authUrl
+      if (authUrl) {
+        window.location.href = authUrl
       } else {
         setError('Erro ao obter URL de autenticação do Google')
         setIsGoogleLoading(false)
