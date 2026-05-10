@@ -160,12 +160,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           SKIP_BACKUP: ${{ github.event.inputs.skip_backup }}
+          # Runtime envs sincronizadas via deploy (sem precisar SSH manual).
+          # Os runtime envs ficam em GitHub Secrets e são gravados/atualizados
+          # idempotentemente em $APP_DIR/$ENV_FILE no servidor antes do compose up.
+          HOMOL_APP_URL: ${{ secrets.HOMOL_APP_URL }}
+          HOMOL_RP_ID: ${{ secrets.HOMOL_RP_ID }}
+          HOMOL_GOOGLE_CLIENT_ID: ${{ secrets.HOMOL_GOOGLE_CLIENT_ID }}
+          HOMOL_GOOGLE_CLIENT_SECRET: ${{ secrets.HOMOL_GOOGLE_CLIENT_SECRET }}
+          HOMOL_GOOGLE_REDIRECT_URI: ${{ secrets.HOMOL_GOOGLE_REDIRECT_URI }}
+          HOMOL_UAZAPI_ADMIN_TOKEN: ${{ secrets.HOMOL_UAZAPI_ADMIN_TOKEN }}
+          HOMOL_UAZAPI_INSTANCE_TOKEN: ${{ secrets.HOMOL_UAZAPI_INSTANCE_TOKEN }}
+          HOMOL_UAZAPI_BASE_URL: ${{ secrets.HOMOL_UAZAPI_BASE_URL }}
         with:
           host: ${{ secrets.HOMOL_HOST }}
           username: ${{ secrets.HOMOL_USER }}
           key: ${{ secrets.HOMOL_SSH_KEY }}
           port: ${{ secrets.HOMOL_SSH_PORT }}
-          envs: CF_TUNNEL_HOMOL_TOKEN,DEPLOY_IMAGE,DEPLOY_REF_NAME,GITHUB_TOKEN,GITHUB_ACTOR,SKIP_BACKUP
+          envs: CF_TUNNEL_HOMOL_TOKEN,DEPLOY_IMAGE,DEPLOY_REF_NAME,GITHUB_TOKEN,GITHUB_ACTOR,SKIP_BACKUP,HOMOL_APP_URL,HOMOL_RP_ID,HOMOL_GOOGLE_CLIENT_ID,HOMOL_GOOGLE_CLIENT_SECRET,HOMOL_GOOGLE_REDIRECT_URI,HOMOL_UAZAPI_ADMIN_TOKEN,HOMOL_UAZAPI_INSTANCE_TOKEN,HOMOL_UAZAPI_BASE_URL
           command_timeout: 20m
           script: |
             set -e
@@ -188,13 +199,39 @@ jobs:
               echo "Swap já configurado: $(free -h | grep Swap)"
             fi
 
-            # Rotacionar CF_TUNNEL_HOMOL_TOKEN no .env.homol
-            if [ -f "$APP_DIR/$ENV_FILE" ]; then
-              if grep -q '^CF_TUNNEL_HOMOL_TOKEN=' "$APP_DIR/$ENV_FILE"; then
-                sed -i "s|^CF_TUNNEL_HOMOL_TOKEN=.*|CF_TUNNEL_HOMOL_TOKEN=${CF_TUNNEL_HOMOL_TOKEN}|" "$APP_DIR/$ENV_FILE"
-              else
-                echo "CF_TUNNEL_HOMOL_TOKEN=${CF_TUNNEL_HOMOL_TOKEN}" >> "$APP_DIR/$ENV_FILE"
+            # Helper idempotente: upsert KEY=VALUE em arquivo, remove duplicatas.
+            # Uso: upsert_env <arquivo> <KEY> <VALUE>
+            # Cria backup do .env (.bak.<timestamp>) antes de mexer.
+            upsert_env() {
+              local file="$1" key="$2" value="$3"
+              [ -z "$value" ] && return 0  # skip se valor vazio (não sobrescreve)
+              [ ! -f "$file" ] && return 0
+              if grep -q "^${key}=" "$file"; then
+                # remove TODAS as linhas existentes (caso haja duplicatas históricas)
+                sed -i "/^${key}=/d" "$file"
               fi
+              echo "${key}=${value}" >> "$file"
+            }
+
+            # Sincroniza runtime envs gerenciados via GitHub Secrets.
+            # Permite operar Google OAuth, WebAuthn (passkey) e UAZAPI (WhatsApp OTP)
+            # sem precisar SSH manual. Cada deploy reafirma os valores corretos.
+            if [ -f "$APP_DIR/$ENV_FILE" ]; then
+              echo ">> Sincronizando runtime envs via GitHub Secrets"
+              cp "$APP_DIR/$ENV_FILE" "$APP_DIR/$ENV_FILE.bak.$(date +%s)" 2>/dev/null || true
+              upsert_env "$APP_DIR/$ENV_FILE" CF_TUNNEL_HOMOL_TOKEN     "$CF_TUNNEL_HOMOL_TOKEN"
+              upsert_env "$APP_DIR/$ENV_FILE" NEXT_PUBLIC_APP_URL       "$HOMOL_APP_URL"
+              upsert_env "$APP_DIR/$ENV_FILE" RP_ID                      "$HOMOL_RP_ID"
+              upsert_env "$APP_DIR/$ENV_FILE" GOOGLE_CLIENT_ID           "$HOMOL_GOOGLE_CLIENT_ID"
+              upsert_env "$APP_DIR/$ENV_FILE" GOOGLE_CLIENT_SECRET       "$HOMOL_GOOGLE_CLIENT_SECRET"
+              upsert_env "$APP_DIR/$ENV_FILE" GOOGLE_REDIRECT_URI        "$HOMOL_GOOGLE_REDIRECT_URI"
+              upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_ADMIN_TOKEN         "$HOMOL_UAZAPI_ADMIN_TOKEN"
+              upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_INSTANCE_TOKEN      "$HOMOL_UAZAPI_INSTANCE_TOKEN"
+              upsert_env "$APP_DIR/$ENV_FILE" UAZAPI_BASE_URL            "$HOMOL_UAZAPI_BASE_URL"
+              # SIGNUP_ENABLED é fixo em homol — não vem de secret.
+              upsert_env "$APP_DIR/$ENV_FILE" SIGNUP_ENABLED             "false"
+              # Limpa backups com mais de 30 dias
+              find "$APP_DIR" -maxdepth 1 -name "$ENV_FILE.bak.*" -mtime +30 -delete 2>/dev/null || true
             fi
 
             echo "=== HOMOL DEPLOY ==="
