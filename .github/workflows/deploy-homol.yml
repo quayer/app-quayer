@@ -133,6 +133,7 @@ jobs:
             NEXT_PUBLIC_IGNITER_API_URL=${{ secrets.HOMOL_APP_URL }}/
             NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
             NEXT_PUBLIC_SIGNUP_ENABLED=false
+            NEXT_PUBLIC_AUTH_V3=on
           no-cache: ${{ github.event.inputs.no_cache == 'true' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
