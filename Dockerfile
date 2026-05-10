@@ -58,20 +58,31 @@ ARG NEXT_PUBLIC_IGNITER_API_URL
 ARG NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
 ARG NEXT_PUBLIC_SIGNUP_ENABLED=false
 ARG NEXT_PUBLIC_AUTH_V3=off
-# Workaround para vercel/next.js#87737 + #88844 — passar 1 desativa o
-# wrapping do Sentry/Next no build (auto-instrumentation OTel quebra o
-# Turbopack runtime). Sentry continua via instrumentation.ts em runtime.
+# SENTRY_BUILD_DISABLED=1 bypassa withSentryConfig no build. Default mantido
+# em 1 para builds que ainda usam Turbopack (vercel/next.js#87737 + #88844
+# quebram o boot quando @sentry/nextjs é importado sob Turbopack runtime).
+# Builds com NEXT_BUILD_FLAGS=--webpack devem passar SENTRY_BUILD_DISABLED=0
+# para reativar withSentryConfig (sourcemaps + auto-instrumentação OTel).
 ARG SENTRY_BUILD_DISABLED=1
+# NEXT_BUILD_FLAGS permite passar flags extras para `next build`. Usado em
+# homol com `--webpack` enquanto os bugs de Turbopack acima não são corrigidos
+# upstream. Vazio = Turbopack default (Next.js 16).
+ARG NEXT_BUILD_FLAGS=
+# SENTRY_RELEASE marca os eventos com a versão do código. Setado no CI a
+# partir do SHA do commit (deploy-homol/production.yml).
+ARG SENTRY_RELEASE=
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV NEXT_PUBLIC_IGNITER_API_URL=${NEXT_PUBLIC_IGNITER_API_URL}
 ENV NEXT_PUBLIC_IGNITER_API_BASE_PATH=${NEXT_PUBLIC_IGNITER_API_BASE_PATH}
 ENV NEXT_PUBLIC_SIGNUP_ENABLED=${NEXT_PUBLIC_SIGNUP_ENABLED}
 ENV NEXT_PUBLIC_AUTH_V3=${NEXT_PUBLIC_AUTH_V3}
 ENV SENTRY_BUILD_DISABLED=${SENTRY_BUILD_DISABLED}
+ENV SENTRY_RELEASE=${SENTRY_RELEASE}
 
 # Build Next.js application
-# This will create .next/standalone for optimal production bundle
-RUN npm run build
+# This will create .next/standalone for optimal production bundle.
+# `next build $NEXT_BUILD_FLAGS` permite opt-out de Turbopack via --webpack.
+RUN npx next build ${NEXT_BUILD_FLAGS}
 
 # ==================================
 # STAGE 3: Runner (Production)

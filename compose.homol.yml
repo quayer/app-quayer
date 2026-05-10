@@ -102,11 +102,13 @@ services:
       # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
 
-      # Observability (Sentry) — TEMPORARIAMENTE DESLIGADO em homol até
-      # corrigir o bug do Turbopack #87737/#88844. Sem isso, qualquer DSN
-      # populado dispara crash no boot ao carregar instrumentation hook.
-      # Hardcoded vazio aqui ignora o que estiver no .env.homol.
-      - SENTRY_DSN=
+      # Observability (Sentry) — build de homol usa --webpack
+      # (NEXT_BUILD_FLAGS no deploy-homol.yml) para contornar
+      # vercel/next.js#87737 + #88844, permitindo @sentry/nextjs subir
+      # sem o bug do import-in-the-middle hashed.
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - NEXT_PUBLIC_APP_ENV=homol
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
 
       # Google OAuth (homol usa redirect URI próprio)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
