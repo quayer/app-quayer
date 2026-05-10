@@ -102,6 +102,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
+# Sentry OTel instrumentation hooks. O tracer do Next.js 16 + Turbopack tem
+# regressão (vercel/next.js#88844) que omite estes pacotes do .next/standalone/
+# node_modules mesmo quando declarados em serverExternalPackages — copiar
+# explicitamente garante que estão presentes em runtime.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/import-in-the-middle ./node_modules/import-in-the-middle
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/require-in-the-middle ./node_modules/require-in-the-middle
+
 # Install pg fresh in runner stage — resolves all transitive deps correctly
 # (migrate.js uses pg directly and needs the full dependency tree)
 USER root

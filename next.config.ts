@@ -35,6 +35,14 @@ const nextConfig: NextConfig = {
     'https-proxy-agent',
     'pg',
     '@prisma/adapter-pg',
+    // OTel hooks usados por @sentry/nextjs precisam ser resolvidos via
+    // require nativo em runtime (não bundlados pelo Turbopack). Sem isso,
+    // o Next.js gera referência hashed (import-in-the-middle-<hash>) que
+    // falha em runtime com "Cannot find module" — quebra o instrumentation
+    // hook e o app não sobe quando SENTRY_DSN está populado.
+    // Refs: vercel/next.js#87737, vercel/next.js#88844.
+    'import-in-the-middle',
+    'require-in-the-middle',
   ],
   turbopack: {},
   images: {
