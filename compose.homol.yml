@@ -60,10 +60,22 @@ services:
       - REDIS_HOST=homol-quayer-redis
       - REDIS_PORT=6379
 
+      # Ambiente (lido pelo rate limiter pra ser generoso em homol vs estrito em prod)
+      - NEXT_PUBLIC_APP_ENV=homol
+
       # Auth
       - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_MAGIC_LINK_SECRET=${JWT_MAGIC_LINK_SECRET}
+      - JWT_2FA_CHALLENGE_SECRET=${JWT_2FA_CHALLENGE_SECRET}
       - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+      # WebAuthn (passkey)
+      - RP_ID=${RP_ID}
+
+      # Signup gate
+      - SIGNUP_ENABLED=${SIGNUP_ENABLED:-false}
 
       # Igniter
       - IGNITER_APP_NAME=quayer-homol
@@ -82,7 +94,9 @@ services:
 
       # WhatsApp
       - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_BASE_URL=${UAZAPI_BASE_URL}
       - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_INSTANCE_TOKEN=${UAZAPI_INSTANCE_TOKEN}
       - UAZAPI_WEBHOOK_URL=${UAZAPI_WEBHOOK_URL}
 
       # OpenAI
