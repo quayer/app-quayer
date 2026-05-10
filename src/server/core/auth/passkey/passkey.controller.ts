@@ -28,10 +28,10 @@ import { authRateLimiter, RateLimiter } from "@/lib/rate-limit/rate-limiter";
 import { checkOtpRateLimit } from "@/lib/rate-limit/otp-rate-limit";
 
 // Rate limiters para fluxos publicos de passkey login (10 req / 10 min por IP)
-const passkeyLoginOptionsLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-options' });
-const passkeyLoginVerifyLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-verify' });
-const passkeyLoginChallengeLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-challenge' });
-const passkeyLoginVerifyCondLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-verify-cond' });
+const passkeyLoginOptionsLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-options', failClosedInProduction: true });
+const passkeyLoginVerifyLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-verify', failClosedInProduction: true });
+const passkeyLoginChallengeLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-challenge', failClosedInProduction: true });
+const passkeyLoginVerifyCondLimiter = new RateLimiter({ limit: 10, window: 600, prefix: 'passkey-login-verify-cond', failClosedInProduction: true });
 
 // Schema WebAuthn — estrutura minima validada (payload completo repassado a @simplewebauthn/server)
 const webauthnRegistrationResponseSchema = z.object({
@@ -380,6 +380,17 @@ export const passkeyController = igniter.controller({
         });
         await db.passkeyChallenge.delete({ where: { id: challenge.id } });
 
+        // H-5: 2FA gate — passkey is first factor only; TOTP still required
+        if (user.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(user.id);
+          await createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'passkey' }, user.currentOrgId);
+          return response.success({
+            requiresTwoFactor: true,
+            challengeId,
+            user: { id: user.id, email: user.email },
+          });
+        }
+
         const currentOrgId = user.currentOrgId || user.organizations[0]?.organizationId;
         const currentOrgRelation = user.organizations.find(o => o.organizationId === currentOrgId);
 
@@ -518,6 +529,17 @@ export const passkeyController = igniter.controller({
           where: { id: credential.id },
           data: { counter: BigInt(authenticationInfo.newCounter), lastUsedAt: new Date() },
         });
+
+        // H-5: 2FA gate — passkey is first factor only; TOTP still required
+        if (user.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(user.id);
+          await createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'passkey-conditional' }, user.currentOrgId);
+          return response.success({
+            requiresTwoFactor: true,
+            challengeId,
+            user: { id: user.id, email: user.email },
+          });
+        }
 
         // Generate tokens and set cookies
         const currentOrgId = user.currentOrgId || user.organizations[0]?.organizationId;

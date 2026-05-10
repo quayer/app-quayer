@@ -213,18 +213,21 @@ export const otpVerifyEmailRateLimiter = new RateLimiter({
   limit: 5,
   window: 600, // 10 minutos
   prefix: 'ratelimit:otp-verify-email',
+  failClosedInProduction: true,
 });
 
 export const otpVerifySignupRateLimiter = new RateLimiter({
   limit: 5,
   window: 600,
   prefix: 'ratelimit:otp-verify-signup',
+  failClosedInProduction: true,
 });
 
 export const otpVerifyLoginRateLimiter = new RateLimiter({
   limit: 5,
   window: 600,
   prefix: 'ratelimit:otp-verify-login',
+  failClosedInProduction: true,
 });
 
 /**
@@ -257,27 +260,6 @@ export const webhookRateLimiter = new RateLimiter({
   prefix: 'ratelimit:webhooks',
 });
 
-/**
- * Helper para extrair identificador da requisição
- */
-export function getClientIdentifier(req: Request | { ip?: string; headers: Headers }): string {
-  // Tentar obter IP real (atrás de proxy)
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  const realIp = req.headers.get('x-real-ip');
-
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
-  }
-
-  if (realIp) {
-    return realIp;
-  }
-
-  // Fallback para IP direto (se disponível)
-  if ('ip' in req && req.ip) {
-    return req.ip;
-  }
-
-  // Último fallback - usar header de user agent como identificador
-  return req.headers.get('user-agent') || 'unknown';
-}
+// getClientIdentifier is the canonical implementation in
+// src/server/core/auth/_shared/helpers.ts — import from there.
+// The duplicate here was removed to eliminate drift between implementations.

@@ -1,4 +1,4 @@
-export function getGoogleAuthUrl(state?: string): string {
+export function getGoogleAuthUrl(state: string): string {
   const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
   const redirectUri = process.env.GOOGLE_REDIRECT_URI ?? ''
   const params = new URLSearchParams({
@@ -6,7 +6,7 @@ export function getGoogleAuthUrl(state?: string): string {
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid email profile',
-    ...(state ? { state } : {}),
+    state,
   })
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`
 }
@@ -27,7 +27,7 @@ export async function getGoogleTokens(code: string): Promise<{ access_token: str
   return res.json()
 }
 
-export async function getGoogleUserInfo(accessToken: string): Promise<{ sub: string; email: string; name: string; picture?: string; verified_email?: boolean }> {
+export async function getGoogleUserInfo(accessToken: string): Promise<{ sub: string; email: string; name: string; picture?: string; verified_email?: boolean; hd?: string }> {
   const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${accessToken}` },
   })

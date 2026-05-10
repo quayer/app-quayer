@@ -12,6 +12,19 @@ import { getIpGeolocation } from '@/lib/geocoding/ip-geolocation';
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from '@/lib/auth/csrf';
 import { getRedis } from '@/server/services/redis';
 
+const _isProduction =
+  (process.env.NEXT_PUBLIC_APP_ENV ?? process.env.NODE_ENV) === 'production';
+
+/**
+ * Extract the real client IP with a security-aware header priority:
+ *   1. cf-connecting-ip  — set by Cloudflare, not client-controllable
+ *   2. x-real-ip         — set by Caddy/nginx reverse proxy
+ *   3. x-forwarded-for   — ONLY trusted in non-production; client-controlled
+ *      in production without a Cloudflare/proxy fronting the service, so we
+ *      collapse all such requests into a single 'untrusted-fallback' bucket,
+ *      ensuring they hit the same rate-limit slot and cannot bypass limiting
+ *      by spoofing arbitrary IPs.
+ */
 export function getClientIdentifier(request: { headers: { get?: (key: string) => string | null; [key: string]: any } }): string {
   const headers = request?.headers;
   if (!headers) return 'unknown';
@@ -19,14 +32,22 @@ export function getClientIdentifier(request: { headers: { get?: (key: string) =>
     if (typeof headers.get === 'function') return headers.get(key) ?? undefined;
     return headers[key];
   };
-  // Priority: Cloudflare real IP → Caddy real IP → forwarded (last resort, client-controlled)
+
   const cfIp = get('cf-connecting-ip');
   if (cfIp) return cfIp;
+
   const realIp = get('x-real-ip');
   if (realIp) return realIp;
+
+  // In production, never trust x-forwarded-for without a trusted proxy header
+  // already present above.  Collapse into a single bucket so an attacker
+  // cannot cycle fake IPs to exhaust per-IP rate limit slots.
+  if (_isProduction) {
+    return 'untrusted-fallback';
+  }
+
   const forwarded = get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
-  return 'unknown';
+  return forwarded ? forwarded.split(',')[0].trim() : 'unknown';
 }
 
 export async function createAuditLog(

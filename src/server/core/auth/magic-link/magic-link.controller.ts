@@ -77,24 +77,33 @@ export const magicLinkController = igniter.controller({
           return response.status(429).json({ error: 'Too many requests', retryAfter: otpRateLimit.retryAfter });
         }
 
-        // Buscar verification code no banco
-        const verificationCode = await db.verificationCode.findUnique({
-          where: { id: payload.tokenId },
-        });
-
-        if (!verificationCode || verificationCode.used) {
-          return response.status(400).json({ error: 'Magic link already used or expired' });
-        }
-
-        if (verificationCode.expiresAt < new Date()) {
-          return response.status(400).json({ error: 'Magic link expired' });
-        }
-
-        // Marcar como usado
-        await db.verificationCode.update({
-          where: { id: verificationCode.id },
+        // Atomic compare-and-set: consume the magic link token in a single UPDATE.
+        // Prevents race-condition token replay where two concurrent requests
+        // both read used=false before either writes used=true.
+        const consumeResult = await db.verificationCode.updateMany({
+          where: {
+            id: payload.tokenId,
+            used: false,
+            expiresAt: { gt: new Date() },
+          },
           data: { used: true },
         });
+
+        if (consumeResult.count === 0) {
+          // Could be: already used, expired, or token ID doesn't exist.
+          // Re-check to give a more specific error without leaking token state.
+          const existing = await db.verificationCode.findUnique({
+            where: { id: payload.tokenId },
+            select: { used: true, expiresAt: true },
+          });
+          if (!existing) {
+            return response.status(400).json({ error: 'Magic link already used or expired' });
+          }
+          if (existing.expiresAt < new Date()) {
+            return response.status(400).json({ error: 'Magic link expired' });
+          }
+          return response.status(400).json({ error: 'Magic link already used or expired' });
+        }
 
         // SIGNUP: Criar novo usuário
         if (payload.type === 'magic-link-signup') {
@@ -321,13 +330,51 @@ export const magicLinkController = igniter.controller({
           return response.status(429).json({ error: 'Too many requests', retryAfter: rateLimit.retryAfter });
         }
 
+        // C-3: Extract `mlpoll` cookie — the plain-text polling secret that was set
+        // (httpOnly, path-scoped to this endpoint) when the OTP was issued. Only the
+        // originating browser tab carries this cookie, binding the polling session to
+        // the tab that initiated the login flow.
+        const cookieHeader = (typeof (request.headers as any).get === 'function')
+          ? ((request.headers as any).get('cookie') ?? '')
+          : ((request.headers as any)['cookie'] ?? '');
+
+        const mlpollCookie = cookieHeader
+          .split(';')
+          .map((c: string) => c.trim())
+          .find((c: string) => c.startsWith('mlpoll='))
+          ?.slice('mlpoll='.length);
+
+        if (!mlpollCookie) {
+          return response.status(403).json({ error: 'Forbidden' });
+        }
+
         // Find the VerificationCode by ID
         const verificationCode = await db.verificationCode.findUnique({
           where: { id: sessionId },
         });
 
         if (!verificationCode) {
-          return response.status(404).json({ error: 'Session not found' });
+          return response.status(403).json({ error: 'Forbidden' });
+        }
+
+        // C-3: Constant-time comparison of the presented polling secret against
+        // the stored SHA-256 hash. Prevents timing oracle attacks.
+        // The `token` field stores the hash (no migration required — field is nullable String).
+        if (!verificationCode.token) {
+          // Legacy record without a polling secret — reject to fail secure
+          return response.status(403).json({ error: 'Forbidden' });
+        }
+        const expectedHash = crypto
+          .createHash('sha256')
+          .update(mlpollCookie)
+          .digest('hex');
+        // timingSafeEqual requires same-length Buffers
+        const expectedBuf = Buffer.from(expectedHash, 'utf8');
+        const actualBuf = Buffer.from(verificationCode.token, 'utf8');
+        const lengthMatch = expectedBuf.length === actualBuf.length;
+        const secretMatch = lengthMatch && crypto.timingSafeEqual(expectedBuf, actualBuf);
+        if (!secretMatch) {
+          return response.status(403).json({ error: 'Forbidden' });
         }
 
         // Check if expired (5 minute polling timeout)

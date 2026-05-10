@@ -78,6 +78,7 @@ const meRateLimiter = new RateLimiter({
   limit: 120,
   window: 60,
   prefix: 'ratelimit:me',
+  failClosedInProduction: true,
 });
 
 export const identityController = igniter.controller({

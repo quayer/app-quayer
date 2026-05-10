@@ -23,10 +23,10 @@ function GoogleCallbackContent() {
     }
   }, [])
 
-  const handleGoogleCallback = useCallback(async (code: string) => {
+  const handleGoogleCallback = useCallback(async (code: string, state: string) => {
     try {
       const { data, error: apiError } = await api.auth.googleCallback.mutate({
-        body: { code }
+        body: { code, state }
       })
 
       if (apiError) {
@@ -70,6 +70,7 @@ function GoogleCallbackContent() {
 
   useEffect(() => {
     const code = searchParams.get('code')
+    const state = searchParams.get('state')
     const errorParam = searchParams.get('error')
 
     if (errorParam) {
@@ -79,8 +80,16 @@ function GoogleCallbackContent() {
       return
     }
 
+    if (!state) {
+      // Missing state — Google should always echo back the state we sent.
+      // Treat absence as a potential CSRF attempt and abort.
+      setError('Parâmetros de autenticação inválidos')
+      setTimeout(() => router.push('/login'), 3000)
+      return
+    }
+
     if (code) {
-      handleGoogleCallback(code)
+      handleGoogleCallback(code, state)
     }
   }, [searchParams, router, handleGoogleCallback])
 

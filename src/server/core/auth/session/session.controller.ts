@@ -37,12 +37,14 @@ const sessionRefreshRateLimiter = new RateLimiter({
   limit: 60,
   window: 600,
   prefix: 'ratelimit:session-refresh',
+  failClosedInProduction: true,
 });
 
 const logoutRateLimiter = new RateLimiter({
   limit: 10,
   window: 60,
   prefix: 'ratelimit:logout',
+  failClosedInProduction: true,
 });
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "@/lib/auth/csrf";
 import { getIpGeolocation } from "@/lib/geocoding/ip-geolocation";

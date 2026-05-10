@@ -48,9 +48,9 @@ export function GoogleCallbackV3(): React.ReactElement {
   )
 
   const exchange = React.useCallback(
-    async (code: string): Promise<void> => {
+    async (code: string, oauthState: string): Promise<void> => {
       try {
-        const result = (await api.auth.googleCallback.mutate({ body: { code } }) as unknown) as {
+        const result = (await api.auth.googleCallback.mutate({ body: { code, state: oauthState } }) as unknown) as {
           data?: GoogleCallbackResponse
           error?: ApiErrorShape['error']
         }
@@ -91,6 +91,7 @@ export function GoogleCallbackV3(): React.ReactElement {
 
   React.useEffect(() => {
     const code = searchParams.get('code')
+    const oauthState = searchParams.get('state')
     const errParam = searchParams.get('error')
 
     if (errParam) {
@@ -99,8 +100,16 @@ export function GoogleCallbackV3(): React.ReactElement {
       return
     }
 
+    if (!oauthState) {
+      // Missing state parameter — Google always echoes back the state we sent.
+      // Treat absence as a potential CSRF attempt and abort.
+      setError('Parametros de autenticacao invalidos')
+      setState('error')
+      return
+    }
+
     if (code) {
-      void exchange(code)
+      void exchange(code, oauthState)
     } else {
       setError('Codigo de autorizacao ausente')
       setState('error')

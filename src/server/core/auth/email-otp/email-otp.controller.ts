@@ -87,8 +87,10 @@ export const emailOtpController = igniter.controller({
           return response.status(400).json({ error: 'Email already verified' });
         }
 
-        // Verificar código via VerificationCode
-        const emailVerification = await db.verificationCode.findFirst({
+        // Atomic compare-and-set: consume the token in a single UPDATE.
+        // Prevents race-condition token replay where two concurrent requests
+        // both read used=false before either writes used=true.
+        const emailVerificationResult = await db.verificationCode.updateMany({
           where: {
             identifier: email,
             code,
@@ -96,18 +98,12 @@ export const emailOtpController = igniter.controller({
             used: false,
             expiresAt: { gt: new Date() },
           },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        if (!emailVerification) {
-          return response.status(400).json({ error: 'Invalid or expired code' });
-        }
-
-        // Marcar código como usado e email como verificado
-        await db.verificationCode.update({
-          where: { id: emailVerification.id },
           data: { used: true },
         });
+
+        if (emailVerificationResult.count === 0) {
+          return response.status(400).json({ error: 'Invalid or expired code' });
+        }
         await db.user.update({
           where: { email },
           data: { emailVerified: new Date() },
@@ -429,12 +425,20 @@ export const emailOtpController = igniter.controller({
             update: { code: signupOtpCode, expiresAt: signupExpiresAt },
           });
 
+          // C-3: Polling secret for signup branch (same protection as login branch)
+          const signupPollingSecret = crypto.randomBytes(32).toString('hex');
+          const signupPollingSecretHash = crypto
+            .createHash('sha256')
+            .update(signupPollingSecret)
+            .digest('hex');
+
           // Criar VerificationCode para magic link de signup
           const signupVerificationCode = await db.verificationCode.create({
             data: {
               identifier: email,
               code: signupOtpCode,
               type: 'MAGIC_LINK',
+              token: signupPollingSecretHash, // C-3: hashed polling secret for tab binding
               expiresAt: signupExpiresAt,
               used: false,
             },
@@ -458,6 +462,15 @@ export const emailOtpController = igniter.controller({
             10
           );
 
+          // C-3: Path-scoped httpOnly cookie for signup polling tab binding
+          response.setCookie('mlpoll', signupPollingSecret, {
+            httpOnly: true,
+            secure: isProduction,
+            sameSite: 'strict' as const,
+            path: '/api/v1/auth/check-magic-link-status',
+            maxAge: 600,
+          });
+
           return response.success({
             sent: true,
             message: 'Código enviado para seu email',
@@ -469,13 +482,25 @@ export const emailOtpController = igniter.controller({
         const otpCode = generateOTPCode();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
 
-        // Create VerificationCode record for magic link
+        // C-3: Generate a polling secret — 32-byte random hex that binds this
+        // browser tab to the polling session. Stored as a SHA-256 hash in the
+        // `token` field (nullable, no migration required). The plain-text secret
+        // is delivered via a path-scoped httpOnly cookie (`mlpoll`) so only the
+        // originating tab can use it to authenticate polling requests.
+        const pollingSecret = crypto.randomBytes(32).toString('hex');
+        const pollingSecretHash = crypto
+          .createHash('sha256')
+          .update(pollingSecret)
+          .digest('hex');
+
+        // Create VerificationCode record for magic link (store hash in `token`)
         const verificationCode = await db.verificationCode.create({
           data: {
             userId: user.id,
             identifier: email,
             code: otpCode,
             type: 'MAGIC_LINK',
+            token: pollingSecretHash, // C-3: hashed polling secret for tab binding
             expiresAt,
             used: false,
           },
@@ -499,6 +524,16 @@ export const emailOtpController = igniter.controller({
           magicLinkUrl,
           10
         );
+
+        // C-3: Set path-scoped httpOnly cookie so only the originating tab can
+        // poll. SameSite=Strict prevents cross-site requests from carrying it.
+        response.setCookie('mlpoll', pollingSecret, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/api/v1/auth/check-magic-link-status',
+          maxAge: 600, // 10 minutes — matches OTP expiry
+        });
 
         return response.success({
           sent: true,
@@ -556,8 +591,9 @@ export const emailOtpController = igniter.controller({
           return response.status(400).json({ error: 'Invalid code' });
         }
 
-        // Verificar código via VerificationCode
-        const loginVerification = await db.verificationCode.findFirst({
+        // Atomic compare-and-set: consume the token in a single UPDATE.
+        // Prevents race-condition token replay.
+        const loginVerificationResult = await db.verificationCode.updateMany({
           where: {
             identifier: email,
             code,
@@ -565,10 +601,10 @@ export const emailOtpController = igniter.controller({
             used: false,
             expiresAt: { gt: new Date() },
           },
-          orderBy: { createdAt: 'desc' },
+          data: { used: true },
         });
 
-        if (!loginVerification) {
+        if (loginVerificationResult.count === 0) {
           return response.status(400).json({ error: 'Invalid or expired code' });
         }
 
@@ -577,11 +613,18 @@ export const emailOtpController = igniter.controller({
           return response.status(403).json({ error: 'Account disabled' });
         }
 
-        // Marcar código como usado
-        await db.verificationCode.update({
-          where: { id: loginVerification.id },
-          data: { used: true },
-        });
+        // H-5: 2FA gate — if TOTP is enabled, first factor is done but we must
+        // not issue auth cookies yet. Return a signed challenge so the frontend
+        // can redirect to the TOTP verification step.
+        if (user.twoFactorEnabled) {
+          const challengeId = sign2faChallenge(user.id);
+          await createAuditLog('2FA_CHALLENGE_ISSUED', user.id, request, { method: 'email-otp' }, user.currentOrgId);
+          return response.success({
+            requiresTwoFactor: true,
+            challengeId,
+            user: { id: user.id, email: user.email },
+          });
+        }
 
         // Se admin não tem org setada, setar primeira org disponível
         let currentOrgId = user.currentOrgId;

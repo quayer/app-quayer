@@ -38,12 +38,14 @@ const oauthGoogleCallbackRateLimiter = new RateLimiter({
   limit: 10,
   window: 600,
   prefix: 'ratelimit:oauth-google-callback',
+  failClosedInProduction: true,
 });
 
 const oauthGoogleInitRateLimiter = new RateLimiter({
   limit: 20,
   window: 600,
   prefix: 'ratelimit:oauth-google-init',
+  failClosedInProduction: true,
 });
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "@/lib/auth/csrf";
 import { getIpGeolocation } from "@/lib/geocoding/ip-geolocation";
@@ -65,6 +67,12 @@ export const oauthGoogleController = igniter.controller({
   actions: {
     /**
      * Google Auth - Iniciar fluxo OAuth
+     *
+     * CSRF protection: generates a cryptographically random `state` token,
+     * stores it in an httpOnly+Secure+SameSite=Lax cookie (oauth_google_state)
+     * valid for 10 minutes, and embeds it in the Google authorization URL.
+     * The callback handler validates the returned state against the cookie
+     * using timing-safe comparison before processing any token exchange.
      */
     googleAuth: igniter.query({
       name: 'Google Auth',
@@ -82,8 +90,21 @@ export const oauthGoogleController = igniter.controller({
           });
         }
 
+        // Generate a cryptographically random CSRF state token (64 hex chars)
+        const state = crypto.randomBytes(32).toString('hex');
+
+        // Store state in a short-lived httpOnly cookie so the callback can
+        // validate it without relying on client-side storage.
+        response.setCookie('oauth_google_state', state, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+          maxAge: 600, // 10 minutes — enough for the OAuth round-trip
+        });
+
         const { getGoogleAuthUrl } = await import('@/lib/auth/google-oauth');
-        const authUrl = getGoogleAuthUrl();
+        const authUrl = getGoogleAuthUrl(state);
         return response.success({ authUrl });
       },
     }),
@@ -108,8 +129,47 @@ export const oauthGoogleController = igniter.controller({
           });
         }
 
-        const { code } = request.body;
+        const { code, state } = request.body;
         const { getGoogleTokens, getGoogleUserInfo } = await import('@/lib/auth/google-oauth');
+
+        // --- CSRF state validation (Login-CSRF prevention) ---
+        // Read the state stored in the httpOnly cookie set during googleAuth.
+        const cookieHeader = request.headers.get('cookie') || '';
+        const cookieState = cookieHeader
+          .split(';')
+          .map((c: string) => c.trim())
+          .find((c: string) => c.startsWith('oauth_google_state='))
+          ?.split('=')
+          .slice(1)
+          .join('=') ?? '';
+
+        // Reject immediately if cookie is absent or lengths differ (prevents
+        // timing oracle when buffers of different length are compared).
+        if (!cookieState || cookieState.length !== state.length) {
+          console.error('[Google OAuth] State mismatch — possible CSRF attack');
+          return response.status(403).json({ error: 'Invalid OAuth state' });
+        }
+
+        // Constant-time comparison to prevent timing attacks.
+        const stateMatches = crypto.timingSafeEqual(
+          Buffer.from(cookieState, 'utf8'),
+          Buffer.from(state, 'utf8'),
+        );
+
+        if (!stateMatches) {
+          console.error('[Google OAuth] State mismatch — possible CSRF attack');
+          return response.status(403).json({ error: 'Invalid OAuth state' });
+        }
+
+        // Invalidate the state cookie (one-shot) immediately after validation.
+        response.setCookie('oauth_google_state', '', {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+          maxAge: 0,
+        });
+        // --- end CSRF validation ---
 
         try {
           // Trocar código por tokens
@@ -123,7 +183,20 @@ export const oauthGoogleController = igniter.controller({
           // Obter informações do usuário
           const googleUser = await getGoogleUserInfo(tokens.access_token);
 
-          if (!googleUser.verified_email) {
+          /**
+           * Email verification check.
+           *
+           * Google's userinfo endpoint behaviour by account type:
+           *   - Consumer accounts:  verified_email = true | false
+           *   - Google Workspace:   verified_email may be undefined (field absent)
+           *     but `hd` (hosted domain) is present — Workspace only populates `hd`
+           *     for active, verified accounts, so its presence implies verification.
+           *
+           * We only hard-reject when verified_email is explicitly `false`.
+           * Undefined (Workspace) or true (Consumer) are treated as verified.
+           */
+          const isWorkspaceAccount = typeof googleUser.hd === 'string' && googleUser.hd.length > 0;
+          if (googleUser.verified_email === false && !isWorkspaceAccount) {
             console.error('[Google OAuth] Provider returned unverified email; rejecting');
             return response.status(400).json({ error: 'Google email not verified' });
           }
