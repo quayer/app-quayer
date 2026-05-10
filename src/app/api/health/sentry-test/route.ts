@@ -11,7 +11,7 @@ export const runtime = 'nodejs'
  * Em prod retorna 404 pra não revelar a existência da rota.
  *
  * Uso:
- *   curl https://homol.quayer.com/api/_health/sentry-test
+ *   curl https://homol.quayer.com/api/health/sentry-test
  *   # → { ok: true, eventId, environment, release }
  *
  * Depois abrir https://quayer.sentry.io/issues/?environment=homol e ver
