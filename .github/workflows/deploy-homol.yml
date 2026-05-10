@@ -134,6 +134,9 @@ jobs:
             NEXT_PUBLIC_IGNITER_API_BASE_PATH=/api/v1
             NEXT_PUBLIC_SIGNUP_ENABLED=false
             NEXT_PUBLIC_AUTH_V3=on
+            NEXT_PUBLIC_APP_ENV=homol
+            NEXT_PUBLIC_SENTRY_DSN=https://101813a039d93ebdf42618e590c15fa8@o4508515203874816.ingest.de.sentry.io/4511304442904656
+            NEXT_PUBLIC_SENTRY_RELEASE=${{ github.sha }}
             NEXT_BUILD_FLAGS=--webpack
             SENTRY_BUILD_DISABLED=0
             SENTRY_RELEASE=${{ github.sha }}
