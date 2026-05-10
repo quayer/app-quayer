@@ -23,10 +23,10 @@ export default function PrivacidadePage() {
         <p className="text-amber-800 mt-1">
           Para esclarecimentos, contate{' '}
           <a
-            href="mailto:juridico@quayer.com"
+            href="mailto:dpo@quayer.com"
             className="underline hover:no-underline"
           >
-            juridico@quayer.com
+            dpo@quayer.com
           </a>
           .
         </p>
@@ -38,34 +38,41 @@ export default function PrivacidadePage() {
         </h1>
         <p className="text-sm text-neutral-500">
           Rascunho — texto sujeito a revisão pela equipe jurídica e adequação
-          à LGPD (Lei nº 13.709/2018).
+          à Lei Geral de Proteção de Dados (Lei nº 13.709/2018 — LGPD).
         </p>
       </header>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">1. Dados Coletados</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá as categorias de dados pessoais coletados
-          pela Quayer (cadastrais, de uso, de comunicação, técnicos) e os
-          momentos da coleta — texto a ser redigido por equipe jurídica.
+          A Quayer coleta dados pessoais necessários à prestação do serviço,
+          organizados em quatro categorias principais: dados cadastrais, dados
+          de uso e comunicação, dados técnicos e dados de pagamento. A coleta
+          ocorre no momento do cadastro, durante a utilização da plataforma e
+          por meio de integrações autorizadas pelo titular ou pela
+          organização contratante.
         </p>
 
         <h3 className="text-base font-semibold mt-5 mb-2">
           1.1. Dados Cadastrais
         </h3>
         <p className="text-neutral-700 leading-relaxed">
-          Esta subseção descreverá nome, e-mail, telefone, CPF/CNPJ e demais
-          dados informados no cadastro — texto a ser redigido por equipe
-          jurídica.
+          Incluem nome, e-mail, telefone, CPF ou CNPJ, dados da organização e
+          credenciais de autenticação. São fornecidos diretamente pelo titular
+          no momento do cadastro ou da contratação e atualizados conforme as
+          alterações realizadas no perfil.
         </p>
 
         <h3 className="text-base font-semibold mt-5 mb-2">
           1.2. Dados de Uso e Comunicação
         </h3>
         <p className="text-neutral-700 leading-relaxed">
-          Esta subseção descreverá metadados de mensagens, conexões com
-          WhatsApp, logs de eventos e dados de campanhas — texto a ser
-          redigido por equipe jurídica.
+          Incluem metadados de mensagens trocadas via WhatsApp, registros de
+          conexão de instâncias, logs de eventos da plataforma, dados de
+          campanhas e fluxos automatizados, bem como interações com agentes
+          de inteligência artificial. O conteúdo das mensagens permanece sob
+          titularidade da organização contratante e é tratado pela Quayer
+          apenas na medida necessária à operação do serviço.
         </p>
       </section>
 
@@ -74,69 +81,97 @@ export default function PrivacidadePage() {
           2. Finalidade do Tratamento
         </h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá as finalidades específicas do tratamento de
-          cada categoria de dado (prestação do serviço, segurança, suporte,
-          melhorias, obrigações legais) — texto a ser redigido por equipe
-          jurídica.
+          Os dados pessoais são tratados pela Quayer para: (i) prestação dos
+          serviços contratados e operação técnica da plataforma; (ii)
+          autenticação, prevenção a fraudes e segurança da informação; (iii)
+          comunicação com o titular sobre o serviço, suporte e atualizações;
+          (iv) cumprimento de obrigações legais e regulatórias; e (v)
+          melhoria contínua dos produtos com base em dados agregados ou
+          anonimizados.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">3. Base Legal (LGPD)</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá as hipóteses legais que autorizam o
-          tratamento (art. 7º da LGPD), tais como execução de contrato,
-          legítimo interesse, cumprimento de obrigação legal e
-          consentimento — texto a ser redigido por equipe jurídica.
+          O tratamento de dados pessoais pela Quayer fundamenta-se nas
+          hipóteses do art. 7º da Lei nº 13.709/2018 (LGPD), em especial:
+          execução de contrato e procedimentos preliminares (inc. V),
+          cumprimento de obrigação legal ou regulatória (inc. II), exercício
+          regular de direitos (inc. VI), legítimo interesse do controlador
+          (inc. IX) e, quando aplicável, consentimento específico do titular
+          (inc. I).
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">4. Compartilhamento</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá com quais terceiros os dados são
-          compartilhados (operadores, provedores de infraestrutura, Meta /
-          WhatsApp, gateways de pagamento) e as garantias contratuais
-          aplicáveis — texto a ser redigido por equipe jurídica.
+          A Quayer compartilha dados pessoais com terceiros apenas na medida
+          necessária à prestação do serviço, com destaque para: provedores de
+          infraestrutura em nuvem, Meta Platforms (provedora do WhatsApp),
+          gateways de pagamento, provedores de e-mail e SMS, e fornecedores
+          de modelos de inteligência artificial. Todos os operadores são
+          contratualmente obrigados a adotar medidas de proteção compatíveis
+          com a LGPD. A Quayer não comercializa dados pessoais de seus
+          usuários.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">5. Cookies</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá os tipos de cookies utilizados (essenciais,
-          analíticos, de preferência), sua finalidade e como o usuário pode
-          gerenciá-los — texto a ser redigido por equipe jurídica.
+          A plataforma utiliza cookies e tecnologias similares classificados
+          em três categorias: essenciais (autenticação e segurança),
+          funcionais (preferências do usuário) e analíticos (métricas
+          agregadas de uso). O usuário pode gerenciar cookies não essenciais
+          por meio das configurações do navegador, observando que a
+          desativação pode comprometer parte das funcionalidades.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">6. Direitos do Titular</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá os direitos garantidos pela LGPD (art. 18) —
-          confirmação, acesso, correção, anonimização, portabilidade,
-          eliminação, informação sobre compartilhamento e revogação de
-          consentimento — e os canais para exercê-los — texto a ser redigido
-          por equipe jurídica.
+          Nos termos do art. 18 da LGPD, o titular pode solicitar a qualquer
+          momento: confirmação da existência de tratamento; acesso aos dados;
+          correção de dados incompletos, inexatos ou desatualizados;
+          anonimização, bloqueio ou eliminação de dados desnecessários;
+          portabilidade; eliminação dos dados tratados com consentimento;
+          informação sobre compartilhamentos realizados; e revogação do
+          consentimento. Solicitações devem ser enviadas para{' '}
+          <a
+            href="mailto:dpo@quayer.com"
+            className="underline hover:no-underline"
+          >
+            dpo@quayer.com
+          </a>
+          .
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">7. Segurança</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá as medidas técnicas e administrativas
-          adotadas para proteger dados pessoais (criptografia em trânsito e
-          repouso, controle de acesso, monitoramento, plano de resposta a
-          incidentes) — texto a ser redigido por equipe jurídica.
+          A Quayer adota medidas técnicas e administrativas para proteger os
+          dados pessoais, incluindo criptografia em trânsito (TLS) e em
+          repouso, controle de acesso baseado em papéis, isolamento
+          multi-tenant, monitoramento contínuo, registros de auditoria e
+          plano de resposta a incidentes de segurança. Em caso de incidente
+          que possa acarretar risco relevante aos titulares, a Autoridade
+          Nacional de Proteção de Dados (ANPD) e os titulares afetados serão
+          comunicados nos prazos exigidos pela legislação.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">8. Retenção</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá os prazos de retenção de cada categoria de
-          dado e os critérios para descarte ou anonimização — texto a ser
-          redigido por equipe jurídica.
+          Os dados pessoais são retidos pelo tempo necessário ao cumprimento
+          das finalidades para as quais foram coletados ou pelo prazo
+          exigido por obrigações legais e regulatórias. Após o término dos
+          prazos aplicáveis, os dados são eliminados ou anonimizados, salvo
+          quando sua conservação for autorizada por hipótese legal específica.
         </p>
       </section>
 
@@ -145,45 +180,56 @@ export default function PrivacidadePage() {
           9. Transferências Internacionais
         </h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá eventuais transferências de dados para
-          outros países (provedores de nuvem, sub-operadores) e as
-          salvaguardas aplicáveis nos termos dos arts. 33 a 36 da LGPD —
-          texto a ser redigido por equipe jurídica.
+          Em razão do uso de provedores globais de nuvem e de modelos de
+          inteligência artificial, dados pessoais podem ser transferidos para
+          outros países. Tais transferências observam as salvaguardas dos
+          arts. 33 a 36 da LGPD, incluindo a contratação de operadores que
+          ofereçam grau de proteção adequado e a celebração de cláusulas
+          contratuais específicas para a proteção dos titulares.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">10. Encarregado (DPO)</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção identificará o Encarregado pelo Tratamento de Dados
-          Pessoais (DPO) da Quayer e seus contatos oficiais — texto a ser
-          redigido por equipe jurídica.
+          A Quayer designa um Encarregado pelo Tratamento de Dados Pessoais
+          (DPO), responsável por receber comunicações dos titulares e da
+          ANPD, orientar internamente sobre práticas de proteção de dados e
+          executar as demais atribuições previstas no art. 41 da LGPD.
+          Contato:{' '}
+          <a
+            href="mailto:dpo@quayer.com"
+            className="underline hover:no-underline"
+          >
+            dpo@quayer.com
+          </a>
+          .
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">11. Alterações</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá o procedimento de atualização desta Política,
-          como o usuário será notificado e a versão vigente — texto a ser
-          redigido por equipe jurídica.
+          Esta Política poderá ser atualizada periodicamente para refletir
+          mudanças legais, técnicas ou operacionais. A versão vigente estará
+          sempre disponível nesta página, com indicação da data da última
+          atualização, e mudanças relevantes serão comunicadas por e-mail ou
+          aviso na plataforma com antecedência razoável.
         </p>
       </section>
 
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-3">12. Contato</h2>
         <p className="text-neutral-700 leading-relaxed">
-          Esta seção descreverá os canais oficiais para contato sobre
-          privacidade, exercício de direitos do titular e comunicação com
-          o DPO — texto a ser redigido por equipe jurídica. Enquanto isso,
-          contate{' '}
+          Para o exercício de direitos do titular, dúvidas sobre esta
+          Política ou comunicação com o Encarregado, escreva para{' '}
           <a
-            href="mailto:juridico@quayer.com"
+            href="mailto:dpo@quayer.com"
             className="underline hover:no-underline"
           >
-            juridico@quayer.com
+            dpo@quayer.com
           </a>
-          .
+          . Endereço para correspondência: Quayer · São Paulo, Brasil.
         </p>
       </section>
     </main>
