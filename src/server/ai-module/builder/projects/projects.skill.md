@@ -77,12 +77,41 @@ Nunca consultar `database.builderProject.findUnique({ where: { id } })` diretame
 
 ## Actions no controller
 
-| Action | Método | Path | Uso |
-|---|---|---|---|
-| `listProjects` | GET | `/builder/projects` | Paginação + filtro por `type`/`status` |
-| `createProject` | POST | `/builder/projects/create` | Cria DRAFT + conversa + 1ª mensagem |
-| `publishProject` | POST | `/builder/projects/publish` | DRAFT → ACTIVE (exige `aiAgentId`) |
-| `sendChatMessage` | POST | `/builder/projects/:id/chat/message` | SSE streaming (ver chat.skill.md) |
+| Action | Método | Path | File | Uso |
+|---|---|---|---|---|
+| `listProjects` | GET | `/builder/projects` | `routes/crud.routes.ts` | Paginação + filtro por `type`/`status` |
+| `getProject` | GET | `/builder/projects/:id` | `routes/crud.routes.ts` | Retorna projeto + conversa + agente vinculado |
+| `createProject` | POST | `/builder/projects/create` | `routes/crud.routes.ts` | Cria DRAFT + conversa + 1ª mensagem |
+| `deleteProject` | DELETE | `/builder/projects/:id` | `routes/crud.routes.ts` | Soft delete (status → archived) |
+| `renameProject` | PATCH | `/builder/projects/:id/rename` | `routes/crud.routes.ts` | Renomeia projeto |
+| `archiveProject` | PATCH | `/builder/projects/:id/archive` | `routes/crud.routes.ts` | Arquiva projeto (status → archived) |
+| `duplicateProject` | POST | `/builder/projects/:id/duplicate` | `routes/crud.routes.ts` | Clona projeto + agente + última versão de prompt |
+| `updatePrompt` | PATCH | `/builder/projects/:id/prompt` | `routes/prompt.routes.ts` | Auto-save do system prompt |
+| `listVersions` | GET | `/builder/projects/:id/versions` | `routes/prompt.routes.ts` | Histórico de versões do prompt |
+| `rollbackPrompt` | POST | `/builder/projects/:id/prompt/rollback` | `routes/prompt.routes.ts` | Cria nova versão copiando versão alvo |
+| `getSidebar` | GET | `/builder/sidebar` | `routes/metrics.routes.ts` | Projetos recentes p/ BuilderSidebar |
+| `getMetrics` | GET | `/builder/projects/:id/metrics` | `routes/metrics.routes.ts` | Métricas 24h (ChatSessions + Messages) |
+| `getProjectChannel` | GET | `/builder/projects/:id/channel` | `routes/channel.routes.ts` | Canal (Connection) ativo do agente |
+| `attachChannel` | POST | `/builder/projects/:id/channel` | `routes/channel.routes.ts` | Vincula canal WhatsApp via AgentDeployment |
+| `detachChannel` | DELETE | `/builder/projects/:id/channel` | `routes/channel.routes.ts` | Remove vínculo do canal ativo |
+| `playgroundStream` | POST | `/builder/projects/:id/playground/stream` | `routes/playground.routes.ts` | SSE stateless para testar agente |
+
+---
+
+## Arquivos do subdomínio
+
+```
+src/server/ai-module/builder/projects/
+├── projects.routes.ts          # Composer (~25 linhas) — agrega os 5 route files
+├── projects.repository.ts      # Queries Prisma do subdomínio
+├── projects.skill.md           # Este arquivo
+└── routes/
+    ├── crud.routes.ts          # listProjects, getProject, createProject, deleteProject, renameProject, archiveProject, duplicateProject
+    ├── prompt.routes.ts        # updatePrompt, listVersions, rollbackPrompt
+    ├── metrics.routes.ts       # getSidebar, getMetrics
+    ├── channel.routes.ts       # getProjectChannel, attachChannel, detachChannel
+    └── playground.routes.ts    # playgroundStream
+```
 
 ---
 
@@ -100,6 +129,6 @@ Falha → `400 badRequest` com mensagem em português.
 
 ## Referências
 
-- Repo: `src/server/ai-module/builder/repositories/builder-project.repository.ts`
+- Repo: `src/server/ai-module/builder/projects/projects.repository.ts`
 - Schemas: `src/server/ai-module/builder/builder.schemas.ts`
 - Constants: `src/server/ai-module/builder/builder.constants.ts`
