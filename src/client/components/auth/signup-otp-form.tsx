@@ -77,8 +77,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         sessionStorage.removeItem('signup-name')
 
         setTimeout(() => {
-          const redirectPath = result.user?.role === "admin" ? "/admin" : "/"
-          window.location.href = redirectPath
+          window.location.href = "/"
         }, 1500)
       }
     } catch (err: unknown) {

@@ -9,7 +9,6 @@ import {
   Moon,
   PanelLeft,
   Plus,
-  Shield,
   Sun,
   ChevronRight,
   Building2,
@@ -54,7 +53,6 @@ interface BuilderSidebarProject {
 
 interface BuilderSidebarProps {
   recentProjects: BuilderSidebarProject[]
-  isSuperAdmin: boolean
   onToggle?: () => void
 }
 
@@ -116,7 +114,6 @@ function getInitials(name?: string | null, email?: string | null): string {
 
 export function BuilderSidebar({
   recentProjects,
-  isSuperAdmin,
   onToggle,
 }: BuilderSidebarProps) {
   const pathname = usePathname()
@@ -341,7 +338,6 @@ export function BuilderSidebar({
         <UserMenuSection
           tokens={tokens}
           supportsHover={supportsHover}
-          isSuperAdmin={isSuperAdmin}
         />
       </div>
     </aside>
@@ -671,11 +667,9 @@ function OrgSwitcherSection({
 function UserMenuSection({
   tokens,
   supportsHover,
-  isSuperAdmin,
 }: {
   tokens: SidebarTokens
   supportsHover: boolean
-  isSuperAdmin: boolean
 }) {
   const { user, logout } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
@@ -765,14 +759,6 @@ function UserMenuSection({
           <UserCircle className="size-4" aria-hidden="true" />
           Minha conta
         </DropdownMenuItem>
-
-        {/* Admin — superadmin only */}
-        {isSuperAdmin && (
-          <DropdownMenuItem onClick={() => router.push("/admin")} className="gap-2">
-            <Shield className="size-4" aria-hidden="true" />
-            Admin
-          </DropdownMenuItem>
-        )}
 
         <DropdownMenuSeparator />
 

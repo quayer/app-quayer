@@ -105,7 +105,7 @@ describe('projectsRoutes.getSidebar', () => {
     expect(true).toBe(true)
   })
 
-  it('retorna recentProjects + isSuperAdmin', () => {
+  it('retorna recentProjects', () => {
     // TODO(US-xxx): mockar getBuilderSidebarData, validar shape.
     expect(true).toBe(true)
   })

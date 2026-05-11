@@ -7,7 +7,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyAccessToken, extractTokenFromHeader } from '@/lib/auth/jwt.edge';
-import { UserRole, isSystemAdmin } from '@/lib/auth/roles';
 
 /**
  * Rotas públicas (não requerem autenticação)
@@ -36,25 +35,10 @@ const ONBOARDING_PATHS = ['/onboarding'];
  */
 const PROTECTED_PATHS = [
   '/projetos',
-  '/canais',
-  '/admin',
   '/conta',
-  '/org',
-  '/dashboard',
-  '/docs',
-  '/instances',
-  '/organizations',
-  '/projects',
-  '/settings',
   '/user',
   '/onboarding',
-  '/auth/device',
 ];
-
-/**
- * Rotas que requerem role de System Admin
- */
-const ADMIN_ONLY_PATHS = ['/admin', '/docs'];
 
 /**
  * Builds a per-request Content-Security-Policy header value.
@@ -130,10 +114,9 @@ export async function middleware(request: NextRequest) {
   const headerToken = extractTokenFromHeader(request.headers.get('authorization') || '');
   const token = cookieToken || headerToken;
 
-  // 4. Se não há token, redirecionar para login
+  // 4. Se não há token, redirecionar para login (preservando query params)
   if (!token) {
     const loginUrl = new URL('/login', request.url);
-    // Preservar query params na URL de redirect (ex: /auth/device?code=ABCD-1234)
     const search = request.nextUrl.search;
     loginUrl.searchParams.set('redirect', search ? `${pathname}${search}` : pathname);
     return NextResponse.redirect(loginUrl);
@@ -173,16 +156,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(dashboardUrl);
   }
 
-  // 8. Verificar se rota requer System Admin
-  const isAdminOnlyPath = ADMIN_ONLY_PATHS.some((path) => pathname.startsWith(path));
-
-  if (isAdminOnlyPath && !isSystemAdmin(payload.role as UserRole)) {
-    // Usuário não é admin do sistema - redirecionar silenciosamente para a home
-    const redirectUrl = new URL('/', request.url);
-    return NextResponse.redirect(redirectUrl);
-  }
-
-  // 9. Adicionar informações do usuário aos headers (para uso em Server Components)
+  // 8. Adicionar informações do usuário aos headers (para uso em Server Components)
   // IMPORTANTE: estes headers são gerados AQUI a partir do JWT verificado.
   // Route Handlers e Server Components NUNCA devem usá-los como fonte primária
   // de autenticação — sempre revalidar via JWT ou session no handler. Eles
@@ -205,7 +179,7 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('x-organization-role', payload.organizationRole);
   }
 
-  // 10. Continuar com headers atualizados
+  // 9. Continuar com headers atualizados
   const response = NextResponse.next({
     request: {
       headers: requestHeaders,

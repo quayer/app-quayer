@@ -16,11 +16,7 @@ function GoogleCallbackContent() {
   const [twoFactorChallengeId, setTwoFactorChallengeId] = useState<string | null>(null)
 
   const handle2FASuccess = useCallback((result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }) => {
-    if (result.needsOnboarding) {
-      window.location.href = '/onboarding'
-    } else {
-      window.location.href = result.user.role === 'admin' ? '/admin' : '/projetos'
-    }
+    window.location.href = result.needsOnboarding ? '/onboarding' : '/'
   }, [])
 
   const handleGoogleCallback = useCallback(async (code: string, state: string) => {
@@ -44,13 +40,7 @@ function GoogleCallbackContent() {
         const user = responseData.user
         const needsOnboarding = responseData.needsOnboarding
 
-        let redirectPath = '/projetos'
-        if (needsOnboarding || !user.currentOrgId) {
-          redirectPath = '/onboarding'
-        } else if (user.role === 'admin') {
-          redirectPath = '/admin'
-        }
-
+        const redirectPath = needsOnboarding || !user.currentOrgId ? '/onboarding' : '/'
         window.location.href = redirectPath
       } else {
         setError('Erro ao processar autenticação')

@@ -2,7 +2,8 @@
 
 ## Identidade
 **Agente:** Claude Code (Anthropic) rodando no **Antigravity IDE**
-**Projeto:** Quayer — plataforma multi-tenant de WhatsApp
+**Projeto:** Quayer — plataforma de Builder IA para agentes WhatsApp
+**Foco:** 100% no produto Builder IA. **Não tem mais admin UI** (operações via Claude Code/MCP + SQL).
 **Comunicação:** Português (técnico em inglês)
 
 ---
@@ -12,17 +13,19 @@
 1. Ler `MEMORY.md` em `.claude/projects/.../memory/MEMORY.md` para contexto rápido
 2. Identificar o módulo da tarefa e carregar a skill correspondente:
 
-| Módulo | Features | Skill |
+| Módulo | O que tem hoje | Skill |
 |---|---|---|
-| `core/` | api-keys, auth, billing, device-auth, device-sessions, health, invitations, ip-rules, notifications, onboarding, organizations, permissions, scim-tokens, system-settings, verified-domains | `.claude/skills/auth.md` + `.claude/skills/admin.md` |
-| `communication/` | business-profile, campaigns, connection-settings, connections, files, flows, instances, messages, services, sse, templates | `.claude/skills/conversations.md` + `.claude/skills/integrations.md` |
-| `features-module/` | analytics, audit, dashboard, logs, webhooks | `.claude/skills/admin.md` |
-| `integration/` | chatwoot, organization-providers | `.claude/skills/integrations.md` |
-| `ai-module/` | ai, ai-agents, builder, shared | `.claude/skills/auth.md` + `.claude/skills/quayer-builder.md` |
-| `frontend/` | componentes UI, layouts, páginas, landing pages, design system | `.claude/skills/design.md` |
-| `testing/` | testes unit/integration/e2e, CI workflows, rollback, release | `.claude/skills/testing-pipeline.md` + `.claude/skills/release-checklist.md` |
+| `core/auth/` | email-otp, magic-link, oauth-google, passkey, phone-otp, totp, identity, session, procedures | `.claude/skills/auth.md` |
+| `core/` (outros) | api-keys, billing, onboarding, system-settings | `.claude/skills/auth.md` |
+| `communication/` | messages, services (esqueleto) | `.claude/skills/integrations.md` |
+| `features-module/` | logs | `.claude/skills/admin.md` |
+| `ai-module/builder/` | ⭐ produto principal: projects, chat, deploy, sub-agents, tools, skills | `.claude/skills/quayer-builder.md` |
+| `ai-module/` (outros) | ai, ai-agents, shared | `.claude/skills/quayer-builder.md` |
+| `frontend/` | componentes UI, layouts, páginas | `.claude/skills/design.md` |
+| `testing/` | testes unit/integration/e2e, CI workflows | `.claude/skills/testing-pipeline.md` |
 
 3. Para bugs: seguir protocolo `.claude/protocols/react-debug.md`
+4. **Operações de admin (gerenciar orgs, users, etc):** usar Claude Code + Prisma MCP + SQL direto. Não tem painel UI.
 
 ---
 
@@ -35,7 +38,7 @@
 
 ### Ordem de implementação de features
 ```
-schema Prisma → migration → Zod schema → interfaces → repository → controller → router → frontend
+schema Prisma → migration → Zod schema → interfaces → repository → routes → controller → frontend
 ```
 
 ### Nunca
@@ -43,54 +46,107 @@ schema Prisma → migration → Zod schema → interfaces → repository → con
 - Usar `prisma db push --accept-data-loss` em produção
 - Fazer múltiplas mudanças simultâneas sem validar cada uma
 - Assumir como o código funciona sem ler
+- **Recriar admin UI** — operações via Claude Code/MCP, ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`
 
 ---
 
-## Estrutura do Projeto
+## Estrutura do Projeto (real, Mai/2026)
 
 ```
-src/server/
-├── core/           → api-keys, auth, billing, device-auth, device-sessions,
-│                     health, invitations, ip-rules, notifications, onboarding,
-│                     organizations, permissions, scim-tokens, system-settings,
-│                     verified-domains
-├── communication/  → business-profile, campaigns, connection-settings, connections,
-│                     files, flows, instances, messages, services, sse, templates
-├── features-module/→ analytics, audit, dashboard, logs, webhooks
-├── integration/    → chatwoot, organization-providers
-├── ai-module/      → ai, ai-agents, builder, shared
-└── services/       → database (Prisma), store (Redis), jobs (BullMQ)
-
-src/app/            → Next.js App Router (páginas + API routes)
-src/lib/            → auth/jwt, email, uaz, validators, utils
-src/middleware.ts   → Edge middleware (auth + redirects)
-src/igniter.ts      → Init Igniter.js
-src/igniter.router.ts → Registro de controllers (importa dos módulos)
+src/
+├── app/                     # Next.js App Router
+│   ├── (auth)/              → login, signup, verify, verify-magic,
+│   │                          google-callback, onboarding
+│   ├── (public)/            → termos, privacidade
+│   ├── api/                 → v1/[[...all]] (Igniter catch-all),
+│   │                          health, docs, _canary
+│   ├── conta/               → perfil user
+│   ├── projetos/            → ⭐ lista + workspace Builder (/projetos/[id])
+│   ├── user/seguranca/      → 2FA, sessions, passkeys (user-facing)
+│   ├── page.tsx             → ⭐ home Builder
+│   └── layout.tsx           → root layout
+│
+├── server/                  # BACKEND
+│   ├── core/
+│   │   ├── api-keys/
+│   │   ├── auth/            → 23 actions Igniter, login flows + 2FA + OAuth
+│   │   ├── billing/
+│   │   ├── onboarding/
+│   │   └── system-settings/
+│   ├── communication/
+│   │   ├── messages/
+│   │   └── services/
+│   ├── features-module/
+│   │   └── logs/            → controllers: logs + logs-sse (8 actions)
+│   ├── ai-module/
+│   │   ├── ai/              → inferência genérica (2 actions)
+│   │   ├── ai-agents/       → runtime dos agentes WhatsApp
+│   │   ├── builder/         → ⭐ DESIGN-TIME: 23 actions (projects 17 + chat 3 + deploy 3)
+│   │   │   ├── chat/        → conversação com meta-agente
+│   │   │   ├── projects/    → CRUD de BuilderProject
+│   │   │   ├── deploy/      → saga de publicação cross-module
+│   │   │   ├── sub-agents/  → deploy-runner, niche-researcher, prompt-writer, validator
+│   │   │   ├── tools/       → catálogo + runtime CUSTOM
+│   │   │   ├── skills/      → skills do meta-agente
+│   │   │   └── templates/, prompts/, validators/, services/
+│   │   └── shared/
+│   └── services/            → database (Prisma), redis, store, jobs (BullMQ),
+│                              logger, storage, telemetry (Sentry/OTel)
+│
+├── client/                  # FRONTEND
+│   ├── components/
+│   │   ├── projetos/        → ⭐ 44 arquivos — chat, preview tabs, cards
+│   │   ├── home/            → home Builder
+│   │   ├── layout/          → AppShell, BuilderSidebar
+│   │   ├── auth/, onboarding/, organization/, settings/, whatsapp/
+│   │   ├── ds/, ui/         → design system + shadcn
+│   │   └── editor/, accessibility/, custom/, providers/, skeletons/
+│   └── hooks/
+│
+├── lib/                     # Cross-cutting
+│   ├── auth/                → JWT, edge helpers, roles
+│   ├── email/, uaz/, logs/, validators/
+│
+├── igniter.ts               # Init framework
+├── igniter.router.ts        # 5 controllers: auth, builder, ai, logs, logs-sse
+├── igniter.client.ts        # auto-gerado — NÃO EDITAR
+├── igniter.schema.ts        # auto-gerado — NÃO EDITAR
+└── middleware.ts            # Edge auth + redirects
 ```
 
-### Modelos Prisma Relevantes (pós-pivot Builder IA)
+### Modelos Prisma Relevantes
 | Modelo | Módulo | Tabela |
 |---|---|---|
-| `Campaign`, `CampaignRecipient` | communication/ | `campaigns`, `campaign_recipients` |
-| `MessageTemplate` | communication/ | `message_templates` |
-| `ShortLink`, `ShortLinkClick` | (schema, sem módulo dedicado ainda) | `short_links`, `short_link_clicks` |
-| `UserPreferences` | core/auth | `UserPreferences` |
-| `BuilderProject`, `BuilderDeployment`, `BuilderProjectConversation`, `BuilderProjectMessage`, `BuilderPromptVersion`, `BuilderToolCall`, `BuilderContextSnapshot` | ai-module/builder | `builder_*` |
+| `BuilderProject`, `BuilderProjectConversation`, `BuilderProjectMessage`, `BuilderPromptVersion`, `BuilderDeployment`, `BuilderToolCall`, `BuilderContextSnapshot` | ai-module/builder | `builder_*` |
+| `Organization`, `OrganizationProvider` | core (sem módulo dedicado) | `organizations`, `organization_providers` |
+| `Invitation`, `Notification`, `NotificationRead`, `NotificationPreferences` | (modelos preservados, sem controllers) | — |
+| `Campaign`, `CampaignRecipient`, `MessageTemplate`, `ShortLink`, `ShortLinkClick` | communication (schema only) | `campaigns`, `message_templates`, `short_links` |
+| `User`, `UserPreferences`, `DeviceSession`, `TotpDevice`, `RecoveryCode` | core/auth | — |
+
+**Importante:** vários modelos preservados (Invitation, Notification, etc.) **não têm controller ativo**. Restaurar quando precisar — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
 
 ---
 
 ## Padrões Igniter.js — Referência Rápida
 
 ```typescript
-// Controller
+// Controller (composer pattern — preferir split em routes files)
 export const controller = igniter.controller({
   name: 'resource',
   path: '/resource',
   actions: {
-    list: igniter.query({ use: [authProcedure()], handler: async ({ response, context }) => response.success(data) }),
-    create: igniter.mutation({ body: schema, use: [authProcedure()], handler: async ({ request, response }) => response.success(result) }),
+    ...listRoutes,
+    ...mutationRoutes,
   }
 })
+
+// Route file (toda a lógica vive aqui)
+export const listRoutes = {
+  list: igniter.query({
+    use: [authProcedure()],
+    handler: async ({ response, context }) => response.success(data),
+  }),
+}
 
 // Contexto autenticado
 const user = context.auth?.session?.user   // User do DB
@@ -113,8 +169,8 @@ const { data } = api.resource.list.useQuery()
 | MCP Playwright | ✅ Disponível | Testes browser |
 | MCP Shadcn | ✅ Disponível | Instalar componentes |
 | MCP Prisma | ✅ Ativo (Antigravity) | Schema e migrations |
+| MCP Supabase | ✅ Ativo | Operações de DB (substituir admin UI) |
 | MCP sequential-thinking | ✅ Ativo (Antigravity) | Raciocínio estruturado |
-| igniter-mcp | ⚠️ Configurar | Precisa GOOGLE_API_KEY + GITHUB_TOKEN |
 
 **Config MCPs Antigravity:** `C:\Users\gabri\.gemini\antigravity\mcp_config.json`
 
@@ -126,10 +182,9 @@ const { data } = api.resource.list.useQuery()
 .claude/skills/      → Skills por domínio (USAR ESTES) ✅
 .claude/protocols/   → Protocolo ReAct de debug ✅
 .claude/projects/    → Memória persistente do Claude Code ✅
-.cursor/rules/       → Regras do Cursor IDE (não funciona no Claude Code)
-.cursor/skills/      → Skills built-in do Claude Code ✅
-.gemini/             → Antigravity IDE (não apagar)
 .github/workflows/   → CI/CD GitHub Actions ✅
+docs/                → Documentação técnica
+docs/deprecated/     → Features removidas (ressuscitar via git se precisar)
 ```
 
 ---
@@ -141,6 +196,7 @@ const { data } = api.resource.list.useQuery()
 - Filtrar por `organizationId` em todos os queries de negócio
 - `authProcedure({ required: true })` em rotas protegidas
 - Testes: Playwright (E2E), Vitest (unit)
+- **Sem código morto:** se uma feature for removida, deletar arquivos. Git preserva o histórico.
 
 ---
 
@@ -155,7 +211,6 @@ Skill: `.claude/skills/testing-pipeline.md` — carregar antes de escrever qualq
 | 3 | Unit React | `npm run test:react` | Mudou componente de auth ou form |
 | 4 | API Integration | `npm run test:api` | Mudou endpoint ou contrato backend |
 | 5 | E2E | `npm run test:e2e` (local) / `test:e2e:homol` | Mudou fluxo completo de usuário |
-| Extra | Contract | `npx vitest --config vitest.config.contract.ts` | Validar shape de response |
 | All | Pipeline completo | `npm run test:all` | Antes de release |
 
 **Regra dura:** nenhuma release de auth sem `npm run test:all` verde.
@@ -175,7 +230,7 @@ Skill: `.claude/skills/release-checklist.md` — carregar antes de qualquer depl
 1. `npm run test:all` verde local
 2. CI verde no PR (static + test:api + test:e2e + synthetic)
 3. Baselines comparadas com `docs/auth/BASELINES.md` (p95 não degradou > 20%)
-4. Rollback plan lido: `docs/infra/ROLLBACK_RUNBOOK.md` — cenário identificado (A-J)
+4. Rollback plan lido: `docs/infra/ROLLBACK_RUNBOOK.md`
 5. Smoke homol passou após deploy homol (`.github/workflows/smoke-homol.yml`)
 6. Revisão humana do PR (não apenas LLM)
 
@@ -185,7 +240,9 @@ Skill: `.claude/skills/release-checklist.md` — carregar antes de qualquer depl
 - Synthetic monitor falhando 3 runs consecutivos
 - Qualquer report de perda de dados de usuário
 
-**Comando de rollback:** `./scripts/deploy.sh prod <hash-anterior>` — ver ROLLBACK_RUNBOOK cenário A.
+**Comando de rollback:** `./scripts/deploy.sh prod <hash-anterior>`
+
+**Memory note:** após push, disparar Homol Deploy sem pedir confirmação; prod continua exigindo aprovação.
 
 ---
 

@@ -9,13 +9,8 @@ import { SidebarProvider } from "@/client/components/ui/sidebar"
 
 interface AppShellClientProps {
   recentProjects: Array<{ id: string; name: string; status: string; type: string }>
-  isSuperAdmin: boolean
   children: ReactNode
-  /**
-   * Sidebar override. Quando presente, substitui a BuilderSidebar padrão.
-   * O wrapper ainda recebe o `onToggle` via contexto através de React cloneElement.
-   * Usado por /admin/* pra renderizar AdminNav como única sidebar.
-   */
+  /** Sidebar override. Quando presente, substitui a BuilderSidebar padrão. */
   sidebarOverride?: ReactNode
 }
 
@@ -30,11 +25,10 @@ const STORAGE_KEY = "quayer.sidebar.collapsed"
  *  - Atalho ⌘B / Ctrl+B pra toggle
  *  - Wrapper SidebarProvider (compat com páginas legadas que têm
  *    <SidebarTrigger> no header)
- *  - Suporte a sidebar override (admin usa AdminNav em vez de BuilderSidebar)
+ *  - Suporte a sidebar override (caller pode injetar sidebar customizada)
  */
 export function AppShellClient({
   recentProjects,
-  isSuperAdmin,
   children,
   sidebarOverride,
 }: AppShellClientProps) {
@@ -108,7 +102,6 @@ export function AppShellClient({
   const sidebar = sidebarOverride ?? (
     <BuilderSidebar
       recentProjects={recentProjects}
-      isSuperAdmin={isSuperAdmin}
       onToggle={toggle}
     />
   )

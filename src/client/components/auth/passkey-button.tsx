@@ -86,13 +86,7 @@ export function PasskeyButton({
 
       toast({ title: "Login realizado!", description: "Autenticado com Passkey." })
 
-      if (result.needsOnboarding) {
-        router.push('/onboarding')
-      } else if (result.user?.role === 'admin') {
-        router.push('/admin')
-      } else {
-        router.push('/')
-      }
+      router.push(result.needsOnboarding ? '/onboarding' : '/')
     } catch (err: unknown) {
       const error = err as { name?: string; message?: string }
       if (error?.name === 'NotAllowedError') {

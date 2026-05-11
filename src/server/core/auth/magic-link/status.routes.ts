@@ -166,12 +166,7 @@ export const statusRoutes = {
       await registerDeviceSession(user.id, request);
 
       // Determine redirect path
-      let redirectPath = '/projetos';
-      if (!user.onboardingCompleted || !currentOrgId) {
-        redirectPath = '/onboarding';
-      } else if (user.role === 'admin') {
-        redirectPath = '/admin';
-      }
+      const redirectPath = (!user.onboardingCompleted || !currentOrgId) ? '/onboarding' : '/';
 
       return response.success({
         verified: true,

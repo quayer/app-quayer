@@ -541,8 +541,6 @@ export const projectsRoutes = {
 
       try {
         const projects = await listRecentProjects(user.currentOrgId)
-        const isSuperAdmin =
-          user.role === 'admin' || user.role === 'super_admin'
         return response.json({
           success: true,
           data: {
@@ -552,7 +550,6 @@ export const projectsRoutes = {
               status: p.status,
               type: p.type,
             })),
-            isSuperAdmin,
           },
         })
       } catch (error: unknown) {
@@ -562,7 +559,7 @@ export const projectsRoutes = {
         )
         return response.json({
           success: true,
-          data: { recentProjects: [], isSuperAdmin: false },
+          data: { recentProjects: [] },
         })
       }
     },

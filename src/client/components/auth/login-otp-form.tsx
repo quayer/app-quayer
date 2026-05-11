@@ -197,8 +197,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
           setIsLoading(false)
           return
         }
-        if (r.needsOnboarding) window.location.href = '/onboarding'
-        else window.location.href = r.user?.role === 'admin' ? '/admin' : '/'
+        window.location.href = r.needsOnboarding ? '/onboarding' : '/'
       } catch {
         setError('Erro ao verificar código')
         setIsLoading(false)
@@ -236,14 +235,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
       }
       if (responseData?.user) {
         // Backend seta cookies httpOnly via Set-Cookie header.
-        const userRole = responseData.user.role
-        const needsOnboarding = responseData.needsOnboarding
-
-        if (needsOnboarding) {
-          window.location.href = "/onboarding"
-        } else {
-          window.location.href = userRole === "admin" ? "/admin" : "/"
-        }
+        window.location.href = responseData.needsOnboarding ? "/onboarding" : "/"
       }
     } catch (err: unknown) {
       let errorMessage = "Não foi possível verificar. Tente novamente."
@@ -334,11 +326,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   }, [otp, isLoading, autoSubmitted, identifier, submitCode])
 
   const handle2FASuccess = (result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }) => {
-    if (result.needsOnboarding) {
-      window.location.href = "/onboarding"
-    } else {
-      window.location.href = result.user.role === "admin" ? "/admin" : "/"
-    }
+    window.location.href = result.needsOnboarding ? "/onboarding" : "/"
   }
 
   if (twoFactorChallengeId) {

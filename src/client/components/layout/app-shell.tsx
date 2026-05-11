@@ -4,28 +4,21 @@ import { getBuilderSidebarData } from '@/server/ai-module/builder/get-sidebar-da
 
 interface AppShellProps {
   children: ReactNode
-  /**
-   * Opcional: substitui a `<BuilderSidebar>` padrão por outra sidebar.
-   * Usado pelo `/admin/*` pra renderizar a `<AdminNav>` como única sidebar
-   * e evitar o problema de 2 sidebars em cascata.
-   */
+  /** Opcional: substitui a `<BuilderSidebar>` padrão por outra sidebar. */
   sidebar?: ReactNode
 }
 
 /**
  * AppShell — Server Component. Layout padrão v3 do Quayer para TODAS as
- * rotas autenticadas.
- *
- * Responsável por fetchar os dados da sidebar server-side e delegar o
+ * rotas autenticadas. Fetcha dados da sidebar server-side e delega o
  * render + estado de visibilidade para o <AppShellClient>.
  */
 export async function AppShell({ children, sidebar }: AppShellProps) {
-  const { recentProjects, isSuperAdmin } = await getBuilderSidebarData()
+  const { recentProjects } = await getBuilderSidebarData()
 
   return (
     <AppShellClient
       recentProjects={recentProjects}
-      isSuperAdmin={isSuperAdmin}
       sidebarOverride={sidebar}
     >
       {children}

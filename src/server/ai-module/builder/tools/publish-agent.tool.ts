@@ -92,7 +92,7 @@ export function publishAgentTool(ctx: BuilderToolExecutionContext) {
               message: 'No active paid plan. Upgrade to publish agents.',
               cta: 'Upgrade your plan',
             })
-            redirects.plan = '/admin/billing'
+            redirects.plan = '/conta'
           }
 
           // 1b. BYOK provider check
