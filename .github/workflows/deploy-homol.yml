@@ -280,6 +280,22 @@ jobs:
               exit 1
             fi
 
+            # Sync compose.homol.yml from the deploying branch — keeps the
+            # service env mappings (RESEND_API_KEY, etc.) consistent with the
+            # code being deployed. Repo is public; falls back to existing file
+            # if the fetch fails so we don't brick the deploy on a network blip.
+            COMPOSE_REMOTE="https://raw.githubusercontent.com/quayer/app-quayer/${DEPLOY_REF_NAME}/compose.homol.yml"
+            echo ">> Sincronizando $COMPOSE_FILE de $COMPOSE_REMOTE"
+            if curl -fsSL "$COMPOSE_REMOTE" -o "$COMPOSE_FILE.new" 2>/dev/null && [ -s "$COMPOSE_FILE.new" ]; then
+              cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak.$(date +%s)" 2>/dev/null || true
+              mv "$COMPOSE_FILE.new" "$COMPOSE_FILE"
+              echo "Compose file atualizado ($(wc -c < "$COMPOSE_FILE") bytes)"
+              find "$APP_DIR" -maxdepth 1 -name "$COMPOSE_FILE.bak.*" -mtime +30 -delete 2>/dev/null || true
+            else
+              echo "WARN: fetch falhou, mantendo $COMPOSE_FILE existente"
+              rm -f "$COMPOSE_FILE.new"
+            fi
+
             if docker compose version > /dev/null 2>&1; then
               COMPOSE_CMD="docker compose"
             else
