@@ -5,7 +5,7 @@
  *
  * Post-pivot (Builder IA WhatsApp-only): removed schemas for deleted actions
  * (updateProfile, updatePreferences, sendVerification, resendVerification,
- * verifyLoginOTPPhone, all mfa-totp actions, webauthn, refreshToken).
+ * all mfa-totp actions, webauthn, refreshToken).
  */
 
 import { z } from 'zod';
@@ -179,6 +179,18 @@ export type VerifySignupOTPInput = z.infer<typeof verifySignupOTPSchema>;
 export const phoneOTPSchema = z.object({ phone: z.string().min(8).max(20) });
 
 export type PhoneOTPInput = z.infer<typeof phoneOTPSchema>;
+
+/**
+ * Schema de Phone OTP Verify (login)
+ */
+export const verifyPhoneOTPSchema = z.object({
+  phone: z.string().min(8).max(20),
+  code: z
+    .string({ required_error: 'OTP code is required' })
+    .length(6, 'Code must be 6 digits'),
+});
+
+export type VerifyPhoneOTPInput = z.infer<typeof verifyPhoneOTPSchema>;
 
 // ============================================================
 // Response schemas — shared between backend response shaping

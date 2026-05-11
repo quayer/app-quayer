@@ -15,6 +15,7 @@ import { registerDeviceSession, createAuditLog } from './helpers';
 
 export type FinalizeLoginMethod =
   | 'email-otp'
+  | 'phone-otp'
   | 'magic-link'
   | 'passkey'
   | 'passkey-conditional'

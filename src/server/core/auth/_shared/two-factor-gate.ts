@@ -16,6 +16,7 @@ import { sign2faChallenge, createAuditLog } from './helpers';
 
 export type TwoFactorMethod =
   | 'email-otp'
+  | 'phone-otp'
   | 'magic-link'
   | 'passkey'
   | 'passkey-conditional'
