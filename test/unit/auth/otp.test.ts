@@ -63,11 +63,17 @@ describe('generateOTPCode', () => {
     expect(seen.size).toBeGreaterThan(90);
   });
 
-  it('always falls within the [10^(d-1), 10^d - 1] range', () => {
-    for (let i = 0; i < 50; i++) {
+  it('always produces exactly 6 numeric chars (zero-padded when necessary)', () => {
+    // Contract: generateOTPCode(6) returns a 6-char string in [000000, 999999].
+    // Leading-zero codes are valid (padStart) — the controller compares strings,
+    // not numbers, so 012345 is a legitimate OTP and the previous numeric range
+    // assertion was wrong.
+    for (let i = 0; i < 200; i++) {
       const code = generateOTPCode(6);
+      expect(code).toHaveLength(6);
+      expect(/^\d{6}$/.test(code)).toBe(true);
       const n = parseInt(code, 10);
-      expect(n).toBeGreaterThanOrEqual(100000);
+      expect(n).toBeGreaterThanOrEqual(0);
       expect(n).toBeLessThanOrEqual(999999);
     }
   });
@@ -79,11 +85,14 @@ describe('generateRecoveryCodes', () => {
     expect(codes).toHaveLength(8);
   });
 
-  it('every recovery code is hex of length 8 (4 bytes)', () => {
+  it('every recovery code is hex of length 16 (8 bytes = 64 bits entropy)', () => {
+    // Contract: src/lib/auth/bcrypt.ts -> generateRecoveryCodes uses
+    // crypto.randomBytes(8).toString('hex') -> 16 hex chars.
+    // The exported RECOVERY_CODE_REGEX is the single source of truth.
     const codes = generateRecoveryCodes(5);
     expect(codes).toHaveLength(5);
     for (const c of codes) {
-      expect(/^[0-9a-f]{8}$/.test(c)).toBe(true);
+      expect(/^[0-9a-f]{16}$/.test(c)).toBe(true);
     }
   });
 });

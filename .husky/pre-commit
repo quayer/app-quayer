@@ -1,1 +1,19 @@
-npx lint-staged
+#!/usr/bin/env sh
+
+# 1. ESLint fix + tsc on changed TS files
+npx lint-staged || exit 1
+
+# 2. Run only the vitest unit tests whose source dependencies changed.
+#    `vitest related` reads the dependency graph and re-runs the minimum set
+#    of files that import the changed sources. Skipped silently if nothing
+#    relevant is staged (e.g. only README/docs changed).
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx)$' | grep -v '^test/' || true)
+if [ -n "$STAGED_TS" ]; then
+  echo "[pre-commit] running vitest related on changed sources..."
+  echo "$STAGED_TS" | xargs npx vitest related --run --reporter=dot --no-coverage --silent=true || {
+    echo "[pre-commit] related unit tests FAILED — commit aborted"
+    exit 1
+  }
+else
+  echo "[pre-commit] no .ts/.tsx source changed — skipping vitest related"
+fi

@@ -14,7 +14,7 @@ import { verifyAccessToken, extractTokenFromHeader } from '@/lib/auth/jwt.edge';
 const PUBLIC_PATHS = [
   '/login',
   '/signup',
-  '/connect',
+  '/connect',       // TODO: rota nao implementada em src/app/. Reservada para futuro fluxo WhatsApp connect.
   '/compartilhar',
   '/google-callback',
   '/verify',

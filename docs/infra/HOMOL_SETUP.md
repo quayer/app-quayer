@@ -151,13 +151,12 @@ ENCRYPTION_KEY=${ENCRYPTION_KEY}
 JWT_ACCESS_TOKEN_EXPIRES_IN=15m
 JWT_REFRESH_TOKEN_EXPIRES_IN=7d
 
-# === EMAIL (preencher) ===
-EMAIL_PROVIDER=smtp
+# === EMAIL (Resend — preencher RESEND_API_KEY) ===
 EMAIL_FROM=noreply-homol@quayer.com
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASSWORD=
+EMAIL_FROM_NAME=Quayer Homol
+RESEND_API_KEY=
+# Optional override for logo URL in emails:
+# EMAIL_LOGO_URL=https://homol.quayer.com/logo.png
 
 # === WHATSAPP (preencher) ===
 UAZAPI_URL=https://quayer.uazapi.com
@@ -176,7 +175,7 @@ EOF
 chmod 600 .env.homol
 ```
 
-**Você precisa preencher os valores em branco** (SMTP, UAZAPI, OpenAI, Google) antes de subir.
+**Você precisa preencher os valores em branco** (RESEND_API_KEY, UAZAPI, OpenAI, Google) antes de subir.
 
 ---
 

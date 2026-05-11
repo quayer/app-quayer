@@ -34,8 +34,10 @@ type JwtModule = {
 let jwtMod: JwtModule;
 
 beforeAll(async () => {
-  process.env.JWT_SECRET = 'test-secret-do-not-use-in-prod-0123456789';
-  process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-0123456789';
+  // All secrets must be >= 32 chars (validateSecret in src/lib/auth/jwt.ts).
+  process.env.JWT_SECRET = 'test-secret-do-not-use-in-prod-0123456789-abcdef';
+  process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-do-not-use-in-prod-0123456789';
+  process.env.JWT_MAGIC_LINK_SECRET = 'test-magic-link-secret-do-not-use-in-prod-0123456789';
   jwtMod = (await import('@/lib/auth/jwt')) as unknown as JwtModule;
 });
 
@@ -64,14 +66,14 @@ describe('signAccessToken / verifyAccessToken', () => {
   });
 
   it('returns null when verifying a token signed with a different secret', async () => {
-    // Re-import with a different secret in a sandboxed module instance
+    // Re-import with a different (but still valid >= 32 char) secret.
     const token = jwtMod.signAccessToken(basePayload);
-    process.env.JWT_SECRET = 'a-completely-different-secret';
+    process.env.JWT_SECRET = 'a-completely-different-secret-but-still-32-chars-xxx';
     vi.resetModules();
     const fresh = (await import('@/lib/auth/jwt')) as unknown as JwtModule;
     expect(fresh.verifyAccessToken(token)).toBeNull();
     // Restore for the rest of the suite
-    process.env.JWT_SECRET = 'test-secret-do-not-use-in-prod-0123456789';
+    process.env.JWT_SECRET = 'test-secret-do-not-use-in-prod-0123456789-abcdef';
     vi.resetModules();
     jwtMod = (await import('@/lib/auth/jwt')) as unknown as JwtModule;
   });

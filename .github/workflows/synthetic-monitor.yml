@@ -115,3 +115,144 @@ jobs:
           )
           curl -sS -X POST -H "Content-Type: application/json" \
             -d "$PAYLOAD" "$WEBHOOK" || echo "::warning::Webhook POST failed"
+
+  # =================================================================
+  # CANARY ROUNDTRIPS (full auth flows against homol/prod)
+  #
+  # Each job below is guarded by secret availability. If the required
+  # secret is missing, the job is skipped (no failure) — letting you
+  # roll out the synthetic stack one channel at a time.
+  #
+  # See docs/testing/SYNTHETIC_MONITORING.md for the full plan.
+  # =================================================================
+
+  # -----------------------------------------------------------------
+  # FREE canary — no third-party SaaS required.
+  #
+  # Hits POST /api/v1/auth/signup-otp with a throwaway @quayer.test
+  # email and asserts the response is NOT 5xx. Does NOT read the
+  # email back — we leave inbox reading to canary-signup-mailosaur
+  # which requires the paid Mailosaur account.
+  #
+  # What this catches (80% of real failure modes at $0 cost):
+  #   - Endpoint 500/502 (backend or DB down)
+  #   - Resend rejecting all sends (provider misconfigured)
+  #   - JWT secret missing on boot
+  #   - Rate limiter mis-set so every request 429s
+  # What this does NOT catch:
+  #   - Email delivered but with broken OTP/magic-link content
+  #   - Resend silently accepting but never sending
+  # -----------------------------------------------------------------
+  canary-signup-endpoint-alive:
+    name: Canary - Signup endpoint not 5xx (free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: check
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "homol", url: "https://homol.quayer.com" }
+    steps:
+      - name: POST signup-otp and assert non-5xx
+        run: |
+          set -e
+          TS=$(date +%s%N)
+          EMAIL="canary-noinbox-${TS}@quayer.test"
+          BODY=$(printf '{"email":"%s","name":"Canary %s"}' "$EMAIL" "$TS")
+          RESP=$(curl -s -o /tmp/resp.json -w "%{http_code},%{time_total}" \
+            --max-time 15 \
+            -A "QuayerSyntheticMonitor/1.0 (+github-actions)" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "$BODY" \
+            "${{ matrix.target.url }}/api/v1/auth/signup-otp")
+          STATUS=$(echo "$RESP" | cut -d, -f1)
+          TIME=$(echo "$RESP"  | cut -d, -f2)
+          echo "::notice::signup-otp status=$STATUS time=${TIME}s email=$EMAIL"
+          if [ "$STATUS" -ge 500 ]; then
+            echo "::error::signup-otp returned $STATUS (>=500) — backend likely broken"
+            cat /tmp/resp.json || true
+            exit 1
+          fi
+
+  canary-google-oauth-url:
+    name: Canary - Google OAuth URL contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: check
+    if: always()  # run even if upstream check failed (it's an independent signal)
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "homol", url: "https://homol.quayer.com" }
+          - { name: "prod",  url: "https://app.quayer.com"  }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tsx
+        run: npm i -g tsx@4
+      - name: Run Google OAuth URL canary
+        env:
+          CANARY_BASE_URL: ${{ matrix.target.url }}
+        run: tsx test/canary/google-oauth-url.ts
+
+  canary-signup-mailosaur:
+    name: Canary - Signup OTP roundtrip (Mailosaur)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: check
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "homol", url: "https://homol.quayer.com" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Skip if Mailosaur not configured
+        id: gate
+        run: |
+          if [ -z "${{ secrets.MAILOSAUR_API_KEY }}" ] || [ -z "${{ secrets.MAILOSAUR_SERVER_ID }}" ]; then
+            echo "::notice::Mailosaur secrets not configured — skipping signup canary"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install tsx
+        if: steps.gate.outputs.skip != 'true'
+        run: npm i -g tsx@4
+      - name: Run signup OTP canary
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CANARY_BASE_URL: ${{ matrix.target.url }}
+          MAILOSAUR_API_KEY: ${{ secrets.MAILOSAUR_API_KEY }}
+          MAILOSAUR_SERVER_ID: ${{ secrets.MAILOSAUR_SERVER_ID }}
+        run: tsx test/canary/signup-roundtrip.ts
+
+  canary-alert:
+    name: Canary - aggregate alert
+    runs-on: ubuntu-latest
+    needs: [canary-signup-endpoint-alive, canary-google-oauth-url, canary-signup-mailosaur]
+    if: failure()
+    steps:
+      - name: Alert Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL not configured — skipping aggregate alert"
+            exit 0
+          fi
+          PAYLOAD=$(cat <<EOF
+          {"content":":rotating_light: **Canary roundtrip FAIL** — see https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+          EOF
+          )
+          curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK" || true

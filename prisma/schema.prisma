@@ -1,29 +1,30 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // Quayer — Prisma Schema
 // Docs: https://pris.ly/d/prisma-schema
-// Last updated: 2026-03-14
+// Last updated: 2026-05-11
 //
 // DOMAIN MAP:
-//   [1] AUTH & IDENTITY        — User, Organization, UserOrganization, Session,
-//                                RefreshToken, TempUser, VerificationCode,
+//   [1] AUTH & IDENTITY        — User, UserIdentity, Organization, UserOrganization,
+//                                Session, RefreshToken, TempUser, VerificationCode,
 //                                Invitation, PasskeyCredential, PasskeyChallenge,
 //                                TotpDevice, RecoveryCode, DeviceSession,
 //                                CustomRole, VerifiedDomain
 //   [2] CONNECTIONS & MESSAGING — Connection, ConnectionSettings, ConnectionEvent,
 //                                 ChatSession, Message
 //   [3] ORGANIZATIONS & TEAMS  — Department, Project, ApiKey, Invitation
-//   [4] AI & AGENTS            — AIAgentConfig, AIPrompt, OrganizationProvider,
-//                                IntegrationConfig, N8nCallLog, BuilderProject*
+//   [4] AI & AGENTS            — AIAgentConfig, OrganizationProvider,
+//                                N8nCallLog, BuilderProject*
 //   [5] PLATFORM & INFRA       — Webhook, WebhookDelivery, AuditLog, LogEntry,
 //                                LogAnalysis, Notification, NotificationRead,
-//                                File, SystemSettings, EmailTemplate, SystemConfig
-//   [6] CAMPAIGNS              — Campaign, CampaignRecipient, MessageTemplate (dormant)
+//                                File, SystemSettings
+//   [6] CAMPAIGNS              — Campaign, CampaignRecipient (dormant)
 //
 // NOTES:
 //   - Tables without @@map() use PascalCase in PostgreSQL (legacy, matches init migration)
 //   - DeviceSession was added via raw SQL migration (no Prisma migrate)
 //   - GeoAlertMode enum added via raw SQL migration
 //   - AccessLevel and SystemConfig are DEPRECATED — use CustomRole and SystemSettings
+//   - 7 orphan models dropped 2026-05-11 — see docs/deprecated/SCHEMA_DORMANT_MODELS.md
 // ══════════════════════════════════════════════════════════════════════════════
 
 generator client {
@@ -230,6 +231,7 @@ model User {
   recoveryCodes      RecoveryCode[]
   deviceSessions     DeviceSession[]
   promptVersions     AgentPromptVersion[]
+  identities         UserIdentity[]
 
   // Builder (home-chat-builder)
   builderProjects                BuilderProject[]
@@ -240,6 +242,33 @@ model User {
   @@index([currentOrgId])
   @@index([role])
   @@index([phone])
+}
+
+// ── User Identities (federated login providers) ──────────────────────────────
+// Tracks which login methods are linked to each user (Google OAuth, WhatsApp
+// phone, etc). Allows users to manage linked providers in /conta and prevents
+// removal of the last authentication method.
+//
+// `provider` examples: "google", "whatsapp"
+// `providerUserId` is the stable ID returned by the provider (Google `sub`,
+// phone E.164). For `password` and `passkey` the link is implicit in the
+// `User` / `PasskeyCredential` tables, so they are not stored here.
+
+model UserIdentity {
+  id             String   @id @default(uuid())
+  userId         String
+  provider       String // "google", "whatsapp"
+  providerUserId String // Google `sub`, phone E.164
+  identifier     String // Display label: email Google, telefone formatado
+  connectedAt    DateTime @default(now())
+  lastUsedAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@unique([userId, provider])
+  @@index([userId])
+  @@map("user_identities")
 }
 
 // ── User Preferences ─────────────────────────────────────────────────────────
@@ -1115,31 +1144,6 @@ model CampaignRecipient {
   @@map("campaign_recipients")
 }
 
-// ── Message Templates HSM (Communication module) ─────────────────────────────
-
-model MessageTemplate {
-  id             String   @id @default(uuid())
-  organizationId String
-  connectionId   String?
-  name           String
-  category       String   @default("UTILITY") // MARKETING | UTILITY | AUTHENTICATION
-  language       String   @default("pt_BR")
-  status         String   @default("PENDING") // PENDING | APPROVED | REJECTED
-  headerType     String   @default("NONE") // NONE | TEXT | IMAGE | VIDEO | DOCUMENT
-  headerContent  String?
-  body           String   @db.Text
-  footer         String?
-  buttons        Json? // Array of buttons (quick_reply, url, phone_number)
-  metaTemplateId String? // ID retornado pela Meta API após aprovação
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([organizationId])
-  @@index([status])
-  @@index([category])
-  @@map("message_templates")
-}
-
 // ── Files ─────────────────────────────────────────────────────────────────────
 
 model File {
@@ -1165,76 +1169,6 @@ model File {
 // ══════════════════════════════════════════════════════════════════════════════
 // [4] AI & AGENTS
 // ══════════════════════════════════════════════════════════════════════════════
-
-model IntegrationConfig {
-  id             String          @id @default(uuid())
-  organizationId String
-  type           IntegrationType
-  name           String
-  isActive       Boolean         @default(true)
-  isDefault      Boolean         @default(false)
-
-  // Encrypted credentials (use encryption at app level)
-  apiKey        String?
-  apiSecret     String?
-  apiUrl        String?
-  webhookUrl    String?
-  webhookSecret String?
-
-  // Additional settings as JSON
-  settings Json?
-  metadata Json?
-
-  // Rate limiting
-  rateLimit       Int?
-  rateLimitPeriod Int? // in seconds
-
-  // Health check
-  lastHealthCheck DateTime?
-  healthStatus    String?   @default("unknown")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([organizationId, type, name])
-  @@index([organizationId])
-  @@index([type])
-  @@index([isActive])
-}
-
-enum IntegrationType {
-  // AI Providers
-  OPENAI
-  ANTHROPIC
-  GROQ
-  TOGETHER_AI
-  OLLAMA
-
-  // Transcription Providers
-  DEEPGRAM
-  WHISPER_API
-  ASSEMBLY_AI
-
-  // Storage Providers
-  SUPABASE
-  AWS_S3
-  CLOUDFLARE_R2
-
-  // Database Providers
-  POSTGRESQL
-  REDIS
-  MONGODB
-
-  // Messaging Channels
-  UAZAPI
-  CHATWOOT
-  WHATSAPP_CLOUD
-  TELEGRAM
-  MESSENGER
-
-  // Other
-  CUSTOM
-}
 
 // ── BYOC Provider (Bring Your Own Credentials) ───────────────────────────────
 
@@ -1493,12 +1427,12 @@ model BuilderProject {
   updatedAt      DateTime             @updatedAt
   archivedAt     DateTime?
 
-  organization      Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user              User                        @relation(fields: [userId], references: [id])
-  aiAgent           AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
-  conversation      BuilderProjectConversation?
-  deployments       BuilderDeployment[]
-  projectProviders  OrganizationProvider[]
+  organization     Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User                        @relation(fields: [userId], references: [id])
+  aiAgent          AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  conversation     BuilderProjectConversation?
+  deployments      BuilderDeployment[]
+  projectProviders OrganizationProvider[]
 
   @@index([organizationId, type, status])
   @@index([userId, updatedAt(sort: Desc)])
@@ -1701,42 +1635,6 @@ model SystemSettings {
   @@index([category])
 }
 
-// Email Templates (customizable by admin)
-model EmailTemplate {
-  id          String   @id @default(uuid())
-  name        String   @unique // welcome, verification, reset_password, invitation
-  subject     String
-  htmlContent String   @db.Text
-  textContent String?  @db.Text
-  variables   String[] // available variables like {{name}}, {{link}}
-  isActive    Boolean  @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  updatedBy String?
-
-  @@index([name])
-}
-
-// AI Prompts (customizable by admin)
-model AIPrompt {
-  id          String  @id @default(uuid())
-  name        String  @unique // image_description, audio_transcription, text_analysis
-  description String?
-  prompt      String  @db.Text
-  model       String? // gpt-4-vision, whisper-1, etc
-  isActive    Boolean @default(true)
-
-  // Usage tracking
-  usageCount Int @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  updatedBy String?
-
-  @@index([name])
-}
-
 // ── API Keys ──────────────────────────────────────────────────────────────────
 
 model ApiKey {
@@ -1845,7 +1743,7 @@ enum LogLevel {
   CRITICAL
 }
 
-// AI Log Analysis Results (cached analyses)
+// AI Log Analysis Results (cached analyses — used by /api/v1/logs/analyze[/analyses])
 model LogAnalysis {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
@@ -2052,13 +1950,6 @@ enum NfseStatus {
   ERROR_NFSE
 }
 
-enum WebhookEventStatus {
-  RECEIVED
-  PROCESSING
-  PROCESSED
-  FAILED
-}
-
 // ── AI Agent Enums ──────────────────────────────────────────────────────────
 
 enum AgentToolType {
@@ -2238,68 +2129,4 @@ model UsageRecord {
 
   @@unique([organizationId, period])
   @@map("usage_records")
-}
-
-// ── Webhook Event (idempotency) ──────────────────────────────────────────────
-
-model WebhookEvent {
-  id             String             @id @default(uuid())
-  gatewayEventId String
-  gateway        PaymentGateway
-  eventType      String
-  status         WebhookEventStatus @default(RECEIVED)
-  payload        Json
-  processedAt    DateTime?
-  errorMessage   String?
-  createdAt      DateTime           @default(now())
-
-  @@unique([gateway, gatewayEventId])
-  @@index([gateway])
-  @@index([eventType])
-  @@index([status])
-  @@map("webhook_events")
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// [7] DEVICE AUTHORIZATION FLOW
-// ══════════════════════════════════════════════════════════════════════════════
-
-model DeviceAuthRequest {
-  id String @id @default(uuid())
-
-  // Device identification
-  deviceCode String @unique // Random 40-char hex — used by CLI to poll
-  userCode   String @unique // Human-readable 8-char code (ABCD-1234 format)
-
-  // What gets created on approval
-  scopes  String[] @default(["read", "write"])
-  keyName String   @default("CLI") // Name for the API key that will be created
-
-  // Status
-  status DeviceAuthStatus @default(PENDING)
-
-  // After approval — links to created API key
-  apiKeyId        String?
-  apiKeyPlaintext String? // Temporarily stores full key until CLI polls it, then cleared
-  userId          String? // Who approved it
-  organizationId  String? // Which org was selected
-
-  // Expiration
-  expiresAt DateTime // 15 minutes from creation
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([deviceCode])
-  @@index([userCode])
-  @@index([status])
-  @@map("device_auth_requests")
-}
-
-enum DeviceAuthStatus {
-  PENDING
-  APPROVED
-  DENIED
-  EXPIRED
 }

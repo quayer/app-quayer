@@ -24,6 +24,11 @@ export default defineConfig({
     globals: false,
     include: ['test/contract/**/*.contract.test.ts'],
     testTimeout: 15000,
+    reporters: [
+      'default',
+      ['json', { outputFile: 'test-results/vitest-contract.json' }],
+    ],
+    outputFile: { json: 'test-results/vitest-contract.json' },
   },
   resolve: {
     alias: {

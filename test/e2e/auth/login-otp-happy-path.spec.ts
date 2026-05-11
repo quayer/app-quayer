@@ -4,7 +4,8 @@ import { generateTestEmail, getLatestOtp, waitForRedirect } from './helpers'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('login OTP happy path', () => {
-  test('login via OTP happy path', async ({ page }) => {
+  // @smoke — runs in PR fast lane via `npx playwright test --grep @smoke`
+  test('login via OTP happy path @smoke', async ({ page }) => {
     const email = generateTestEmail()
 
     await page.goto('/login')
@@ -41,6 +42,10 @@ test.describe('login OTP happy path', () => {
     await otpField.waitFor({ state: 'attached' })
     await otpField.fill(otp)
 
-    await waitForRedirect(page, /\/(integracoes|dashboard|admin)/)
+    // Login redireciona para `/` (home Builder) — ver
+    // src/client/components/auth/login-otp-form.tsx:200,238,329.
+    // O regex casa URL terminando em `/` ou começando com `/projetos`
+    // (deep-link via redirectPath).
+    await waitForRedirect(page, /\/(?:$|\?|projetos)/)
   })
 })

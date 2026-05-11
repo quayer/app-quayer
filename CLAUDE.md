@@ -2,8 +2,8 @@
 
 <!--
 Criado: 2026-04-08
-Atualizado: 2026-05-10
-Revisar em: 2026-08-10 (3 meses) — ou quando mudar estrutura de src/, igniter.router.ts, ou skills
+Atualizado: 2026-05-11
+Revisar em: 2026-08-11 (3 meses) — ou quando mudar estrutura de src/, igniter.router.ts, ou skills
 Relacionados:
   - src/igniter.router.ts (lista de controllers)
   - prisma/schema.prisma (tabela Prisma)
@@ -27,12 +27,12 @@ Relacionados:
 
 | Módulo | O que tem hoje | Skill |
 |---|---|---|
-| `core/auth/` | email-otp, magic-link, oauth-google, passkey, phone-otp, totp, identity, session, procedures | `.claude/skills/auth.md` |
+| `core/auth/` | email-otp, magic-link, oauth-google, passkey, phone-otp, totp, identity, session, device-sessions, procedures | `.claude/skills/auth.md` |
 | `core/` (outros) | api-keys, billing, onboarding, system-settings | `.claude/skills/auth.md` |
 | `communication/` | messages, services (esqueleto) | `.claude/skills/integrations.md` |
 | `features-module/` | logs | `.claude/skills/admin.md` |
 | `ai-module/builder/` | ⭐ produto principal: projects, chat, deploy, sub-agents, tools, skills | `.claude/skills/quayer-builder.md` |
-| `ai-module/` (outros) | ai, ai-agents, shared | `.claude/skills/quayer-builder.md` |
+| `ai-module/` (outros) | ai-agents (runtime WhatsApp), shared | `.claude/skills/quayer-builder.md` |
 | `frontend/` | componentes UI, layouts, páginas | `.claude/skills/design.md` |
 | `testing/` | testes unit/integration/e2e, CI workflows | `.claude/skills/testing-pipeline.md` |
 | `infra/` | Caddyfile, docker-compose prod, deploy, hardening | `.claude/skills/infra.md` |
@@ -100,7 +100,7 @@ schema Prisma → migration → Zod schema → interfaces → repository → rou
 src/
 ├── app/                     # Next.js App Router
 │   ├── (auth)/              → login, signup, verify, verify-magic,
-│   │                          google-callback, onboarding
+│   │                          google-callback
 │   ├── (public)/            → termos, privacidade
 │   ├── api/                 → v1/[[...all]] (Igniter catch-all),
 │   │                          health, docs, _canary
@@ -123,8 +123,7 @@ src/
 │   ├── features-module/
 │   │   └── logs/            → controllers: logs + logs-sse (8 actions)
 │   ├── ai-module/
-│   │   ├── ai/              → inferência genérica (2 actions)
-│   │   ├── ai-agents/       → runtime dos agentes WhatsApp
+│   │   ├── ai-agents/       → runtime dos agentes WhatsApp (sem controller registrado)
 │   │   ├── builder/         → ⭐ DESIGN-TIME: 23 actions (projects 17 + chat 3 + deploy 3)
 │   │   │   ├── chat/        → conversação com meta-agente
 │   │   │   ├── projects/    → CRUD de BuilderProject
@@ -142,17 +141,21 @@ src/
 │   │   ├── projetos/        → ⭐ 44 arquivos — chat, preview tabs, cards
 │   │   ├── home/            → home Builder
 │   │   ├── layout/          → AppShell, BuilderSidebar
-│   │   ├── auth/, onboarding/, organization/, settings/, whatsapp/
+│   │   ├── auth/, settings/, whatsapp/
 │   │   ├── ds/, ui/         → design system + shadcn
-│   │   └── editor/, accessibility/, custom/, providers/, skeletons/
+│   │   └── custom/, providers/
 │   └── hooks/
 │
 ├── lib/                     # Cross-cutting
-│   ├── auth/                → JWT, edge helpers, roles
-│   ├── email/, uaz/, logs/, validators/
+│   ├── auth/                → JWT (edge + node), roles, CSRF, bcrypt, OAuth, AuthProvider
+│   ├── email/               → React Email templates + service
+│   ├── feature-flags/       → auth-v3 (rollout das auth pages com tokens DS v3)
+│   ├── api/, uaz/           → clientes externos (UAZ WhatsApp)
+│   ├── logs/                → logger + api-logger middleware
+│   ├── rate-limit/, geocoding/, providers/, utils/, crypto.ts, config.ts
 │
 ├── igniter.ts               # Init framework
-├── igniter.router.ts        # 5 controllers: auth, builder, ai, logs, logs-sse
+├── igniter.router.ts        # 5 controllers: auth, builder, device-sessions, logs, logs-sse
 ├── igniter.client.ts        # auto-gerado — NÃO EDITAR
 ├── igniter.schema.ts        # auto-gerado — NÃO EDITAR
 └── middleware.ts            # Edge auth + redirects
@@ -164,10 +167,10 @@ src/
 | `BuilderProject`, `BuilderProjectConversation`, `BuilderProjectMessage`, `BuilderPromptVersion`, `BuilderDeployment`, `BuilderToolCall`, `BuilderContextSnapshot` | ai-module/builder | `builder_*` |
 | `Organization`, `OrganizationProvider` | core (sem módulo dedicado) | `organizations`, `organization_providers` |
 | `Invitation`, `Notification`, `NotificationRead`, `NotificationPreferences` | (modelos preservados, sem controllers) | — |
-| `Campaign`, `CampaignRecipient`, `MessageTemplate`, `ShortLink`, `ShortLinkClick` | communication (schema only) | `campaigns`, `message_templates`, `short_links` |
+| `Campaign`, `CampaignRecipient`, `ShortLink`, `ShortLinkClick` | communication (schema only) | `campaigns`, `short_links` |
 | `User`, `UserPreferences`, `DeviceSession`, `TotpDevice`, `RecoveryCode` | core/auth | — |
 
-**Importante:** vários modelos preservados (Invitation, Notification, etc.) **não têm controller ativo**. Restaurar quando precisar — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
+**Importante:** vários modelos preservados (Invitation, Notification, etc.) **não têm controller ativo**. Restaurar quando precisar — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`. Inventário completo dos modelos dormentes/órfãos em `docs/deprecated/SCHEMA_DORMANT_MODELS.md`.
 
 ---
 

@@ -1,8 +1,8 @@
 /**
  * AI Module - Public Exports
  *
- * AI-powered features and services
+ * AI-powered features and services.
+ * (ai.controller foi removido em 2026-05 — feature sem dona, ver docs/strategy/.)
  */
 
-// AI Controller
-export { aiController } from './ai/controllers/ai.controller'
+export {}

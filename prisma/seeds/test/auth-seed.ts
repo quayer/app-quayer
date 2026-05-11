@@ -1,83 +1,128 @@
 /**
- * US-106A — Auth integration test seed.
+ * Auth integration test seed.
  *
- * Creates the minimal fixtures shared across auth integration tests:
- *   - 1 Organization (Test Org / test-org)
- *   - 1 confirmed user  (confirmed@test.local) with emailVerified set
- *   - 1 pending  user   (pending@test.local)   with emailVerified null
+ * Idempotent fixtures (upsert) shared across C4 integration tests.
+ * Tests that need ephemeral data should use `test/factories/` + `withTransaction`
+ * instead of mutating these long-lived rows.
  *
- * Idempotent: safe to re-run (uses upsert).
+ * Roster:
+ *   org-default        Test Org              type=pj, billing=free, max 5 users
+ *   confirmed@test     emailVerified, master role in org-default
+ *   pending@test       emailVerified=null (mid-signup)
+ *   twofa@test         emailVerified, twoFactorEnabled=true (no TotpDevice — tests create per case)
+ *   admin@test         role='admin', system-wide
+ *   multiorg@test      member of org-default AND org-secondary
+ *   org-secondary      Test Org Secondary    used to exercise switch-organization
+ *
+ * All emails end in @test.local so production audit/analytics queries can
+ * filter them out via `email NOT LIKE '%@test.local'`.
  */
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+const PLACEHOLDER_BCRYPT = '$2a$10$testtesttesttesttesttuQpQpQpQpQpQpQpQpQpQpQpQpQpQpQ';
+
 async function main() {
-  const org = await prisma.organization.upsert({
+  const orgDefault = await prisma.organization.upsert({
     where: { slug: 'test-org' },
     update: {},
-    create: {
-      name: 'Test Org',
-      slug: 'test-org',
-      // Required by schema: "pf" (pessoa fisica) or "pj" (pessoa juridica)
-      type: 'pj',
-    },
+    create: { name: 'Test Org', slug: 'test-org', type: 'pj' },
+  });
+
+  const orgSecondary = await prisma.organization.upsert({
+    where: { slug: 'test-org-secondary' },
+    update: {},
+    create: { name: 'Test Org Secondary', slug: 'test-org-secondary', type: 'pj' },
   });
 
   const confirmed = await prisma.user.upsert({
     where: { email: 'confirmed@test.local' },
-    update: {
-      emailVerified: new Date(),
-      isActive: true,
-    },
+    update: { emailVerified: new Date(), isActive: true },
     create: {
       email: 'confirmed@test.local',
       name: 'Confirmed Test User',
       emailVerified: new Date(),
       isActive: true,
-      // TODO: password — placeholder bcrypt-shaped string; tests that exercise
-      //       login should overwrite this with a real hash via withTransaction.
-      password: '$2a$10$testtesttesttesttesttuQpQpQpQpQpQpQpQpQpQpQpQpQpQpQ',
+      password: PLACEHOLDER_BCRYPT,
       onboardingCompleted: true,
-      currentOrgId: org.id,
+      currentOrgId: orgDefault.id,
     },
   });
 
   const pending = await prisma.user.upsert({
     where: { email: 'pending@test.local' },
-    update: {
-      emailVerified: null,
-      isActive: true,
-    },
+    update: { emailVerified: null, isActive: true },
     create: {
       email: 'pending@test.local',
       name: 'Pending Test User',
       emailVerified: null,
       isActive: true,
-      // TODO: password — placeholder; pending users normally finish signup via OTP.
       password: null,
       onboardingCompleted: false,
     },
   });
 
-  // Link confirmed user to the test org as master so org-scoped queries work.
-  await prisma.userOrganization.upsert({
-    where: {
-      userId_organizationId: {
-        userId: confirmed.id,
-        organizationId: org.id,
-      },
-    },
-    update: { role: 'master', isActive: true },
+  const twofa = await prisma.user.upsert({
+    where: { email: 'twofa@test.local' },
+    update: { twoFactorEnabled: true, isActive: true },
     create: {
-      userId: confirmed.id,
-      organizationId: org.id,
-      role: 'master',
+      email: 'twofa@test.local',
+      name: 'Two FA Test User',
+      emailVerified: new Date(),
       isActive: true,
+      twoFactorEnabled: true,
+      onboardingCompleted: true,
+      currentOrgId: orgDefault.id,
     },
   });
 
-  console.log('[auth-seed] org=%s confirmed=%s pending=%s', org.id, confirmed.id, pending.id);
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@test.local' },
+    update: { role: 'admin', isActive: true },
+    create: {
+      email: 'admin@test.local',
+      name: 'Admin Test User',
+      role: 'admin',
+      emailVerified: new Date(),
+      isActive: true,
+      password: PLACEHOLDER_BCRYPT,
+      onboardingCompleted: true,
+    },
+  });
+
+  const multiorg = await prisma.user.upsert({
+    where: { email: 'multiorg@test.local' },
+    update: { isActive: true },
+    create: {
+      email: 'multiorg@test.local',
+      name: 'Multi Org Test User',
+      emailVerified: new Date(),
+      isActive: true,
+      onboardingCompleted: true,
+      currentOrgId: orgDefault.id,
+    },
+  });
+
+  // Memberships -----------------------------------------------------------
+  for (const [user, org, role] of [
+    [confirmed, orgDefault, 'master'],
+    [twofa, orgDefault, 'manager'],
+    [multiorg, orgDefault, 'user'],
+    [multiorg, orgSecondary, 'master'],
+  ] as const) {
+    await prisma.userOrganization.upsert({
+      where: {
+        userId_organizationId: { userId: user.id, organizationId: org.id },
+      },
+      update: { role, isActive: true },
+      create: { userId: user.id, organizationId: org.id, role, isActive: true },
+    });
+  }
+
+  console.log('[auth-seed] orgs=%s,%s users=%s,%s,%s,%s,%s',
+    orgDefault.id, orgSecondary.id,
+    confirmed.id, pending.id, twofa.id, admin.id, multiorg.id);
 }
 
 main()

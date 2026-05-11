@@ -24,12 +24,18 @@ export default defineConfig({
   },
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'test-results/html' }],
+    ['html', { outputFolder: 'test-results/html', open: 'never' }],
+    ['json', { outputFile: 'test-results/playwright.json' }],
+    ['junit', { outputFile: 'test-results/playwright-junit.xml' }],
   ],
-  outputDir: 'test-results',
+  outputDir: 'test-results/playwright',
 
   use: {
-    trace: 'on-first-retry',
+    // Keep a Playwright trace whenever a test fails. The trace makes
+    // post-mortem debugging possible without re-running (network, DOM,
+    // console, screenshots, every action). Open with:
+    //   npx playwright show-trace test-results/playwright/.../trace.zip
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     // Header usado por rotas de teste (preservado da config anterior)

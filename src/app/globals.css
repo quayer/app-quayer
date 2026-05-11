@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
+/* Disable Tailwind v4 automatic source detection — the project lives inside
+   OneDrive and many files are cloud-only stubs that crash PostCSS when read.
+   The explicit `content` array in tailwind.config.ts already covers everything. */
+@source not "../..";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {

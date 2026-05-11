@@ -7,7 +7,11 @@ import type { Config } from 'tailwindcss'
  * The `ds-` prefix prevents collisions with existing dashboard utilities.
  */
 const config: Config = {
-  content: ['./src/**/*.{ts,tsx,js,jsx,mdx}'],
+  content: [
+    './src/**/*.{ts,tsx,js,jsx,mdx}',
+    './content/**/*.{md,mdx}',
+    './node_modules/fumadocs-ui/dist/**/*.js',
+  ],
   theme: {
     extend: {
       colors: {

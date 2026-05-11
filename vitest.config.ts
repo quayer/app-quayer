@@ -23,9 +23,18 @@ export default defineConfig({
   test: {
     globals: false,
     setupFiles: ['./test/setup.ts'],
+    // Persist machine-readable results so debugging-without-rerun is possible.
+    // CI and `npm run test:debug:open` consume these. Per-project files are
+    // suffixed via outputFile keys below.
+    reporters: [
+      'default',
+      ['json', { outputFile: 'test-results/vitest-unit.json' }],
+    ],
+    outputFile: { json: 'test-results/vitest-unit.json' },
     coverage: {
       enabled: false,
       provider: 'v8',
+      reportsDirectory: 'test-results/coverage',
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['**/node_modules/**', 'src/igniter.client.ts']
     },
@@ -60,7 +69,7 @@ export default defineConfig({
           name: 'react',
           environment: 'happy-dom',
           globals: false,
-          setupFiles: ['./test/setup.ts'],
+          setupFiles: ['./test/setup.ts', './test/setup-react.ts'],
           include: ['test/unit/react/**/*.test.tsx']
         }
       }

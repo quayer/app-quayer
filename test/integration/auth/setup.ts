@@ -22,8 +22,8 @@
  * its own `path`, e.g. `/login-otp`. Final URL: `/api/v1/auth/login-otp`.
  *
  * This file is imported by individual test files; it does not register vitest
- * hooks itself (the global integration setup in `test/api/setup.ts` already
- * runs `prisma migrate deploy`).
+ * hooks itself. Migrations are applied by `npm run test:db:up` before the
+ * suite runs (see `scripts/test/db-up.sh`).
  */
 import { nextRouteHandlerAdapter } from '@igniter-js/core/adapters';
 import { AppRouter } from '@/igniter.router';

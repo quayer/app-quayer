@@ -209,6 +209,7 @@ export const oauthGoogleController = igniter.controller({
                 password: null, // Passwordless — OAuth user
                 role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
                 emailVerified: new Date(), // Google já verificou - must be DateTime
+                onboardingCompleted: true,
                 currentOrgId: organization.id,
                 organizations: {
                   create: {
@@ -220,6 +221,25 @@ export const oauthGoogleController = igniter.controller({
             });
             isNewGoogleUser = true;
           }
+
+          // Registrar/atualizar identidade OAuth vinculada ao usuário
+          await db.userIdentity.upsert({
+            where: {
+              provider_providerUserId: {
+                provider: 'google',
+                providerUserId: googleUser.sub,
+              },
+            },
+            create: {
+              userId: user.id,
+              provider: 'google',
+              providerUserId: googleUser.sub,
+              identifier: googleUser.email,
+            },
+            update: {
+              lastUsedAt: new Date(),
+            },
+          });
 
           // 2FA gate: se usuário existente tem TOTP ativo, emitir challenge e encerrar
           if (!isNewGoogleUser) {

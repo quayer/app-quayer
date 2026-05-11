@@ -25,7 +25,7 @@ Testes end-to-end Playwright para a plataforma Quayer.
 | Smoke em produção (https://app.quayer.com) | `npx playwright test --project=prod` |
 | UI mode | `npx playwright test --project=local --ui` |
 | Headed (browser visível) | `npx playwright test --project=local --headed` |
-| Spec específico | `npx playwright test --project=local admin-security.spec.ts` |
+| Spec específico | `npx playwright test --project=local redirects.spec.ts` |
 
 ## Por que `prod` tem `testMatch` restrito?
 

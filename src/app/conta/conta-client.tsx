@@ -697,9 +697,8 @@ function SessoesTab() {
   }, [])
 
   const fetchLinkedAccounts = useCallback(async () => {
-    // TODO(backend): GET /api/v1/auth/linked-accounts
     try {
-      const json = await apiFetch<unknown>('/api/v1/auth/linked-accounts')
+      const json = await apiFetch<unknown>('/api/v1/auth/me/linked-accounts')
       const data = unwrapData<LinkedAccount[]>(json)
       setLinkedAccounts(Array.isArray(data) ? data : [])
     } catch {
@@ -717,13 +716,10 @@ function SessoesTab() {
   const handleRevoke = async (deviceSessionId: string) => {
     setRevokingId(deviceSessionId)
     try {
-      const res = await fetch('/api/v1/device-sessions/revoke', {
+      await apiFetch('/api/v1/device-sessions/revoke', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceSessionId }),
       })
-      if (!res.ok) throw new Error('Erro ao desconectar dispositivo')
       await fetchDevices()
       toast.success('Dispositivo desconectado')
     } catch (err) {
@@ -737,13 +733,10 @@ function SessoesTab() {
     setIsRevokingAll(true)
     try {
       const currentDevice = devices.find((d) => isCurrentDevice(d.userAgent))
-      const res = await fetch('/api/v1/device-sessions/revoke-all', {
+      await apiFetch('/api/v1/device-sessions/revoke-all', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentDeviceSessionId: currentDevice?.id }),
       })
-      if (!res.ok) throw new Error('Erro ao desconectar dispositivos')
       await fetchDevices()
       toast.success('Outros dispositivos desconectados')
     } catch (err) {
@@ -756,8 +749,7 @@ function SessoesTab() {
   const handleUnlink = async (provider: LinkedProvider) => {
     setUnlinkingProvider(provider)
     try {
-      // TODO(backend): DELETE /api/v1/auth/linked-accounts/:provider
-      await apiFetch(`/api/v1/auth/linked-accounts/${provider}`, { method: 'DELETE' })
+      await apiFetch(`/api/v1/auth/me/linked-accounts/${provider}`, { method: 'DELETE' })
       toast.success(`${providerLabel(provider)} desconectado`)
       await fetchLinkedAccounts()
     } catch (err) {

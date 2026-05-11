@@ -47,6 +47,9 @@ out/
 /.next/
 /out/
 
+# Fumadocs MDX generated source
+.source/
+
 # ===========================================
 # 🗄️ DATABASE
 # ===========================================
@@ -252,6 +255,8 @@ local/
 # Data volumes (Docker postgres)
 data/
 .claude/worktrees/
+.claude/projects/
+.claude/scheduled_tasks.lock
 
 # ===========================================
 # === Quayer-specific clutter prevention ===

@@ -18,7 +18,7 @@
  * level CI teardown (TODO US-106C).
  */
 import { describe, it, expect } from 'vitest';
-import { withTransaction } from '../../api/db';
+import { withTransaction } from '../../factories/transaction';
 import { callAction } from './setup';
 
 interface VerifyOtpResponse {

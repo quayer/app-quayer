@@ -1,3 +1,13 @@
+/**
+ * auth-v3 feature flag.
+ *
+ * Estado pos-refactor (Maio/2026): os componentes `*-v3.tsx` foram deletados e
+ * unificados em LoginFormFinal / SignupForm. O flag NAO troca mais o form —
+ * controla apenas o wrapper visual (AuthShell + tokens DS via `[data-auth-v3]`).
+ *
+ * Decidir entre manter (rollout staged do DS) ou consolidar (assumir sempre ON
+ * e remover o flag + AuthShell branch) eh decisao de produto. Ate la, manter.
+ */
 import { createHash } from 'node:crypto';
 
 type FlagValue = 'off' | `percentage:${number}` | 'on';

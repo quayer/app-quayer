@@ -1,9 +1,11 @@
 # Skill: Quayer Builder — Criar Agentes IA via MCP
 
 ## Quando carregar esta skill
-Quando o usuario pedir para criar, melhorar, testar ou publicar agentes de IA para WhatsApp usando o MCP da Quayer (`@quayer/mcp-server`).
+Quando o usuario pedir para criar, melhorar, testar ou publicar agentes de IA para WhatsApp usando o Builder do Quayer.
 
 Triggers: "cria agente", "novo agente WhatsApp", "build agent", "quero um bot", "melhora o agente", "otimiza o prompt", "publica o agente", "faz deploy".
+
+> ⚠️ **Status do canal MCP:** o pacote `@quayer/mcp-server` (que daria as tools `create_agent`, `deploy_agent`, etc. dentro do Claude Code do usuario) **ainda nao foi construido**. Esta skill descreve o estado-alvo do canal API-first. Ver [../../docs/builder/MCP_CLI_ROADMAP.md](../../docs/builder/MCP_CLI_ROADMAP.md) para o backlog. Enquanto isso, o fluxo real vive na UI em `/projetos/[id]` (controllers em `src/server/ai-module/builder/`).
 
 ---
 

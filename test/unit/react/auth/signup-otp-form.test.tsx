@@ -61,7 +61,9 @@ describe('SignupOTPForm', () => {
 
   it('renders the back-to-signup link', () => {
     render(<SignupOTPForm email="new@example.com" name="Alice" />)
-    const link = screen.getByRole('link', { name: /Voltar para cadastro/i })
+    // The link's accessible name comes from its aria-label
+    // "Voltar para a página de cadastro" (aria-label wins over text content).
+    const link = screen.getByRole('link', { name: /Voltar para a página de cadastro/i })
     expect(link).toHaveAttribute('href', '/signup')
   })
 

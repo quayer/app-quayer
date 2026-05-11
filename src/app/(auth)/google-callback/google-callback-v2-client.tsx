@@ -6,8 +6,6 @@ import { Loader2, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/client/components/ui/alert'
 import { api } from '@/igniter.client'
 import { TwoFactorChallenge } from '@/client/components/auth/two-factor-challenge'
-import Image from 'next/image'
-import Link from 'next/link'
 
 function GoogleCallbackContent() {
   const searchParams = useSearchParams()
@@ -87,16 +85,6 @@ function GoogleCallbackContent() {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
         <div className="flex w-full max-w-sm flex-col gap-6">
-          <Link href="/login" className="flex items-center gap-2 self-center font-medium">
-            <Image
-              src="/logo.svg"
-              alt="Quayer"
-              width={120}
-              height={28}
-              style={{ height: "auto" }}
-              priority
-            />
-          </Link>
           <TwoFactorChallenge
             challengeId={twoFactorChallengeId}
             onSuccess={handle2FASuccess}

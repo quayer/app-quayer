@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { createMDX } from "fumadocs-mdx/next";
+
+const withMDX = createMDX();
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -138,9 +141,11 @@ const nextConfig: NextConfig = {
 // SENTRY_BUILD_DISABLED do build-args do deploy-homol.yml/deploy-production.yml.
 const sentryBuildDisabled = process.env.SENTRY_BUILD_DISABLED === '1';
 
+const withFumadocs = (config: NextConfig) => withMDX(config);
+
 export default sentryBuildDisabled
-  ? nextConfig
-  : withSentryConfig(nextConfig, {
+  ? withFumadocs(nextConfig)
+  : withSentryConfig(withFumadocs(nextConfig), {
       org: process.env.SENTRY_ORG,
       project: process.env.SENTRY_PROJECT,
       silent: !process.env.CI,

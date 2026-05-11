@@ -4,7 +4,8 @@ import { generateTestEmail, getLatestOtp, waitForRedirect } from './helpers'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('signup OTP happy path', () => {
-  test('signup via OTP happy path', async ({ page }) => {
+  // @smoke — runs in PR fast lane via `npx playwright test --grep @smoke`
+  test('signup via OTP happy path @smoke', async ({ page }) => {
     const email = generateTestEmail()
     const name = 'Test User ' + Math.random().toString(36).slice(2, 6)
 
@@ -40,6 +41,8 @@ test.describe('signup OTP happy path', () => {
     await otpField.waitFor({ state: 'attached' })
     await otpField.fill(otp)
 
-    await waitForRedirect(page, /\/(onboarding|integracoes|dashboard|admin)/)
+    // Signup auto-cria org com onboardingCompleted=true e redireciona pra `/`
+    // (home Builder). Ver commit 332c76e — onboarding interativo removido.
+    await waitForRedirect(page, /\/(?:$|\?|projetos)/)
   })
 })

@@ -14,7 +14,7 @@
  * out of scope for this story. We document this in a TODO below.
  */
 import { describe, it, expect } from 'vitest';
-import { withTransaction } from '../../api/db';
+import { withTransaction } from '../../factories/transaction';
 import { callAction } from './setup';
 
 interface SignupOtpResponse {
