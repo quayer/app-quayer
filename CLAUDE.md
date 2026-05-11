@@ -229,6 +229,8 @@ const { data } = api.resource.list.useQuery()
 .github/workflows/   → CI/CD GitHub Actions ✅
 docs/                → Documentação técnica
 docs/deprecated/     → Features removidas (ressuscitar via git se precisar)
+scripts/             → Automação (deploy, baselines, test DB). Ver scripts/README.md ✅
+infra/               → IaC (Caddyfile, supabase, n8n, prod compose)
 ```
 
 ---
