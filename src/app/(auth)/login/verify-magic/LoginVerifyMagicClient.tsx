@@ -6,8 +6,6 @@ import { api } from "@/igniter.client"
 import { Loader2, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/client/components/ui/button"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
-import Image from "next/image"
-import Link from "next/link"
 
 export function LoginVerifyMagicClient() {
   const router = useRouter()
@@ -107,21 +105,6 @@ export function LoginVerifyMagicClient() {
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="flex w-full max-w-sm flex-col gap-6">
-        <Link
-          href="/login"
-          className="inline-flex min-h-[44px] items-center gap-2 self-start font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 rounded-sm transition-opacity hover:opacity-80"
-          aria-label="Quayer — voltar ao login"
-        >
-          <Image
-            src="/logo.svg"
-            alt=""
-            width={120}
-            height={28}
-            style={{ height: "auto" }}
-            priority
-          />
-        </Link>
-
         <div className="flex flex-col gap-8">
           {/* Header — live region announces status changes */}
           <div
