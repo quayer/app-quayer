@@ -145,6 +145,10 @@ playwright-report/
 playwright/.cache/
 test/.auth/
 
+# MockEmailProvider on-disk inbox (test/helpers/inbox.ts)
+tmp/test-inbox/
+tmp/
+
 # Vitest
 vitest.config.js.timestamp-*
 
@@ -244,3 +248,32 @@ local/
 # Data volumes (Docker postgres)
 data/
 .claude/worktrees/
+
+# ===========================================
+# === Quayer-specific clutter prevention ===
+# ===========================================
+# AI-generated images dropped randomly in repo
+Gemini_Generated_Image_*.png
+Gemini_Generated_Image_*.jpg
+Gemini_Generated_Image_*.jpeg
+
+# Ad-hoc image dumps (200MB+ folders, not assets)
+imagem/
+imagens/
+
+# Common typos of docs/testing/ that leak in
+docstesting/
+docs-testing/
+
+# Temporary patch staging dirs and loose patch files
+tmpquayer-patches/
+tmp-*/
+tmp_*/
+*.patch
+*.diff
+
+# Archived tasks (kept locally, never versioned)
+tasks/_archive/
+
+# External repo clones used for reference only
+docs/claude-code-src/

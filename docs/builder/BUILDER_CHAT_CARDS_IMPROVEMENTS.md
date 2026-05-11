@@ -1,5 +1,7 @@
 # Builder — Melhorias propostas nos Bullets do Chat
 
+> **Versão atualizada 10/Mai/2026:** refs a `/admin` substituídas por `/conta` — admin UI foi removida, ver `docs/deprecated/`.
+
 > Complemento de [BUILDER_CHAT_TOOL_CARDS_UX.md](./BUILDER_CHAT_TOOL_CARDS_UX.md). Aqui estão sugestões priorizadas por ROI: o que já existe e não está ligado, cards novos para jornadas ausentes, e polimento do que já roda.
 
 ---
@@ -277,7 +279,7 @@ Propostas ordenadas por dor que resolvem.
 
 ### 2.4 💳 Card de plano/billing quando há blocker
 
-**Gap:** hoje o `DeployBlockersCard` só mostra links externos. Usuário sai do Builder, entra em `/admin/billing`, volta.
+**Gap:** hoje o `DeployBlockersCard` só mostra links externos. Usuário sai do Builder, entra em `/conta`, volta.
 
 **Proposta — `PlanPickerCard` inline:**
 
@@ -530,7 +532,7 @@ Se o Caminho A não dá (Meta App Review negado, MVP apertado), o Builder conduz
 
 ### 2.6 🔑 BYOK inline — colar chave OpenAI/Anthropic
 
-**Gap:** Builder diz "configure sua chave em /admin/byok" → usuário sai, perde contexto.
+**Gap:** Builder diz "configure sua chave em /conta" → usuário sai, perde contexto.
 
 **Proposta — `ByokInlineCard`:**
 

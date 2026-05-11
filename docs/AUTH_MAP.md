@@ -1,6 +1,9 @@
 # Mapa Completo do Sistema de Autenticação — Quayer
 
 > Atualizado em 2026-03-14 | Cobertura: Frontend, Backend, Database, APIs, Jornadas
+>
+> **Versão atualizada 10/Mai/2026:** admin surface removida — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
+> `UserRole.ADMIN` permanece no schema/JWT apenas para controle cross-org no Builder (sem UI dedicada). Todos os usuários — incluindo admins — caem em `/` (home Builder) após login.
 
 ---
 
@@ -8,7 +11,7 @@
 
 | Dimensão | Total |
 |----------|-------|
-| **Páginas frontend** | 17 (12 auth + 3 admin + 2 user settings) |
+| **Páginas frontend** | 14 (12 auth + 2 user settings) |
 | **Endpoints API** | 40 auth + 6 device-sessions + 5 ip-rules + 6 permissions + 6 custom-roles = **63 endpoints** |
 | **Tabelas banco** | 22 tabelas auth-related |
 | **Jornadas usuário** | 8 principais + 2 auxiliares (2FA, Onboarding) |
@@ -48,7 +51,7 @@
   ↓
 /onboarding (se needsOnboarding=true) → cria org
   ↓
-/integracoes (destino final)
+/ (home Builder, destino final)
 ```
 
 ### 1.2 Login por OTP (WhatsApp/Telefone)
@@ -57,7 +60,7 @@
   ↓
 /login/verify?phone=+55... → código 6 dígitos → POST /api/v1/auth/verify-login-otp-phone
   ↓
-/onboarding ou /integracoes
+/onboarding ou /
 ```
 
 ### 1.3 Login por Google OAuth
@@ -69,7 +72,7 @@ Google consent → redirect → /google-callback?code=X
 api.auth.googleCallback → tokens + cookies
   ↓ (se 2FA) → TwoFactorChallenge inline
   ↓
-/onboarding (se needsOnboarding) ou /integracoes
+/onboarding (se needsOnboarding) ou /
 ```
 
 ### 1.4 Login por Magic Link (via email)
@@ -81,7 +84,7 @@ api.auth.googleCallback → tokens + cookies
   ↓
 BroadcastChannel notifica aba original → redirect
   ↓
-/onboarding ou /integracoes
+/onboarding ou /
 ```
 
 ### 1.5 Login por Passkey (WebAuthn)
@@ -94,7 +97,7 @@ POST /api/v1/auth/passkey/login/verify-conditional → tokens (conditional UI)
   OU
 POST /api/v1/auth/passkey/login/verify → tokens (login manual)
   ↓
-/onboarding ou /integracoes
+/onboarding ou /
 ```
 
 ### 1.6 Signup (OTP — Rota canônica)
@@ -103,7 +106,7 @@ POST /api/v1/auth/passkey/login/verify → tokens (login manual)
   ↓
 /signup/verify?email=X&name=Y → código 6 dígitos → api.auth.verifySignupOTP
   ↓
-/integracoes (direto, sem onboarding)
+/ (direto, sem onboarding)
 ```
 
 ### 1.7 Registro Legacy (Senha)
@@ -114,7 +117,7 @@ Email de verificação enviado
   ↓
 /verify-email?email=X → código 6 dígitos → api.auth.verifyEmail
   ↓
-/integracoes
+/
 ```
 
 ### 1.8 Reset de Senha
@@ -125,7 +128,7 @@ Email com link enviado
   ↓
 /reset-password/[token] → nova senha (com indicador de força) → api.auth.resetPassword
   ↓
-Auto-login → /integracoes (ou /admin se admin)
+Auto-login → / (home Builder, mesmo para admins)
 ```
 
 ### Fluxo de 2FA (intercepta qualquer login)
@@ -152,7 +155,7 @@ Senão → usuário digita nome → PATCH /api/v1/auth/profile
   ↓
 createOrganizationAction (Server Action) → cria org + completa onboarding
   ↓
-Novo JWT com needsOnboarding=false → /integracoes
+Novo JWT com needsOnboarding=false → /
 ```
 
 ---
@@ -189,13 +192,7 @@ Novo JWT com needsOnboarding=false → /integracoes
 | 11 | `/reset-password/[token]` | `src/app/(auth)/reset-password/[token]/page.tsx` | Inline (strength indicator) | Nova senha via token + auto-login |
 | 12 | `/google-callback` | `src/app/(auth)/google-callback/page.tsx` | `GoogleCallbackContent` | Callback OAuth Google + 2FA handling |
 
-### Páginas Admin Auth-related
-
-| # | Rota | Arquivo | Descrição |
-|---|------|---------|-----------|
-| 13 | `/admin/security` | `src/app/admin/security/page.tsx` | Dashboard: Device Sessions (tab) + IP Rules (tab) |
-| 14 | `/admin/sessions` | `src/app/admin/sessions/page.tsx` | Gestão de chat sessions (não auth sessions) |
-| 15 | `/admin/invitations` | `src/app/admin/invitations/` | Convites para organizações |
+> **Removido em 10/Mai/2026:** as antigas páginas `/admin/security`, `/admin/sessions` e `/admin/invitations` foram removidas. Device Sessions, IP Rules e Invitations continuam expostos via API (mesmos endpoints da seção 5.2/5.3) mas sem UI dedicada. Ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
 
 ### Loading States
 - `src/app/(auth)/loading.tsx` — Skeleton global do grupo auth
@@ -243,8 +240,9 @@ Novo JWT com needsOnboarding=false → /integracoes
 |-------------|----------|---------------|
 | **Pública** | `/login`, `/signup`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`, `/verify`, `/google-callback`, `/connect` | Sem auth necessária |
 | **Onboarding** | `/onboarding` | Auth obrigatória, onboarding incompleto OK |
-| **Protegida** | `/integracoes`, `/conversas`, `/dashboard`, `/admin`, `/instances`, `/organizations`, `/projects`, `/settings` | Auth + onboarding completo |
-| **Admin** | `/admin/*` | Apenas `SYSTEM_ADMIN` |
+| **Protegida** | `/`, `/integracoes`, `/conversas`, `/dashboard`, `/instances`, `/organizations`, `/projects`, `/settings` | Auth + onboarding completo |
+
+> **Removido em 10/Mai/2026:** a classe "Admin" e a lista `ADMIN_ONLY_PATHS` foram removidas do middleware. Não há mais paths bloqueados por `role === 'admin'`. `UserRole.ADMIN` continua no JWT só para escopo cross-org no Builder.
 
 ### Token Extraction
 1. Cookie `accessToken` (httpOnly)
@@ -255,7 +253,7 @@ Novo JWT com needsOnboarding=false → /integracoes
 |--------|----------|
 | `x-user-id` | UUID do usuário |
 | `x-user-email` | Email do usuário |
-| `x-user-role` | "admin" ou "user" |
+| `x-user-role` | "admin" ou "user" (admin é apenas escopo cross-org no Builder — não bloqueia rotas) |
 | `x-needs-onboarding` | "true" ou "false" |
 | `x-current-org-id` | UUID da org ativa |
 | `x-organization-role` | "master", "manager", "user" |
@@ -264,8 +262,8 @@ Novo JWT com needsOnboarding=false → /integracoes
 ```
 Token expirado → /login?redirect=...&error=session_expired
 needsOnboarding=true + rota protegida → /onboarding
-needsOnboarding=false + rota /onboarding → /integracoes
-Rota admin + role != admin → /integracoes
+needsOnboarding=false + rota /onboarding → /
+Login bem-sucedido (qualquer role, incluindo admin) → / (home Builder)
 ```
 
 ---
@@ -671,9 +669,9 @@ Custom:   CustomRole com permissions JSON por recurso (sobrepõe legacy)
 ┌──────────────────────────────────────────────────────────────┐
 │                     FRONTEND (Next.js)                       │
 │                                                              │
-│  /login ─→ /login/verify ─→ /onboarding ─→ /integracoes     │
-│  /signup ─→ /signup/verify ─────────────→ /integracoes       │
-│  /register ─→ /verify-email ────────────→ /integracoes       │
+│  /login ─→ /login/verify ─→ /onboarding ─→ / (home Builder)  │
+│  /signup ─→ /signup/verify ─────────────→ /                  │
+│  /register ─→ /verify-email ────────────→ /                  │
 │  /forgot-password ─→ /reset-password/[token]                 │
 │  /google-callback                                            │
 │                                                              │
@@ -688,7 +686,6 @@ Custom:   CustomRole com permissions JSON por recurso (sobrepõe legacy)
 │                    MIDDLEWARE (Edge)                          │
 │  JWT verify (jose) → Route protection → Header injection     │
 │  needsOnboarding? → /onboarding                             │
-│  isAdmin? → /admin allowed                                   │
 │  Token expired? → /login?error=session_expired               │
 └───────────────────────────┬──────────────────────────────────┘
                             │
@@ -763,7 +760,7 @@ Custom:   CustomRole com permissions JSON por recurso (sobrepõe legacy)
 {
   userId: string,
   email: string,
-  role: 'admin' | 'user',
+  role: 'admin' | 'user',  // 'admin' usado só p/ escopo cross-org no Builder; sem UI dedicada
   currentOrgId?: string,
   organizationRole?: 'master' | 'manager' | 'user',
   needsOnboarding?: boolean,
