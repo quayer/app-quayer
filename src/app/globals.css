@@ -1,10 +1,12 @@
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
-/* Disable Tailwind v4 automatic source detection — the project lives inside
-   OneDrive and many files are cloud-only stubs that crash PostCSS when read.
-   The explicit `content` array in tailwind.config.ts already covers everything. */
-@source not "../..";
+/* Explicit @source globs — Tailwind v4 doesn't reliably honor the legacy
+   `content` array from `@config`, so we list the paths here. Keep these in
+   sync with tailwind.config.ts `content`. */
+@source "../**/*.{ts,tsx,js,jsx,mdx}";
+@source "../../content/**/*.{md,mdx}";
+@source "../../node_modules/fumadocs-ui/dist/**/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
