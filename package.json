@@ -41,7 +41,8 @@
     "test:e2e:prod": "playwright test --project=prod",
     "test:react": "vitest run test/unit/react --config vitest.config.ts",
     "email:dev": "email dev --dir src/lib/email/templates",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "fumadocs-mdx"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
