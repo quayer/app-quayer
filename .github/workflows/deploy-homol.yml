@@ -358,6 +358,19 @@ jobs:
             echo "RAM livre pós-deploy: $(free -m | awk '/Mem/{print $4}')MB"
             echo "=== Deploy concluído: https://homol.quayer.com ==="
 
+            # ── Diag dump (non-destructive) ──
+            # Helps debug runtime issues like missing env vars or Resend failures
+            # without triggering a separate diag workflow.
+            echo
+            echo "=== DIAG: .env.homol keys (NO VALUES) ==="
+            grep -oE '^[A-Z_]+=' "$APP_DIR/$ENV_FILE" 2>/dev/null | sort -u | head -80 || true
+            echo
+            echo "=== DIAG: app logs grep email/Resend (last 200 lines, filtered) ==="
+            docker logs homol-quayer-app --tail 200 2>&1 | grep -iE 'resend|email|mock|otp|sendLogin|SMTP' | tail -50 || true
+            echo
+            echo "=== DIAG: app last 50 lines (unfiltered tail) ==="
+            docker logs homol-quayer-app --tail 50 2>&1 || true
+
   # ============================================
   # 4. SMOKE TEST
   # ============================================
