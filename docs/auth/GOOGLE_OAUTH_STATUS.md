@@ -59,7 +59,8 @@ auth surfaces and is NOT a candidate for cleanup.
   - Loading state: DS `Card` with spinner + "Concluindo login..."
   - 2FA branch: mounts shared `TwoFactorChallenge` component
   - Success branch: redirects via `window.location.href` (mirrors v2),
-    routing to `/onboarding`, `/admin`, or `/integracoes`
+    routing to `/admin` or `/integracoes` (onboarding step removed —
+    signup auto-cria org)
   - Error branch: DS `Card` with `Button` "Voltar para login"
   - Uses DS primitives only: `Card`, `Button`, `text-ds-*` tokens
 - Added unit test

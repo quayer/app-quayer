@@ -38,7 +38,7 @@ export function GoogleCallbackV3(): React.ReactElement {
 
   const handle2FASuccess = React.useCallback(
     (result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }): void => {
-      window.location.href = result.needsOnboarding ? '/onboarding' : '/'
+      window.location.href = '/'
     },
     [],
   )
@@ -65,7 +65,7 @@ export function GoogleCallbackV3(): React.ReactElement {
         }
 
         if (data?.user) {
-          const redirect = data.needsOnboarding || !data.user.currentOrgId ? '/onboarding' : '/'
+          const redirect = '/'
           window.location.href = redirect
           return
         }

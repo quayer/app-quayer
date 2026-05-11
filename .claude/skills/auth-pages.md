@@ -17,8 +17,9 @@ NAO carregar para: backend de auth (usar `auth.md`), dashboard, admin, landing.
 | /signup/verify | src/app/(auth)/signup/verify/page.tsx | signup-otp-form.tsx | signup-verify-v3.tsx | api.auth.verifySignupOTP |
 | /signup/verify-magic | layout.tsx+page.tsx | SignupVerifyMagicClient.tsx | (sem v3) | magic link |
 | /verify-email | src/app/(auth)/verify-email/page.tsx | verify-email-form.tsx | verify-email-v3.tsx | api.auth.verifyEmail |
-| /onboarding | src/app/(auth)/onboarding/page.tsx | onboarding-form.tsx | onboarding-v3.tsx | PATCH /api/v1/auth/profile |
 | /google-callback | src/app/(auth)/google-callback/page.tsx | (verificar GOOGLE_OAUTH_STATUS.md) | ditto | google OAuth |
+
+> **Removido em 10/Mai/2026:** rota `/onboarding` + componentes `onboarding-form.tsx` / `onboarding-v3.tsx` foram deletados. Signup agora cria a org e marca `onboardingCompleted=true` direto. Perfil atualizavel via `PATCH /api/v1/auth/me`.
 
 ---
 

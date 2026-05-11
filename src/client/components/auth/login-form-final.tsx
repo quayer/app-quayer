@@ -98,7 +98,7 @@ export function LoginFormFinal({
         })
         if (!verifyRes.ok) return
         const { data: result } = await verifyRes.json()
-        router.push(result.needsOnboarding ? '/onboarding' : '/')
+        router.push('/')
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return
         console.debug('[Conditional UI]', err)

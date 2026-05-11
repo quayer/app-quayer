@@ -15,19 +15,16 @@ flowchart TD
   E --> F[POST api.auth.verifySignupOTP]
   F -->|invalid/expired| E
   F -->|success| G[Set-Cookie accessToken + refreshToken]
-  G --> H[needsOnboarding=true no JWT]
-  H --> I[middleware redirect /onboarding]
-  I --> J[POST api.auth.completeOnboarding]
-  J --> K[redirect /integracoes]
+  G --> H[Org auto-criada, onboardingCompleted=true]
+  H --> K[redirect /integracoes]
 ```
 
 Steps detail:
 - **Step B:** `src/client/components/auth/signup-form.tsx` (form principal de signup)
 - **Step C:** `api.auth.signupOTP.useMutation({ body: { email, name } })` -> POST `/api/v1/auth/signup-otp` (handler em `src/server/core/auth/controllers/auth.controller.ts:1223`). Cria `TempUser` + `VerificationCode` (TTL 10min) e envia email com OTP + magic link.
 - **Step D:** Pagina `src/app/(auth)/signup/verify/page.tsx` -> `signup-otp-form.tsx`
-- **Step F:** `api.auth.verifySignupOTP.useMutation({ body: { email, code } })` -> POST `/api/v1/auth/verify-signup-otp` (handler em `auth.controller.ts:1291`). Cria `User` + `Organization`, gera tokens (refresh TTL 7d).
-- **Step I:** `src/middleware.ts` linha 104: `if (payload.needsOnboarding && !isOnboardingPath) -> redirect /onboarding`.
-- **Step J:** `src/app/(auth)/onboarding/...` -> `api.auth.completeOnboarding` POST `/api/v1/auth/onboarding/complete`.
+- **Step F:** `api.auth.verifySignupOTP.useMutation({ body: { email, code } })` -> POST `/api/v1/auth/verify-signup-otp` (handler em `auth.controller.ts:1291`). Cria `User` + `Organization`, marca `onboardingCompleted=true` imediatamente, gera tokens (refresh TTL 7d).
+- **Step H:** (removido) signup auto-cria org. Passo de `/onboarding` e `POST /auth/onboarding/complete` foram removidos.
 
 ## Journey 2: Existing User Login (OTP)
 
@@ -43,9 +40,7 @@ flowchart TD
   F -->|2FA enabled| G2[render two-factor-challenge]
   F -->|sucesso| G[Set-Cookie tokens]
   Fp -->|verified| G
-  G --> H{currentOrgId existe?}
-  H -->|sim| I[redirect /integracoes]
-  H -->|nao| J[redirect /onboarding]
+  G --> I[redirect /integracoes]
 ```
 
 Steps detail:
@@ -66,7 +61,7 @@ flowchart TD
   D -->|magic-link-signup| E[Cria User+Org, retorna tokens]
   D -->|magic-link-login| F[Verifica 2FA, retorna tokens]
   D -->|invalid/expired| Err[Mostra erro, link /login]
-  E --> G[Set-Cookie + needsOnboarding -> /onboarding]
+  E --> G[Set-Cookie + redirect /integracoes (org auto-criada)]
   F --> H{2FA?}
   H -->|sim| I[Render two-factor-challenge]
   H -->|nao| J[redirect /integracoes]
@@ -78,27 +73,13 @@ Steps detail:
 - **Step D:** POST `/api/v1/auth/verify-magic-link` (`auth.controller.ts:1705`). Verifica `payload.type === 'magic-link-login' | 'magic-link-signup'`.
 - **Signup magic link:** `${appBaseUrl}/signup/verify-magic?token=...` (`auth.controller.ts:1279`).
 
-## Journey 4: User Without Active Organization
+## Journey 4: User Without Active Organization (REMOVIDO)
 
-```mermaid
-flowchart TD
-  A[Login bem-sucedido] --> B[JWT contem currentOrgId=null]
-  B --> C[Backend marca needsOnboarding=true]
-  C --> D[Cliente recebe tokens + redireciona /integracoes]
-  D --> E[middleware.ts intercepta]
-  E --> F{payload.needsOnboarding?}
-  F -->|true| G[redirect /onboarding]
-  F -->|false e isOnboardingPath| H[redirect /integracoes]
-  G --> I[Usuario completa onboarding]
-  I --> J[POST api.auth.completeOnboarding]
-  J --> K[Cria Organization, atualiza currentOrgId]
-  K --> L[Re-emite tokens needsOnboarding=false]
-  L --> M[redirect /integracoes]
-```
-
-Steps detail:
-- **Step E:** `src/middleware.ts` linhas 100-114.
-- **Step J:** POST `/api/v1/auth/onboarding/complete` (`auth.controller.ts:2074`).
+Fluxo descontinuado. Signup (OTP, magic link e Google OAuth) agora cria
+`Organization` automaticamente e marca `onboardingCompleted=true` no
+mesmo handler. Nao existe mais pagina `/onboarding` nem endpoint
+`POST /api/v1/auth/onboarding/complete`. Usuario sempre cai em
+`/integracoes` apos autenticar.
 
 ## References
 - `.claude/skills/auth-pages.md` [TODO: verify file exists]

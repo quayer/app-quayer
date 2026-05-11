@@ -72,7 +72,7 @@ Files: src/app/(auth)/*/page.tsx (modified) + src/client/components/auth/{login-
 - [INFO] Dual-render pattern preserved in all pages (v2 untouched when flag off)
 - [INFO] v2 code paths bit-for-bit unchanged -- zero regression risk for v2 users
 - [INFO] All forms call same controllers as v2 (contract preservation)
-- [TODO] Verify post-login redirect targets match v2 (login -> /integracoes or /admin or /onboarding depending on user state)
+- [TODO] Verify post-login redirect targets match v2 (login -> /integracoes or /admin; onboarding step removed — signup auto-cria org)
 - [TODO] Verify autocomplete attributes per A11Y_AUDIT.md (email, name, new-password, current-password)
 - [MEDIUM] SignupFormV3 likely uses native checkbox -- DS Wave 1 lacks Checkbox primitive; track for follow-up
 - [MEDIUM] Onboarding v3 is simplified (2 steps) vs v2 -- needs product review to ensure no required data is dropped

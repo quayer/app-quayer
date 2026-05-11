@@ -50,7 +50,7 @@ describe('SignupVerifyV3', () => {
     expect(submit).toBeDisabled()
   })
 
-  it('calls verifySignupOTP mutation with 6 digits and redirects to /onboarding', async () => {
+  it('calls verifySignupOTP mutation with 6 digits and redirects to home', async () => {
     const user = userEvent.setup()
     render(<SignupVerifyV3 />)
 
@@ -68,7 +68,7 @@ describe('SignupVerifyV3', () => {
       body: { email: 'gabriel@example.com', code: '123456' },
     })
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith('/onboarding')
+      expect(pushMock).toHaveBeenCalledWith('/')
     })
   })
 

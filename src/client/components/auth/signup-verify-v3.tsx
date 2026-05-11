@@ -42,7 +42,7 @@ export function SignupVerifyV3(): React.ReactElement {
         return
       }
 
-      router.push('/onboarding')
+      router.push('/')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Codigo invalido. Tente novamente.'
       setError(msg)

@@ -86,7 +86,7 @@ export function PasskeyButton({
 
       toast({ title: "Login realizado!", description: "Autenticado com Passkey." })
 
-      router.push(result.needsOnboarding ? '/onboarding' : '/')
+      router.push('/')
     } catch (err: unknown) {
       const error = err as { name?: string; message?: string }
       if (error?.name === 'NotAllowedError') {

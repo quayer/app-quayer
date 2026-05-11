@@ -165,8 +165,8 @@ export const statusRoutes = {
       // Register device session (non-blocking)
       await registerDeviceSession(user.id, request);
 
-      // Determine redirect path
-      const redirectPath = (!user.onboardingCompleted || !currentOrgId) ? '/onboarding' : '/';
+      // Determine redirect path (org auto-created on signup; onboarding flow removed)
+      const redirectPath = '/';
 
       return response.success({
         verified: true,

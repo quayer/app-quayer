@@ -25,9 +25,9 @@ sequenceDiagram
   I->>D: SELECT VerificationCode WHERE email + code + !used + expiresAt>NOW
   I->>D: UPDATE User SET lastLoginAt
   I->>D: INSERT RefreshToken (expiresAt=now+7d)
-  I->>I: signAccessToken({userId, email, role, currentOrgId, organizationRole, needsOnboarding})
+  I->>I: signAccessToken({userId, email, role, currentOrgId, organizationRole})
   I-->>C: 200 { user, tokens } + Set-Cookie accessToken + refreshToken
-  C->>C: router.push /integracoes (or /onboarding if needsOnboarding)
+  C->>C: router.push /integracoes (onboarding step removed — signup auto-cria org)
 ```
 
 ## OTP Lifecycle
@@ -44,7 +44,7 @@ sequenceDiagram
 - **Algorithm:** HS256 (default `jsonwebtoken.sign` sem `algorithm` explicito)
 - **Secret:** `process.env.JWT_SECRET` (obrigatorio, throws se ausente). Refresh usa `JWT_REFRESH_SECRET` ou cai no `JWT_SECRET`.
 - **Issuer/Audience:** `issuer: 'quayer'`, `audience: 'quayer-api'`
-- **Access token payload:** `{ userId, email, role, currentOrgId?, organizationRole?, needsOnboarding?, type: 'access', iat, exp }`
+- **Access token payload:** `{ userId, email, role, currentOrgId?, organizationRole?, type: 'access', iat, exp }` (`needsOnboarding` REMOVIDO — signup auto-cria org)
 - **Access token lifetime:** **15 minutos** (`ACCESS_TOKEN_EXPIRY = '15m'` em `src/lib/auth/jwt.ts:24`)
 - **Refresh token lifetime:** **7 dias** (`REFRESH_TOKEN_EXPIRY = '7d'`). Refresh tokens persistidos na tabela `RefreshToken` com `expiresAt` e `revokedAt`.
 - **Refresh flow:** POST `/api/v1/auth/refresh` (`auth.controller.ts:503`). Verifica refresh token, valida `revokedAt`/`expiresAt`, emite novo par de tokens.
@@ -60,16 +60,15 @@ sequenceDiagram
 ## Middleware
 - **Arquivo:** `src/middleware.ts`
 - **PUBLIC_PATHS** (linha 15): `/login`, `/register`, `/signup`, `/connect`, `/forgot-password`, `/reset-password`, `/google-callback`, `/verify-email`, `/verify`
-- **ONBOARDING_PATHS:** `/onboarding`
-- **PROTECTED_PATHS:** `/integracoes`, `/conversas`, `/admin`, `/dashboard`, `/instances`, `/organizations`, `/projects`, `/settings`, `/onboarding`
+- **ONBOARDING_PATHS:** (REMOVIDO) signup auto-cria org
+- **PROTECTED_PATHS:** `/integracoes`, `/conversas`, `/admin`, `/dashboard`, `/instances`, `/organizations`, `/projects`, `/settings`
 - **ADMIN_ONLY_PATHS:** `/admin`
 - **Redirects:**
   - Sem token em rota protegida -> `/login?redirect=<pathname>`
   - Token invalido/expirado -> `/login?redirect=<pathname>&error=session_expired` + delete cookies
-  - `payload.needsOnboarding && !isOnboardingPath` -> `/onboarding`
-  - `!payload.needsOnboarding && isOnboardingPath` -> `/integracoes`
+  - (REMOVIDO) redirect de onboarding — signup auto-cria org
   - Rota `/admin` sem role SystemAdmin -> `/integracoes` (silencioso)
-- **Headers injetados:** `x-user-id`, `x-user-email`, `x-user-role`, `x-needs-onboarding`, `x-current-org-id`, `x-organization-role`
+- **Headers injetados:** `x-user-id`, `x-user-email`, `x-user-role`, `x-current-org-id`, `x-organization-role` (`x-needs-onboarding` REMOVIDO — signup auto-cria org)
 - **IP block:** removido do middleware (Edge runtime nao pode fazer fetch bloqueante); aplicado na camada de API.
 - **Verify:** `verifyAccessToken` de `@/lib/auth/jwt.edge` (variant Edge-safe)
 
@@ -91,7 +90,6 @@ sequenceDiagram
 | /api/v1/auth/me | PATCH | { name?, language?, timezone? } | { user } |
 | /api/v1/auth/preferences | PATCH | { ... } | { preferences } |
 | /api/v1/auth/switch-organization | POST | { organizationId } | { tokens } |
-| /api/v1/auth/onboarding/complete | POST | { organizationName, ... } | { user, tokens } |
 | /api/v1/auth/google | GET | - | redirect Google OAuth |
 | /api/v1/auth/google/callback | POST | { code } | { user, tokens } |
 | /api/v1/auth/users | GET | - | { users[] } (admin) |

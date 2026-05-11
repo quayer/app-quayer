@@ -43,8 +43,8 @@ src/features/auth/
 | `/auth/refresh` | POST | Renovar access token |
 | `/auth/logout` | POST | Invalidar sessão |
 | `/auth/me` | GET | Dados do usuário logado |
+| `/auth/me` | PATCH | Atualizar perfil (`{ name?, language?, timezone? }`) |
 | `/auth/change-password` | POST | Alterar senha |
-| `/auth/profile` | PATCH | Atualizar perfil |
 | `/auth/switch-org` | POST | Trocar organização ativa |
 | `/auth/forgot-password` | POST | Solicitar reset |
 | `/auth/reset-password` | POST | Confirmar reset |
@@ -238,14 +238,15 @@ src/components/auth/
 
 ---
 
-## Onboarding Flow
+## Onboarding Flow (REMOVIDO em 10/Mai/2026)
 
 ```
-Register → needsOnboarding=true → middleware redireciona /onboarding
-Onboarding → cria organização + completa perfil → onboardingCompleted=true
+Signup → org auto-criada no fluxo de signup → onboardingCompleted=true direto
+(rota /onboarding e endpoint /auth/onboarding/complete removidos da UI;
+ controller pode permanecer apenas para legacy users sem org)
 ```
 
-**Hooks:** `src/hooks/useOnboarding.ts`
+**Hooks:** ~~`src/hooks/useOnboarding.ts`~~ (removido junto com a pagina)
 
 ---
 

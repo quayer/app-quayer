@@ -1,18 +1,16 @@
 # Skill: Auth / Magic Link
 
 ## Responsabilidade
-Consumo do magic link (token JWT) e polling do tab original + complete onboarding.
+Consumo do magic link (token JWT) e polling do tab original.
 
 ## Actions (endpoints)
 - `verifyMagicLink`      — POST /auth/verify-magic-link
 - `checkMagicLinkStatus` — POST /auth/check-magic-link-status
-- `completeOnboarding`   — POST /auth/onboarding/complete
 
 ## Arquivos
 - `magic-link.controller.ts` — composer (~25 LoC); só importa e espalha routes
 - `verify.routes.ts`         — verifyMagicLink: signup path + login path (~230 LoC)
 - `status.routes.ts`         — checkMagicLinkStatus: cross-tab polling (~170 LoC)
-- `onboarding.routes.ts`     — completeOnboarding (~80 LoC)
 
 ## Dependencias _shared/
 - `_shared/helpers.ts`         — getClientIdentifier, setAuthCookies, createAuditLog, registerDeviceSession, autoJoinByVerifiedDomain, sign2faChallenge
@@ -27,9 +25,9 @@ VerificationCode, TempUser, User, Organization, UserOrganization, RefreshToken, 
 ## Invariantes
 - Token assinado via `signMagicLinkToken`; `sessionId` UUID para cross-tab polling.
 - `checkMagicLinkStatus` emite access + refresh (comportamento completo de login).
-- `completeOnboarding` emite APENAS access token (refresh existente permanece válido).
 - `verifyMagicLink` tem rate-limit duplo: IP (authRateLimiter no handler) + email/IP (checkOtpRateLimit).
 - Consume atômico do token: `updateMany where used=false` — previne replay concorrente.
+- Onboarding interativo foi removido: signup cria org + seta `onboardingCompleted=true` na hora; sem rota `/auth/onboarding/complete`.
 
 ## Como mexer
 1. Ler este arquivo + o routes file relevante.

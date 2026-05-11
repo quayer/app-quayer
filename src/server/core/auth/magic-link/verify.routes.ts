@@ -136,6 +136,7 @@ export const verifyRoutes = {
             password: null, // Passwordless — magic-link signup user
             role: isFirstUser ? UserRole.ADMIN : UserRole.USER,
             emailVerified: new Date(),
+            onboardingCompleted: true,
             currentOrgId: organization.id,
             organizations: {
               create: {

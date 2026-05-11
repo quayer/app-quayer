@@ -17,7 +17,7 @@ export function LoginVerifyMagicClient() {
   const [twoFactorChallengeId, setTwoFactorChallengeId] = useState<string | null>(null)
 
   const handle2FASuccess = useCallback((result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }) => {
-    window.location.href = result.needsOnboarding ? '/onboarding' : '/'
+    window.location.href = '/'
   }, [])
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export function LoginVerifyMagicClient() {
           const user = responseData.user
           const needsOnboarding = responseData.needsOnboarding
 
-          const redirectPath = needsOnboarding || !user.currentOrgId ? '/onboarding' : '/'
+          const redirectPath = '/'
 
           // Notificar a aba original (OTP) que o login foi feito via magic link
           let notifiedOriginalTab = false

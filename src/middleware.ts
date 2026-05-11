@@ -23,11 +23,6 @@ const PUBLIC_PATHS = [
 ];
 
 /**
- * Rotas de onboarding (requerem autenticação mas não onboarding completo)
- */
-const ONBOARDING_PATHS = ['/onboarding'];
-
-/**
  * Rotas protegidas (requerem autenticação)
  *
  * Nota: a rota raiz `/` (home nova do Builder) é tratada separadamente
@@ -37,7 +32,6 @@ const PROTECTED_PATHS = [
   '/projetos',
   '/conta',
   '/user',
-  '/onboarding',
 ];
 
 /**
@@ -140,21 +134,9 @@ export async function middleware(request: NextRequest) {
   // 6. [IP check removido do middleware — Edge runtime não pode fazer fetch bloqueante]
   // IP blocking é aplicado na camada de API quando necessário.
 
-  // 7. Verificar onboarding
-  // Se usuário não completou onboarding E não está em rota de onboarding, redirecionar
-  const isOnboardingPath = ONBOARDING_PATHS.some((path) => pathname.startsWith(path));
-
-  if (payload.needsOnboarding && !isOnboardingPath) {
-    // Usuário precisa completar onboarding
-    const onboardingUrl = new URL('/onboarding', request.url);
-    return NextResponse.redirect(onboardingUrl);
-  }
-
-  // Se usuário JÁ completou onboarding mas está na rota de onboarding, redirecionar para home
-  if (!payload.needsOnboarding && isOnboardingPath) {
-    const dashboardUrl = new URL('/', request.url);
-    return NextResponse.redirect(dashboardUrl);
-  }
+  // 7. [Onboarding redirect removido — org agora é auto-criada no signup e
+  //     onboardingCompleted é setado true imediatamente. A página /onboarding
+  //     e seus componentes foram deletados.]
 
   // 8. Adicionar informações do usuário aos headers (para uso em Server Components)
   // IMPORTANTE: estes headers são gerados AQUI a partir do JWT verificado.
@@ -166,10 +148,6 @@ export async function middleware(request: NextRequest) {
   requestHeaders.set('x-user-id', payload.userId);
   requestHeaders.set('x-user-email', payload.email);
   requestHeaders.set('x-user-role', payload.role);
-
-  if (payload.needsOnboarding !== undefined) {
-    requestHeaders.set('x-needs-onboarding', String(payload.needsOnboarding));
-  }
 
   if (payload.currentOrgId) {
     requestHeaders.set('x-current-org-id', payload.currentOrgId);

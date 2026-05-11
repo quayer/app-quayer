@@ -62,7 +62,7 @@ export function LoginVerifyV3(): React.ReactElement {
         setError(extractErrorMessage({ error: result.error }, 'Codigo invalido'))
         return
       }
-      router.push(result?.data?.needsOnboarding ? '/onboarding' : '/')
+      router.push('/')
     } catch (err) {
       setError(extractErrorMessage(err, 'Codigo invalido'))
     } finally {

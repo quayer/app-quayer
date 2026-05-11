@@ -38,8 +38,8 @@ endpoint calls. Findings classified as KEEP / UPDATE / DELETE.
   the stub) — DELETE with route
 
 **Tests:**
-- test/e2e/onboarding-flow.spec.ts:27 — `page.goto('${BASE_URL}/register')`
-  — UPDATE (point to `/signup`)
+- (REMOVIDO) test/e2e/onboarding-flow.spec.ts — spec removida junto com a
+  pagina `/onboarding` (signup auto-cria org)
 
 **Configs:**
 - (none found in next.config.ts / prisma)
@@ -248,10 +248,9 @@ Recommend Phase B target only the 3 password-flow stubs.
    despite the endpoint being removed months ago (per AUTH_MAP.md
    note dated 2026-03-16). Stale UI text — UPDATE regardless of
    cleanup outcome.
-3. `test/e2e/onboarding-flow.spec.ts:27` still navigates to `/register`
-   directly. Currently masked by the US-201 redirect-to-/signup stub,
-   so the test "works" but is testing the wrong URL. UPDATE to `/signup`
-   regardless.
+3. (REMOVIDO) `test/e2e/onboarding-flow.spec.ts` foi removido com a
+   pagina `/onboarding` (signup auto-cria org). Nao ha mais teste para
+   atualizar.
 
 ---
 
