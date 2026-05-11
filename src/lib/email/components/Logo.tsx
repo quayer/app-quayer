@@ -8,19 +8,13 @@ interface LogoProps {
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.quayer.com';
 
-/**
- * Quayer Q-bolt logo for transactional emails.
- *
- * Email clients have notoriously poor SVG support (Outlook desktop, Gmail iOS strip
- * inline SVG entirely), so we reference the public asset by absolute URL. The PNG
- * fallback would be ideal, but the project currently only ships an SVG; mainstream
- * webmail (Gmail web, Apple Mail, Yahoo, ProtonMail) does render external SVG via
- * <img>, and clients that don't will simply show alt text.
- */
-export function Logo({ width = 48, height = 48 }: LogoProps) {
+// PNG (not SVG) because Outlook desktop and Gmail iOS strip external SVG.
+// Dark fill (#1A0800) renders against the white card background; the public/
+// logo.svg ships in white for the dark app UI.
+export function Logo({ width = 140, height = 32 }: LogoProps) {
   return (
     <Img
-      src={`${APP_URL}/logo.svg`}
+      src={`${APP_URL}/logo.png`}
       width={width}
       height={height}
       alt="Quayer"
