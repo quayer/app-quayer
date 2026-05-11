@@ -136,6 +136,6 @@ This LLM review does NOT substitute a human review. Before merging Release 3:
 ## References
 - .claude/skills/release-checklist.md
 - docs/auth/A11Y_AUDIT.md
-- docs/auth/BASELINES.md (for perf comparison)
+- docs/infra/BASELINES.md (seção 8 — for perf comparison; consolidado de docs/auth/BASELINES.md em 10/Mai/2026)
 - docs/auth/ASSETS.md
 - docs/auth/FEATURE_FLAGS.md

@@ -94,7 +94,7 @@ for entry in "${URLS[@]}"; do
 done
 
 echo
-echo "## Resultado (copie para docs/auth/BASELINES.md)"
+echo "## Resultado (copie para docs/infra/BASELINES.md secao 8)"
 echo
 echo "$MD_TABLE"
 echo

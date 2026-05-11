@@ -19,7 +19,7 @@ Estabelecer uma rede de segurança de testes automatizados em 5 camadas, rodando
 ## 2. Goals
 
 - Pipeline de 5 camadas funcionando com **testes reais contra o auth atual**
-- Baselines quantitativas de produção documentadas em `docs/auth/BASELINES.md`
+- Baselines quantitativas de produção documentadas em `docs/infra/BASELINES.md` seção 8 (consolidado de `docs/auth/BASELINES.md` em 10/Mai/2026)
 - CI bloqueando merge em falha de qualquer camada
 - Monitoramento sintético em produção (read-only, sem backdoor de auth)
 - Skills `.claude/skills/testing-pipeline.md` e `release-checklist.md` criadas
@@ -33,14 +33,14 @@ Estabelecer uma rede de segurança de testes automatizados em 5 camadas, rodando
 **Description:** Como engenheiro, preciso dos números atuais de performance e conversão para definir o critério objetivo de "não regrediu" nas próximas releases.
 
 **Acceptance Criteria:**
-- [ ] `docs/auth/BASELINES.md` criado com snapshot datado contendo:
+- [ ] `docs/infra/BASELINES.md` seção 8 criada com snapshot datado contendo (consolidado de `docs/auth/BASELINES.md` em 10/Mai/2026):
   - p50/p95/p99 de TTFB e LCP para `/login`, `/signup`, `/login/verify`, `/signup/verify` (30 dias)
   - Taxa de conversão signup→onboarding completo (30 dias)
   - Taxa de sucesso de OTP (verificados/enviados, 30 dias)
   - Error rate de `/api/v1/auth/*` (30 dias)
   - Volume médio diário de requests em cada rota `(auth)/*`
 - [ ] Fonte de cada número documentada (Vercel Analytics, SQL query, log aggregator)
-- [ ] Queries SQL usadas salvas em `docs/auth/baseline-queries.sql`
+- [ ] Queries SQL usadas salvas em `docs/infra/baseline-queries.sql` (movido de `docs/auth/` em 10/Mai/2026)
 
 ### US-102: Vitest + TypeScript strict configurado
 **Description:** Como dev, preciso de Vitest rodando com os path aliases do projeto e tipagem estrita.

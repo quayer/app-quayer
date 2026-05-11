@@ -18,7 +18,7 @@ Nenhum item abaixo é pulável. Cada checkbox DEVE ser marcado com evidência co
 - [ ] Migrations Prisma revisadas e idempotentes (sem `--accept-data-loss`)
 
 ### Baselines
-- [ ] Métricas comparadas contra `docs/auth/BASELINES.md` — p95 não degradou mais de **20%**
+- [ ] Métricas comparadas contra `docs/infra/BASELINES.md` (seção 8 para auth) — p95 não degradou mais de **20%**
 - [ ] Error rate não aumentou vs snapshot anterior (comparar mesma janela de 24h)
 - [ ] Conversion metrics (login success, signup completion) inalteradas ou melhores, quando houver dados estatisticamente significativos
 - [ ] Snapshot do estado atual salvo ANTES do deploy para possibilitar comparação pós-deploy
@@ -117,7 +117,7 @@ Copiar integralmente o bloco abaixo para `docs/incidents/YYYY-MM-DD-titulo.md` e
 ## Referências cruzadas
 
 - `docs/infra/ROLLBACK_RUNBOOK.md` — runbooks detalhados dos cenários 3A–3J, comandos exatos, SLA 15min
-- `docs/auth/BASELINES.md` — baselines de produção v1 (p95, error rate, conversion)
+- `docs/infra/BASELINES.md` — baselines de produção v1 (p95, error rate, conversion); auth breakdown na seção 8
 - `docs/infra/SYNTHETIC_MONITORING.md` — configuração dos monitors externos e alertas
 - `.claude/skills/testing-pipeline.md` — skill complementar de estratégia de testes
 - `tasks/prd-01-testing-pipeline.md` — PRD do pipeline de testes (Story US-114 origina esta skill)

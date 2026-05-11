@@ -1,0 +1,93 @@
+SETOR,MÉTRICA,VALOR,UNIDADE,ANO,FONTE,OPORTUNIDADE_QUAYER
+Geral,Consumidores que abandonam marca por atendimento ruim,80,%,2025,Terra/E-Commerce Brasil,CRÍTICA
+Geral,Consumidores satisfeitos com atendimento,11,%,2025,Instituto Hibou,CRÍTICA
+Geral,Consumidores que mudam de marca,53,%,2025,E-Commerce Brasil,CRÍTICA
+Geral,Empresas que perdem por mau atendimento,401,bilhões R$,2017,Accenture,CRÍTICA
+Geral,Consumidores que comentam experiência negativa,47.8,%,2025,E-Commerce Brasil,CRÍTICA
+Geral,Que publicam em redes sociais,19.4,%,2025,E-Commerce Brasil,ALTA
+Geral,Que recorrem a avaliações públicas,31.8,%,2025,PecaMentor,ALTA
+Geral,Que evitam novas compras,58.8,%,2025,PecaMentor,CRÍTICA
+Geral,Taxa de churn por insatisfação,25,%,2025,Contábeis.com,ALTA
+Geral,Reclamações sobre demora excessiva,58.6,%,2025,PecaMentor,CRÍTICA
+Geral,Mensagens genéricas sem solução,55,%,2025,PecaMentor,ALTA
+Geral,Atendimento encerrado sem solução,44.4,%,2025,PecaMentor,ALTA
+Geral,Consumidores que apontam despreparo,58,%,2025,E-Commerce Brasil,CRÍTICA
+Geral,Disposição a pagar mais por atendimento melhor,68,%,2025,Pesquisa geral,MÉDIA
+Geral,Consumidores que preferem contato humano,73.2,%,2026,PecaMentor,MÉDIA
+Geral,Crescimento reclamações ES,28,%,2025,Procon ES,CRÍTICA
+Telefonia,NPS - Telefonia/Banda Larga,21,pontos,2024,Opinion Box,CRÍTICA
+Telefonia,Descontentamento com operadoras,41,%,2025,Exame,CRÍTICA
+Telefonia,Claro - Pontos/Reclamações,14445,pontos,2025,Reclame Aqui,CRÍTICA
+Telefonia,Vivo - Pontos/Reclamações,14415,pontos,2025,Reclame Aqui,CRÍTICA
+Telefonia,Taxa de resposta Claro,50,%,2025,Reclame Aqui,CRÍTICA
+Telefonia,Cobrança indevida,33.75,%,2025,Reclame Aqui,CRÍTICA
+Telefonia,Problemas internet,22.88,%,2025,Reclame Aqui,CRÍTICA
+Bancos,NPS - Bancos,43,pontos,2024,Opinion Box,ALTA
+Bancos,Descontentamento com bancos,33,%,2025,Exame,ALTA
+Bancos,Banco do Brasil - Total Reclamações,23832,reclamações,2025,Reclame Aqui,ALTA
+Bancos,BD Brasil - Taxa resposta,77.4,%,2025,Reclame Aqui,ALTA
+Bancos,BB - Tempo médio resposta,10.42,dias,2025,Reclame Aqui,ALTA
+Bancos,Banco BMG - Total Reclamações,13248,reclamações,2025,Reclame Aqui,ALTA
+Bancos,BMG - Taxa resposta,94.9,%,2025,Reclame Aqui,ALTA
+Bancos,BMG - Tempo médio resposta,8.71,dias,2025,Reclame Aqui,ALTA
+Bancos,Serasa Experian - % de reclamações,10.37,%,2026,Consumidor.gov,ALTA
+Bancos,Serasa SP - Reclamações,8170,reclamações,2026,Consumidor.gov,ALTA
+Bancos,Serasa MG,2746,reclamações,2026,Consumidor.gov,ALTA
+Bancos,Serasa RJ,2442,reclamações,2026,Consumidor.gov,ALTA
+E-commerce,% de todas reclamações,22.6,%,2021,Reclame Aqui,CRÍTICA
+E-commerce,Descontentamento varejo,35,%,2025,Exame,CRÍTICA
+E-commerce,Yeesco/Mercado Livre - Ranking,Top 5,ranking,2025,Procon SP,CRÍTICA
+E-commerce,E-commerce Brasil - Reclamações,4,reclamações,2025,Reclame Aqui,MÉDIA
+E-commerce,E-commerce Brasil - Taxa resposta,25,%,2025,Reclame Aqui,MÉDIA
+Delivery,Ranking % de reclamações,7,%,2021,Reclame Aqui,CRÍTICA
+Delivery,iFood - Reclamações,273000,reclamações,2021,Reclame Aqui,CRÍTICA
+Delivery,Rappi - Reclamações,41200,reclamações,2021,Reclame Aqui,CRÍTICA
+Delivery,Uber Eats - Reclamações,24500,reclamações,2021,Reclame Aqui,CRÍTICA
+Delivery,99Food - Reclamações,10300,reclamações,2021,Reclame Aqui,CRÍTICA
+Saúde,NPS - Planos Saúde,45,pontos,2024,Opinion Box,ALTA
+Saúde,Descontentamento saúde,27,%,2025,Exame,ALTA
+Saúde,Humana Saúde - Reclamações MA,116,reclamações,2025,Procon MA,ALTA
+Saúde,Equatorial Maranhão - Reclamações,92,reclamações,2025,Procon MA,ALTA
+Saúde,Mais Saúde - Tempo resposta,28.42,dias,2025,Reclame Aqui,ALTA
+Saúde,Universidade Anhanguera - NPS,5.8,pontos,2025,Reclame Aqui,ALTA
+Saúde,Anhanguera - Cobrança indevida,31.27,%,2025,Reclame Aqui,ALTA
+Saúde,Anhanguera - Problemas plataforma,41.58,%,2025,Reclame Aqui,ALTA
+Seguros,NPS - Seguros,45,pontos,2024,Opinion Box,ALTA
+Seguros,Porto Seguro - Taxa resolução,74.4,%,2025,Reclame Aqui,ALTA
+Seguros,Porto Seguro - Tempo resposta,8.75,dias,2025,Reclame Aqui,ALTA
+Seguros,Too Seguros - Taxa resolução,70.4,%,2025,Reclame Aqui,ALTA
+Seguros,Too Seguros - Tempo resposta,4.04,dias,2025,Reclame Aqui,ALTA
+Seguros,Imediato Seguros - Tempo resposta,104.83,dias,2025,Reclame Aqui,CRÍTICA
+Educação,Portal Educação - Taxa resolução,100,%,2025,Reclame Aqui,MÉDIA
+Educação,Portal Educação - Tempo resposta,2.04,dias,2025,Reclame Aqui,MÉDIA
+Educação,Educa Mais Brasil - Taxa resolução,92.6,%,2025,Reclame Aqui,MÉDIA
+Educação,Educa Mais Brasil - NPS,8.5,pontos,2025,Reclame Aqui,MÉDIA
+Educação,Portal Educa - Taxa resolução,90.9,%,2025,Reclame Aqui,MÉDIA
+Educação,Portal Educa - Tempo resposta,7.21,dias,2025,Reclame Aqui,MÉDIA
+Material Escolar,NPS Material Escolar,74,pontos,2024,Opinion Box,BAIXA
+Moda Íntima,NPS Moda Íntima,72,pontos,2024,Opinion Box,BAIXA
+Roupas Esportivas,NPS Roupas Esportivas,70,pontos,2024,Opinion Box,BAIXA
+Fast Food,NPS Fast Food,47,pontos,2024,Opinion Box,MÉDIA
+Turismo,NPS Turismo,41,pontos,2024,Opinion Box,ALTA
+Mídia,Taxa retenção,84,%,2025,Shopify,BAIXA
+Serviços Profissionais,Taxa retenção,84,%,2025,Shopify,BAIXA
+TI,Taxa retenção,81,%,2025,Shopify,BAIXA
+Banco Central,Prazo legal resposta,10,dias úteis,2025,BC,CRÍTICA
+Anatel,Prazo legal resposta,10,dias corridos,2025,Anatel,CRÍTICA
+Consumidor.gov,Prazo resposta,2-7,dias corridos,2025,Gov.br,CRÍTICA
+SAC,Prazo lei 11.034,5,dias úteis,2025,Gov.br,CRÍTICA
+Reclame Aqui,Prazo resposta médio,28,dias,2025,Reclame Aqui,CRÍTICA
+Energisa Acre,Reclamações Acre,593,reclamações,2025,Procon AC,ALTA
+Reclamações Totais,Total 200 maiores (2021),5003610,reclamações,2021,Reclame Aqui,CONTEXTO
+Classificação,Critério essencial - Clareza,96.8,%,2025,E-Commerce Brasil,CRÍTICA
+Classificação,Critério essencial - Conhecimento,96.3,%,2025,E-Commerce Brasil,CRÍTICA
+Classificação,Critério essencial - Escuta,95.9,%,2025,E-Commerce Brasil,CRÍTICA
+Satisfação,Atendimento supera preço na decisão,100,%,2025,E-Commerce Brasil,CRÍTICA
+Frustração,Falta personalização,65,%,2025,Accenture,ALTA
+Migração,Taxa de mudança por falta personalização,47,%,2025,Accenture,ALTA
+Pesquisa,Consumidores abandonam por 1 experiência ruim,83,%,2026,CX Trends,CRÍTICA
+Pesquisa,Preferência por tratamento único,72,%,2025,CX Trends,CRÍTICA
+Pesquisa,Experiências personalizadas influenciam compra,68,%,2025,CX Trends,CRÍTICA
+Retenção,Taxa retenção seguros,83,%,2025,Shopify,MÉDIA
+Resposta tempo,Expectativa - Resposta em 5 minutos,CRITICAL,benchmark,2025,Harvard Business Review,CRÍTICA
+WhatsApp,Reclamações por demora resposta,FREQUENTE,padrão,2025,Reclame Aqui,CRÍTICA

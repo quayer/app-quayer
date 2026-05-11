@@ -49,9 +49,7 @@
 /login/verify?email=X → digita código 6 dígitos → api.auth.verifyLoginOTP
   ↓ (se 2FA) → TwoFactorChallenge inline → api.auth.totpChallenge
   ↓
-/onboarding (se needsOnboarding=true) → cria org
-  ↓
-/ (home Builder, destino final)
+/ (home Builder, destino final — org já criada no signup)
 ```
 
 ### 1.2 Login por OTP (WhatsApp/Telefone)
@@ -60,7 +58,7 @@
   ↓
 /login/verify?phone=+55... → código 6 dígitos → POST /api/v1/auth/verify-login-otp-phone
   ↓
-/onboarding ou /
+/ (home Builder — onboarding interativo removido)
 ```
 
 ### 1.3 Login por Google OAuth
@@ -72,7 +70,7 @@ Google consent → redirect → /google-callback?code=X
 api.auth.googleCallback → tokens + cookies
   ↓ (se 2FA) → TwoFactorChallenge inline
   ↓
-/onboarding (se needsOnboarding) ou /
+/ (home Builder — org auto-criada se ainda nao existir)
 ```
 
 ### 1.4 Login por Magic Link (via email)
@@ -84,7 +82,7 @@ api.auth.googleCallback → tokens + cookies
   ↓
 BroadcastChannel notifica aba original → redirect
   ↓
-/onboarding ou /
+/ (home Builder — onboarding interativo removido)
 ```
 
 ### 1.5 Login por Passkey (WebAuthn)
@@ -97,7 +95,7 @@ POST /api/v1/auth/passkey/login/verify-conditional → tokens (conditional UI)
   OU
 POST /api/v1/auth/passkey/login/verify → tokens (login manual)
   ↓
-/onboarding ou /
+/ (home Builder — onboarding interativo removido)
 ```
 
 ### 1.6 Signup (OTP — Rota canônica)
@@ -144,18 +142,15 @@ Código de recuperação → POST /api/v1/auth/totp-recovery
 Sucesso → redirect normal
 ```
 
-### Fluxo de Onboarding
+### Fluxo de Onboarding (REMOVIDO)
 ```
-Login com needsOnboarding=true → Middleware redireciona para /onboarding
+Signup → org auto-criada no momento do signup → onboardingCompleted=true direto
   ↓
-Busca dados do user via /api/v1/auth/me
+Sem página /onboarding interativa (rota e componentes deletados)
   ↓
-Se Google login com nome real → auto-cria org
-Senão → usuário digita nome → PATCH /api/v1/auth/profile
+Login com needsOnboarding=true só ocorre para usuários legacy → org criada server-side automaticamente
   ↓
-createOrganizationAction (Server Action) → cria org + completa onboarding
-  ↓
-Novo JWT com needsOnboarding=false → /
+/ (home Builder)
 ```
 
 ---
@@ -187,7 +182,7 @@ Novo JWT com needsOnboarding=false → /
 | 6 | `/signup/verify-magic` | `src/app/(auth)/signup/verify-magic/page.tsx` | `SignupVerifyMagicClient` (CSR) | Magic link do signup |
 | 7 | `/register` | `src/app/(auth)/register/page.tsx` | Inline (senha + strength) | Registro legacy (senha) — deveria redirecionar p/ /signup |
 | 8 | `/verify-email` | `src/app/(auth)/verify-email/page.tsx` | `VerifyEmailForm` | Verificação email (legacy) |
-| 9 | `/onboarding` | `src/app/(auth)/onboarding/page.tsx` | `OnboardingForm` | Setup pós-login (nome + org) |
+| ~~9~~ | ~~`/onboarding`~~ | **REMOVIDO** — pagina e componentes deletados em 10/Mai/2026 (signup ja cria org + marca onboardingCompleted=true) | — | — |
 | 10 | `/forgot-password` | `src/app/(auth)/forgot-password/page.tsx` | Inline (+ Turnstile) | Solicitar reset de senha |
 | 11 | `/reset-password/[token]` | `src/app/(auth)/reset-password/[token]/page.tsx` | Inline (strength indicator) | Nova senha via token + auto-login |
 | 12 | `/google-callback` | `src/app/(auth)/google-callback/page.tsx` | `GoogleCallbackContent` | Callback OAuth Google + 2FA handling |
@@ -213,7 +208,7 @@ Novo JWT com needsOnboarding=false → /
 | `SignupForm` | `signup-form.tsx` | Formulário de cadastro | `signupOTP`, `loginOTPPhone`, `googleSignup` |
 | `SignupOTPForm` | `signup-otp-form.tsx` | Verificação OTP signup | `verifySignupOTP` |
 | `VerifyEmailForm` | `verify-email-form.tsx` | Verificação email legacy | `verifyEmail`, `resendVerification` |
-| `OnboardingForm` | `onboarding-form.tsx` | Setup pós-login | `completeOnboarding`, `updateProfile` |
+| ~~`OnboardingForm`~~ | ~~`onboarding-form.tsx`~~ | **REMOVIDO** em 10/Mai/2026 | — |
 | `TwoFactorChallenge` | `two-factor-challenge.tsx` | Desafio 2FA TOTP/recovery | `/api/v1/auth/totp-challenge`, `/api/v1/auth/totp-recovery` |
 | `PasskeyButton` | `passkey-button.tsx` | Botão WebAuthn passkey | `passkeyLoginOptions`, `passkeyLoginVerify` |
 | `TurnstileWidget` | `turnstile-widget.tsx` | CAPTCHA Cloudflare Turnstile | Cloudflare JS SDK |
@@ -239,8 +234,8 @@ Novo JWT com needsOnboarding=false → /
 | Tipo de Rota | Exemplos | Comportamento |
 |-------------|----------|---------------|
 | **Pública** | `/login`, `/signup`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`, `/verify`, `/google-callback`, `/connect` | Sem auth necessária |
-| **Onboarding** | `/onboarding` | Auth obrigatória, onboarding incompleto OK |
-| **Protegida** | `/`, `/integracoes`, `/conversas`, `/dashboard`, `/instances`, `/organizations`, `/projects`, `/settings` | Auth + onboarding completo |
+| ~~**Onboarding**~~ | ~~`/onboarding`~~ | **REMOVIDA** em 10/Mai/2026 — signup cria org + marca onboardingCompleted=true |
+| **Protegida** | `/`, `/integracoes`, `/conversas`, `/dashboard`, `/instances`, `/organizations`, `/projects`, `/settings` | Auth obrigatória |
 
 > **Removido em 10/Mai/2026:** a classe "Admin" e a lista `ADMIN_ONLY_PATHS` foram removidas do middleware. Não há mais paths bloqueados por `role === 'admin'`. `UserRole.ADMIN` continua no JWT só para escopo cross-org no Builder.
 
@@ -261,8 +256,7 @@ Novo JWT com needsOnboarding=false → /
 ### Lógica de Redirect
 ```
 Token expirado → /login?redirect=...&error=session_expired
-needsOnboarding=true + rota protegida → /onboarding
-needsOnboarding=false + rota /onboarding → /
+needsOnboarding=true (legacy users) → org auto-criada server-side, sem rota /onboarding
 Login bem-sucedido (qualquer role, incluindo admin) → / (home Builder)
 ```
 
@@ -669,14 +663,15 @@ Custom:   CustomRole com permissions JSON por recurso (sobrepõe legacy)
 ┌──────────────────────────────────────────────────────────────┐
 │                     FRONTEND (Next.js)                       │
 │                                                              │
-│  /login ─→ /login/verify ─→ /onboarding ─→ / (home Builder)  │
-│  /signup ─→ /signup/verify ─────────────→ /                  │
-│  /register ─→ /verify-email ────────────→ /                  │
+│  /login ─→ /login/verify ─────────────────→ / (home Builder) │
+│  /signup ─→ /signup/verify ───────────────→ /                │
+│  /register ─→ /verify-email ──────────────→ /                │
 │  /forgot-password ─→ /reset-password/[token]                 │
 │  /google-callback                                            │
+│  (rota /onboarding REMOVIDA em 10/Mai/2026)                  │
 │                                                              │
 │  Components: LoginFormFinal, SignupForm, TwoFactorChallenge, │
-│              PasskeyButton, TurnstileWidget, OnboardingForm  │
+│              PasskeyButton, TurnstileWidget                  │
 │                                                              │
 │  Provider: AuthProvider (auto-refresh 14min, CSRF patching)  │
 └───────────────────────────┬──────────────────────────────────┘
@@ -685,7 +680,7 @@ Custom:   CustomRole com permissions JSON por recurso (sobrepõe legacy)
 ┌──────────────────────────────────────────────────────────────┐
 │                    MIDDLEWARE (Edge)                          │
 │  JWT verify (jose) → Route protection → Header injection     │
-│  needsOnboarding? → /onboarding                             │
+│  (redirect /onboarding REMOVIDO — org criada no signup)       │
 │  Token expired? → /login?error=session_expired               │
 └───────────────────────────┬──────────────────────────────────┘
                             │

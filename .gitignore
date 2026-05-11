@@ -166,6 +166,10 @@ vitest.config.js.timestamp-*
 
 # TypeScript
 *.tsbuildinfo
+tsconfig*.tsbuildinfo
+
+# Claude local settings (per-machine)
+.claude/settings.local-*.json
 
 # Next.js cache
 .next/cache/

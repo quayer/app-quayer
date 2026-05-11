@@ -88,7 +88,7 @@ sequenceDiagram
 | /api/v1/auth/refresh | POST | (refreshToken cookie) | { tokens } |
 | /api/v1/auth/logout | POST | - | { success } |
 | /api/v1/auth/me | GET | - | { user, organizations } |
-| /api/v1/auth/profile | PATCH | { name?, image?, ... } | { user } |
+| /api/v1/auth/me | PATCH | { name?, language?, timezone? } | { user } |
 | /api/v1/auth/preferences | PATCH | { ... } | { preferences } |
 | /api/v1/auth/switch-organization | POST | { organizationId } | { tokens } |
 | /api/v1/auth/onboarding/complete | POST | { organizationName, ... } | { user, tokens } |

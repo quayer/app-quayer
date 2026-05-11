@@ -106,7 +106,7 @@ Releases 1 e 2 não precisam de flag — são backward-compatible por design.
 Criada durante Release 1, referenciada pelas três:
 
 - `docs/auth/TESTING_ENVIRONMENTS.md` (Release 1)
-- `docs/auth/BASELINES.md` (Release 1) — snapshot dos números de PR-5
+- `docs/infra/BASELINES.md` seção 8 (Release 1) — snapshot dos números de PR-5 (consolidado de `docs/auth/BASELINES.md` em 10/Mai/2026)
 - `docs/auth/USER_JOURNEY.md` (Release 3)
 - `docs/auth/AUTH_FLOW.md` (Release 3)
 - `docs/auth/CLEANUP_AUDIT.md` (Release 2)

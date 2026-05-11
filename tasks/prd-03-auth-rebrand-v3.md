@@ -198,7 +198,7 @@ Aplicar a nova identidade visual [quayer-ds-v3.html](../quayer-ds-v3.html) nas p
 
 **Acceptance Criteria:**
 - [ ] Lighthouse rodado em homol (flag on) para `/login`, `/signup`, `/login/verify`
-- [ ] Comparação com `docs/auth/BASELINES.md`:
+- [ ] Comparação com `docs/infra/BASELINES.md` seção 8:
   - LCP v3 ≤ baseline × 1.1 (10% de tolerância)
   - TTFB v3 ≤ baseline × 1.1
   - CLS v3 ≤ 0.1
@@ -244,7 +244,7 @@ Aplicar a nova identidade visual [quayer-ds-v3.html](../quayer-ds-v3.html) nas p
 - [ ] Só prosseguir se US-320 passou
 - [ ] Flag ajustada para `on`
 - [ ] Janela de observação: 7 dias
-- [ ] Baselines atualizadas em `docs/auth/BASELINES.md` com snapshot pós-v3
+- [ ] Baselines atualizadas em `docs/infra/BASELINES.md` seção 8 com snapshot pós-v3
 
 #### US-322: Remoção do código v2 (após 30 dias de 100%)
 **Description:** Após v3 estável em prod por 30 dias, remover o dual-render.

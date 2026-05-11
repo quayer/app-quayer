@@ -1355,7 +1355,7 @@ Default assumido: flag por org, admin liberado explicitamente. Sem UI no v1, ape
 - [MEMORY.md](../.claude/projects/.../memory/MEMORY.md) — business model + constraints
 - [CLAUDE.md](../CLAUDE.md) — ordem de implementação obrigatória
 - `docs/auth/FEATURE_FLAGS.md` — padrão de feature flag estabelecido em Release 3
-- `docs/auth/BASELINES.md` — métricas baseline pra comparação
+- `docs/infra/BASELINES.md` seção 8 — métricas baseline pra comparação (auth breakdown)
 - ORAYON (referência futura pra automações IG) — fora do escopo v1
 
 ---

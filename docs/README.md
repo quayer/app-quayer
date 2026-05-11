@@ -23,7 +23,7 @@ Documentação técnica do Quayer — plataforma de Builder IA para agentes What
 
 - [`builder/BUILDER_AGENT_ARCHITECTURE.md`](./builder/BUILDER_AGENT_ARCHITECTURE.md) — arquitetura completa do agente Builder (referência principal)
 - [`infra/ROLLBACK_RUNBOOK.md`](./infra/ROLLBACK_RUNBOOK.md) — procedimento de rollback de produção (cenários A–J)
-- [`auth/BASELINES.md`](./auth/BASELINES.md) — baselines de performance para gating de release
+- [`infra/BASELINES.md`](./infra/BASELINES.md) — baselines de performance para gating de release (auth breakdown na seção 8; consolidado de `auth/BASELINES.md` em 10/Mai/2026)
 
 ## Convenções
 

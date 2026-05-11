@@ -81,7 +81,7 @@ Ver `docs/auth/TESTING_PATTERNS.md`. Reutilizar exatamente:
 - `docs/auth/ASSETS.md` — imagem hero e conventions
 - `docs/auth/FEATURE_FLAGS.md` — rollout plan e override cookie
 - `docs/auth/TESTING_PATTERNS.md` — padroes de mock
-- `docs/auth/BASELINES.md` — metricas para comparacao de regressao
+- `docs/infra/BASELINES.md` seção 8 — metricas para comparacao de regressao (auth breakdown)
 - `.claude/skills/auth.md` — skill complementar para BACKEND (procedures, repository, controller)
 - `.claude/skills/testing-pipeline.md` — como testar
 - `.claude/skills/release-checklist.md` — gate pre-release

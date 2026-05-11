@@ -9,9 +9,6 @@ if [ -n "$DATABASE_URL" ] && [ "${SKIP_MIGRATIONS:-false}" != "true" ]; then
     echo "📦 Running database migrations..."
     node ./prisma/migrate.js
 
-    echo "👤 Ensuring admin user exists..."
-    node ./prisma/create-admin.js || true
-
 fi
 
 # Start the application

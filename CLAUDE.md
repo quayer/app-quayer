@@ -229,7 +229,7 @@ Skill: `.claude/skills/release-checklist.md` — carregar antes de qualquer depl
 **Gate obrigatório:**
 1. `npm run test:all` verde local
 2. CI verde no PR (static + test:api + test:e2e + synthetic)
-3. Baselines comparadas com `docs/auth/BASELINES.md` (p95 não degradou > 20%)
+3. Baselines comparadas com `docs/infra/BASELINES.md` seção 8 (p95 não degradou > 20%)
 4. Rollback plan lido: `docs/infra/ROLLBACK_RUNBOOK.md`
 5. Smoke homol passou após deploy homol (`.github/workflows/smoke-homol.yml`)
 6. Revisão humana do PR (não apenas LLM)
