@@ -1,5 +1,17 @@
 # CLAUDE.md — Instruções para Claude Code
 
+<!--
+Criado: 2026-04-08
+Atualizado: 2026-05-10
+Revisar em: 2026-08-10 (3 meses) — ou quando mudar estrutura de src/, igniter.router.ts, ou skills
+Relacionados:
+  - src/igniter.router.ts (lista de controllers)
+  - prisma/schema.prisma (tabela Prisma)
+  - .claude/skills/* (todas as skills referenciadas)
+  - docs/AUTH_MAP.md
+  - docs/deprecated/ADMIN_SURFACE_REMOVED.md
+-->
+
 ## Identidade
 **Agente:** Claude Code (Anthropic) rodando no **Antigravity IDE**
 **Projeto:** Quayer — plataforma de Builder IA para agentes WhatsApp
@@ -23,9 +35,41 @@
 | `ai-module/` (outros) | ai, ai-agents, shared | `.claude/skills/quayer-builder.md` |
 | `frontend/` | componentes UI, layouts, páginas | `.claude/skills/design.md` |
 | `testing/` | testes unit/integration/e2e, CI workflows | `.claude/skills/testing-pipeline.md` |
+| `infra/` | Caddyfile, docker-compose prod, deploy, hardening | `.claude/skills/infra.md` |
 
 3. Para bugs: seguir protocolo `.claude/protocols/react-debug.md`
 4. **Operações de admin (gerenciar orgs, users, etc):** usar Claude Code + Prisma MCP + SQL direto. Não tem painel UI.
+5. **Manutenção de docs:** sempre seguir `.claude/skills/doc-freshness.md` — frontmatter com data + revisar-em + cascade nos relacionados.
+
+---
+
+## 🚨 REGRAS CRÍTICAS (sempre verificar)
+
+Estas regras valem em TODA conversa. Quando você mexer em um arquivo da coluna esquerda, **obrigatório** revisar/atualizar os da direita ANTES do commit.
+
+| Mudou | Revisar / atualizar | Por quê |
+|---|---|---|
+| `src/middleware.ts` | `docs/AUTH_MAP.md` + `docs/auth/AUTH_FLOW.md` + `docs/auth/USER_JOURNEY.md` | middleware = source of truth de redirects |
+| `prisma/schema.prisma` | `docs/ERD.md` + tabela Prisma no CLAUDE.md | schema = source of truth do DB |
+| `src/igniter.router.ts` | `CLAUDE.md` (lista controllers) + `docs/AUTH_MAP.md` | router = porta de entrada API |
+| Redirect em login flow | `docs/AUTH_MAP.md` + `docs/auth/USER_JOURNEY.md` | rota afeta UX final |
+| Deletou feature/módulo | criar/atualizar `docs/deprecated/<FEATURE>.md` + remover refs em CLAUDE.md | evita zumbi de código |
+| `infra/prod/Caddyfile` | `infra/README.md` + `docs/infra/HOMOL_SETUP.md` | roteamento = produção |
+| `package.json` deps Igniter | `CLAUDE.md` patterns + skill `igniter.md` | API contracts mudam |
+| `.env.example` | `docs/infra/SECRETS.md` | novos segredos = nova rotação |
+
+**Toda doc nova ou alterada deve ter frontmatter:**
+```yaml
+---
+Criado: YYYY-MM-DD
+Atualizado: YYYY-MM-DD
+Revisar em: <data ou trigger>
+Relacionados:
+  - path/x
+---
+```
+
+Ver `.claude/skills/doc-freshness.md` para a regra completa (cadências por tipo de doc, política de docs antigos, verificação automática).
 
 ---
 

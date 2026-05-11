@@ -1,3 +1,13 @@
+---
+Criado: 2026-05-10
+Atualizado: 2026-05-10
+Revisar em: quando admin UI for reintroduzida
+Relacionados:
+  - docs/AUTH_MAP.md
+  - .claude/skills/auth.md
+  - CLAUDE.md
+---
+
 # Admin Surface Removed — Mai/2026
 
 ## Contexto
