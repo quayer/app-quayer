@@ -1,5 +1,7 @@
 # Builder — Mapa de UX das Tabs do Preview
 
+> **Data original:** 2026-04-17 | **Validado:** 2026-05-10 (tab-registry.tsx existe)
+>
 > Companheiro visual do [BUILDER_USER_JOURNEY.md](./BUILDER_USER_JOURNEY.md). Aqui cada tab do `PreviewPanel` está documentada com wireframe ASCII + breakdown de componentes + estado funcional.
 
 **Arquitetura das tabs:** [tab-registry.tsx](../../src/client/components/projetos/preview/tab-registry.tsx) — `visibleFor: ProjectType[]` filtra quais tabs aparecem por tipo de projeto. Hoje só `ai_agent` tem tabs específicas; futuros kinds (campanha, flow) ganham as suas via novas entradas no registry.

@@ -108,4 +108,4 @@ sequenceDiagram
 - `src/lib/auth/jwt.ts`, `src/lib/auth/jwt.edge.ts`
 - `src/server/core/auth/controllers/auth.controller.ts`
 - `docs/auth/USER_JOURNEY.md`
-- `docs/auth/FEATURE_FLAGS.md`
+- `docs/deprecated/auth-v3-feature-flag-2026-04.md` (rollout v2→v3 completo)

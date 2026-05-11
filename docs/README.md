@@ -6,12 +6,12 @@ Documentação técnica do Quayer — plataforma de Builder IA para agentes What
 
 | Pasta | Conteúdo |
 |---|---|
-| [`auth/`](./auth/) | Autenticação: fluxos, OAuth, contract testing, baselines, a11y, coverage |
+| [`auth/`](./auth/) | Autenticação: fluxos, OAuth, a11y, cleanup audit, user journey, code review |
 | [`builder/`](./builder/) | Builder IA: arquitetura do agente, UX do chat, preview tabs, user journey |
 | [`infra/`](./infra/) | DevOps: deploy, hardening, rollback runbook, monitoring sintético, secrets |
 | [`strategy/`](./strategy/) | Estratégia de produto/negócio: conceito, modelo, setores, pipeline, pesquisa |
-| [`testing/`](./testing/) | Padrões de teste: debugging, módulo auth, test data, synthetic monitoring |
-| [`deprecated/`](./deprecated/) | Features removidas — código preservado no git, recupere via `git log` |
+| [`testing/`](./testing/) | Padrões de teste: vitest setup, contract, integration auth, coverage, timings, debugging, synthetic monitoring |
+| [`deprecated/`](./deprecated/) | Features removidas e snapshots históricos (admin UI, route migration plan, builder v5, auth v3 flag) |
 
 ## Documentos raiz
 
@@ -46,4 +46,12 @@ Mantenha este índice atualizado quando criar uma nova categoria. Para PRDs ou f
 
 ## Nota sobre `deprecated/`
 
-A pasta [`deprecated/`](./deprecated/) preserva referências históricas de features removidas (e.g., [`ADMIN_SURFACE_REMOVED.md`](./deprecated/ADMIN_SURFACE_REMOVED.md) — nuke do admin em Mai/2026). O código continua acessível via histórico Git — use `git log --all -- <path>` para localizar.
+A pasta [`deprecated/`](./deprecated/) preserva referências históricas de features removidas e snapshots de planejamento superados:
+
+- [`ADMIN_SURFACE_REMOVED.md`](./deprecated/ADMIN_SURFACE_REMOVED.md) — nuke do admin UI em Mai/2026
+- [`admin-prds/`](./deprecated/admin-prds/) — PRDs do antigo painel admin
+- [`builder-route-migration-plan-2026-04.md`](./deprecated/builder-route-migration-plan-2026-04.md) — plan de migração de rotas (pré-nuke; `/onboarding`, `/admin/*`, `/pricing`, `/connect` foram removidas depois)
+- [`builder-architecture-v5-2026-04.md`](./deprecated/builder-architecture-v5-2026-04.md) — arquitetura v5.3 do Builder (superada por `builder/BUILDER_AGENT_ARCHITECTURE.md` v18)
+- [`auth-v3-feature-flag-2026-04.md`](./deprecated/auth-v3-feature-flag-2026-04.md) — `NEXT_PUBLIC_AUTH_V3` (rollout v2→v3 completo; só existem componentes `*-v3.tsx`)
+
+O código continua acessível via histórico Git — use `git log --all -- <path>` para localizar.

@@ -1,5 +1,7 @@
 # Resumo do Ecossistema Quayer Builder
 
+> **Data original:** 2026-04-17 | **Validado:** 2026-05-10
+>
 > Versao simplificada do BUILDER_AGENT_ARCHITECTURE.md
 
 ---

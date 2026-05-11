@@ -4,7 +4,7 @@
 > **Data:** 2026-04-08
 > **Substitui:** v1, v2, v3, v4, v5, v5.1, v5.2 (consolidadas)
 > **Referências:**
-> - [`route-migration-plan.md`](./route-migration-plan.md) — mapeamento backup das 63 rotas atuais
+> - [`builder-route-migration-plan-2026-04.md`](./builder-route-migration-plan-2026-04.md) — mapeamento backup das 63 rotas atuais
 > - Inspiração: Claude Artifacts + v0.dev + Cursor Composer
 
 ---
@@ -315,7 +315,7 @@ Encontra conversa ativa (última < 24h):
 
 ### 6.2 Rotas preservadas / migradas
 
-**Ver `route-migration-plan.md`** pra mapeamento completo de **63 rotas atuais** com status keep/move/disable/delete.
+**Ver `builder-route-migration-plan-2026-04.md`** pra mapeamento completo de **63 rotas atuais** com status keep/move/disable/delete.
 
 **Resumo:**
 - 🟢 **29 rotas preservadas** (todas públicas + auth + admin)
@@ -707,7 +707,7 @@ whatsapp_conversations  (tabela já existe)
 
 ## Anexo — Referências
 
-- [`route-migration-plan.md`](./route-migration-plan.md) — mapeamento backup das 63 rotas atuais
+- [`builder-route-migration-plan-2026-04.md`](./builder-route-migration-plan-2026-04.md) — mapeamento backup das 63 rotas atuais
 - Releases 1-3 auth v3 (commits `3f12ac5`..`02f1201`) — padrão de feature flag + rollout gradual
 - `src/server/ai-module/ai-agents/` — backend do agente que vai ser reusado
 - `src/server/communication/instances/` — QR code + share link existentes

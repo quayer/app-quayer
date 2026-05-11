@@ -1,7 +1,9 @@
 # ERD — Quayer Database Schema
 
-> Updated: 2026-03-14 | Engine: PostgreSQL (Supabase)
+> Updated: 2026-05-10 | Engine: PostgreSQL (Supabase)
 > Rendered automatically by GitHub (Mermaid)
+>
+> **Mudanças desde 2026-03-14:** CRM/Inbox nukados (Abr/13) — `Contact`, `GroupChat`, `KanbanBoard`, `QuickReply`, `SessionNote` e ~15 tabelas removidas; Builder IA adicionado (`BuilderProject` família, Abr/9 + Abr/12); `UserIdentity` para login federado (Mai/10); role normalizado lowercase (Mai/10); `OTP disabled flags` em UserPreferences (Abr/30). `IpRule`, `ScimToken` foram removidos junto com admin surface.
 
 ---
 
@@ -148,16 +150,6 @@ erDiagram
         datetime revokedAt "nullable"
     }
 
-    IpRule {
-        uuid id PK
-        string type "ALLOW|BLOCK"
-        string ipAddress
-        uuid organizationId FK "nullable"
-        uuid createdById FK
-        bool isActive
-        datetime expiresAt "nullable"
-    }
-
     VerifiedDomain {
         uuid id PK
         uuid organizationId FK
@@ -167,22 +159,29 @@ erDiagram
         bool autoJoin
     }
 
-    ScimToken {
+    UserIdentity {
         uuid id PK
-        uuid organizationId FK
-        string name
-        string tokenHash "bcrypt"
-        datetime lastUsedAt "nullable"
-        datetime expiresAt "nullable"
-        datetime revokedAt "nullable"
+        uuid userId FK
+        string provider "google|whatsapp"
+        string providerUserId "google sub or E.164 phone"
+        string identifier "display label"
+        datetime connectedAt
+        datetime lastUsedAt
+    }
+
+    UserPreferences {
+        uuid id PK
+        uuid userId FK UK
+        json messageSignature
+        bool aiSuggestionsEnabled
+        bool otpEmailDisabled
+        bool otpPhoneDisabled
     }
 
     Organization ||--o{ UserOrganization : "has members"
     Organization ||--o{ CustomRole : "owns"
     Organization ||--o{ Invitation : "sends"
     Organization ||--o{ VerifiedDomain : "verifies"
-    Organization ||--o{ ScimToken : "has"
-    Organization ||--o{ IpRule : "has rules"
     User ||--o{ UserOrganization : "belongs to"
     User ||--o{ Session : "has"
     User ||--o{ RefreshToken : "has"
@@ -192,13 +191,16 @@ erDiagram
     User ||--o{ TotpDevice : "sets up"
     User ||--o{ RecoveryCode : "owns"
     User ||--o{ DeviceSession : "has"
-    User ||--o{ IpRule : "creates"
+    User ||--o{ UserIdentity : "federated logins"
+    User ||--|| UserPreferences : "has"
     UserOrganization }o--|| CustomRole : "assigned"
 ```
 
 ---
 
 ## Domain 2: Connections & Messaging
+
+> **Mudança Abr/13:** `Contact`, `GroupChat`, `GroupParticipant`, `GroupMessage` removidos. `ChatSession.contactId` e `Message.contactId` foram trocados por `contactPhone: String` (sem FK). CRM nukado junto.
 
 ```mermaid
 erDiagram
@@ -216,7 +218,7 @@ erDiagram
 
     ChatSession {
         uuid id PK
-        uuid contactId FK
+        string contactPhone "E.164 phone (não FK)"
         uuid connectionId FK
         uuid organizationId FK
         string status "QUEUED|ACTIVE|PAUSED|CLOSED"
@@ -229,7 +231,7 @@ erDiagram
     Message {
         uuid id PK
         uuid sessionId FK
-        uuid contactId FK
+        string contactPhone "E.164 phone (não FK)"
         uuid connectionId FK
         string waMessageId UK
         string direction "INBOUND|OUTBOUND"
@@ -239,34 +241,100 @@ erDiagram
         datetime createdAt
     }
 
-    Contact {
-        uuid id PK
-        string phoneNumber UK "⚠️ global unique - should be per-org"
-        string name "nullable"
-        string organizationId "nullable"
-        bool bypassBots
-        string[] tags
-    }
-
-    GroupChat {
-        uuid id PK
-        string groupJid UK
-        uuid connectionId FK
-        string mode "DISABLED|MONITOR_ONLY|ACTIVE"
-        bool aiEnabled
-    }
-
     Connection ||--o{ ChatSession : "has"
     Connection ||--o{ Message : "carries"
-    Contact ||--o{ ChatSession : "opens"
-    Contact ||--o{ Message : "sends"
     ChatSession ||--o{ Message : "contains"
-    Connection ||--o{ GroupChat : "hosts"
 ```
 
 ---
 
-## Domain 3: Tokens & Security (summary)
+## Domain 3: Builder IA (Design-time)
+
+> **Adicionado Abr/9 + Abr/12.** Produto principal — meta-agente para criar agentes WhatsApp. Ver `src/server/ai-module/builder/`.
+
+```mermaid
+erDiagram
+    BuilderProject {
+        uuid id PK
+        uuid organizationId FK
+        uuid userId FK
+        string type "ai_agent (futuro: wa_campaign, ig_automation, etc)"
+        string name
+        string status "draft|publishing|published|archived"
+        uuid aiAgentId FK "nullable 1:1 com AIAgentConfig"
+        json metadata
+        datetime archivedAt "nullable"
+    }
+
+    BuilderProjectConversation {
+        uuid id PK
+        uuid projectId FK UK "1:1"
+        json contextSnapshot
+        datetime updatedAt
+    }
+
+    BuilderProjectMessage {
+        uuid id PK
+        uuid conversationId FK
+        string role "user|assistant|tool|system_banner"
+        text content
+        json toolCalls
+        json toolResults
+        json metadata "tokens, model, latency"
+    }
+
+    BuilderPromptVersion {
+        uuid id PK
+        uuid projectId FK
+        int version
+        text systemPrompt
+        json tools
+        bool isCurrent
+        datetime createdAt
+    }
+
+    BuilderDeployment {
+        uuid id PK
+        uuid projectId FK
+        uuid aiAgentId
+        uuid promptVersionId FK
+        string instanceId "nullable WhatsApp UAZ instance"
+        string connectionId "nullable"
+        string status "pending|publishing|published|failed|rolled_back"
+        string failureStep "publish|create_instance|attach"
+        bool rolledBack
+        datetime startedAt
+        datetime completedAt "nullable"
+    }
+
+    BuilderToolCall {
+        uuid id PK
+        uuid messageId FK
+        string toolName
+        json input
+        json output
+        string status "pending|running|success|error"
+        int latencyMs
+    }
+
+    BuilderContextSnapshot {
+        uuid id PK
+        uuid projectId FK
+        json snapshot "compressed context for token economy"
+        datetime createdAt
+    }
+
+    BuilderProject ||--|| BuilderProjectConversation : "has"
+    BuilderProjectConversation ||--o{ BuilderProjectMessage : "contains"
+    BuilderProject ||--o{ BuilderPromptVersion : "versions"
+    BuilderProject ||--o{ BuilderDeployment : "deploys"
+    BuilderProject ||--o{ BuilderContextSnapshot : "snapshots"
+    BuilderProjectMessage ||--o{ BuilderToolCall : "logs"
+```
+
+---
+
+## Domain 4: Tokens & Security (summary)
 
 | Table | Key Relation | Purpose |
 |-------|-------------|---------|
@@ -274,20 +342,10 @@ erDiagram
 | `RefreshToken` | `userId → User` | JWT rotation — active |
 | `VerificationCode` | `userId? → User` | OTP + Magic Links + Email verification |
 | `DeviceSession` | `userId → User` | Trusted device tracking |
-| `IpRule` | `organizationId? → Org` | Allow/Block IP lists |
+| `UserIdentity` | `userId → User` | Federated logins (Google, WhatsApp phone) |
 | `ApiKey` | `organizationId` | Programmatic API access |
-| `ScimToken` | `organizationId → Org` | SCIM 2.0 (Okta / Entra ID) |
 
----
-
-## Deprecated Tables
-
-> These tables exist in the DB but should NOT be used in new code:
-
-| Table | Replacement | Status |
-|-------|-------------|--------|
-| `AccessLevel` | `CustomRole` | Orphaned — no User/Org FK |
-| `SystemConfig` | `SystemSettings` | Duplicate key-value store |
+> **Removidos com admin nuke (Mai/2026):** `IpRule`, `ScimToken`. Endpoints API correspondentes também eliminados.
 
 ---
 
@@ -295,17 +353,19 @@ erDiagram
 
 | Date | Migration | Change |
 |------|-----------|--------|
-| 2025-10-11 | `add_onboarding_and_business_hours` | Onboarding flow |
+| 2025-10-11 | `add_onboarding_and_business_hours` | Onboarding flow (página depois removida em Mai/10) |
 | 2025-12-25 | `add_autopause_and_group_settings` | AutoPause + Groups |
-| 2025-12-26 | `add_session_notes` | SessionNote model |
-| 2025-12-26 | `add_quick_replies` | QuickReply model |
-| 2026-03-12 | `add_device_sessions_and_ip_rules` | DeviceSession + IpRule (raw SQL) |
-| 2026-03-12 | `add_user_phone` | User.phone + phoneVerified (raw SQL) |
-| 2026-03-12 | `make_document_optional` | Organization.document nullable |
-| 2026-03-13 | `add_geo_alert_and_country_code` | geoAlertMode + countryCode (raw SQL) |
+| 2025-12-26 | `add_session_notes` | SessionNote (depois removido em Abr/13) |
+| 2025-12-26 | `add_quick_replies` | QuickReply (depois removido em Abr/13) |
 | 2026-03-13 | `add_totp_2fa` | TotpDevice + RecoveryCode |
 | 2026-03-13 | `add_custom_roles` | CustomRole + UserOrganization.customRoleId |
 | 2026-03-13 | `add_verified_domains` | VerifiedDomain |
-| 2026-03-13 | `add_scim_tokens` | ScimToken |
+| 2026-03-13 | `add_scim_tokens` | ScimToken (depois removido com admin nuke) |
 | 2026-03-14 | `make_password_optional` | User.password nullable |
 | 2026-03-14 | `add_invitation_org_fk` | FK: Invitation.organizationId → Organization |
+| **2026-04-09** | **`add_builder_projects`** | **Builder IA: BuilderProject + conversation + messages + prompt versions + deployments + tool calls + context snapshots** |
+| 2026-04-12 | `add_boards_table` | Kanban boards (depois removido em Abr/13) |
+| **2026-04-13** | **`remove_crm_and_inbox`** | **Pivot: CRM (Contact, Lead, etc) e Inbox (GroupChat, QuickReply, SessionNote) removidos. ChatSession.contactId → contactPhone string.** |
+| 2026-04-30 | `add_otp_disabled_flags` | UserPreferences.otpEmailDisabled + otpPhoneDisabled |
+| 2026-05-10 | `normalize_role_lowercase` | UPDATE User.role para lowercase (fix UserRole enum case) |
+| **2026-05-10** | **`add_user_identities`** | **UserIdentity para login federado (Google, WhatsApp) — usado em `/conta/linked-accounts`** |

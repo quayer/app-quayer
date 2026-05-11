@@ -11,7 +11,7 @@ All files touched by US-301 through US-316. LLM review is advisory only and must
 ## Review by area
 
 ### US-301 Feature flag
-Files: src/lib/feature-flags/auth-v3.ts, test/unit/feature-flags/auth-v3.test.ts, docs/auth/FEATURE_FLAGS.md
+Files: src/lib/feature-flags/auth-v3.ts, test/unit/feature-flags/auth-v3.test.ts, docs/deprecated/auth-v3-feature-flag-2026-04.md (rollout completo)
 
 - [INFO] Stable SHA-256 hash for percentage distribution -- deterministic across requests
 - [INFO] Override cookie bypasses env percentage -- correct precedence (cookie > env)
@@ -138,4 +138,4 @@ This LLM review does NOT substitute a human review. Before merging Release 3:
 - docs/auth/A11Y_AUDIT.md
 - docs/infra/BASELINES.md (seção 8 — for perf comparison; consolidado de docs/auth/BASELINES.md em 10/Mai/2026)
 - docs/auth/ASSETS.md
-- docs/auth/FEATURE_FLAGS.md
+- docs/deprecated/auth-v3-feature-flag-2026-04.md (rollout v2→v3 completo em Mai/2026)

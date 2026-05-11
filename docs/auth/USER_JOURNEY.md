@@ -84,5 +84,5 @@ mesmo handler. Nao existe mais pagina `/onboarding` nem endpoint
 ## References
 - `.claude/skills/auth-pages.md` [TODO: verify file exists]
 - `docs/auth/AUTH_FLOW.md`
-- `docs/auth/FEATURE_FLAGS.md`
+- `docs/deprecated/auth-v3-feature-flag-2026-04.md` (rollout v2→v3 completo)
 - `docs/auth/CLEANUP_AUDIT.md`

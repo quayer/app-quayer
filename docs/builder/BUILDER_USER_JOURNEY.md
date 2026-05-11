@@ -3,7 +3,7 @@
 > Documento visual da jornada do usuário criando um agente WhatsApp no Quayer Builder.
 > Cobre **o que o usuário vê (UI)** e **o que a IA faz por baixo (orquestração + tools)**.
 
-**Data:** 2026-04-17
+**Data:** 2026-04-17 | **Validado:** 2026-05-10 (workspace.tsx, builder/ e prompts existem)
 **Fonte de verdade:**
 - UI: [src/client/components/projetos/workspace.tsx](../../src/client/components/projetos/workspace.tsx)
 - AI: [src/server/ai-module/builder/](../../src/server/ai-module/builder/)

@@ -1,6 +1,6 @@
 # Builder Agent — Arquitetura & Refinamento
-> Status: Estudo/Design | Data: 2026-04-10 | Última revisão: 2026-04-12 (v18)
-> Branch: ralph/auth-platform-hardening
+> Status: Design de referência (canônico) | Data original: 2026-04-10 | Última revisão: 2026-04-12 (v18)
+> Validado contra código em: 2026-05-10 — estrutura `src/server/ai-module/builder/` (catalog, chat, deploy, projects, prompts, services, skills, sub-agents, templates, tools, validators) confere com o doc.
 
 ---
 

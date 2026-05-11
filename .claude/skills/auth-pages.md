@@ -68,7 +68,7 @@ Rota dev para ver todos os states: `/dev/ds-showcase` (bloqueada em prod).
 
 ## Padroes de mock para testes
 
-Ver `docs/auth/TESTING_PATTERNS.md`. Reutilizar exatamente:
+Ver `docs/testing/AUTH_INTEGRATION_PATTERNS.md`. Reutilizar exatamente:
 - `vi.mock('@/igniter.client')`
 - `vi.mock('next/navigation')`
 - `vi.mock('@/client/hooks/use-csrf-token')`
@@ -80,8 +80,8 @@ Ver `docs/auth/TESTING_PATTERNS.md`. Reutilizar exatamente:
 - `docs/auth/USER_JOURNEY.md` — 4 jornadas completas com Mermaid
 - `docs/auth/AUTH_FLOW.md` — sequence diagram + endpoints + troubleshooting
 - `docs/auth/ASSETS.md` — imagem hero e conventions
-- `docs/auth/FEATURE_FLAGS.md` — rollout plan e override cookie
-- `docs/auth/TESTING_PATTERNS.md` — padroes de mock
+- `docs/deprecated/auth-v3-feature-flag-2026-04.md` — rollout plan v2→v3 (completo, histórico)
+- `docs/testing/AUTH_INTEGRATION_PATTERNS.md` — padroes de mock
 - `docs/infra/BASELINES.md` seção 8 — metricas para comparacao de regressao (auth breakdown)
 - `.claude/skills/auth.md` — skill complementar para BACKEND (procedures, repository, controller)
 - `.claude/skills/testing-pipeline.md` — como testar

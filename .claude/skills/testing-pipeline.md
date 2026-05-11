@@ -194,8 +194,11 @@ npm run typecheck          # Camada 1 - tsc --noEmit
 
 ## Referências cruzadas
 
-- `docs/auth/TESTING_PATTERNS.md` — padrões detalhados de mock e fixtures (criado em US posterior).
-- `docs/auth/TESTING_SETUP.md` — setup de ambiente local + CI (criado em US posterior).
+- `docs/testing/AUTH_INTEGRATION_PATTERNS.md` — padrões detalhados de mock e fixtures (auth integration).
+- `docs/testing/VITEST_SETUP.md` — setup de ambiente local + CI (vitest unit layer).
+- `docs/testing/CONTRACT_TESTING.md` — contract tests (shape-only) para auth API.
+- `docs/testing/AUTH_COVERAGE.md` — baseline de cobertura auth.
+- `docs/testing/TEST_TIMINGS.md` — tempos por camada de `npm run test:all`.
 - `.claude/skills/release-checklist.md` — checklist de release (criado em US-114).
 - `tasks/prd-01-testing-pipeline.md` — PRD fonte com todas as decisões arquiteturais das 5 camadas.
 - `.claude/skills/auth.md` — contexto de auth para mockar `authProcedure` corretamente.

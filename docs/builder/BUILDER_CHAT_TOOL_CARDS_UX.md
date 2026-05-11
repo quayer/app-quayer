@@ -1,5 +1,7 @@
 # Builder — Bullets visuais no Chat (Tool Cards & UX)
 
+> **Data original:** 2026-04-17 | **Validado:** 2026-05-10 (ChatPanel em `src/client/components/projetos/chat-panel.tsx` existe)
+>
 > Companheiro de [BUILDER_USER_JOURNEY.md](./BUILDER_USER_JOURNEY.md) e [BUILDER_PREVIEW_TABS_UX.md](./BUILDER_PREVIEW_TABS_UX.md). Aqui está documentado **o que aparece dentro do `ChatPanel`** quando o agente Builder executa ferramentas — os tais "bullets de UI" inline no chat, quais passos são visíveis, e como elementos visuais (ex.: QR Code) são ativados.
 
 ---

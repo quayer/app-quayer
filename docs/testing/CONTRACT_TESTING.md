@@ -105,5 +105,5 @@ There are exactly two outcomes:
 ## See also
 
 - `.claude/skills/testing-pipeline.md`
-- `docs/auth/TESTING_PATTERNS.md`
+- `docs/testing/AUTH_INTEGRATION_PATTERNS.md`
 - `test/api/auth.test.ts` (US-106B integration tests, behaviour-focused)
