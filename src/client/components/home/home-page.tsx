@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Bot, ChevronDown, Mic, Paperclip, Sparkles, Square, X } from "lucide-react"
+import { Bot, ChevronDown, Paperclip, Sparkles, X } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { MessageInput } from "@/client/components/ds/message-input"
 import { ClaudeIcon, CodexIcon } from "@/client/components/ds/model-icons"
@@ -14,7 +14,6 @@ import {
 } from "@/lib/project-status"
 import type { ProjectStatus } from "@/client/components/projetos/types"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
-import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
 import { api } from "@/igniter.client"
 
 interface Project {
@@ -69,25 +68,6 @@ export function HomePage({
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>("my-projects")
   const createProject = api.builder.createProject as any
-
-  const appendTranscript = useCallback((text: string) => {
-    setPrompt((prev) => (prev ? `${prev} ${text}`.trim() : text.trim()))
-  }, [])
-
-  const {
-    isSupported: speechSupported,
-    isListening,
-    start: startRecording,
-    stop: stopRecording,
-  } = useSpeechToText({
-    lang: "pt-BR",
-    onFinalTranscript: appendTranscript,
-  })
-
-  const toggleRecording = () => {
-    if (isListening) stopRecording()
-    else startRecording()
-  }
 
   const pickFile = () => fileInputRef.current?.click()
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -211,6 +191,8 @@ export function HomePage({
             borderColor={error ? "rgba(239,68,68,0.45)" : undefined}
             textareaRef={textareaRef}
             textareaProps={{ id: "builder-home-input" }}
+            voiceEnabled
+            voiceLang="pt-BR"
             aboveTextarea={attachedFile ? (
               <div
                 className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
@@ -260,29 +242,6 @@ export function HomePage({
                 >
                   <Paperclip className="h-4 w-4" />
                 </button>
-
-                {speechSupported && (
-                  <button
-                    type="button"
-                    onClick={toggleRecording}
-                    disabled={isPending}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
-                    style={{
-                      borderColor: isListening ? "rgba(239,68,68,0.45)" : tokens.border,
-                      backgroundColor: isListening ? "rgba(239,68,68,0.12)" : "transparent",
-                      color: isListening ? "#ef4444" : tokens.textSecondary,
-                    }}
-                    aria-label={isListening ? "Parar gravação" : "Gravar por áudio"}
-                    aria-pressed={isListening}
-                    title={isListening ? "Parar gravação" : "Falar em vez de digitar"}
-                  >
-                    {isListening ? (
-                      <Square className="h-3.5 w-3.5 animate-pulse" fill="currentColor" />
-                    ) : (
-                      <Mic className="h-4 w-4" />
-                    )}
-                  </button>
-                )}
 
                 <div className="relative">
                   <button

@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect } from "react"
-import { ArrowUp, Loader2 } from "lucide-react"
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react"
+import { ArrowUp, Loader2, Mic, Square } from "lucide-react"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
 
 export interface MessageInputProps {
   value: string
@@ -20,9 +21,13 @@ export interface MessageInputProps {
   textareaProps?: React.TextareaHTMLAttributes<HTMLTextAreaElement>
   leftSlot?: React.ReactNode
   aboveTextarea?: React.ReactNode
+  voiceEnabled?: boolean
+  voiceLang?: string
 }
 
 const MAX_HEIGHT_PX = 200
+const REC_RED_BG = "rgba(239,68,68,0.18)"
+const REC_RED_FG = "#ef4444"
 
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect
@@ -43,8 +48,37 @@ export function MessageInput({
   textareaProps,
   leftSlot,
   aboveTextarea,
+  voiceEnabled = false,
+  voiceLang = "pt-BR",
 }: MessageInputProps) {
   const canSend = !disabled && value.trim().length >= minLength
+
+  // Base value captured when recording starts, so transcript appends rather
+  // than replaces what the user already typed.
+  const baseValueRef = useRef("")
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  const handleTranscript = useCallback((text: string) => {
+    const base = baseValueRef.current
+    const next = base ? `${base} ${text}`.trim() : text.trim()
+    onChangeRef.current(next)
+  }, [])
+
+  const {
+    isSupported: speechSupported,
+    isListening,
+    start: startRecording,
+    stop: stopRecording,
+  } = useSpeechToText({
+    lang: voiceLang,
+    onInterimTranscript: handleTranscript,
+    onFinalTranscript: handleTranscript,
+  })
+
+  const voiceActive = voiceEnabled && speechSupported
+  const showMic = voiceActive && !canSend && !isListening
+  const showStop = voiceActive && isListening
 
   const resize = useCallback(() => {
     const el = textareaRef?.current
@@ -74,15 +108,37 @@ export function MessageInput({
     textareaProps?.onChange?.(e)
   }
 
+  const handleRightButton = () => {
+    if (disabled) return
+    if (showStop) { stopRecording(); return }
+    if (showMic) {
+      baseValueRef.current = value
+      startRecording()
+      return
+    }
+    if (canSend) onSend()
+  }
+
+  const buttonStyle = showStop
+    ? { backgroundColor: REC_RED_BG, color: REC_RED_FG }
+    : { backgroundColor: tokens.brand, color: tokens.textInverse }
+
+  const buttonAriaLabel = disabled
+    ? "Enviando"
+    : showStop
+      ? "Parar gravação"
+      : showMic
+        ? "Gravar por áudio"
+        : "Enviar mensagem"
+
+  const buttonDisabled = disabled || (!canSend && !showMic && !showStop)
+
   const {
-    onKeyDown: _omitKeyDown,
-    onChange: _omitChange,
-    style: extraStyle,
-    className: extraClassName,
+    onKeyDown: _ok, onChange: _oc,
+    style: extraStyle, className: extraClassName,
     ...restTextareaProps
   } = textareaProps ?? {}
-  void _omitKeyDown
-  void _omitChange
+  void _ok; void _oc
 
   return (
     <div
@@ -119,17 +175,19 @@ export function MessageInput({
 
         <button
           type="button"
-          onClick={onSend}
-          disabled={!canSend}
-          aria-label="Enviar mensagem"
+          onClick={handleRightButton}
+          disabled={buttonDisabled}
+          aria-label={buttonAriaLabel}
+          aria-pressed={showStop ? true : undefined}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-40"
-          style={{
-            backgroundColor: tokens.brand,
-            color: tokens.textInverse,
-          }}
+          style={buttonStyle}
         >
           {disabled ? (
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : showStop ? (
+            <Square className="h-3.5 w-3.5 animate-pulse" fill="currentColor" aria-hidden />
+          ) : showMic ? (
+            <Mic className="h-4 w-4" aria-hidden />
           ) : (
             <ArrowUp className="h-4 w-4" aria-hidden />
           )}
