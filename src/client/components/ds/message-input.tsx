@@ -68,6 +68,7 @@ export function MessageInput({
   const {
     isSupported: speechSupported,
     isListening,
+    error: speechError,
     start: startRecording,
     stop: stopRecording,
   } = useSpeechToText({
@@ -113,6 +114,8 @@ export function MessageInput({
     if (showStop) { stopRecording(); return }
     if (showMic) {
       baseValueRef.current = value
+      // start() is async-ish (does getUserMedia + permission popup).
+      // Errors set hook.error which we surface below the input.
       startRecording()
       return
     }
@@ -193,6 +196,16 @@ export function MessageInput({
           )}
         </button>
       </div>
+
+      {speechError && (
+        <div
+          role="alert"
+          className="border-t px-4 py-2 text-[12px]"
+          style={{ borderColor: tokens.divider, color: REC_RED_FG }}
+        >
+          {speechError}
+        </div>
+      )}
     </div>
   )
 }

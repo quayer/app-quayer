@@ -35,6 +35,7 @@ const PROTECTED_PATHS = [
   '/canais',
   '/org',
   '/dev',
+  '/integracoes',
 ];
 
 /**
