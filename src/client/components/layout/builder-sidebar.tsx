@@ -20,6 +20,7 @@ import {
   LogOut,
   UserCircle,
   Smartphone,
+  Plug,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { getProjectStatusStyle, PROJECT_STATUS_LABEL } from "@/lib/project-status"
@@ -607,6 +608,13 @@ function OrgSwitcherSection({
               </Link>
             </DropdownMenuItem>
           )}
+
+          <DropdownMenuItem asChild>
+            <Link href="/integracoes" className="gap-2">
+              <Plug className="size-4" aria-hidden="true" />
+              Integrações
+            </Link>
+          </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 

@@ -232,6 +232,7 @@ describe('deployRunnerSubAgent', () => {
       projectId: VALID_PROJECT_ID,
       promptVersionId: VALID_PROMPT_VERSION_ID,
       userId: 'user-test',
+      organizationId: 'org-test',
     })
     expect(typeof result.durationMs).toBe('number')
   })

@@ -5,6 +5,7 @@ import { builderController } from '@/server/ai-module/builder/builder.controller
 import { messagesController } from '@/server/communication/messages/messages.controller'
 import { logsController } from '@/server/features-module/logs/controllers/logs.controller'
 import { logsSseController } from '@/server/features-module/logs/controllers/logs-sse.controller'
+import { providersController } from '@/server/core/providers/providers.controller'
 
 /**
  * @description Main application router configuration
@@ -18,6 +19,7 @@ export const AppRouter = igniter.router({
     logs: logsController,
     'logs-sse': logsSseController,
     messages: messagesController,
+    providers: providersController,
   }
 })
 
