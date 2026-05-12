@@ -54,6 +54,9 @@ export default defineConfig({
           include: [
             'test/unit/**/*.test.ts',
             'src/**/sub-agents/**/*.test.ts',
+            'src/server/communication/**/*.test.ts',
+            'src/server/ai-module/ai-agents/**/*.test.ts',
+            'src/app/api/**/*.test.ts',
           ],
           exclude: ['test/unit/react/**']
         }

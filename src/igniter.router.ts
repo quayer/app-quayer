@@ -2,6 +2,7 @@ import { igniter } from '@/igniter'
 import { authController } from '@/server/core/auth/auth.controller'
 import { deviceSessionsController } from '@/server/core/auth/device-sessions/device-sessions.controller'
 import { builderController } from '@/server/ai-module/builder/builder.controller'
+import { messagesController } from '@/server/communication/messages/messages.controller'
 import { logsController } from '@/server/features-module/logs/controllers/logs.controller'
 import { logsSseController } from '@/server/features-module/logs/controllers/logs-sse.controller'
 
@@ -16,6 +17,7 @@ export const AppRouter = igniter.router({
     'device-sessions': deviceSessionsController,
     logs: logsController,
     'logs-sse': logsSseController,
+    messages: messagesController,
   }
 })
 

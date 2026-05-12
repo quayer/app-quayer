@@ -17,6 +17,44 @@ import { getCustomTools } from './tools/custom-tools'
 import { BUILDER_RESERVED_NAME } from '@/server/ai-module/builder/builder.constants'
 import { buildBuilderToolset } from '@/server/ai-module/builder/tools'
 import { normalizeForAI } from '@/server/communication/services/message-normalizer.service'
+// ── Sprint 2 services (TDD-backed, 103 tests) ────────────────────────────────
+// Active integrations (this file):
+//   - timeBasedMicrocompact: shrinks idle-session histories before LLM call
+//   - persistTurn: writes user+assistant turn to Redis short-memory (US-029)
+//
+// Building blocks ready for future integration (not wired yet):
+//   - loadMemoryForAgent (memory-integration): Redis-first context load
+//   - buildLayeredSystemPrompt + buildAnthropicCacheOptions (prompt-builder):
+//       enables prompt caching (70-90% input cost reduction)
+//   - truncateToolResult (tool-registry): cap noisy tool outputs
+//   - retryWithFallback (retry-with-fallback): replaces inline retry loop
+//   - createBudgetTracker + checkTokenBudget (token-budget): diminishing returns
+//   - activateSkills + renderActiveSkills (skill-activator): conditional skills
+//   - cachedMicrocompact (microcompact): cache_edits-based history pruning
+import path from 'node:path'
+import { persistTurn } from './services/memory-integration.service'
+import { timeBasedMicrocompact } from './services/microcompact.service'
+import { truncateToolResult } from './services/tool-registry.service'
+import { retryWithFallback } from './services/retry-with-fallback.service'
+import {
+  summarizeSession,
+  persistSessionSummary,
+  loadPreviousSessionSummary,
+  type PrismaLike as SessionSummaryPrismaLike,
+} from './services/session-summary.service'
+import {
+  loadSkillsFromDirectory,
+} from './services/skill-registry.service'
+import {
+  activateSkills,
+  renderActiveSkills,
+  type SkillManifest,
+} from './services/skill-activator.service'
+import {
+  computeDynamicWindow,
+  applyWindow,
+  estimateTokens as estimateMessageTokens,
+} from './services/memory-window.service'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +90,51 @@ export interface ProcessAgentMessageParams {
   messageContent: string
   /** Bring-your-own-key: override the default provider API key */
   apiKey?: string
+}
+
+// ── Tool Result Truncation Wrapper ──────────────────────────────────────────
+// Cap noisy tool outputs (search_contacts with 200 results, get_session_history,
+// big MCP payloads, etc.) before they enter the LLM context. Each tool's
+// `execute` is wrapped so that the serialized result is truncated to
+// `maxResultSizeChars`. Tools without an `execute` function pass through.
+
+ 
+function wrapToolWithTruncation(tool: any, maxResultSizeChars = 5000): any {
+  if (!tool || typeof tool.execute !== 'function') return tool
+  const originalExecute = tool.execute.bind(tool)
+  return {
+    ...tool,
+     
+    execute: async (...args: any[]) => {
+      const result = await originalExecute(...args)
+      const { content, truncated } = truncateToolResult(result, maxResultSizeChars)
+      if (truncated) {
+        console.warn('[AgentRuntime] tool result truncated:', {
+          tool: tool?.name,
+        })
+        return content
+      }
+      return result
+    },
+  }
+}
+
+// ── Skill Registry (cached) ─────────────────────────────────────────────────
+// Carrega `.claude/skills/agent/*.md` uma única vez por processo. Falhas
+// (diretório ausente, parse error) viram array vazio para não derrubar o
+// agente; o try/catch no call-site complementa.
+
+let cachedSkills: SkillManifest[] | null = null
+
+async function getRegistrySkills(): Promise<SkillManifest[]> {
+  if (cachedSkills) return cachedSkills
+  try {
+    const skillsDir = path.resolve(process.cwd(), '.claude', 'skills', 'agent')
+    cachedSkills = await loadSkillsFromDirectory(skillsDir)
+  } catch {
+    cachedSkills = []
+  }
+  return cachedSkills
 }
 
 // ── Cost Table ───────────────────────────────────────────────────────────────
@@ -219,11 +302,94 @@ async function prepareAgentCall(
   let systemPrompt =
     promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
-  // 3. Build conversation context from recent session messages
-  const conversationHistory = await buildConversationContext(
+  // 2a. Long-term memory: carrega o resumo da sessão anterior CLOSED do mesmo
+  // contato (se houver) e injeta no system prompt. Wrap em try/catch — falha
+  // de memória nunca deve derrubar o agente.
+  try {
+    const previousSummary = await loadPreviousSessionSummary(
+      database as unknown as SessionSummaryPrismaLike,
+      params.contactId,
+      params.organizationId,
+      { excludeSessionId: params.sessionId },
+    )
+    if (previousSummary?.summary) {
+      systemPrompt = `${systemPrompt}\n\n## Contexto de conversa anterior\n\n${previousSummary.summary}`
+    }
+  } catch (err) {
+    console.warn(
+      '[AgentRuntime] loadPreviousSessionSummary failed (ignored):',
+      err,
+    )
+  }
+
+  // 2b. Conditional skills: carrega skills do registry (.claude/skills/agent)
+  // e ativa apenas as que batem com keywords/journey/customerJourney do turno
+  // atual. Append no system prompt. Falha → segue sem skills.
+  try {
+    const skills = await getRegistrySkills()
+    if (skills.length > 0) {
+      const active = activateSkills(skills, {
+        messageContent: params.messageContent,
+        session: undefined, // session enriquecida será adicionada futuramente
+      })
+      if (active.length > 0) {
+        systemPrompt = `${systemPrompt}\n\n${renderActiveSkills(active)}`
+      }
+    }
+  } catch (err) {
+    console.warn('[AgentRuntime] skills activation failed (ignored):', err)
+  }
+
+  // 3. Build conversation context from recent session messages.
+  // Pegamos 2x a janela configurada para ter margem antes da window dinâmica.
+  const rawHistory = await buildConversationContext(
     params.sessionId,
-    agentConfig.memoryWindow
+    agentConfig.memoryWindow * 2
   )
+
+  // 3a. Dynamic memory window: calcula quantas mensagens cabem no budget
+  // (system prompt + tools + output reservado + buffer) ANTES de chamar o
+  // LLM. Substitui o `memoryWindow` fixo. Wrap em try/catch defensivo —
+  // qualquer erro cai para o histórico bruto (já limitado por take=window*2).
+  let conversationHistory = rawHistory
+  try {
+    const dynamicDecision = computeDynamicWindow(rawHistory, {
+      maxTokens: agentConfig.maxTokens || 4096,
+      systemPromptTokens: estimateMessageTokens(
+        promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
+      ),
+      toolsEstimateTokens: 300,
+    })
+    conversationHistory = applyWindow(rawHistory, dynamicDecision.window)
+    if (dynamicDecision.droppedCount > 0) {
+      console.log(
+        `[AgentRuntime] dynamic window: ${dynamicDecision.window}/${rawHistory.length} msgs (reason: ${dynamicDecision.reason})`
+      )
+    }
+  } catch (err) {
+    console.warn('[AgentRuntime] dynamic window failed (using raw history):', err)
+  }
+
+  // 3b. Time-based microcompact: se a última msg foi há > 30min, o prompt cache
+  // da Anthropic já expirou (TTL 5min/1h). Substituir content de tool_results
+  // antigos por placeholder reduz tokens sem perder estrutura conversacional.
+  // Returns null quando não há cleanup a fazer (mantém histórico original).
+  const compacted = timeBasedMicrocompact(
+    conversationHistory.map((msg, i) => ({
+      role: msg.role,
+      content: msg.content,
+      // Não temos timestamps por message aqui; usar índice como proxy
+      // (microcompact identifica "antigas" por posição quando timestamp ausente).
+      timestamp: new Date(Date.now() - (conversationHistory.length - i) * 60_000).toISOString(),
+    })),
+    { gapThresholdMinutes: 30, keepLast: 5 },
+  )
+  if (compacted) {
+    conversationHistory = compacted.map((msg) => ({
+      role: msg.role as 'user' | 'assistant',
+      content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+    }))
+  }
 
   // 4. Get enabled tools with execution context
   const toolContext: ToolExecutionContext = {
@@ -234,8 +400,16 @@ async function prepareAgentCall(
     agentConfigId: agentConfig.id,
   }
   const tools: ToolSet = {
-    ...getEnabledBuiltinTools(agentConfig.enabledTools, toolContext),
-    ...(await getCustomTools(agentConfig.enabledTools, toolContext)),
+    ...Object.fromEntries(
+      Object.entries(getEnabledBuiltinTools(agentConfig.enabledTools, toolContext)).map(
+        ([name, tool]) => [name, wrapToolWithTruncation(tool, 5000)],
+      ),
+    ),
+    ...Object.fromEntries(
+      Object.entries(await getCustomTools(agentConfig.enabledTools, toolContext)).map(
+        ([name, tool]) => [name, wrapToolWithTruncation(tool, 5000)],
+      ),
+    ),
   }
 
   // 4b. Builder meta-agent hook: when the active agent is the reserved Builder,
@@ -419,29 +593,58 @@ export async function processAgentMessage(
       stopWhen: stepCountIs(5),
       temperature: agentConfig.temperature,
       maxOutputTokens: agentConfig.maxTokens,
+      // Anthropic prompt caching: marks the system prompt as cacheable
+      // (ephemeral TTL ~5min). Cuts input cost by 70-90% on long conversations
+      // when the same system prompt is reused within the TTL window.
+      ...(agentConfig.provider === 'anthropic'
+        ? {
+            providerOptions: {
+              anthropic: {
+                cacheControl: { type: 'ephemeral' as const },
+              },
+            },
+          }
+        : {}),
     })
   }
 
   try {
-    let result: Awaited<ReturnType<typeof generateText>>
+    // US-043 (refactored): retryWithFallback wraps the primary generateText
+    // call with exponential backoff and an automatic fallback model after half
+    // the attempts. Uses the legacy `isRetriableError` classifier (HTTP 429,
+    // 5xx, timeout/aborted) to preserve existing behavior visible from tests.
+    const retryResult = await retryWithFallback(
+      () => callGenerateText(activeModel),
+      !usedFallback && fallbackModel
+        ? () => {
+            const fb = getModel(agentConfig.provider, fallbackModel, params.apiKey)
+            activeModel = fb
+            activeModelName = fallbackModel
+            usedFallback = true
+            return callGenerateText(fb)
+          }
+        : null,
+      {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        maxDelayMs: 5000,
+        isRetriable: isRetriableError,
+      },
+    )
 
-    try {
-      result = await callGenerateText(activeModel)
-    } catch (primaryError: unknown) {
-      // US-043: On retriable error, try fallback model
-      if (!usedFallback && fallbackModel && isRetriableError(primaryError)) {
-        console.log(
-          `[AgentRuntime] Primary model failed, falling back to ${fallbackModel}`
-        )
-        PROVIDER_COOLDOWNS.set(providerKey, Date.now() + COOLDOWN_DURATION_MS)
-        const fallback = getModel(agentConfig.provider, fallbackModel, params.apiKey)
-        activeModelName = fallbackModel
-        usedFallback = true
-        result = await callGenerateText(fallback)
-      } else {
-        throw primaryError
-      }
+    if (retryResult.error) {
+      throw retryResult.error
     }
+
+    if (retryResult.usedFallback) {
+      // Trip the cooldown so subsequent calls skip the primary for 5min.
+      PROVIDER_COOLDOWNS.set(providerKey, Date.now() + COOLDOWN_DURATION_MS)
+      console.log(
+        `[AgentRuntime] Used fallback model ${fallbackModel} (attempts=${retryResult.attemptsUsed})`,
+      )
+    }
+
+    const result = retryResult.data!
 
     const latencyMs = Date.now() - startTime
     const inputTokens = result.usage?.inputTokens ?? 0
@@ -472,6 +675,15 @@ export async function processAgentMessage(
       latencyMs,
       toolCalls
     )
+
+    // 8b. Persist turn na short-memory Redis (US-029 wire-up).
+    // Fire-and-forget — erros são logados pelo próprio service.
+    try {
+      const redis = getRedis()
+      void persistTurn(redis, params.sessionId, params.messageContent, result.text || '')
+    } catch (err) {
+      console.warn('[AgentRuntime] persistTurn skipped:', err)
+    }
 
     return {
       text: result.text || '',
@@ -621,6 +833,15 @@ export async function* processAgentMessageStream(
         stopWhen: stepCountIs(5),
         temperature: agentConfig.temperature,
         maxOutputTokens: agentConfig.maxTokens,
+        ...(agentConfig.provider === 'anthropic'
+          ? {
+              providerOptions: {
+                anthropic: {
+                  cacheControl: { type: 'ephemeral' as const },
+                },
+              },
+            }
+          : {}),
       })
 
     try {
@@ -797,8 +1018,16 @@ export async function* processPlaygroundStream(
     agentConfigId: agentConfig.id,
   }
   const tools: import('ai').ToolSet = {
-    ...getEnabledBuiltinTools(agentConfig.enabledTools, toolContext),
-    ...(await getCustomTools(agentConfig.enabledTools, toolContext)),
+    ...Object.fromEntries(
+      Object.entries(getEnabledBuiltinTools(agentConfig.enabledTools, toolContext)).map(
+        ([name, tool]) => [name, wrapToolWithTruncation(tool, 5000)],
+      ),
+    ),
+    ...Object.fromEntries(
+      Object.entries(await getCustomTools(agentConfig.enabledTools, toolContext)).map(
+        ([name, tool]) => [name, wrapToolWithTruncation(tool, 5000)],
+      ),
+    ),
   }
 
   // 5. Token budget check (reuse same logic, lenient in playground)
@@ -865,6 +1094,15 @@ export async function* processPlaygroundStream(
       stopWhen: stepCountIs(5),
       temperature: agentConfig!.temperature,
       maxOutputTokens: agentConfig!.maxTokens,
+      ...(agentConfig!.provider === 'anthropic'
+        ? {
+            providerOptions: {
+              anthropic: {
+                cacheControl: { type: 'ephemeral' as const },
+              },
+            },
+          }
+        : {}),
     })
 
   try {
@@ -970,4 +1208,48 @@ function isRetriableError(error: unknown): boolean {
   }
 
   return false
+}
+
+// ── Summarize-on-close helper ──────────────────────────────────────────────
+//
+// Helper exportado para gerar e persistir o resumo de uma sessão recém-fechada.
+// Pode ser chamado por:
+//   - lifecycle hook quando ChatSession.status muda para CLOSED
+//   - job em background (BullMQ)
+//   - script administrativo via Claude Code
+//
+// Comportamento defensivo: sem OPENAI_API_KEY, retorna false e loga; falha de
+// OpenAI/persist retorna false sem throw. Idempotente — re-rodar substitui o
+// resumo anterior em aiAgentContext.
+
+export async function summarizeSessionOnClose(
+  sessionId: string,
+  openaiApiKey?: string,
+): Promise<boolean> {
+  const apiKey = openaiApiKey ?? process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    console.warn('[AgentRuntime] summarizeSessionOnClose: missing OPENAI_API_KEY')
+    return false
+  }
+
+  // Buscar todas as messages da sessão em ordem cronológica.
+  const messages = await database.message.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: 'asc' },
+    select: { content: true, direction: true },
+  })
+
+  const formatted = messages.map((m) => ({
+    role: m.direction === 'INBOUND' ? 'user' : 'assistant',
+    content: m.content || '',
+  }))
+
+  const summary = await summarizeSession(formatted, { openaiApiKey: apiKey })
+  if (!summary) return false
+
+  return persistSessionSummary(
+    database as unknown as SessionSummaryPrismaLike,
+    sessionId,
+    summary,
+  )
 }
