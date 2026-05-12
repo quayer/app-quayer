@@ -16,13 +16,10 @@ import {
   Check,
   Settings2,
   Users,
-  Key,
-  FileText,
   CreditCard,
   LogOut,
   UserCircle,
   Smartphone,
-  Plug,
 } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { getProjectStatusStyle, PROJECT_STATUS_LABEL } from "@/lib/project-status"
@@ -512,9 +509,7 @@ function OrgSwitcherSection({
 
   const orgRole = user.organizationRole || "user"
   const isSystemAdmin = user.role === "admin"
-  const canViewAudit = orgRole === "master" || orgRole === "manager" || isSystemAdmin
   const canViewTeam = orgRole === "master" || orgRole === "manager" || isSystemAdmin
-  const isAgency = user.isAgency === true
 
   return (
     <div
@@ -613,13 +608,6 @@ function OrgSwitcherSection({
             </DropdownMenuItem>
           )}
 
-          <DropdownMenuItem asChild>
-            <Link href="/org/api-keys" className="gap-2">
-              <Key className="size-4" aria-hidden="true" />
-              API Keys
-            </Link>
-          </DropdownMenuItem>
-
           <DropdownMenuSeparator />
 
           <DropdownMenuItem asChild>
@@ -628,34 +616,6 @@ function OrgSwitcherSection({
               Canais
             </Link>
           </DropdownMenuItem>
-
-          <DropdownMenuItem asChild>
-            <Link href="/integracoes" className="gap-2">
-              <Plug className="size-4" aria-hidden="true" />
-              Integrações
-            </Link>
-          </DropdownMenuItem>
-
-          {canViewAudit && (
-            <DropdownMenuItem asChild>
-              <Link href="/org/auditoria" className="gap-2">
-                <FileText className="size-4" aria-hidden="true" />
-                Auditoria
-              </Link>
-            </DropdownMenuItem>
-          )}
-
-          {isAgency && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/org/nova" className="gap-2">
-                  <Plus className="size-4" aria-hidden="true" />
-                  Nova organização
-                </Link>
-              </DropdownMenuItem>
-            </>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
