@@ -136,7 +136,10 @@ export const registerRoutes = {
   passkeyList: igniter.query({
     name: 'Passkey List',
     path: '/passkey/list',
-    use: [authProcedure({ required: true }), csrfProcedure()],
+    // GET reads do not need CSRF (CSRF protects against forged state-changing
+    // requests). Frontend doesn't send X-CSRF-Token on GET, so requiring it
+    // here forced a 403. CSRF stays on the POST/PATCH/DELETE passkey routes.
+    use: [authProcedure({ required: true })],
     handler: async ({ context, response }) => {
       const user = context.auth?.session?.user;
       if (!user) return response.unauthorized('Authentication required');
