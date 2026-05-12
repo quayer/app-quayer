@@ -230,9 +230,15 @@
     @apply outline-2 outline-primary ring-2 ring-primary/20 border-primary;
   }
 
-  /* textarea usa focus-within no card pai — ring interno causaria duplo indicador */
+  /* textarea usa focus-within no card pai — ring interno causaria duplo indicador.
+     Need to kill ALL focus-visible decorations: outline, ring (box-shadow), and
+     Tailwind's ring-offset/ring CSS vars set by the wildcard `*:focus-visible`. */
   textarea:focus-visible {
-    outline: none;
+    outline: none !important;
+    box-shadow: none !important;
+    --tw-ring-offset-shadow: 0 0 transparent !important;
+    --tw-ring-shadow: 0 0 transparent !important;
+    --tw-ring-color: transparent !important;
   }
 
   .skip-link {
