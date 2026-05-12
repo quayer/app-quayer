@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
+import { AppShell } from '@/client/components/layout/app-shell'
 import { ContaClient } from './conta-client'
 
 export const metadata: Metadata = {
@@ -20,8 +21,10 @@ export const metadata: Metadata = {
  */
 export default function ContaPage() {
   return (
-    <Suspense>
-      <ContaClient />
-    </Suspense>
+    <AppShell>
+      <Suspense>
+        <ContaClient />
+      </Suspense>
+    </AppShell>
   )
 }
