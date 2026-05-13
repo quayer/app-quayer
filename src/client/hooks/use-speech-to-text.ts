@@ -13,6 +13,7 @@ export interface UseSpeechToTextResult {
   isListening: boolean
   isTranscribing: boolean
   error: string | null
+  analyser: AnalyserNode | null
   start: () => void
   stop: () => void
 }
@@ -72,6 +73,7 @@ export function useSpeechToText({
   const [isListening, setIsListening] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
 
   useEffect(() => { setIsSupported(!!navigator.mediaDevices?.getUserMedia) }, [])
 
@@ -84,6 +86,7 @@ export function useSpeechToText({
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const mimeTypeRef = useRef("audio/webm")
+  const audioContextRef = useRef<AudioContext | null>(null)
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const webSpeechActiveRef = useRef(false) // true = Web Speech is delivering results
@@ -139,6 +142,25 @@ export function useSpeechToText({
     streamRef.current = stream
     chunksRef.current = []
 
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const audioContext = new AudioCtx()
+      // iOS Safari: AudioContext can start suspended — resume after user gesture
+      if (audioContext.state === "suspended") {
+        await audioContext.resume()
+      }
+      const source = audioContext.createMediaStreamSource(stream)
+      const node = audioContext.createAnalyser()
+      node.fftSize = 64
+      node.smoothingTimeConstant = 0.7
+      source.connect(node)
+      audioContextRef.current = audioContext
+      setAnalyser(node)
+    } catch {
+      // Web Audio API failure is non-fatal — recording still works, só sem visualizer
+      setAnalyser(null)
+    }
+
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
@@ -157,6 +179,12 @@ export function useSpeechToText({
       stopPeriodic()
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = null
+
+      if (audioContextRef.current) {
+        try { await audioContextRef.current.close() } catch { /* ignore */ }
+        audioContextRef.current = null
+      }
+      setAnalyser(null)
 
       // If Web Speech delivered results, emit final and we're done
       if (webSpeechActiveRef.current) {
@@ -252,5 +280,5 @@ export function useSpeechToText({
     if (mr && mr.state !== "inactive") mr.stop()
   }, [stopPeriodic])
 
-  return { isSupported, isListening, isTranscribing, error, start, stop }
+  return { isSupported, isListening, isTranscribing, error, analyser, start, stop }
 }

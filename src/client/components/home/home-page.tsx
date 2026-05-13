@@ -41,7 +41,7 @@ const MODELS: ModelOption[] = [
 ]
 
 const INPUT_PLACEHOLDER =
-  "ex: agente de captação de leads pra advocacia tributária..."
+  "Crie um agente de captação de leads para advocacia tributária"
 
 /** Tipos de arquivo aceitos para anexar ao prompt do agente. */
 const ACCEPTED_FILE_TYPES =
@@ -226,7 +226,7 @@ export function HomePage({
               </div>
             ) : undefined}
             leftSlot={
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={pickFile}
@@ -250,7 +250,7 @@ export function HomePage({
                     onClick={() => setModelOpen((v) => !v)}
                     aria-haspopup="listbox"
                     aria-expanded={modelOpen}
-                    className="flex h-9 items-center gap-2 rounded-full border px-3 text-[13px] font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
+                    className="flex h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
                     style={{ borderColor: tokens.border, color: tokens.textPrimary }}
                   >
                     <selectedModel.icon size={14} />
@@ -300,7 +300,7 @@ export function HomePage({
           />
 
           {error && (
-            <p className="mt-3 text-center text-sm" role="alert" style={{ color: "#ef4444" }}>
+            <p className="mt-2 px-4 text-left text-sm" role="alert" style={{ color: "#ef4444" }}>
               {error}
             </p>
           )}

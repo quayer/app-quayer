@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react"
-import { ArrowUp, Loader2, Mic, Square } from "lucide-react"
+import { ArrowUp, Loader2, Mic } from "lucide-react"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
+import { AudioWaveform } from "@/client/components/ds/audio-waveform"
 
 export interface MessageInputProps {
   value: string
@@ -26,7 +27,6 @@ export interface MessageInputProps {
 }
 
 const MAX_HEIGHT_PX = 200
-const REC_RED_BG = "rgba(239,68,68,0.18)"
 const REC_RED_FG = "#ef4444"
 
 const useIsomorphicLayoutEffect =
@@ -69,6 +69,7 @@ export function MessageInput({
     isSupported: speechSupported,
     isListening,
     error: speechError,
+    analyser,
     start: startRecording,
     stop: stopRecording,
   } = useSpeechToText({
@@ -78,8 +79,14 @@ export function MessageInput({
   })
 
   const voiceActive = voiceEnabled && speechSupported
-  const showMic = voiceActive && !canSend && !isListening
-  const showStop = voiceActive && isListening
+
+  // Right-side button cluster state machine.
+  // Mutually exclusive flags — exactly one of the "showOnly*" or "showMicPlusSend" is true.
+  const showOnlyLoader = disabled
+  const showOnlyStop = !disabled && voiceActive && isListening
+  const showMicPlusSend = !disabled && voiceActive && canSend && !isListening
+  const showOnlyMic = !disabled && voiceActive && !canSend && !isListening
+  const showOnlySend = !disabled && !showOnlyStop && !showMicPlusSend && !showOnlyMic && canSend
 
   const resize = useCallback(() => {
     const el = textareaRef?.current
@@ -109,32 +116,95 @@ export function MessageInput({
     textareaProps?.onChange?.(e)
   }
 
-  const handleRightButton = () => {
-    if (disabled) return
-    if (showStop) { stopRecording(); return }
-    if (showMic) {
-      baseValueRef.current = value
-      // start() is async-ish (does getUserMedia + permission popup).
-      // Errors set hook.error which we surface below the input.
-      startRecording()
-      return
-    }
-    if (canSend) onSend()
+  const handleMicClick = () => {
+    if (disabled || isListening) return
+    baseValueRef.current = value
+    // start() is async-ish (does getUserMedia + permission popup).
+    // Errors set hook.error which we surface below the input.
+    startRecording()
   }
 
-  const buttonStyle = showStop
-    ? { backgroundColor: REC_RED_BG, color: REC_RED_FG }
-    : { backgroundColor: tokens.brand, color: tokens.textInverse }
+  const handleStopClick = () => {
+    if (disabled) return
+    stopRecording()
+  }
 
-  const buttonAriaLabel = disabled
-    ? "Enviando"
-    : showStop
-      ? "Parar gravação"
-      : showMic
-        ? "Gravar por áudio"
-        : "Enviar mensagem"
+  const handleSendClick = () => {
+    if (disabled || !canSend) return
+    onSend()
+  }
 
-  const buttonDisabled = disabled || (!canSend && !showMic && !showStop)
+  useEffect(() => {
+    if (!voiceActive) return
+    const handler = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (!isMod || e.key.toLowerCase() !== "d") return
+      e.preventDefault()
+      if (disabled) return
+      if (isListening) stopRecording()
+      else {
+        baseValueRef.current = value
+        startRecording()
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [voiceActive, isListening, disabled, value, startRecording, stopRecording])
+
+  const sendStyle = { backgroundColor: tokens.brand, color: tokens.textInverse }
+  const micStyle = { backgroundColor: "transparent", color: tokens.brand, borderColor: tokens.border }
+
+  const baseBtn =
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--q-brand)] disabled:cursor-not-allowed disabled:opacity-40"
+  const micDescribedBy = speechError ? "message-input-mic-error" : undefined
+
+  const sendBtn = (
+    <button
+      type="button"
+      onClick={handleSendClick}
+      aria-label="Enviar mensagem"
+      className={baseBtn}
+      style={sendStyle}
+    >
+      <ArrowUp className="h-4 w-4" aria-hidden />
+    </button>
+  )
+  const micBtn = (
+    <button
+      type="button"
+      onClick={handleMicClick}
+      aria-label="Gravar por áudio"
+      aria-describedby={micDescribedBy}
+      className={`${baseBtn} border`}
+      style={micStyle}
+    >
+      <Mic className="h-4 w-4" aria-hidden />
+    </button>
+  )
+  const stopBtn = (
+    <button
+      type="button"
+      onClick={handleStopClick}
+      aria-label="Parar gravação"
+      aria-pressed={true}
+      aria-describedby={micDescribedBy}
+      className="flex h-9 items-center gap-2 rounded-full px-3 shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--q-brand)] disabled:cursor-not-allowed disabled:opacity-40"
+      style={{ backgroundColor: tokens.brand, color: tokens.textInverse }}
+    >
+      <AudioWaveform analyser={analyser} bars={3} color="currentColor" />
+      <Mic className="h-4 w-4" aria-hidden />
+    </button>
+  )
+  const loaderBtn = (
+    <button type="button" disabled aria-label="Enviando" className={baseBtn} style={sendStyle}>
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+    </button>
+  )
+  const idleSendBtn = (
+    <button type="button" disabled aria-label="Enviar mensagem" className={baseBtn} style={sendStyle}>
+      <ArrowUp className="h-4 w-4" aria-hidden />
+    </button>
+  )
 
   const {
     onKeyDown: _ok, onChange: _oc,
@@ -145,7 +215,7 @@ export function MessageInput({
 
   return (
     <div
-      className="flex flex-col rounded-2xl border transition-colors"
+      className="flex flex-col rounded-2xl border transition-colors focus-within:ring-2 focus-within:ring-[var(--q-brand)]/30"
       style={{
         backgroundColor: tokens.bgElevated,
         borderColor: borderColor ?? tokens.border,
@@ -154,18 +224,19 @@ export function MessageInput({
     >
       {aboveTextarea}
 
-      <div className="px-4 pt-3">
+      <div className="px-4 pt-4 pb-1">
         <textarea
           {...restTextareaProps}
+          aria-label={placeholder ?? "Mensagem"}
           ref={textareaRef}
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={isListening ? "Ouvindo..." : placeholder}
           disabled={disabled}
           rows={rows}
           maxLength={maxLength}
-          className={`w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:opacity-60 disabled:cursor-not-allowed disabled:opacity-60 ${extraClassName ?? ""}`}
+          className={`w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:opacity-75 focus-visible:rounded-md focus-visible:[box-shadow:0_0_0_2px_var(--q-brand)] disabled:cursor-not-allowed disabled:opacity-60 ${extraClassName ?? ""}`}
           style={{
             color: tokens.textPrimary,
             ...extraStyle,
@@ -173,32 +244,42 @@ export function MessageInput({
         />
       </div>
 
-      <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-3">
+      <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
         <div className="flex min-w-0 items-center">{leftSlot}</div>
 
-        <button
-          type="button"
-          onClick={handleRightButton}
-          disabled={buttonDisabled}
-          aria-label={buttonAriaLabel}
-          aria-pressed={showStop ? true : undefined}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-40"
-          style={buttonStyle}
-        >
-          {disabled ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          ) : showStop ? (
-            <Square className="h-3.5 w-3.5 animate-pulse" fill="currentColor" aria-hidden />
-          ) : showMic ? (
-            <Mic className="h-4 w-4" aria-hidden />
-          ) : (
-            <ArrowUp className="h-4 w-4" aria-hidden />
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {showOnlyLoader ? loaderBtn
+            : showOnlyStop ? stopBtn
+            : showMicPlusSend ? (<>{micBtn}{sendBtn}</>)
+            : showOnlyMic ? micBtn
+            : showOnlySend ? sendBtn
+            : idleSendBtn}
+        </div>
       </div>
+
+      {voiceActive && !canSend && !isListening && !disabled && (
+        <div
+          className="hidden sm:flex items-center justify-end gap-1.5 px-4 pb-2 text-[11px] opacity-60"
+          style={{ color: tokens.textTertiary }}
+          aria-hidden
+        >
+          <kbd className="rounded border px-1.5 py-0.5 font-mono text-[10px]"
+               style={{ borderColor: tokens.border }}>
+            ⌘D
+          </kbd>
+          <span>para falar</span>
+        </div>
+      )}
+
+      {isListening && (
+        <span className="sr-only" role="status" aria-live="polite">
+          Gravando áudio
+        </span>
+      )}
 
       {speechError && (
         <div
+          id="message-input-mic-error"
           role="alert"
           className="border-t px-4 py-2 text-[12px]"
           style={{ borderColor: tokens.divider, color: REC_RED_FG }}
