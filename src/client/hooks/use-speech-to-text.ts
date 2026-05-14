@@ -47,7 +47,7 @@ async function whisperTranscribe(chunks: Blob[], mimeType: string): Promise<stri
   const form = new FormData()
   form.append("audio", file)
 
-  const res = await fetch("/api/transcribe", { method: "POST", body: form })
+  const res = await fetch("/api/transcribe", { method: "POST", body: form, credentials: "include" })
   const json = (await res.json()) as { text?: string; error?: string }
   return res.ok && json.text ? json.text : null
 }

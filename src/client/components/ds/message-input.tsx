@@ -28,6 +28,7 @@ export interface MessageInputProps {
 
 const MAX_HEIGHT_PX = 200
 const REC_RED_FG = "#ef4444"
+const REC_BLUE = "#3b82f6"
 
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? useLayoutEffect : useEffect
@@ -188,10 +189,11 @@ export function MessageInput({
       aria-label="Parar gravação"
       aria-pressed={true}
       aria-describedby={micDescribedBy}
-      className="flex h-9 items-center gap-2 rounded-full px-3 shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--q-brand)] disabled:cursor-not-allowed disabled:opacity-40"
-      style={{ backgroundColor: tokens.brand, color: tokens.textInverse }}
+      className="flex h-9 items-center gap-2 rounded-full px-3 shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#3b82f6] disabled:cursor-not-allowed disabled:opacity-40"
+      style={{ backgroundColor: REC_BLUE, color: "#fff" }}
     >
       <AudioWaveform analyser={analyser} bars={3} color="currentColor" />
+      <span className="hidden sm:inline text-[13px] font-medium leading-none">Ouvindo</span>
       <Mic className="h-4 w-4" aria-hidden />
     </button>
   )
