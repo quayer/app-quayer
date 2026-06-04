@@ -28,6 +28,13 @@ export interface IngestOptions {
   rawText?: string
   chunkSize?: number
   chunkOverlap?: number
+  /**
+   * Org esperada do chamador. Quando passado, validamos que a fonte pertence a
+   * ela ANTES de processar (defesa multi-tenant). As rotas/handler sempre passam
+   * a org autenticada. Se um dia esta função for chamada de input não-confiável,
+   * este parâmetro evita ingestão cross-org.
+   */
+  expectedOrganizationId?: string
 }
 
 export interface IngestResult {
@@ -101,6 +108,9 @@ export async function ingestSource(
     select: { id: true, collectionId: true, organizationId: true, type: true, source: true },
   })
   if (!source) throw new Error(`Fonte ${sourceId} não encontrada`)
+  if (opts.expectedOrganizationId && source.organizationId !== opts.expectedOrganizationId) {
+    throw new Error('Fonte de outra organização (acesso negado)')
+  }
 
   await delegate.update({
     where: { id: sourceId },

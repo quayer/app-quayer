@@ -47,12 +47,64 @@ export function stripHtml(html: string): string {
     .trim()
 }
 
+// ── SSRF guard ────────────────────────────────────────────────────────────────
+// Espelha isWebhookUrlBlocked (ai-agents/tools/custom-tools.ts): bloqueia hosts
+// privados/loopback/link-local e schemes não-http(s). Aqui aceitamos http E https
+// (sites de FAQ legados usam http) mas revalidamos CADA hop de redirect — um host
+// público que redireciona p/ 169.254.169.254 é o bypass clássico de SSRF.
+const PRIVATE_HOST_REGEX =
+  /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?|\[?fc00:|\[?fd00:|\[?fe80:)/i
+
+function assertPublicHttpUrl(raw: string): URL {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('URL inválida')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Scheme não permitido: ${url.protocol}`)
+  }
+  if (PRIVATE_HOST_REGEX.test(url.hostname)) {
+    throw new Error('Host privado/interno bloqueado (SSRF)')
+  }
+  return url
+}
+
+const FETCH_TIMEOUT_MS = 10_000
+const MAX_REDIRECTS = 3
+
+/** fetch seguro: valida cada hop, timeout, segue até MAX_REDIRECTS manualmente. */
+async function safeFetch(rawUrl: string): Promise<Response> {
+  let current = assertPublicHttpUrl(rawUrl).toString()
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    let res: Response
+    try {
+      res = await fetch(current, {
+        headers: { 'user-agent': 'QuayerKnowledgeBot/1.0 (+https://quayer.com)' },
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timer)
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location')
+      if (!location) return res
+      // Revalida o destino do redirect (resolve relativo ao current).
+      current = assertPublicHttpUrl(new URL(location, current).toString()).toString()
+      continue
+    }
+    return res
+  }
+  throw new Error('Redirects demais')
+}
+
 export async function extractUrlText(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { 'user-agent': 'QuayerKnowledgeBot/1.0 (+https://quayer.com)' },
-    redirect: 'follow',
-  })
-  if (!res.ok) throw new Error(`fetch ${url} → HTTP ${res.status}`)
+  const res = await safeFetch(url)
+  if (!res.ok) throw new Error(`fetch → HTTP ${res.status}`)
   const contentType = res.headers.get('content-type') ?? ''
   if (contentType.includes('application/pdf')) {
     const buf = Buffer.from(await res.arrayBuffer())

@@ -177,8 +177,10 @@ export async function* streamAgentResponse(
   // configured in OrganizationProvider (the integrations page).
   // We need the agentConfig's provider field — load it here with a minimal
   // select so we avoid a second full fetch when the runtime repeats the load.
-  const agentConfigForProvider = await database.aIAgentConfig.findUnique({
-    where: { id: params.agentConfigId },
+  // findFirst com filtro de org (não findUnique por id): impede enumerar o
+  // provider de agente de outra org. O runtime (prepareAgentCall) revalida a org.
+  const agentConfigForProvider = await database.aIAgentConfig.findFirst({
+    where: { id: params.agentConfigId, organizationId: params.organizationId },
     select: { provider: true },
   })
   const agentProvider = agentConfigForProvider?.provider ?? 'anthropic'

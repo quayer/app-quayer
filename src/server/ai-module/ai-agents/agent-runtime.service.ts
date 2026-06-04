@@ -301,6 +301,15 @@ async function prepareAgentCall(
     )
   }
 
+  // Defesa multi-tenant: o agente DEVE pertencer à org do chamador. Sem isto, um
+  // webhook com (connection da org A + agentConfigId da org B) leria prompt/RAG/
+  // settings da org B. Mesma mensagem de erro (não revela existência cross-org).
+  if (agentConfig.organizationId !== params.organizationId) {
+    throw new Error(
+      `Agent config ${params.agentConfigId} not found or inactive`
+    )
+  }
+
   // 2. Get active prompt (supports A/B testing)
   const promptVersion = await getActivePrompt(agentConfig.id, params.sessionId)
   let systemPrompt =

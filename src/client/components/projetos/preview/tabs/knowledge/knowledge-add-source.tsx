@@ -14,6 +14,22 @@ import { Textarea } from "@/client/components/ui/textarea"
 
 type Busy = null | "url" | "text" | "pdf"
 
+/** Extrai a mensagem de erro da resposta (Igniter ou route handler), com fallback. */
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const j = (await res.json()) as {
+      error?: string | { message?: string }
+      message?: string
+    }
+    if (typeof j?.error === "string") return j.error
+    if (j?.error && typeof j.error.message === "string") return j.error.message
+    if (typeof j?.message === "string") return j.message
+    return fallback
+  } catch {
+    return fallback
+  }
+}
+
 export function KnowledgeAddSource({
   projectId,
   onAdded,
@@ -40,7 +56,7 @@ export function KnowledgeAddSource({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       })
-      if (!res.ok) throw new Error("Falha ao processar a URL")
+      if (!res.ok) throw new Error(await readError(res, "Falha ao processar a URL"))
       setUrl(""); onAdded()
     } catch (e) { setError(e instanceof Error ? e.message : "Erro") }
     finally { setBusy(null) }
@@ -55,7 +71,7 @@ export function KnowledgeAddSource({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim() || undefined, text: text.trim() }),
       })
-      if (!res.ok) throw new Error("Falha ao processar o texto")
+      if (!res.ok) throw new Error(await readError(res, "Falha ao processar o texto"))
       setText(""); setTitle(""); onAdded()
     } catch (e) { setError(e instanceof Error ? e.message : "Erro") }
     finally { setBusy(null) }

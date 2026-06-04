@@ -60,7 +60,10 @@ export function chunkText(text: string, options: ChunkOptions = {}): TextChunk[]
       const boundary =
         lastIndexOfAny(window, ['\n\n', '. ', '! ', '? ', '\n']) ??
         window.lastIndexOf(' ')
-      if (boundary != null && boundary > size * 0.5) {
+      // Aceita a fronteira se ela representa progresso razoável (>30% do alvo).
+      // 0.5 era estrito demais — rejeitava quebras válidas e cortava no meio de
+      // palavras quando a melhor quebra ficava entre 30% e 50% do tamanho.
+      if (boundary != null && boundary > size * 0.3) {
         end = start + boundary + 1
       }
     }

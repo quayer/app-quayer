@@ -22,6 +22,9 @@ import {
 } from '@/server/ai-module/builder/knowledge/knowledge-helpers'
 
 export const runtime = 'nodejs'
+// Ingestão é síncrona (v1): estende o limite p/ PDFs grandes não cortarem no
+// timeout padrão. Migrar p/ job BullMQ remove a necessidade (ver backlog).
+export const maxDuration = 60
 
 const MAX_BYTES = 15 * 1024 * 1024 // 15 MB
 
@@ -66,6 +69,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'only_pdf_supported' }, { status: 415 })
   }
 
+  // ── Valida assinatura real do PDF (magic bytes %PDF) ANTES de tocar no DB ─────
+  // Content-Type/extensão são client-controlled; sem isto, lixo binário spoofado
+  // como .pdf vira buffer alocado + parse + linha de erro no DB (DoS barato).
+  const buffer = Buffer.from(await fileField.arrayBuffer())
+  if (buffer.length < 5 || buffer.toString('latin1', 0, 5) !== '%PDF-') {
+    return NextResponse.json({ error: 'invalid_pdf_signature' }, { status: 415 })
+  }
+
   // ── Projeto + coleção ───────────────────────────────────────────────────────
   const project = await loadProject(projectId, organizationId)
   if (!project) {
@@ -93,8 +104,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     select: { id: true },
   })
 
-  const buffer = Buffer.from(await fileField.arrayBuffer())
-  const result = await ingestSource(source.id, { buffer })
+  const result = await ingestSource(source.id, {
+    buffer,
+    expectedOrganizationId: organizationId,
+  })
 
   if (result.status === 'error') {
     return NextResponse.json(

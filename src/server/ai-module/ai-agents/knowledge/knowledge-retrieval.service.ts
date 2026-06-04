@@ -73,16 +73,21 @@ export async function retrieveRelevantChunks(
     const vec = toVectorLiteral(embedding)
     const limit = Math.max(topK, overFetch)
 
+    // JOIN com knowledge_collections + filtro organizationId = defesa multi-tenant:
+    // mesmo que um ragCollectionId aponte (por bug) p/ coleção de outra org, o
+    // filtro garante que só chunks da org chamadora voltam.
     const rows = await database.$queryRaw<RawRow[]>(Prisma.sql`
       SELECT
-        "id",
-        "content",
-        "metadata",
-        1 - ("embedding" <=> ${vec}::vector) AS score
-      FROM "knowledge_chunks"
-      WHERE "collectionId" = ${collectionId}
-        AND "embedding" IS NOT NULL
-      ORDER BY "embedding" <=> ${vec}::vector
+        c."id",
+        c."content",
+        c."metadata",
+        1 - (c."embedding" <=> ${vec}::vector) AS score
+      FROM "knowledge_chunks" c
+      JOIN "knowledge_collections" col ON col."id" = c."collectionId"
+      WHERE c."collectionId" = ${collectionId}
+        AND col."organizationId" = ${organizationId}
+        AND c."embedding" IS NOT NULL
+      ORDER BY c."embedding" <=> ${vec}::vector
       LIMIT ${limit}
     `)
 
@@ -96,21 +101,38 @@ export async function retrieveRelevantChunks(
       .filter((r) => Number.isFinite(r.score) && r.score >= threshold)
       .slice(0, topK)
   } catch (err) {
-    console.warn('[KnowledgeRetrieval] busca falhou (ignorada):', err)
+    // Só a mensagem (não o objeto) — evita vazar baseURL/stack do LiteLLM nos logs.
+    console.warn(
+      '[KnowledgeRetrieval] busca falhou (ignorada):',
+      err instanceof Error ? err.message : String(err),
+    )
     return []
   }
 }
 
 /**
+ * Limite de caracteres do bloco RAG injetado no system prompt (~1.5k tokens).
+ * Bound necessário: sem ele um topK alto com chunks grandes infla o systemPrompt
+ * e pode estourar o token budget do turno (que é calculado depois da injeção).
+ */
+const MAX_CONTEXT_CHARS = 6000
+
+/**
  * Monta o bloco de contexto para injetar no system prompt. Numera as fontes e
- * inclui o score (debug). Retorna '' se não houver chunks (caller pula a injeção).
+ * respeita MAX_CONTEXT_CHARS (corta fontes excedentes). Retorna '' se vazio.
  */
 export function buildContextBlock(chunks: RetrievedChunk[]): string {
   if (chunks.length === 0) return ''
 
-  const sources = chunks
-    .map((c, i) => `[${i + 1}] ${c.content.trim()}`)
-    .join('\n\n')
+  const picked: string[] = []
+  let used = 0
+  for (let i = 0; i < chunks.length; i++) {
+    const entry = `[${i + 1}] ${chunks[i].content.trim()}`
+    if (used + entry.length > MAX_CONTEXT_CHARS && picked.length > 0) break
+    picked.push(entry)
+    used += entry.length + 2
+  }
+  const sources = picked.join('\n\n')
 
   return [
     '## Base de conhecimento',

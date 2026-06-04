@@ -50,7 +50,9 @@ const addUrlSource = igniter.mutation({
       select: { id: true },
     })
 
-    const result = await ingestSource(source.id)
+    const result = await ingestSource(source.id, {
+      expectedOrganizationId: user.currentOrgId,
+    })
     return response.success(result)
   },
 })
@@ -89,7 +91,10 @@ const addTextSource = igniter.mutation({
       select: { id: true },
     })
 
-    const result = await ingestSource(source.id, { rawText: request.body.text })
+    const result = await ingestSource(source.id, {
+      rawText: request.body.text,
+      expectedOrganizationId: user.currentOrgId,
+    })
     return response.success(result)
   },
 })

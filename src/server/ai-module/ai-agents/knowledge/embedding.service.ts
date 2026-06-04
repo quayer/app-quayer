@@ -45,10 +45,25 @@ async function resolveOpenAIKey(scope: EmbeddingScope): Promise<string | undefin
   return process.env.OPENAI_API_KEY
 }
 
+/** Erro claro quando a org não tem como gerar embeddings (sem key OpenAI). */
+export class EmbeddingUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EmbeddingUnavailableError'
+  }
+}
+
 /** Cria o model de embedding (proxy LiteLLM quando configurado, senão direto). */
 async function getEmbeddingModel(scope: EmbeddingScope) {
   const apiKey = await resolveOpenAIKey(scope)
   const litellm = litellmConfig()
+  // Embeddings exigem OpenAI (text-embedding-3-small). Org só-Anthropic sem
+  // OPENAI_API_KEY e sem LiteLLM → falha CLARA (não silenciosa). Ver SECRETS.md.
+  if (!apiKey && !litellm) {
+    throw new EmbeddingUnavailableError(
+      'RAG indisponível: nenhuma credencial OpenAI para embeddings (configure OPENAI_API_KEY na org ou LiteLLM).',
+    )
+  }
   const openai = createOpenAI(
     litellm
       ? { apiKey: apiKey || litellm.key, baseURL: `${litellm.url}/v1` }
@@ -57,19 +72,56 @@ async function getEmbeddingModel(scope: EmbeddingScope) {
   return openai.textEmbeddingModel(EMBEDDING_MODEL)
 }
 
-/** Embeda um único texto (query do retrieval). */
+const EMBED_TIMEOUT_MS = 12_000
+
+/** Promise.race com timeout — embedding lento não pode travar o turno do agente. */
+async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timeout após ${ms}ms`)), ms)
+  })
+  try {
+    return await Promise.race([p, timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** Retry com backoff exponencial p/ falhas transitórias (429/5xx/network). */
+async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (attempt < tries - 1) {
+        await new Promise((r) => setTimeout(r, 400 * 2 ** attempt))
+      }
+    }
+  }
+  throw lastErr
+}
+
+/** Embeda um único texto (query do retrieval). Com timeout — caminho quente. */
 export async function embedQuery(
   text: string,
   scope: EmbeddingScope,
 ): Promise<number[]> {
   const model = await getEmbeddingModel(scope)
-  const { embedding } = await embed({ model, value: text })
+  const { embedding } = await withTimeout(
+    embed({ model, value: text }),
+    EMBED_TIMEOUT_MS,
+    'embedQuery',
+  )
   return embedding
 }
 
 /**
  * Embeda um lote de textos (chunks na ingestão). A OpenAI aceita lotes grandes,
- * mas fatiamos em 96 para evitar payloads gigantes / timeouts.
+ * mas fatiamos em 96 para evitar payloads gigantes / timeouts. Cada batch tem
+ * retry (falha transitória) e VALIDA que o nº de vetores == nº de textos — se a
+ * API devolver menos, lançamos (evita embeddings[i] undefined → vetor inválido).
  */
 export async function embedTexts(
   texts: string[],
@@ -82,8 +134,18 @@ export async function embedTexts(
   const out: number[][] = []
   for (let i = 0; i < texts.length; i += BATCH) {
     const slice = texts.slice(i, i + BATCH)
-    const { embeddings } = await embedMany({ model, values: slice })
+    const { embeddings } = await withRetry(() =>
+      withTimeout(embedMany({ model, values: slice }), EMBED_TIMEOUT_MS, 'embedMany'),
+    )
+    if (embeddings.length !== slice.length) {
+      throw new Error(
+        `Embedding count mismatch no batch ${i / BATCH}: ${embeddings.length} != ${slice.length}`,
+      )
+    }
     out.push(...embeddings)
+  }
+  if (out.length !== texts.length) {
+    throw new Error(`Embedding total mismatch: ${out.length} != ${texts.length}`)
   }
   return out
 }

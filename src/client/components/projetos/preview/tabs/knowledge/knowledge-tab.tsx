@@ -33,14 +33,17 @@ export function KnowledgeTab({ project }: KnowledgeTabProps) {
   const base = `/api/v1/builder/knowledge/${project.id}`
 
   const load = React.useCallback(async () => {
+    const fallback = { collection: null, sources: [], useRAG: false }
     try {
       const res = await fetch(base, { credentials: "same-origin" })
+      if (!res.ok) {
+        setState(fallback)
+        return
+      }
       const json = (await res.json()) as { data?: KnowledgeState }
-      setState(
-        json.data ?? { collection: null, sources: [], useRAG: false },
-      )
+      setState(json.data ?? fallback)
     } catch {
-      setState({ collection: null, sources: [], useRAG: false })
+      setState(fallback)
     }
   }, [base])
 
@@ -59,12 +62,15 @@ export function KnowledgeTab({ project }: KnowledgeTabProps) {
   const toggleRAG = async (enabled: boolean) => {
     setState((p) => (p ? { ...p, useRAG: enabled } : p))
     try {
-      await fetch(base, {
+      const res = await fetch(base, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       })
+      // Reconcilia o estado otimista com o servidor em erro HTTP (400 sem agente,
+      // 401, 404) — não só em erro de rede.
+      if (!res.ok) void load()
     } catch {
       void load()
     }
