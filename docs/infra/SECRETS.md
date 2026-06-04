@@ -106,6 +106,10 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (e opcional `OPENROUTER_API_KEY`) — keys diretas dos provedores. Usadas no caminho direto e pelo próprio proxy LiteLLM.
 - `LITELLM_URL` + `LITELLM_MASTER_KEY` — quando **ambos** setados, todo o LLM (chat do projeto + agente WhatsApp) passa pelo proxy LiteLLM (`provider-factory.ts`), preservando o prompt cache da Anthropic. Vazios = caminho direto (nada quebra). Proxy em `infra/litellm/` (ver `infra/litellm/README.md`). Rotacionar a master key a cada incidente.
 
+## Apify (enrich_instagram — Wave Orayon)
+
+- `APIFY_TOKEN` — token da plataforma Apify, usado pela tool `enrich_instagram` do agente runtime (scrape de perfil IG público via actor `instagram-profile-scraper`, cache Redis 24h). Sem ele, a tool degrada (`não configurado`) sem quebrar o agente. **MVP:** token único de plataforma. **Fase 2:** BYOK por org via `OrganizationProvider` (category AUXILIARY, provider `apify`), molde do Google Calendar. Rotacionar a cada incidente.
+
 ## Google Calendar (connect-link — Wave 4b)
 
 - `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI` — OAuth **separado** do login Google (escopo calendar, `access_type=offline`). Redirect = `.../api/v1/calendar/oauth/callback`. O refresh_token é encriptado (`@/lib/crypto`/`ENCRYPTION_KEY`) e guardado em `OrganizationProvider` (provider `google-calendar`). Sem essas 3 envs, `/oauth/start` responde 503 e as tools de agenda degradam. **Verificação OAuth do Google** (escopos de Calendar) é externa — disparar no Google Cloud com antecedência.

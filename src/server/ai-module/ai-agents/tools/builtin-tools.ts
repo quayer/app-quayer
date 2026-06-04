@@ -22,6 +22,7 @@ import {
   createCancelEventTool,
 } from './calendar'
 import { createGetPricingTool } from './pricing'
+import { createEnrichInstagramTool } from './instagram'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -554,6 +555,10 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     // Degrada ("catálogo não configurado") até o profissional preencher a lista.
     get_pricing: createGetPricingTool(ctx),
 
+    // enrich_instagram — busca perfil público do IG via Apify (bio/seguidores/
+    // posts) p/ enriquecer o lead. Degrada se APIFY_TOKEN ausente.
+    enrich_instagram: createEnrichInstagramTool(ctx),
+
   }
 }
 
@@ -604,4 +609,5 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'create_event',
   'cancel_event',
   'get_pricing',
+  'enrich_instagram',
 ]
