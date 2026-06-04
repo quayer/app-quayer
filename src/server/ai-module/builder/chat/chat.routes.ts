@@ -10,7 +10,7 @@ import { database } from '@/server/services/database'
 import { z } from 'zod'
 
 import { sendChatMessageInputSchema } from '../builder.schemas'
-import { BUILDER_RESERVED_NAME } from '../builder.constants'
+import { ensureBuilderAgent } from '../services/ensure-builder-agent'
 
 import { persistUserMessage } from './handlers/persist-message'
 import { compactIfNeeded } from './handlers/compact-if-needed'
@@ -71,17 +71,9 @@ const sendMessage = igniter.mutation({
       return response.forbidden('Acesso negado a esta conversa')
     }
 
-    const builderAgent = await database.aIAgentConfig.findFirst({
-      where: {
-        organizationId: user.currentOrgId,
-        name: BUILDER_RESERVED_NAME,
-      },
-    })
-    if (!builderAgent) {
-      return response.badRequest(
-        'Builder AI not initialized for this organization. Contact admin to run the register-builder-agent script.',
-      )
-    }
+    // Lazy-init: cria o meta-agente do Builder na 1ª mensagem se ainda não
+    // existir (idempotente). Remove a necessidade do script manual por org.
+    const builderAgent = await ensureBuilderAgent(user.currentOrgId)
 
     // Only persist when the message is new. The auto-trigger path (skipUserPersist=true)
     // arrives here with a message already saved by createWithInitialMessage.
