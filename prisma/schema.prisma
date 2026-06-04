@@ -1498,6 +1498,65 @@ model KnowledgeChunk {
   @@map("knowledge_chunks")
 }
 
+// ── Agent Runtime Decisions (observabilidade — Wave Orayon) ──────────────────
+// Um registro por turno do runtime: que decisões o agente tomou (modelo/fallback,
+// RAG hit/miss, skills, tools, memória dinâmica) + tokens/custo/latência/status.
+// Tabela de LOG: sem FK (alta escrita, desacoplada); limpeza por retenção/job.
+// Escrita é fire-and-forget — gravar decisão NUNCA pode derrubar o agente.
+model AgentRuntimeDecision {
+  id              String  @id @default(uuid())
+  organizationId  String
+  sessionId       String
+  agentConfigId   String
+  promptVersionId String?
+  executionMode   String // 'sync' | 'stream' | 'playground'
+
+  // Modelo & provider (used pode diferir de primary se houve fallback)
+  modelPrimary      String
+  providerPrimary   String
+  modelUsed         String
+  providerUsed      String
+  fallbackTriggered Boolean @default(false)
+  fallbackReason    String?
+
+  // Memória & contexto
+  memoryWindowSize           Int?
+  dynamicWindowSize          Int?
+  messagesDropped            Int     @default(0)
+  previousSessionSummaryUsed Boolean @default(false)
+
+  // RAG
+  ragEnabled         Boolean @default(false)
+  ragQueried         Boolean @default(false)
+  ragCollectionId    String?
+  ragChunksRetrieved Int     @default(0)
+
+  // Skills & tools
+  skillsActivated String[] @default([])
+  enabledTools    String[] @default([])
+  toolsCalled     String[] @default([])
+  toolIterations  Int      @default(0)
+
+  // Tokens & custo
+  inputTokens  Int   @default(0)
+  outputTokens Int   @default(0)
+  cachedTokens Int   @default(0)
+  totalTokens  Int   @default(0)
+  totalCost    Float @default(0)
+
+  // Latência & status
+  latencyMs    Int     @default(0)
+  status       String  @default("success") // 'success' | 'error'
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([sessionId])
+  @@index([agentConfigId, createdAt])
+  @@map("agent_runtime_decisions")
+}
+
 // ── Agent Prompt Versions ─────────────────────────────────────────────────────
 
 model AgentPromptVersion {

@@ -11,7 +11,12 @@
 import { generateText, streamText, stepCountIs, type ToolSet } from 'ai'
 import { database } from '@/server/services/database'
 import { getModel } from './services/provider-factory'
-import { retrieveContextBlock } from './knowledge/knowledge-retrieval.service'
+import { retrieveRelevantChunks, buildContextBlock } from './knowledge/knowledge-retrieval.service'
+import {
+  recordRuntimeDecision,
+  EMPTY_DECISION_META,
+  type RuntimeDecisionMeta,
+} from './services/runtime-decision.service'
 import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 import { getRedis } from '@/server/services/redis'
 import { getEnabledBuiltinTools, type ToolExecutionContext } from './tools/builtin-tools'
@@ -278,6 +283,8 @@ type PreparedAgentCall = {
   startTime: number
   /** Resolved BYOK key (or undefined → provider env fallback). */
   apiKey?: string
+  /** Decisões coletadas no setup (RAG/skills/memória) p/ observabilidade. */
+  decisionMeta: RuntimeDecisionMeta
 }
 
 /**
@@ -315,6 +322,14 @@ async function prepareAgentCall(
   let systemPrompt =
     promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
+  // Observabilidade: coleta as decisões de setup conforme cada bloco roda.
+  const decisionMeta: RuntimeDecisionMeta = {
+    ...EMPTY_DECISION_META,
+    promptVersionId: promptVersion?.id ?? null,
+    memoryWindowSize: agentConfig.memoryWindow,
+    enabledTools: agentConfig.enabledTools ?? [],
+  }
+
   // 2a. Long-term memory: carrega o resumo da sessão anterior CLOSED do mesmo
   // contato (se houver) e injeta no system prompt. Wrap em try/catch — falha
   // de memória nunca deve derrubar o agente.
@@ -327,6 +342,7 @@ async function prepareAgentCall(
     )
     if (previousSummary?.summary) {
       systemPrompt = `${systemPrompt}\n\n## Contexto de conversa anterior\n\n${previousSummary.summary}`
+      decisionMeta.previousSessionSummaryUsed = true
     }
   } catch (err) {
     console.warn(
@@ -347,6 +363,7 @@ async function prepareAgentCall(
       })
       if (active.length > 0) {
         systemPrompt = `${systemPrompt}\n\n${renderActiveSkills(active)}`
+        decisionMeta.skillsActivated = active.map((s) => s.name)
       }
     }
   } catch (err) {
@@ -358,12 +375,17 @@ async function prepareAgentCall(
   // decisão de design: economiza um passo do tool-loop e garante disponibilidade).
   // Falha (coleção vazia, extensão ausente, embedding indisponível) → segue sem RAG.
   if (agentConfig.useRAG && agentConfig.ragCollectionId) {
+    decisionMeta.ragEnabled = true
+    decisionMeta.ragCollectionId = agentConfig.ragCollectionId
     try {
-      const ragBlock = await retrieveContextBlock({
+      const chunks = await retrieveRelevantChunks({
         collectionId: agentConfig.ragCollectionId,
         query: params.messageContent,
         organizationId: params.organizationId,
       })
+      decisionMeta.ragQueried = true
+      decisionMeta.ragChunksRetrieved = chunks.length
+      const ragBlock = buildContextBlock(chunks)
       if (ragBlock) {
         systemPrompt = `${systemPrompt}\n\n${ragBlock}`
       }
@@ -393,6 +415,8 @@ async function prepareAgentCall(
       toolsEstimateTokens: 300,
     })
     conversationHistory = applyWindow(rawHistory, dynamicDecision.window)
+    decisionMeta.dynamicWindowSize = dynamicDecision.window
+    decisionMeta.messagesDropped = dynamicDecision.droppedCount
     if (dynamicDecision.droppedCount > 0) {
       console.log(
         `[AgentRuntime] dynamic window: ${dynamicDecision.window}/${rawHistory.length} msgs (reason: ${dynamicDecision.reason})`
@@ -521,6 +545,7 @@ async function prepareAgentCall(
     startTime,
     // Resolved BYOK key (or undefined) so fallback model swaps reuse it.
     apiKey: resolvedApiKey,
+    decisionMeta,
   }
 }
 
@@ -604,6 +629,7 @@ export async function processAgentMessage(
     systemPrompt,
     startTime,
     apiKey: resolvedApiKey,
+    decisionMeta,
   } = await prepareAgentCall(params)
 
   // agentConfig is guaranteed non-null here (prepareAgentCall throws otherwise)
@@ -734,6 +760,32 @@ export async function processAgentMessage(
       console.warn('[AgentRuntime] persistTurn skipped:', err)
     }
 
+    // 8c. Observabilidade por turno (fire-and-forget — nunca derruba o agente).
+    void recordRuntimeDecision({
+      ...decisionMeta,
+      organizationId: params.organizationId,
+      sessionId: params.sessionId,
+      agentConfigId: agentConfig.id,
+      executionMode: 'sync',
+      modelPrimary: agentConfig.model,
+      providerPrimary: agentConfig.provider,
+      modelUsed: activeModelName,
+      providerUsed: agentConfig.provider,
+      fallbackTriggered: usedFallback,
+      fallbackReason: usedFallback ? 'cooldown_or_retry' : null,
+      toolsCalled: toolCalls.map((t) => t.toolName),
+      toolIterations: result.steps?.length ?? 0,
+      inputTokens,
+      outputTokens,
+      cachedTokens:
+        (result.usage as { cachedInputTokens?: number } | undefined)
+          ?.cachedInputTokens ?? 0,
+      totalTokens: inputTokens + outputTokens,
+      totalCost: cost.totalCost,
+      latencyMs,
+      status: 'success',
+    })
+
     return {
       text: result.text || '',
       toolCalls,
@@ -755,6 +807,21 @@ export async function processAgentMessage(
       `[AgentRuntime] LLM call failed for agent "${agentConfig.name}":`,
       message
     )
+    void recordRuntimeDecision({
+      ...decisionMeta,
+      organizationId: params.organizationId,
+      sessionId: params.sessionId,
+      agentConfigId: agentConfig.id,
+      executionMode: 'sync',
+      modelPrimary: agentConfig.model,
+      providerPrimary: agentConfig.provider,
+      modelUsed: activeModelName,
+      providerUsed: agentConfig.provider,
+      fallbackTriggered: usedFallback,
+      latencyMs: Date.now() - startTime,
+      status: 'error',
+      errorMessage: message,
+    })
     throw error
   }
 }
@@ -834,6 +901,7 @@ export async function* processAgentMessageStream(
     model,
     systemPrompt,
     startTime,
+    decisionMeta,
   } = prepared
 
   if (!agentConfig) {
@@ -973,6 +1041,26 @@ export async function* processAgentMessageStream(
       aggregatedToolCalls
     )
 
+    void recordRuntimeDecision({
+      ...decisionMeta,
+      organizationId: params.organizationId,
+      sessionId: params.sessionId,
+      agentConfigId: agentConfig.id,
+      executionMode: 'stream',
+      modelPrimary: agentConfig.model,
+      providerPrimary: agentConfig.provider,
+      modelUsed: streamActiveModelName,
+      providerUsed: agentConfig.provider,
+      fallbackTriggered: streamActiveModelName !== agentConfig.model,
+      toolsCalled: aggregatedToolCalls.map((t) => t.toolName),
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      totalCost: cost.totalCost,
+      latencyMs,
+      status: 'success',
+    })
+
     yield {
       type: 'finish',
       usage: {
@@ -1001,6 +1089,20 @@ export async function* processAgentMessageStream(
         `[AgentRuntime] LLM stream failed for agent "${agentConfig.name}":`,
         message
       )
+      void recordRuntimeDecision({
+        ...decisionMeta,
+        organizationId: params.organizationId,
+        sessionId: params.sessionId,
+        agentConfigId: agentConfig.id,
+        executionMode: 'stream',
+        modelPrimary: agentConfig.model,
+        providerPrimary: agentConfig.provider,
+        modelUsed: streamActiveModelName,
+        providerUsed: agentConfig.provider,
+        latencyMs: Date.now() - startTime,
+        status: 'error',
+        errorMessage: message,
+      })
       yield { type: 'error', message }
     }
   }

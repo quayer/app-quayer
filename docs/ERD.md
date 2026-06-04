@@ -1,9 +1,11 @@
 # ERD — Quayer Database Schema
 
-> Updated: 2026-05-10 | Engine: PostgreSQL (Supabase)
+> Updated: 2026-06-04 | Engine: PostgreSQL (Supabase + pgvector 0.8)
 > Rendered automatically by GitHub (Mermaid)
 >
 > **Mudanças desde 2026-03-14:** CRM/Inbox nukados (Abr/13) — `Contact`, `GroupChat`, `KanbanBoard`, `QuickReply`, `SessionNote` e ~15 tabelas removidas; Builder IA adicionado (`BuilderProject` família, Abr/9 + Abr/12); `UserIdentity` para login federado (Mai/10); role normalizado lowercase (Mai/10); `OTP disabled flags` em UserPreferences (Abr/30). `IpRule`, `ScimToken` foram removidos junto com admin surface.
+>
+> **Jun/04 (Wave Orayon):** RAG/base de conhecimento — `KnowledgeCollection` / `KnowledgeSource` / `KnowledgeChunk` (coluna `embedding vector(1536)` + índice HNSW `vector_cosine_ops`, escrita/leitura via raw SQL); observabilidade `AgentRuntimeDecision` (1 registro por turno, **sem FK** — tabela de log de alta escrita); canais Cloud API/Instagram (colunas novas em `Connection`); `CalendarConnection` (connect-link Google Calendar, refresh_token encriptado em `OrganizationProvider`); `Department` + `DepartmentMember` (roleta/round-robin). Modelos novos abaixo no Domain "RAG & Observability".
 
 ---
 
@@ -373,5 +375,66 @@ erDiagram
 | **2026-06-03** | **`add_channel_credentials`** | **Connection: + cloudApiVerifyToken + colunas Instagram (igAccountId/igPageAccessToken/igAppSecret/igVerifyToken) — Wave 2 (3 canais)** |
 | **2026-06-03** | **`add_department_round_robin`** | **Department estendido (lastAssignedUserId/At + FK→Organization) + novo `department_members` + ChatSession FKs assignedAgent/assignedCustomer — Wave 4a (roleta/departamentos)** |
 | **2026-06-03** | **`add_calendar_connections`** | **Novo `calendar_connections` + enum CalendarConnectionStatus (estado do link público de conexão do Google Calendar; refresh_token vai no OrganizationProvider) — Wave 4b** |
+| **2026-06-03** | **`add_knowledge_rag`** | **`CREATE EXTENSION vector` + `knowledge_collections`/`knowledge_sources`/`knowledge_chunks` (coluna `embedding vector(1536)` + índice HNSW) + FK reativada `AIAgentConfig.ragCollectionId` — Wave RAG** |
+| **2026-06-04** | **`add_agent_runtime_decisions`** | **Novo `agent_runtime_decisions` (1 registro/turno: modelo/fallback, RAG, skills, tools, tokens, custo, latência, status). Sem FK (log de alta escrita) — Wave Orayon** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
+
+---
+
+## Domain: RAG & Observability (Wave Orayon)
+
+```mermaid
+erDiagram
+    KnowledgeCollection ||--o{ KnowledgeSource : "tem"
+    KnowledgeCollection ||--o{ KnowledgeChunk : "tem"
+    KnowledgeSource ||--o{ KnowledgeChunk : "gera"
+    AIAgentConfig }o--o| KnowledgeCollection : "ragCollectionId (SetNull)"
+
+    KnowledgeCollection {
+        uuid id PK
+        string organizationId FK
+        string name "UK(org,name)"
+        string embeddingModel "text-embedding-3-small"
+        int dimensions "1536"
+        bool isActive
+    }
+    KnowledgeSource {
+        uuid id PK
+        string collectionId FK
+        string organizationId
+        string type "pdf|url|text"
+        string source "filename|url"
+        string status "pending|processing|ready|error"
+        int chunkCount
+    }
+    KnowledgeChunk {
+        uuid id PK
+        string collectionId FK
+        string sourceId FK "nullable"
+        text content
+        vector embedding "vector(1536), HNSW cosine — raw SQL"
+        json metadata
+        int ordinal
+    }
+    AgentRuntimeDecision {
+        uuid id PK
+        string organizationId "indexed, sem FK"
+        string sessionId
+        string agentConfigId
+        string executionMode "sync|stream"
+        string modelUsed
+        bool fallbackTriggered
+        bool ragQueried
+        int ragChunksRetrieved
+        string_array skillsActivated
+        string_array toolsCalled
+        int totalTokens
+        float totalCost
+        int latencyMs
+        string status "success|error"
+        datetime createdAt
+    }
+```
+
+> `AgentRuntimeDecision` é **tabela de log sem FK** (desacoplada, alta escrita; limpeza por retenção). `KnowledgeChunk.embedding` nunca é lida/escrita via Prisma tipado — sempre raw SQL (`::vector`).
