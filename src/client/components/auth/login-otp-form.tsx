@@ -20,7 +20,7 @@ import Link from "next/link"
 import { api } from "@/igniter.client"
 import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
-import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
+import { getCsrfHeaders, ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -69,10 +69,13 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
   const [countdown, setCountdown] = useState(60)
   const [autoSubmitted, setAutoSubmitted] = useState(false)
   const [twoFactorChallengeId, setTwoFactorChallengeId] = useState<string | null>(null)
-  const countdownEndRef = useRef(Date.now() + 60 * 1000)
+  const countdownEndRef = useRef(0)
 
   useEffect(() => {
     if (canResend) return
+    // Define o fim do countdown ao (re)iniciar — mount e a cada resend (quando
+    // canResend volta a false). Mantém Date.now() fora do render (pureza react-hooks).
+    countdownEndRef.current = Date.now() + 60 * 1000
     const id = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((countdownEndRef.current - Date.now()) / 1000))
       setCountdown(remaining)
@@ -214,20 +217,37 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
     setIsLoading(true)
 
     try {
-      // Call different endpoint based on signup vs login flow
-      const { data, error: apiError } = isSignup
-        ? await api.auth.verifySignupOTP.mutate({
-            body: { email, code }
-          })
-        : await api.auth.verifyLoginOTP.mutate({
-            body: { email, code }
-          })
+      // verify-login-otp / verify-signup-otp exigem csrfProcedure (double-submit:
+      // header x-csrf-token === cookie csrf_token). O Igniter client NÃO injeta
+      // esse header, então usamos fetch direto + ensureCsrfHeaders() para garantir
+      // que o cookie exista e o header seja enviado (evita o 403 do homol).
+      const csrfHeaders = await ensureCsrfHeaders()
+      const endpoint = isSignup
+        ? '/api/v1/auth/verify-signup-otp'
+        : '/api/v1/auth/verify-login-otp'
 
-      if (apiError) {
-        throw apiError
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders },
+        credentials: 'include',
+        body: JSON.stringify({ email, code }),
+      })
+
+      const payload = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        const message =
+          payload?.error?.message ||
+          (typeof payload?.error === 'string' ? payload.error : undefined) ||
+          'Não foi possível verificar. Tente novamente.'
+        setError(translateAuthError(message))
+        setIsLoading(false)
+        return
       }
 
-      const responseData = data as { user?: { role: string }; needsOnboarding?: boolean; requiresTwoFactor?: boolean; challengeId?: string } | null
+      const responseData = (payload?.data ?? payload) as
+        | { user?: { role: string }; needsOnboarding?: boolean; requiresTwoFactor?: boolean; challengeId?: string }
+        | null
       if (responseData?.requiresTwoFactor && responseData?.challengeId) {
         setTwoFactorChallengeId(responseData.challengeId)
         setIsLoading(false)
@@ -237,26 +257,8 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
         // Backend seta cookies httpOnly via Set-Cookie header.
         window.location.href = "/"
       }
-    } catch (err: unknown) {
-      let errorMessage = "Não foi possível verificar. Tente novamente."
-
-      const e = err as Record<string, unknown> | undefined
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (e?.data && typeof (e.data as Record<string, unknown>).error === 'string') {
-        errorMessage = (e.data as Record<string, unknown>).error as string
-      } else if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
-        errorMessage = String(errObj.details[0]?.message) || errorMessage
-      } else if (typeof errObj?.message === 'string') {
-        errorMessage = errObj.message
-      } else if (typeof e?.message === 'string') {
-        errorMessage = e.message
-      } else if (typeof err === 'string') {
-        errorMessage = err
-      }
-
-      errorMessage = translateAuthError(errorMessage)
-
-      setError(errorMessage)
+    } catch {
+      setError(translateAuthError("Não foi possível verificar. Tente novamente."))
       setIsLoading(false)
     }
   }, [identifier, phone, email, isSignup, isLoading])
@@ -316,7 +318,10 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
     }
   }
 
-  // Auto-submit quando 6 dígitos preenchidos
+  // Auto-submit quando 6 dígitos preenchidos. O setState aqui é intencional
+  // (auto-submit guardado por flag autoSubmitted p/ não disparar 2x); a regra
+  // set-state-in-effect é desabilitada só neste bloco.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (otp.length === 6 && !isLoading && !autoSubmitted && identifier) {
       setAutoSubmitted(true)
@@ -324,6 +329,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
     }
     if (otp.length < 6) setAutoSubmitted(false)
   }, [otp, isLoading, autoSubmitted, identifier, submitCode])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handle2FASuccess = (result: { user: { role: string; currentOrgId?: string }; needsOnboarding?: boolean }) => {
     window.location.href = "/"
