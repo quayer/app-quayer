@@ -14,6 +14,11 @@
 
 import { getDatabase } from '@/server/services/database'
 import type { Prisma } from '@prisma/client'
+import {
+  mergeAgentRuntimeSettingsIntoMetadata,
+  normalizeAgentRuntimeSettings,
+  type AgentRuntimeSettings,
+} from '@/lib/agent-runtime-settings'
 
 export const builderProjectRepository = {
   /**
@@ -235,6 +240,61 @@ export const builderProjectRepository = {
       data: { systemPrompt },
       select: { id: true, systemPrompt: true, updatedAt: true },
     })
+  },
+
+  /**
+   * Atualiza flags operacionais do agente publicado/criador.
+   *
+   * Flags de runtime que ainda não possuem colunas próprias ficam em
+   * BuilderProject.metadata.agentRuntimeSettings. TTS usa também os campos
+   * já existentes em AIAgentConfig para o callback/outbound conseguir ler sem
+   * depender só de metadata.
+   */
+  async updateAgentRuntimeSettings(
+    projectId: string,
+    organizationId: string,
+    rawSettings: unknown,
+  ): Promise<AgentRuntimeSettings | null> {
+    const database = getDatabase()
+
+    const project = await database.builderProject.findFirst({
+      where: { id: projectId, organizationId },
+      select: {
+        id: true,
+        aiAgentId: true,
+        metadata: true,
+      },
+    })
+
+    if (!project) return null
+
+    const settings = normalizeAgentRuntimeSettings(rawSettings)
+    const metadata = mergeAgentRuntimeSettingsIntoMetadata(
+      project.metadata,
+      settings,
+    ) as Prisma.InputJsonValue
+
+    await database.$transaction(async (tx) => {
+      await tx.builderProject.update({
+        where: { id: project.id },
+        data: { metadata },
+      })
+
+      if (project.aiAgentId) {
+        await tx.aIAgentConfig.update({
+          where: { id: project.aiAgentId },
+          data: {
+            enableTTS: settings.tts.enabled,
+            ttsProvider: settings.tts.provider,
+            ttsVoiceId: settings.tts.voiceId,
+            ttsModel: settings.tts.model,
+            ttsSpeechRate: settings.tts.speechRate,
+          },
+        })
+      }
+    })
+
+    return settings
   },
 
   /**

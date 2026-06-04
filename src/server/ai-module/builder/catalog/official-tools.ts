@@ -57,27 +57,27 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     type: 'builtin',
     status: 'available',
   },
-  // v1.5 — backlog
+  // v1.5 — Google Calendar (Wave 4b — available; conecta via link de agenda)
   {
     name: 'check_availability',
     description: 'Consulta slots livres Google Calendar',
     phase: 'v1.5',
     type: 'official',
-    status: 'backlog',
+    status: 'available',
   },
   {
     name: 'create_event',
     description: 'Cria evento Google Calendar + Meet',
     phase: 'v1.5',
     type: 'official',
-    status: 'backlog',
+    status: 'available',
   },
   {
     name: 'cancel_event',
     description: 'Cancela agendamento Google Calendar',
     phase: 'v1.5',
     type: 'official',
-    status: 'backlog',
+    status: 'available',
   },
   {
     name: 'create_funnel_tabulation',
@@ -91,7 +91,7 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     description: 'Distribui conversa para atendente via roleta',
     phase: 'v1.5',
     type: 'builtin',
-    status: 'backlog',
+    status: 'available',
   },
 ]
 

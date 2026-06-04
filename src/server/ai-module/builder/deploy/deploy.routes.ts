@@ -18,6 +18,7 @@ import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { database } from '@/server/services/database'
 import { executeDeployFlow } from './deploy-flow.orchestrator'
+import { publishVersion as publishVersionStep } from './publish-version.handler'
 import { rollbackDeployment } from './rollback.handler'
 import type { DeployStatus } from './deploy.contract'
 
@@ -38,10 +39,8 @@ type BuilderDeploymentRow = {
   id: string
   projectId: string
   promptVersionId: string
-  organizationId: string
-  userId: string
+  triggeredBy: string
   status: DeployStatus
-  currentStep: string | null
   failureStep: string | null
   failureReason: string | null
   instanceId: string | null
@@ -146,7 +145,8 @@ const status = igniter.query({
 
     try {
       const latest = await delegate.findFirst({
-        where: { projectId, organizationId: user.currentOrgId },
+        // org scoping via the project relation (no organizationId column here)
+        where: { projectId, project: { organizationId: user.currentOrgId } },
         orderBy: { startedAt: 'desc' },
       })
 
@@ -217,7 +217,13 @@ const rollback = igniter.mutation({
       if (!deployment) {
         return response.notFound('Deployment não encontrado')
       }
-      if (deployment.organizationId !== user.currentOrgId) {
+      // No organizationId column on BuilderDeployment — verify ownership via
+      // the project (which IS org-scoped).
+      const ownerProject = await database.builderProject.findFirst({
+        where: { id: deployment.projectId, organizationId: user.currentOrgId },
+        select: { id: true },
+      })
+      if (!ownerProject) {
         return response.forbidden('Deployment não pertence à organização ativa')
       }
 
@@ -230,4 +236,71 @@ const rollback = igniter.mutation({
   },
 })
 
-export const deployRoutes = { publish, status, rollback }
+// ---------------------------------------------------------------------------
+// publish-version — promote a draft prompt version to production WITHOUT the
+// instance-creation saga. The deploy-tab wizard attaches the channel in a
+// separate step (channel.routes), so "Publicar" here only needs to promote the
+// version. This is the route the UI button hits (the old saga `/publish` would
+// provision a duplicate instance over the already-attached channel).
+// ---------------------------------------------------------------------------
+
+const publishVersion = igniter.mutation({
+  name: 'Publish Builder Prompt Version',
+  description:
+    'Promove uma versão de prompt para produção (sem criar instância; o canal é anexado à parte).',
+  path: '/deploy/publish-version',
+  method: 'POST',
+  use: [authOrApiKeyProcedure({ required: true })],
+  body: z.object({
+    projectId: z.string().uuid(),
+    promptVersionId: z.string().uuid(),
+  }),
+  handler: async ({ request, context, response }) => {
+    const user = context.auth?.session?.user as
+      | { id: string; currentOrgId?: string }
+      | undefined
+    if (!user) return response.unauthorized('Não autenticado')
+    if (!user.currentOrgId) {
+      return response.badRequest('Organização não selecionada')
+    }
+
+    const { projectId, promptVersionId } = request.body
+
+    const project = await database.builderProject.findFirst({
+      where: { id: projectId, organizationId: user.currentOrgId },
+      select: { id: true, aiAgentId: true },
+    })
+    if (!project) return response.notFound('Projeto não encontrado')
+    if (!project.aiAgentId) {
+      return response.badRequest(
+        'Projeto ainda não possui agente — crie o agente antes de publicar',
+      )
+    }
+
+    try {
+      const result = await publishVersionStep({
+        deploymentId: null,
+        projectId: project.id,
+        promptVersionId,
+        aiAgentId: project.aiAgentId,
+        organizationId: user.currentOrgId,
+        userId: user.id,
+        state: {},
+      })
+      return response.json({
+        success: true,
+        data: {
+          versionNumber: result.versionNumber,
+          publishedAt: result.publishedAt,
+        },
+        message: 'Versão publicada',
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido'
+      console.error('[deploy/publish-version] Falha:', err)
+      return response.badRequest(`Erro ao publicar versão: ${message}`)
+    }
+  },
+})
+
+export const deployRoutes = { publish, publishVersion, status, rollback }

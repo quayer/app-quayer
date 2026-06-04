@@ -63,6 +63,11 @@ const ENV_KEYS: Record<string, string | undefined> = {
   openai: process.env.OPENAI_API_KEY,
   anthropic: process.env.ANTHROPIC_API_KEY,
   google: process.env.GOOGLE_API_KEY,
+  elevenlabs: process.env.ELEVENLABS_API_KEY,
+  // Aligned with provider-factory.getModel() supported providers so BYOK
+  // doesn't silently fall through for groq/openrouter agents.
+  groq: process.env.GROQ_API_KEY,
+  openrouter: process.env.OPENROUTER_API_KEY,
 }
 
 // ── Resolver ──────────────────────────────────────────────────────────────────

@@ -15,6 +15,12 @@ import { tool } from 'ai'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { createDispatchToAgentTool } from './department-dispatch'
+import {
+  createCheckAvailabilityTool,
+  createCreateEventTool,
+  createCancelEventTool,
+} from './calendar'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -532,6 +538,17 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
       },
     }),
 
+    // dispatch_to_agent (roleta) — encaminha para um departamento e distribui
+    // ao próximo atendente via round-robin. Degrada para transfer_to_human-like
+    // até a migration de departamentos landar.
+    dispatch_to_agent: createDispatchToAgentTool(ctx),
+
+    // Google Calendar (Wave 4b) — degradam ("agenda não conectada") até o
+    // profissional conectar a agenda pelo link.
+    check_availability: createCheckAvailabilityTool(ctx),
+    create_event: createCreateEventTool(ctx),
+    cancel_event: createCancelEventTool(ctx),
+
   }
 }
 
@@ -577,4 +594,8 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'send_pricing',
   'create_lead',
   'transfer_to_human',
+  'dispatch_to_agent',
+  'check_availability',
+  'create_event',
+  'cancel_event',
 ]

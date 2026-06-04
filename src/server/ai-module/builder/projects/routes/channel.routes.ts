@@ -32,6 +32,52 @@ type AuthedUser = {
 
 export const channelRoutes = {
   // ==========================================
+  // LIST PROJECT CHANNEL OPTIONS — GET /projects/:id/channel/options
+  // ==========================================
+  listProjectChannelOptions: igniter.query({
+    name: 'List Project Channel Options',
+    description: 'Lista canais WhatsApp existentes na organização para vincular ao projeto.',
+    path: '/projects/:id/channel/options' as const,
+    method: 'GET',
+    use: [authOrApiKeyProcedure({ required: true })],
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = channelProjectParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+
+      const database = getDatabase()
+      const project = await database.builderProject.findFirst({
+        where: { id, organizationId: user.currentOrgId },
+        select: { id: true },
+      })
+
+      if (!project) return response.notFound('Projeto não encontrado')
+
+      const channels = await database.connection.findMany({
+        where: {
+          organizationId: user.currentOrgId,
+          channel: 'WHATSAPP',
+        },
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          name: true,
+          phoneNumber: true,
+          status: true,
+          provider: true,
+          profileName: true,
+        },
+      })
+
+      return response.success({ channels })
+    },
+  }),
+
+  // ==========================================
   // GET PROJECT CHANNEL — GET /projects/:id/channel
   // ==========================================
   getProjectChannel: igniter.query({

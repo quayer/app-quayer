@@ -22,7 +22,40 @@ import {
 import { updateStateSummary } from '../../services/context-summary.service'
 import { compactIfNeeded } from './compact-if-needed'
 import { persistAssistantMessage, persistErrorMessage } from './persist-message'
+import { logToolCallComplete } from './log-tool-call'
 import { credentialResolver } from '@/lib/providers/credential-resolver.service'
+import type { Prisma } from '@prisma/client'
+
+/**
+ * Hard ceiling for total LLM spend within a single Builder creation
+ * conversation (mirrors Orayon's MAX_SESSION_COST_USD). Without this, a
+ * looping/expensive creation chat could burn money unbounded — the previous
+ * only guard was context-size, not cost.
+ */
+const MAX_SESSION_COST_USD = 5.0
+
+/**
+ * Sums the per-turn LLM cost already spent on this conversation by reading the
+ * `metadata.cost.totalCost` stamped on each assistant message. Best-effort.
+ */
+async function getSessionCostUsd(conversationId: string): Promise<number> {
+  try {
+    const rows = await database.builderProjectMessage.findMany({
+      where: { conversationId, role: 'assistant' },
+      select: { metadata: true },
+    })
+    let total = 0
+    for (const row of rows) {
+      const meta = row.metadata as { cost?: { totalCost?: number } } | null
+      const c = meta?.cost?.totalCost
+      if (typeof c === 'number' && Number.isFinite(c)) total += c
+    }
+    return total
+  } catch (err) {
+    console.warn('[streamAgentResponse] session cost check failed:', err)
+    return 0
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,6 +160,19 @@ export async function* streamAgentResponse(
     return
   }
 
+  // Cost ceiling guard — refuse before spending more if the session already
+  // crossed the budget (pre-flight, so we never start an over-budget turn).
+  const spentUsd = await getSessionCostUsd(params.conversationId)
+  if (spentUsd >= MAX_SESSION_COST_USD) {
+    yield {
+      type: '__budget_exhausted__',
+      message: `Limite de custo desta sessão de criação atingido (US$ ${spentUsd.toFixed(
+        2,
+      )}). Crie um novo projeto para continuar.`,
+    }
+    return
+  }
+
   // Resolve the agent's AI provider so we can honour the org's BYOK key
   // configured in OrganizationProvider (the integrations page).
   // We need the agentConfig's provider field — load it here with a minimal
@@ -173,18 +219,37 @@ export async function* streamAgentResponse(
       yield event
 
       if (event.type === 'finish') {
-        await persistAssistantMessage({
+        const persisted = await persistAssistantMessage({
           conversationId: params.conversationId,
           content: accumulatedText,
-          toolCalls: event.toolCalls as unknown as import('@prisma/client').Prisma.InputJsonValue,
+          toolCalls: event.toolCalls as unknown as Prisma.InputJsonValue,
           metadata: {
             usage: event.usage,
             cost: event.cost,
             model: event.model,
             provider: event.provider,
             latencyMs: event.latencyMs,
-          } as unknown as import('@prisma/client').Prisma.InputJsonValue,
+          } as unknown as Prisma.InputJsonValue,
         })
+
+        // Observability: write one BuilderToolCall row per tool the meta-agent
+        // invoked, linked to the persisted assistant message. The writer existed
+        // but was never wired — this turns the dead table on. Fire-and-forget.
+        if (persisted.id && Array.isArray(event.toolCalls)) {
+          for (const tc of event.toolCalls as Array<{
+            toolName?: string
+            args?: unknown
+            result?: unknown
+          }>) {
+            if (!tc?.toolName) continue
+            void logToolCallComplete({
+              messageId: persisted.id,
+              toolName: tc.toolName,
+              input: (tc.args ?? {}) as Prisma.InputJsonValue,
+              output: (tc.result ?? {}) as Prisma.InputJsonValue,
+            })
+          }
+        }
 
         // Fire-and-forget state summary refresh.
         void updateStateSummary(params.conversationId, database).catch(

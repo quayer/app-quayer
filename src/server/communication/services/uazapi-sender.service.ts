@@ -28,6 +28,54 @@ export interface SendOptions {
   replyToMessageId?: string
 }
 
+export interface SendButtonItem {
+  id: string
+  title: string
+}
+
+export interface SendListRow {
+  id: string
+  title: string
+  description?: string
+}
+
+export interface SendListSection {
+  title: string
+  rows: SendListRow[]
+}
+
+export interface SendLocationPayload {
+  latitude: number
+  longitude: number
+  name?: string
+  address?: string
+}
+
+export interface SendButtonsPayload {
+  text: string
+  buttons: SendButtonItem[]
+}
+
+export interface SendListPayload {
+  text: string
+  button: string
+  sections: SendListSection[]
+}
+
+export interface SendCarouselCard {
+  header_url: string
+  body: string
+  button_type: 'cta_url' | 'quick_reply'
+  button_text: string
+  button_url?: string
+  buttons?: SendButtonItem[]
+}
+
+export interface SendCarouselPayload {
+  text: string
+  cards: SendCarouselCard[]
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -50,7 +98,19 @@ function extractMessageId(data: unknown): string | undefined {
   if (!data || typeof data !== 'object') return undefined
   const obj = data as Record<string, unknown>
   const key = obj.key as Record<string, unknown> | undefined
-  return (key?.id as string | undefined) ?? (obj.messageId as string | undefined)
+  const nestedData = obj.data as Record<string, unknown> | undefined
+
+  return (
+    (key?.id as string | undefined) ??
+    (obj.id as string | undefined) ??
+    (obj.messageId as string | undefined) ??
+    (obj.messageid as string | undefined) ??
+    (obj.message_id as string | undefined) ??
+    (nestedData?.id as string | undefined) ??
+    (nestedData?.messageId as string | undefined) ??
+    (nestedData?.messageid as string | undefined) ??
+    (nestedData?.message_id as string | undefined)
+  )
 }
 
 function extractError(data: unknown, status: number): string {
@@ -87,6 +147,39 @@ async function postJson(
   return { ok: response.ok, status: response.status, data }
 }
 
+async function maybeDelay(options: SendOptions): Promise<void> {
+  if (options.delayMs && options.delayMs > 0) {
+    await sleep(options.delayMs)
+  }
+}
+
+function addReplyId(body: Record<string, unknown>, options: SendOptions): void {
+  if (options.replyToMessageId) {
+    body.replyid = options.replyToMessageId
+  }
+}
+
+async function sendToPath(
+  path: string,
+  token: string,
+  baseUrl: string,
+  body: Record<string, unknown>,
+  options: SendOptions,
+): Promise<SendResult> {
+  try {
+    await maybeDelay(options)
+    addReplyId(body, options)
+
+    const { ok, status, data } = await postJson(`${baseUrl}${path}`, token, body)
+    if (!ok) {
+      return { success: false, error: extractError(data, status) }
+    }
+    return { success: true, messageId: extractMessageId(data) }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // sendText
 // ---------------------------------------------------------------------------
@@ -98,27 +191,16 @@ export async function sendText(
   content: string,
   options: SendOptions = {},
 ): Promise<SendResult> {
-  try {
-    if (options.delayMs && options.delayMs > 0) {
-      await sleep(options.delayMs)
-    }
-
-    const body: Record<string, unknown> = {
+  return sendToPath(
+    '/send/text',
+    token,
+    baseUrl,
+    {
       number: normalizePhone(recipient),
       text: content,
-    }
-    if (options.replyToMessageId) {
-      body.replyid = options.replyToMessageId
-    }
-
-    const { ok, status, data } = await postJson(`${baseUrl}/send/text`, token, body)
-    if (!ok) {
-      return { success: false, error: extractError(data, status) }
-    }
-    return { success: true, messageId: extractMessageId(data) }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
-  }
+    },
+    options,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -133,29 +215,18 @@ export async function sendImage(
   caption?: string,
   options: SendOptions = {},
 ): Promise<SendResult> {
-  try {
-    if (options.delayMs && options.delayMs > 0) {
-      await sleep(options.delayMs)
-    }
-
-    const body: Record<string, unknown> = {
+  return sendToPath(
+    '/send/image',
+    token,
+    baseUrl,
+    {
       number: normalizePhone(recipient),
       image: imageUrl,
       imageUrl, // compat: alguns deploys UAZ aceitam camelCase
       caption: caption ?? '',
-    }
-    if (options.replyToMessageId) {
-      body.replyid = options.replyToMessageId
-    }
-
-    const { ok, status, data } = await postJson(`${baseUrl}/send/image`, token, body)
-    if (!ok) {
-      return { success: false, error: extractError(data, status) }
-    }
-    return { success: true, messageId: extractMessageId(data) }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
-  }
+    },
+    options,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -169,28 +240,169 @@ export async function sendAudio(
   audioUrl: string,
   options: SendOptions = {},
 ): Promise<SendResult> {
-  try {
-    if (options.delayMs && options.delayMs > 0) {
-      await sleep(options.delayMs)
-    }
-
-    const body: Record<string, unknown> = {
+  return sendToPath(
+    '/send/audio',
+    token,
+    baseUrl,
+    {
       number: normalizePhone(recipient),
       audio: audioUrl,
+      audioUrl,
       mimetype: 'audio/ogg',
-    }
-    if (options.replyToMessageId) {
-      body.replyid = options.replyToMessageId
-    }
+    },
+    options,
+  )
+}
 
-    const { ok, status, data } = await postJson(`${baseUrl}/send/audio`, token, body)
-    if (!ok) {
-      return { success: false, error: extractError(data, status) }
-    }
-    return { success: true, messageId: extractMessageId(data) }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
-  }
+// ---------------------------------------------------------------------------
+// sendDocument
+// ---------------------------------------------------------------------------
+
+export async function sendDocument(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  documentUrl: string,
+  caption?: string,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/document',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      document: documentUrl,
+      documentUrl,
+      caption: caption ?? '',
+    },
+    options,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// sendVideo
+// ---------------------------------------------------------------------------
+
+export async function sendVideo(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  videoUrl: string,
+  caption?: string,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/video',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      video: videoUrl,
+      videoUrl,
+      caption: caption ?? '',
+    },
+    options,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// sendLocation
+// ---------------------------------------------------------------------------
+
+export async function sendLocation(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  location: SendLocationPayload,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/location',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      latitude: location.latitude,
+      longitude: location.longitude,
+      name: location.name,
+      address: location.address,
+    },
+    options,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// sendButtons
+// ---------------------------------------------------------------------------
+
+export async function sendButtons(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  payload: SendButtonsPayload,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/buttons',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      text: payload.text,
+      buttons: payload.buttons,
+    },
+    options,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// sendList
+// ---------------------------------------------------------------------------
+
+export async function sendList(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  payload: SendListPayload,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/list',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      text: payload.text,
+      button: payload.button,
+      sections: payload.sections,
+    },
+    options,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// sendCarousel
+// ---------------------------------------------------------------------------
+
+export async function sendCarousel(
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  payload: SendCarouselPayload,
+  options: SendOptions = {},
+): Promise<SendResult> {
+  return sendToPath(
+    '/send/carousel',
+    token,
+    baseUrl,
+    {
+      number: normalizePhone(recipient),
+      text: payload.text,
+      cards: payload.cards,
+    },
+    options,
+  )
 }
 
 // ---------------------------------------------------------------------------

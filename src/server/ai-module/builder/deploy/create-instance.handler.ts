@@ -23,7 +23,7 @@
  */
 
 import { database } from '@/server/services/database'
-import { uazapiService } from '@/lib/api/uazapi.service'
+import { uazapiService, buildUazapiWebhookUrl } from '@/lib/api/uazapi.service'
 import type { DeployContext } from './deploy.contract'
 
 export interface CreateDeployInstanceResult {
@@ -90,6 +90,28 @@ export async function createDeployInstance(
   const uazapiToken = uazapiResult.data.token as string
   const uazapiInstanceId =
     (uazapiResult.data.instance?.id as string | undefined) ?? null
+
+  // Register our inbound webhook on the fresh instance. Best-effort: a failure
+  // here must NOT abort the deploy (the connection still pairs via QR), but
+  // WITHOUT this the instance never delivers messages to us.
+  const webhookUrl = buildUazapiWebhookUrl()
+  if (webhookUrl) {
+    try {
+      const hook = await uazapiService.setWebhook(uazapiToken, webhookUrl)
+      if (!hook.success) {
+        console.warn(
+          '[deploy/create-instance] setWebhook returned non-ok:',
+          hook.error,
+        )
+      }
+    } catch (err) {
+      console.warn('[deploy/create-instance] setWebhook failed (non-fatal):', err)
+    }
+  } else {
+    console.warn(
+      '[deploy/create-instance] NEXT_PUBLIC_APP_URL/UAZAPI_WEBHOOK_SECRET missing — webhook NOT registered; instance will not receive messages',
+    )
+  }
 
   const shareToken = `share_${Date.now()}_${Math.random()
     .toString(36)

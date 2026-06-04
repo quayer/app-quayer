@@ -27,6 +27,9 @@ export interface InboundPipelineInput {
   bufferTimeoutSeconds?: number
   whisperEnabled?: boolean
   visionEnabled?: boolean
+  imageVisionEnabled?: boolean
+  documentVisionEnabled?: boolean
+  videoUnderstandingEnabled?: boolean
   bufferEnabled?: boolean
 }
 
@@ -59,6 +62,9 @@ export async function processInboundMessage(
     bufferTimeoutSeconds,
     whisperEnabled = true,
     visionEnabled = true,
+    imageVisionEnabled = visionEnabled,
+    documentVisionEnabled = visionEnabled,
+    videoUnderstandingEnabled = true,
     bufferEnabled = true,
   } = input
 
@@ -135,8 +141,10 @@ export async function processInboundMessage(
 
   // 5. Vision para imagem ou documento.
   if (
-    (normalized.type === 'image' || normalized.type === 'document') &&
-    visionEnabled &&
+    (
+      (normalized.type === 'image' && imageVisionEnabled) ||
+      (normalized.type === 'document' && documentVisionEnabled)
+    ) &&
     openaiApiKey &&
     normalized.mediaUrl &&
     normalized.mediaMimetype
@@ -158,6 +166,10 @@ export async function processInboundMessage(
         (err as Error).message,
       )
     }
+  }
+
+  if (normalized.type === 'video' && !videoUnderstandingEnabled) {
+    processingSteps.push('video_skipped')
   }
 
   // 6. Buffer de concatenação.

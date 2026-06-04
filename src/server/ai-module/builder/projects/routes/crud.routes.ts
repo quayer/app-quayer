@@ -55,6 +55,11 @@ export const duplicateProjectBodySchema = z.object({
   name: z.string().min(1).max(100).trim().optional(),
 })
 
+export const updateAgentSettingsParamsSchema = z.object({
+  id: z.string().uuid('ID de projeto inválido'),
+})
+export const updateAgentSettingsBodySchema = z.record(z.unknown())
+
 // ---------------------------------------------------------------------------
 // Tipagem mínima do usuário autenticado — evita `any` espalhado.
 // ---------------------------------------------------------------------------
@@ -376,6 +381,47 @@ export const crudRoutes = {
         console.error('[projectsRoutes.duplicateProject] Erro:', error)
         const message = error instanceof Error ? error.message : 'Erro desconhecido'
         return response.badRequest(`Erro ao duplicar projeto: ${message}`)
+      }
+    },
+  }),
+
+  // ==========================================
+  // UPDATE AGENT RUNTIME SETTINGS — PATCH /projects/:id/agent-settings
+  // ==========================================
+  updateAgentSettings: igniter.mutation({
+    name: 'Update Agent Runtime Settings',
+    description:
+      'Atualiza flags avançadas do agente: typing, idioma, mídia, buffer e áudio/TTS.',
+    path: '/projects/:id/agent-settings',
+    method: 'PATCH',
+    use: [authOrApiKeyProcedure({ required: true })],
+    body: updateAgentSettingsBodySchema,
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = updateAgentSettingsParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+
+      try {
+        const settings = await builderProjectRepository.updateAgentRuntimeSettings(
+          id,
+          user.currentOrgId,
+          request.body,
+        )
+        if (!settings) return response.notFound('Projeto não encontrado')
+
+        return response.json({
+          success: true,
+          data: settings,
+          message: 'Configurações do agente atualizadas',
+        })
+      } catch (error: unknown) {
+        console.error('[projectsRoutes.updateAgentSettings] Erro:', error)
+        const message = error instanceof Error ? error.message : 'Erro desconhecido'
+        return response.badRequest(`Erro ao atualizar configurações: ${message}`)
       }
     },
   }),

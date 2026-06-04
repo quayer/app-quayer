@@ -17,7 +17,17 @@
  *   - Se 0 blocos forem enviados, NADA é persistido (não polui o histórico).
  */
 
-import type { SendResult, SendOptions } from './uazapi-sender.service'
+import { parseTags, type ParsedTag } from './tag-parser.service'
+import { splitMessage, type MessageBlock } from './message-splitter.service'
+import type {
+  SendResult,
+  SendOptions,
+  SendButtonsPayload,
+  SendCarouselPayload,
+  SendListPayload,
+} from './uazapi-sender.service'
+import { synthesizeTtsToMediaUrl } from './tts.service'
+import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,6 +39,23 @@ export interface OutboundRequest {
   organizationId: string
   contactPhone: string
   agentText: string
+  tts?: AgentRuntimeSettings['tts']
+  /**
+   * Per-turn AI attribution (cost/tokens/model). Persisted on the OUTBOUND
+   * Message so spend and latency are queryable per reply. Optional — operator
+   * (human) messages won't carry it.
+   */
+  aiMeta?: {
+    model?: string
+    provider?: string
+    agentId?: string | null
+    inputTokens?: number
+    outputTokens?: number
+    inputCost?: number
+    outputCost?: number
+    totalCost?: number
+    latencyMs?: number
+  }
 }
 
 export interface OutboundResult {
@@ -61,13 +88,71 @@ export interface OutboundDatabase {
   }
 }
 
-/** Interface mínima do sender — só sendText hoje, expansível para image/audio. */
 export interface OutboundSender {
   sendText: (
     token: string,
     baseUrl: string,
     recipient: string,
     content: string,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendImage?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    imageUrl: string,
+    caption?: string,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendAudio?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    audioUrl: string,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendDocument?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    documentUrl: string,
+    caption?: string,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendVideo?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    videoUrl: string,
+    caption?: string,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendLocation?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    location: NonNullable<MessageBlock['location']>,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendButtons?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    payload: SendButtonsPayload,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendList?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    payload: SendListPayload,
+    options?: SendOptions,
+  ) => Promise<SendResult>
+  sendCarousel?: (
+    token: string,
+    baseUrl: string,
+    recipient: string,
+    payload: SendCarouselPayload,
     options?: SendOptions,
   ) => Promise<SendResult>
 }
@@ -111,19 +196,22 @@ export async function sendAgentResponse(
 
   const baseUrl = connection.uazapiBaseUrl ?? FALLBACK_BASE_URL
 
-  // 2. Split em blocos
-  const blocks = splitIntoBlocks(req.agentText, MAX_BLOCK_CHARS)
+  // 2. Parse tags ricas + split de texto puro
+  const blocks = buildOutboundBlocks(req.agentText, MAX_BLOCK_CHARS)
 
   // 3. Envio sequencial + bot-echo tracking
   let blocksSent = 0
   let firstSuccessMessageId: string | undefined
 
   for (const block of blocks) {
-    const result = await deps.sender.sendText(
+    const result = await sendBlock(
+      deps.sender,
       connection.uazapiToken,
       baseUrl,
       req.contactPhone,
       block,
+      req.organizationId,
+      req.tts,
     )
 
     if (result.success) {
@@ -158,6 +246,20 @@ export async function sendAgentResponse(
         content: req.agentText,
         status: 'sent',
         sentAt: new Date(),
+        // Per-turn AI attribution (these columns existed but were always NULL).
+        ...(req.aiMeta
+          ? {
+              aiModel: req.aiMeta.model,
+              aiProvider: req.aiMeta.provider,
+              aiAgentId: req.aiMeta.agentId ?? undefined,
+              inputTokens: req.aiMeta.inputTokens,
+              outputTokens: req.aiMeta.outputTokens,
+              inputCost: req.aiMeta.inputCost,
+              outputCost: req.aiMeta.outputCost,
+              totalCost: req.aiMeta.totalCost,
+              aiLatency: req.aiMeta.latencyMs,
+            }
+          : {}),
       },
     })
     return { blocksSent, persisted: true, errors }
@@ -184,53 +286,206 @@ export async function sendAgentResponse(
  * Exportado para testes; uso primário interno.
  */
 export function splitIntoBlocks(text: string, maxChars: number): string[] {
-  if (!text) return []
-  if (text.length <= maxChars) return [text]
+  return splitMessage(text, { maxChars, useDelay: false }).map((block) => block.content)
+}
 
-  const paragraphs = text.split(/\n\n+/)
-  const blocks: string[] = []
-  let current = ''
+function buildOutboundBlocks(text: string, maxChars: number): MessageBlock[] {
+  const parsed = parseTags(text)
+  if (parsed.tagsFound.length === 0) {
+    return splitMessage(text, { maxChars })
+  }
 
-  for (const para of paragraphs) {
-    if (para.length > maxChars) {
-      // parágrafo grande: empurra o `current` antes e quebra por palavras
-      if (current) {
-        blocks.push(current)
-        current = ''
-      }
-      for (const sub of splitByWords(para, maxChars)) {
-        blocks.push(sub)
-      }
+  const blocks: MessageBlock[] = []
+  const parts = parsed.textWithPlaceholders.split(/(__TAG_\d+__)/g)
+
+  for (const part of parts) {
+    if (!part) continue
+
+    const placeholder = /^__TAG_(\d+)__$/.exec(part)
+    if (placeholder) {
+      const tag = parsed.tagsFound[Number(placeholder[1])]
+      if (tag) blocks.push(blockFromTag(tag, blocks.length))
       continue
     }
 
-    const candidate = current ? `${current}\n\n${para}` : para
-    if (candidate.length <= maxChars) {
-      current = candidate
-    } else {
-      if (current) blocks.push(current)
-      current = para
-    }
+    blocks.push(
+      ...splitMessage(part, { maxChars }).map((block) => ({
+        ...block,
+        index: blocks.length + block.index,
+      })),
+    )
   }
 
-  if (current) blocks.push(current)
-  return blocks
+  return blocks.map((block, index) => ({
+    ...block,
+    index,
+    delay_ms: index === 0 ? 0 : block.delay_ms,
+  }))
 }
 
-function splitByWords(text: string, maxChars: number): string[] {
-  const words = text.split(/\s+/)
-  const out: string[] = []
-  let cur = ''
-  for (const w of words) {
-    if (!w) continue
-    const candidate = cur ? `${cur} ${w}` : w
-    if (candidate.length <= maxChars) {
-      cur = candidate
-    } else {
-      if (cur) out.push(cur)
-      cur = w
-    }
+function blockFromTag(tag: ParsedTag, index: number): MessageBlock {
+  return {
+    type: tag.type,
+    content: tag.content ?? tag.caption ?? tag.raw,
+    url: tag.url,
+    caption: tag.caption,
+    index,
+    delay_ms: index === 0 ? 0 : undefined,
+    buttons: tag.buttons,
+    list: tag.list,
+    location: tag.location,
+    flow: tag.flow,
+    carousel: tag.carousel,
+    cta_url: tag.cta_url,
   }
-  if (cur) out.push(cur)
-  return out
+}
+
+async function sendBlock(
+  sender: OutboundSender,
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  block: MessageBlock,
+  organizationId: string,
+  tts?: AgentRuntimeSettings['tts'],
+): Promise<SendResult> {
+  const options = { delayMs: block.delay_ms }
+
+  switch (block.type) {
+    case 'text':
+      if (tts?.enabled && sender.sendAudio) {
+        try {
+          const audioUrl = await synthesizeTtsToMediaUrl({
+            organizationId,
+            text: block.content,
+            settings: tts,
+          })
+          if (audioUrl) {
+            return sender.sendAudio(token, baseUrl, recipient, audioUrl, options)
+          }
+        } catch (err) {
+          console.warn(
+            '[outbound] TTS failed, falling back to text:',
+            err instanceof Error ? err.message : String(err),
+          )
+        }
+      }
+      return sender.sendText(token, baseUrl, recipient, block.content, options)
+    case 'image':
+      if (sender.sendImage && block.url) {
+        return sender.sendImage(token, baseUrl, recipient, block.url, block.caption, options)
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'audio':
+      if (sender.sendAudio && block.url) {
+        return sender.sendAudio(token, baseUrl, recipient, block.url, options)
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'document':
+      if (sender.sendDocument && block.url) {
+        return sender.sendDocument(token, baseUrl, recipient, block.url, block.caption, options)
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'video':
+      if (sender.sendVideo && block.url) {
+        return sender.sendVideo(token, baseUrl, recipient, block.url, block.caption, options)
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'location':
+      if (sender.sendLocation && block.location) {
+        return sender.sendLocation(token, baseUrl, recipient, block.location, options)
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'buttons':
+      if (sender.sendButtons && block.buttons?.length) {
+        return sender.sendButtons(
+          token,
+          baseUrl,
+          recipient,
+          { text: block.content, buttons: block.buttons },
+          options,
+        )
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'list':
+      if (sender.sendList && block.list?.sections.length) {
+        return sender.sendList(
+          token,
+          baseUrl,
+          recipient,
+          { text: block.content, button: block.list.button, sections: block.list.sections },
+          options,
+        )
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'carousel':
+      if (sender.sendCarousel && block.carousel?.cards.length) {
+        return sender.sendCarousel(
+          token,
+          baseUrl,
+          recipient,
+          { text: block.content, cards: block.carousel.cards },
+          options,
+        )
+      }
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    case 'cta_url':
+    case 'flow':
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+    default:
+      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
+  }
+}
+
+function sendFallbackText(
+  sender: OutboundSender,
+  token: string,
+  baseUrl: string,
+  recipient: string,
+  block: MessageBlock,
+  options: SendOptions,
+): Promise<SendResult> {
+  return sender.sendText(token, baseUrl, recipient, fallbackTextForBlock(block), options)
+}
+
+function fallbackTextForBlock(block: MessageBlock): string {
+  if (block.type === 'cta_url' && block.cta_url) {
+    return [block.content, `${block.cta_url.display_text}: ${block.cta_url.url}`]
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (block.type === 'flow' && block.flow) {
+    const flowLabel = block.flow.flow_name ?? block.flow.flow_id
+    return [block.flow.flow_cta, flowLabel ? `Formulario: ${flowLabel}` : 'Formulario']
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (block.type === 'location' && block.location) {
+    const { latitude, longitude, name, address } = block.location
+    return [name, address, `https://maps.google.com/?q=${latitude},${longitude}`]
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (block.url) {
+    return [block.caption ?? block.content, block.url].filter(Boolean).join('\n')
+  }
+  if (block.buttons?.length) {
+    return [block.content, ...block.buttons.map((button) => `- ${button.title}`)]
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (block.list?.sections.length) {
+    const rows = block.list.sections.flatMap((section) => [
+      section.title,
+      ...section.rows.map((row) => `- ${row.title}`),
+    ])
+    return [block.content, ...rows].filter(Boolean).join('\n')
+  }
+  if (block.carousel?.cards.length) {
+    const cards = block.carousel.cards.map((card) =>
+      [card.body, card.button_url ?? card.header_url].filter(Boolean).join(' - '),
+    )
+    return [block.content, ...cards].filter(Boolean).join('\n')
+  }
+  return block.content
 }

@@ -52,4 +52,50 @@ export const uazapiService = {
       return { success: false, error: String(err) }
     }
   },
+
+  /**
+   * Registra (upsert) a URL de webhook na instância UAZAPI.
+   *
+   * Sem isso, a instância criada pela saga NUNCA entrega mensagem ao nosso
+   * `/api/v1/webhooks/uazapi` — era o buraco que deixava o agente "publicado"
+   * mudo. O secret viaja na query (`?secret=`) porque a UAZAPI não garante
+   * envio de header customizado; o webhook aceita header OU query.
+   *
+   * ⚠️ Contrato a confirmar no E2E (Wave 7): o shape do body de `POST /webhook`
+   * varia entre versões da UAZAPI. Mantido best-effort (nunca aborta o deploy).
+   */
+  async setWebhook(
+    token: string,
+    webhookUrl: string,
+  ): Promise<UazapiResult> {
+    const baseUrl = getBaseUrl()
+    try {
+      const res = await fetch(`${baseUrl}/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: token },
+        body: JSON.stringify({
+          url: webhookUrl,
+          enabled: true,
+          // Eventos mínimos que o runtime consome: mensagens + estado da conexão.
+          events: ['messages', 'connection'],
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      return { success: res.ok, data, error: res.ok ? undefined : data?.message }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  },
+}
+
+/**
+ * Monta a URL pública do webhook inbound da UAZAPI com o secret na query.
+ * O handler em `/api/v1/webhooks/uazapi` aceita o secret via header
+ * `x-webhook-secret` OU via `?secret=` (fallback) — ver route.ts.
+ */
+export function buildUazapiWebhookUrl(): string | null {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  const secret = process.env.UAZAPI_WEBHOOK_SECRET
+  if (!appUrl || !secret) return null
+  return `${appUrl.replace(/\/$/, '')}/api/v1/webhooks/uazapi?secret=${encodeURIComponent(secret)}`
 }

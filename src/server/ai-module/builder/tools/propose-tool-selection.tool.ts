@@ -26,14 +26,17 @@ export interface BuilderToolExecutionContext {
 }
 
 interface ToolCatalogEntry {
-  /** Matches BUILTIN_TOOL_NAMES — must stay in sync */
+  /** Stable UI id for the capability card */
   key: string
   title: string
   description: string
+  /** Built-in tool keys enabled when this capability is selected */
+  toolKeys: string[]
   /** Icon hint for the card — lucide-react icon name */
   icon: 'calendar' | 'tag' | 'user-plus' | 'headphones' | 'bell'
   /** Recommended by default (pre-checked in the UI) */
   recommended: boolean
+  note?: string
 }
 
 /**
@@ -43,44 +46,88 @@ interface ToolCatalogEntry {
  */
 const RAW_CATALOG: ToolCatalogEntry[] = [
   {
-    key: 'schedule_appointment',
-    title: 'Agendar',
-    description: 'Captura horários e serviços combinados com o cliente.',
-    icon: 'calendar',
-    recommended: true,
-  },
-  {
-    key: 'send_pricing',
-    title: 'Enviar preços',
-    description: 'Registra cotações enviadas para rastreio no CRM.',
-    icon: 'tag',
-    recommended: true,
-  },
-  {
-    key: 'create_lead',
-    title: 'Qualificar lead',
-    description: 'Marca contatos quentes e notifica o time de vendas.',
-    icon: 'user-plus',
-    recommended: true,
-  },
-  {
-    key: 'transfer_to_human',
-    title: 'Escalar para humano',
-    description: 'Pausa a IA e transfere conversas difíceis para um atendente.',
+    key: 'qualified_handoff',
+    title: 'Qualificar e encaminhar',
+    description:
+      'Coleta dados mínimos, registra o lead e pausa a IA para humano continuar.',
+    toolKeys: ['create_lead', 'transfer_to_human'],
     icon: 'headphones',
     recommended: true,
+    note:
+      'Ideal para SDR: depois da qualificação, a conversa fica pronta para advogado, vendedor ou secretária assumir no painel.',
   },
   {
-    key: 'notify_team',
-    title: 'Notificar equipe',
-    description: 'Avisa a equipe sobre situações importantes sem pausar a IA.',
+    key: 'department_dispatch',
+    title: 'Encaminhar para departamento (roleta)',
+    description:
+      'Coloca a conversa na fila de um departamento e distribui automaticamente para o próximo atendente disponível (rodízio justo).',
+    toolKeys: ['dispatch_to_agent'],
+    icon: 'headphones',
+    recommended: false,
+    note:
+      'Diferente de "Qualificar e encaminhar": aqui o sistema escolhe QUAL pessoa do departamento recebe (round-robin) e atribui a conversa a ela. Requer departamentos cadastrados com membros.',
+  },
+  {
+    key: 'team_alert',
+    title: 'Avisar responsável',
+    description:
+      'Cria um alerta interno com resumo do lead sem necessariamente pausar a IA.',
+    toolKeys: ['notify_team'],
     icon: 'bell',
     recommended: false,
+    note:
+      'Hoje a notificação aparece no sistema. Enviar esse resumo para outro WhatsApp exige uma ferramenta custom via webhook.',
+  },
+  {
+    key: 'appointment_intent',
+    title: 'Coletar pedido de agenda',
+    description:
+      'Registra data, horário e motivo quando o cliente pede consulta ou reunião.',
+    toolKeys: ['schedule_appointment'],
+    icon: 'calendar',
+    recommended: false,
+    note:
+      'Registro simples de intenção (sem checar agenda). Para checar/criar/cancelar no Google Calendar, use "Agenda Google" abaixo.',
+  },
+  {
+    key: 'google_calendar',
+    title: 'Agenda Google (consultar e marcar)',
+    description:
+      'Consulta horários livres, cria eventos (com Google Meet) e cancela direto no Google Calendar conectado.',
+    toolKeys: ['check_availability', 'create_event', 'cancel_event'],
+    icon: 'calendar',
+    recommended: false,
+    note:
+      'Requer conectar a agenda do profissional pelo link de conexão (aba Publicar → canais). Sem conexão, o agente avisa que a agenda não está conectada.',
+  },
+  {
+    key: 'pricing_log',
+    title: 'Registrar preços enviados',
+    description:
+      'Registra propostas ou valores mencionados pelo agente para rastreio.',
+    toolKeys: ['send_pricing'],
+    icon: 'tag',
+    recommended: false,
+    note:
+      'Não recomendado por padrão para advocacia. Use só quando preço automático fizer sentido para o negócio.',
+  },
+  {
+    key: 'lead_only',
+    title: 'Só qualificar lead',
+    description:
+      'Marca o contato como lead qualificado, mas mantém a IA ativa na conversa.',
+    toolKeys: ['create_lead'],
+    icon: 'user-plus',
+    recommended: false,
+    note:
+      'Útil quando a IA deve continuar nutrindo o contato após marcar o lead.',
   },
 ]
 
 const CATALOG: ToolCatalogEntry[] = RAW_CATALOG.filter((entry) =>
-  (BUILTIN_TOOL_NAMES as readonly string[]).includes(entry.key),
+  entry.toolKeys.every((key) =>
+    (BUILTIN_TOOL_NAMES as readonly string[]).includes(key),
+  ),
 )
 
 export function proposeToolSelectionTool(_ctx: BuilderToolExecutionContext) {
@@ -94,7 +141,10 @@ export function proposeToolSelectionTool(_ctx: BuilderToolExecutionContext) {
         agentId: z
           .string()
           .uuid()
-          .describe('AIAgentConfig.id the selection will be applied to'),
+          .optional()
+          .describe(
+            'Optional AIAgentConfig.id. Omit before agent creation; provide it when applying tools after create_agent.',
+          ),
         reason: z
           .string()
           .max(200)
@@ -106,7 +156,7 @@ export function proposeToolSelectionTool(_ctx: BuilderToolExecutionContext) {
       execute: async (input) => {
         return {
           success: true as const,
-          agentId: input.agentId,
+          agentId: input.agentId ?? null,
           reason: input.reason ?? null,
           tools: CATALOG,
           message: `Exibindo ${CATALOG.length} ferramentas para o usuário escolher.`,

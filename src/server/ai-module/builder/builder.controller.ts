@@ -14,6 +14,12 @@ import { igniter } from '@/igniter'
 import { projectsRoutes } from './projects/projects.routes'
 import { chatRoutes }     from './chat/chat.routes'
 import { deployRoutes }   from './deploy/deploy.routes'
+import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
+import { provisionWhatsAppRoutes } from './channel/provision-whatsapp.routes'
+import { identityRoutes } from './identity/identity.routes'
+import { calendarRoutes } from './calendar/calendar.routes'
+import { knowledgeRoutes } from './knowledge/knowledge.routes'
+import { knowledgeSourceRoutes } from './knowledge/knowledge-source.routes'
 
 export const builderController = igniter.controller({
   name: 'builder',
@@ -23,5 +29,11 @@ export const builderController = igniter.controller({
     ...projectsRoutes,
     ...chatRoutes,
     ...deployRoutes,
+    ...channelCredentialsRoutes,
+    ...provisionWhatsAppRoutes,
+    ...identityRoutes,
+    ...calendarRoutes,
+    ...knowledgeRoutes,
+    ...knowledgeSourceRoutes,
   },
 })

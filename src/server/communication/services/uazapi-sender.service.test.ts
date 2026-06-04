@@ -20,6 +20,12 @@ import {
   sendText,
   sendImage,
   sendAudio,
+  sendDocument,
+  sendVideo,
+  sendLocation,
+  sendButtons,
+  sendList,
+  sendCarousel,
   sendTyping,
   normalizePhone,
 } from './uazapi-sender.service'
@@ -104,6 +110,26 @@ describe('sendText', () => {
 
     expect(res.success).toBe(true)
     expect(res.messageId).toBe('fallback-id')
+  })
+
+  it('extrai messageId de formatos comuns do UAZ/Evolution', async () => {
+    getFetchMock()
+      .mockResolvedValueOnce(jsonResponse({ id: 'root-id' }, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ messageid: 'lower-id' }, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ data: { message_id: 'nested-id' } }, { status: 200 }))
+
+    await expect(sendText(TOKEN, BASE_URL, '5511999999999', 'oi')).resolves.toMatchObject({
+      success: true,
+      messageId: 'root-id',
+    })
+    await expect(sendText(TOKEN, BASE_URL, '5511999999999', 'oi')).resolves.toMatchObject({
+      success: true,
+      messageId: 'lower-id',
+    })
+    await expect(sendText(TOKEN, BASE_URL, '5511999999999', 'oi')).resolves.toMatchObject({
+      success: true,
+      messageId: 'nested-id',
+    })
   })
 
   it('retorna success=false com erro quando UAZapi responde 500', async () => {
@@ -264,6 +290,124 @@ describe('sendAudio', () => {
 
     expect(res.success).toBe(false)
     expect(String(res.error)).toMatch(/socket hang up/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// rich block senders
+// ---------------------------------------------------------------------------
+
+describe('rich block senders', () => {
+  it('sendDocument envia documento e caption', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'doc-1' }, { status: 200 }))
+
+    const res = await sendDocument(
+      TOKEN,
+      BASE_URL,
+      '5511999999999',
+      'https://cdn/doc.pdf',
+      'Contrato',
+    )
+
+    expect(res.success).toBe(true)
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/document`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.document ?? body.documentUrl).toBe('https://cdn/doc.pdf')
+    expect(body.caption).toBe('Contrato')
+  })
+
+  it('sendVideo envia vídeo e caption', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'vid-1' }, { status: 200 }))
+
+    await sendVideo(TOKEN, BASE_URL, '5511999999999', 'https://cdn/v.mp4', 'demo')
+
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/video`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.video ?? body.videoUrl).toBe('https://cdn/v.mp4')
+    expect(body.caption).toBe('demo')
+  })
+
+  it('sendLocation envia coordenadas e metadados', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'loc-1' }, { status: 200 }))
+
+    await sendLocation(TOKEN, BASE_URL, '5511999999999', {
+      latitude: -23.55,
+      longitude: -46.63,
+      name: 'Loja',
+      address: 'Rua A',
+    })
+
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/location`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.latitude).toBe(-23.55)
+    expect(body.longitude).toBe(-46.63)
+    expect(body.name).toBe('Loja')
+    expect(body.address).toBe('Rua A')
+  })
+
+  it('sendButtons envia texto e botões', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'btn-1' }, { status: 200 }))
+
+    await sendButtons(TOKEN, BASE_URL, '5511999999999', {
+      text: 'Escolha',
+      buttons: [{ id: 'comprar', title: 'Comprar' }],
+    })
+
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/buttons`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.text).toBe('Escolha')
+    expect(body.buttons).toEqual([{ id: 'comprar', title: 'Comprar' }])
+  })
+
+  it('sendList envia botão e seções', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'list-1' }, { status: 200 }))
+
+    await sendList(TOKEN, BASE_URL, '5511999999999', {
+      text: 'Escolha',
+      button: 'Ver opcoes',
+      sections: [{ title: 'Produtos', rows: [{ id: 'a', title: 'Plano A' }] }],
+    })
+
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/list`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.button).toBe('Ver opcoes')
+    expect(body.sections).toEqual([{ title: 'Produtos', rows: [{ id: 'a', title: 'Plano A' }] }])
+  })
+
+  it('sendCarousel envia cards', async () => {
+    getFetchMock().mockResolvedValue(jsonResponse({ messageId: 'car-1' }, { status: 200 }))
+
+    await sendCarousel(TOKEN, BASE_URL, '5511999999999', {
+      text: 'Veja',
+      cards: [
+        {
+          header_url: 'https://cdn/a.jpg',
+          body: 'A',
+          button_type: 'quick_reply',
+          button_text: 'Comprar',
+          buttons: [{ id: 'comprar', title: 'Comprar' }],
+        },
+      ],
+    })
+
+    const [url, init] = getFetchMock().mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${BASE_URL}/send/carousel`)
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.text).toBe('Veja')
+    expect(body.cards).toEqual([
+      {
+        header_url: 'https://cdn/a.jpg',
+        body: 'A',
+        button_type: 'quick_reply',
+        button_text: 'Comprar',
+        buttons: [{ id: 'comprar', title: 'Comprar' }],
+      },
+    ])
   })
 })
 

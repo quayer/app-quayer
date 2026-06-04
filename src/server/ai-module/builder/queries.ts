@@ -8,6 +8,10 @@
 
 import { getDatabase } from '@/server/services/database'
 import { builderProjectRepository } from './projects/projects.repository'
+import {
+  getAgentRuntimeSettingsFromMetadata,
+  normalizeAgentRuntimeSettings,
+} from '@/lib/agent-runtime-settings'
 
 export async function listOrgProjects(organizationId: string) {
   try {
@@ -51,6 +55,11 @@ export async function getProjectDetail(
             systemPrompt: true,
             provider: true,
             model: true,
+            enableTTS: true,
+            ttsProvider: true,
+            ttsVoiceId: true,
+            ttsModel: true,
+            ttsSpeechRate: true,
             // Active AgentDeployments indicate a live channel connection.
             // Field name on AIAgentConfig is 'deployments' (-> AgentDeployment[]).
             deployments: {
@@ -68,6 +77,15 @@ export async function getProjectDetail(
           },
         },
       },
+    }).then((project) => {
+      if (!project) return null
+      return {
+        ...project,
+        runtimeSettings: normalizeAgentRuntimeSettings(
+          getAgentRuntimeSettingsFromMetadata(project.metadata),
+          project.aiAgent,
+        ),
+      }
     })
   } catch (err) {
     console.warn('[builder/queries] getProjectDetail failed:', err)

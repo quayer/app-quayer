@@ -11,6 +11,8 @@
 import { generateText, streamText, stepCountIs, type ToolSet } from 'ai'
 import { database } from '@/server/services/database'
 import { getModel } from './services/provider-factory'
+import { retrieveContextBlock } from './knowledge/knowledge-retrieval.service'
+import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 import { getRedis } from '@/server/services/redis'
 import { getEnabledBuiltinTools, type ToolExecutionContext } from './tools/builtin-tools'
 import { getCustomTools } from './tools/custom-tools'
@@ -274,6 +276,8 @@ type PreparedAgentCall = {
   model: ReturnType<typeof getModel>
   systemPrompt: string
   startTime: number
+  /** Resolved BYOK key (or undefined → provider env fallback). */
+  apiKey?: string
 }
 
 /**
@@ -338,6 +342,25 @@ async function prepareAgentCall(
     }
   } catch (err) {
     console.warn('[AgentRuntime] skills activation failed (ignored):', err)
+  }
+
+  // 2c. RAG: se o agente tem base de conhecimento ativa, recupera os chunks mais
+  // relevantes para a mensagem atual e injeta no system prompt (NÃO como tool —
+  // decisão de design: economiza um passo do tool-loop e garante disponibilidade).
+  // Falha (coleção vazia, extensão ausente, embedding indisponível) → segue sem RAG.
+  if (agentConfig.useRAG && agentConfig.ragCollectionId) {
+    try {
+      const ragBlock = await retrieveContextBlock({
+        collectionId: agentConfig.ragCollectionId,
+        query: params.messageContent,
+        organizationId: params.organizationId,
+      })
+      if (ragBlock) {
+        systemPrompt = `${systemPrompt}\n\n${ragBlock}`
+      }
+    } catch (err) {
+      console.warn('[AgentRuntime] RAG retrieval failed (ignored):', err)
+    }
   }
 
   // 3. Build conversation context from recent session messages.
@@ -435,8 +458,22 @@ async function prepareAgentCall(
     )
   }
 
-  // 5. Get LLM model instance
-  const model = getModel(agentConfig.provider, agentConfig.model, params.apiKey)
+  // 5. Get LLM model instance — BYOK: when the caller didn't pass an explicit
+  // key (e.g. the WhatsApp webhook), resolve the org-scoped key from
+  // OrganizationProvider (falls back to env inside the resolver). This is what
+  // makes the PUBLISHED agent honour the customer's own key, not the platform's.
+  let resolvedApiKey = params.apiKey
+  if (!resolvedApiKey) {
+    try {
+      const cred = await credentialResolver.resolve('AI', agentConfig.provider, {
+        organizationId: params.organizationId,
+      })
+      resolvedApiKey = cred?.credentials?.apiKey
+    } catch (err) {
+      console.warn('[AgentRuntime] BYOK resolve failed, falling back to env:', err)
+    }
+  }
+  const model = getModel(agentConfig.provider, agentConfig.model, resolvedApiKey)
 
   // ── US-036: Token budget tracker ──────────────────────────────────────
   const systemTokens = estimateTokens(systemPrompt)
@@ -473,6 +510,8 @@ async function prepareAgentCall(
     model,
     systemPrompt,
     startTime,
+    // Resolved BYOK key (or undefined) so fallback model swaps reuse it.
+    apiKey: resolvedApiKey,
   }
 }
 
@@ -555,6 +594,7 @@ export async function processAgentMessage(
     model,
     systemPrompt,
     startTime,
+    apiKey: resolvedApiKey,
   } = await prepareAgentCall(params)
 
   // agentConfig is guaranteed non-null here (prepareAgentCall throws otherwise)
@@ -575,7 +615,7 @@ export async function processAgentMessage(
 
   if (isInCooldown && fallbackModel) {
     console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown, using fallback ${fallbackModel}`)
-    activeModel = getModel(agentConfig.provider, fallbackModel, params.apiKey)
+    activeModel = getModel(agentConfig.provider, fallbackModel, resolvedApiKey ?? params.apiKey)
     activeModelName = fallbackModel
     usedFallback = true
   }
@@ -617,7 +657,7 @@ export async function processAgentMessage(
       () => callGenerateText(activeModel),
       !usedFallback && fallbackModel
         ? () => {
-            const fb = getModel(agentConfig.provider, fallbackModel, params.apiKey)
+            const fb = getModel(agentConfig.provider, fallbackModel, resolvedApiKey ?? params.apiKey)
             activeModel = fb
             activeModelName = fallbackModel
             usedFallback = true
@@ -803,7 +843,7 @@ export async function* processAgentMessageStream(
 
   if (streamIsInCooldown && streamFallbackModel) {
     console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown (stream), using fallback ${streamFallbackModel}`)
-    streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, params.apiKey)
+    streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, prepared.apiKey ?? params.apiKey)
     streamActiveModelName = streamFallbackModel
   }
 
@@ -855,7 +895,7 @@ export async function* processAgentMessageStream(
           `[AgentRuntime] Primary model failed (stream), falling back to ${streamFallbackModel}`
         )
         PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
-        streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, params.apiKey)
+        streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, prepared.apiKey ?? params.apiKey)
         streamActiveModelName = streamFallbackModel
         result = callStreamText(streamActiveModel)
       } else {

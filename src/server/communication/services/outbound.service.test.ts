@@ -36,6 +36,14 @@ function buildDeps(overrides: {
   sendTextResults?: Array<{ success: boolean; messageId?: string; error?: string }>
 } = {}): OutboundDeps & {
   _sendTextMock: ReturnType<typeof vi.fn>
+  _sendImageMock: ReturnType<typeof vi.fn>
+  _sendAudioMock: ReturnType<typeof vi.fn>
+  _sendDocumentMock: ReturnType<typeof vi.fn>
+  _sendVideoMock: ReturnType<typeof vi.fn>
+  _sendLocationMock: ReturnType<typeof vi.fn>
+  _sendButtonsMock: ReturnType<typeof vi.fn>
+  _sendListMock: ReturnType<typeof vi.fn>
+  _sendCarouselMock: ReturnType<typeof vi.fn>
   _markBotMessageMock: ReturnType<typeof vi.fn>
   _messageCreateMock: ReturnType<typeof vi.fn>
 } {
@@ -52,6 +60,14 @@ function buildDeps(overrides: {
 
   const markBotMessageMock = vi.fn(async () => true)
   const messageCreateMock = vi.fn(async (args: { data: unknown }) => args.data)
+  const sendImageMock = vi.fn(async () => ({ success: true, messageId: 'img-1' }))
+  const sendAudioMock = vi.fn(async () => ({ success: true, messageId: 'aud-1' }))
+  const sendDocumentMock = vi.fn(async () => ({ success: true, messageId: 'doc-1' }))
+  const sendVideoMock = vi.fn(async () => ({ success: true, messageId: 'vid-1' }))
+  const sendLocationMock = vi.fn(async () => ({ success: true, messageId: 'loc-1' }))
+  const sendButtonsMock = vi.fn(async () => ({ success: true, messageId: 'btn-1' }))
+  const sendListMock = vi.fn(async () => ({ success: true, messageId: 'list-1' }))
+  const sendCarouselMock = vi.fn(async () => ({ success: true, messageId: 'car-1' }))
 
   const connectionFindFirstMock = vi.fn(async () => {
     if ('connection' in overrides) return overrides.connection
@@ -72,9 +88,25 @@ function buildDeps(overrides: {
     } as unknown as OutboundDeps['database'],
     sender: {
       sendText: sendTextMock,
+      sendImage: sendImageMock,
+      sendAudio: sendAudioMock,
+      sendDocument: sendDocumentMock,
+      sendVideo: sendVideoMock,
+      sendLocation: sendLocationMock,
+      sendButtons: sendButtonsMock,
+      sendList: sendListMock,
+      sendCarousel: sendCarouselMock,
     } as unknown as OutboundDeps['sender'],
     markBotMessage: markBotMessageMock as unknown as OutboundDeps['markBotMessage'],
     _sendTextMock: sendTextMock,
+    _sendImageMock: sendImageMock,
+    _sendAudioMock: sendAudioMock,
+    _sendDocumentMock: sendDocumentMock,
+    _sendVideoMock: sendVideoMock,
+    _sendLocationMock: sendLocationMock,
+    _sendButtonsMock: sendButtonsMock,
+    _sendListMock: sendListMock,
+    _sendCarouselMock: sendCarouselMock,
     _markBotMessageMock: markBotMessageMock,
     _messageCreateMock: messageCreateMock,
   }
@@ -202,6 +234,85 @@ describe('sendAgentResponse — bot-echo tracking', () => {
     await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
 
     expect(deps._markBotMessageMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendAgentResponse — rich tags', () => {
+  it('envia tag de buttons como bloco tipado e não como texto cru', async () => {
+    const deps = buildDeps()
+    const agentText = 'Escolha uma opção\n\n[buttons:"Como prefere seguir?" | Comprar | Falar com humano]'
+
+    const res = await sendAgentResponse(buildRequest({ agentText }), deps)
+
+    expect(res.blocksSent).toBe(2)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock.mock.calls[0][3]).toBe('Escolha uma opção')
+    expect(deps._sendButtonsMock).toHaveBeenCalledTimes(1)
+    const payload = deps._sendButtonsMock.mock.calls[0][3] as {
+      text: string
+      buttons: Array<{ id: string; title: string }>
+    }
+    expect(payload.text).toBe('Como prefere seguir?')
+    expect(payload.buttons.map((button) => button.title)).toEqual([
+      'Comprar',
+      'Falar com humano',
+    ])
+    expect(String(deps._sendTextMock.mock.calls[0][3])).not.toContain('[buttons:')
+    expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'wa-1')
+    expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'btn-1')
+  })
+
+  it('envia mídia, localização, lista e carrossel por funções específicas', async () => {
+    const deps = buildDeps()
+    const agentText = [
+      '[document:https://cdn/doc.pdf|Contrato]',
+      '[video:https://cdn/video.mp4|Demonstração]',
+      '[location:-23.55,-46.63|Loja Centro|Rua A]',
+      '[list:"Escolha" | Produtos > Plano A, Plano B]',
+      '[carousel:"Veja" | A: https://cdn/a.jpg: Comprar | B: https://cdn/b.jpg: Saiba mais]',
+    ].join('\n\n')
+
+    const res = await sendAgentResponse(buildRequest({ agentText }), deps)
+
+    expect(res.blocksSent).toBe(5)
+    expect(deps._sendDocumentMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendVideoMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendLocationMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendListMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendCarouselMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
+    expect(deps._markBotMessageMock).toHaveBeenCalledTimes(5)
+  })
+
+  it('faz fallback de cta_url para texto com URL', async () => {
+    const deps = buildDeps()
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: '[cta:"Confira a proposta" | Abrir | https://example.com]' }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock.mock.calls[0][3]).toBe(
+      'Confira a proposta\nAbrir: https://example.com',
+    )
+  })
+
+  it('faz fallback de flow para texto legível sem vazar tag crua', async () => {
+    const deps = buildDeps()
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: '[flow:cadastro_lead | Preencher cadastro]' }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock.mock.calls[0][3]).toBe(
+      'Preencher cadastro\nFormulario: cadastro_lead',
+    )
+    expect(String(deps._sendTextMock.mock.calls[0][3])).not.toContain('[flow:')
   })
 })
 

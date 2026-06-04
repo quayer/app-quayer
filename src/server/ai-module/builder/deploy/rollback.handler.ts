@@ -6,7 +6,7 @@
  * Collected errors are returned to the caller for logging/alerting.
  *
  * Touches tables:
- *   - AgentDeployment (UPDATE status = INACTIVE)
+ *   - AgentDeployment (UPDATE status = PAUSED) — via detachConnection
  *   - Connection      (DELETE) — via deleteDeployInstance
  *   - BuilderPromptVersion (UPDATE publishedAt = null)
  *   - BuilderProject  (UPDATE status = 'draft')
@@ -19,16 +19,17 @@ import { detachConnection } from './attach-connection.handler'
 import { deleteDeployInstance } from './create-instance.handler'
 import { unpublishVersion } from './publish-version.handler'
 
+// Matches the real BuilderDeployment columns (schema.prisma): no organizationId
+// / userId / updatedAt / publishedAt exist. Org is derived via the `project`
+// relation; whether the version was published is read from BuilderPromptVersion.
 type BuilderDeploymentRow = {
   id: string
   projectId: string
   promptVersionId: string
   aiAgentId: string | null
-  organizationId: string
-  userId: string
   instanceId: string | null
   connectionId: string | null
-  publishedAt: Date | null
+  project?: { organizationId: string | null } | null
 }
 
 async function loadDeployment(
@@ -39,9 +40,21 @@ async function loadDeployment(
       builderDeployment: {
         findUnique: (args: {
           where: { id: string }
+          select?: Record<string, unknown>
         }) => Promise<BuilderDeploymentRow | null>
       }
-    }).builderDeployment.findUnique({ where: { id: deploymentId } })
+    }).builderDeployment.findUnique({
+      where: { id: deploymentId },
+      select: {
+        id: true,
+        projectId: true,
+        promptVersionId: true,
+        aiAgentId: true,
+        instanceId: true,
+        connectionId: true,
+        project: { select: { organizationId: true } },
+      },
+    })
     return row ?? null
   } catch (err) {
     console.warn(
@@ -73,17 +86,33 @@ export async function rollbackDeployment(
     }
   }
 
+  // Org comes from the project relation (no organizationId column on the row).
+  const organizationId = row.project?.organizationId ?? ''
+
+  // Whether the prompt version is published (so unpublishVersion compensation
+  // actually runs) is read from the source of truth, not a non-existent column.
+  let publishedAt: Date | undefined
+  try {
+    const version = await database.builderPromptVersion.findUnique({
+      where: { id: row.promptVersionId },
+      select: { publishedAt: true },
+    })
+    publishedAt = version?.publishedAt ?? undefined
+  } catch {
+    publishedAt = undefined
+  }
+
   const context: DeployContext = {
     deploymentId,
     projectId: row.projectId,
     promptVersionId: row.promptVersionId,
     aiAgentId: row.aiAgentId ?? '',
-    organizationId: row.organizationId,
+    organizationId,
     userId,
     state: {
       instanceId: row.instanceId ?? undefined,
       connectionId: row.connectionId ?? undefined,
-      publishedAt: row.publishedAt ?? undefined,
+      publishedAt,
     },
   }
 
@@ -118,10 +147,11 @@ export async function rollbackDeployment(
       }
     }).builderDeployment.update({
       where: { id: deploymentId },
+      // No `updatedAt` column on BuilderDeployment — writing it threw and was
+      // swallowed, so rolled_back never persisted. Only real columns now.
       data: {
         rolledBack: true,
         status: 'rolled_back',
-        updatedAt: new Date(),
       },
     })
   } catch (err) {

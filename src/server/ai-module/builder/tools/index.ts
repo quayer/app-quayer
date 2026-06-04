@@ -31,7 +31,6 @@ import { runPromptPreviewTool } from './run-prompt-preview.tool'
 import { adjustPromptToneTool } from './adjust-prompt-tone.tool'
 import { proposeToolSelectionTool } from './propose-tool-selection.tool'
 import { proposePlanUpgradeTool } from './propose-plan-upgrade.tool'
-import { instagramSetupWizardTool } from './instagram-setup-wizard.tool'
 
 export type { BuilderToolExecutionContext }
 
@@ -61,6 +60,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     adjust_prompt_tone: adjustPromptToneTool(ctx),
     propose_tool_selection: proposeToolSelectionTool(ctx),
     propose_plan_upgrade: proposePlanUpgradeTool(ctx),
-    instagram_setup_wizard: instagramSetupWizardTool(ctx),
+    // Instagram agora é configurado pelo card de credenciais (deploy tab), não
+    // por um wizard no chat — o wizard antigo foi removido (dead UI).
   }
 }

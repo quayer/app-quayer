@@ -119,6 +119,16 @@ model Organization {
   builderProjects      BuilderProject[]
   builderConversations BuilderProjectConversation[]
 
+  // Departamentos / roleta
+  departments       Department[]
+  departmentMembers DepartmentMember[]
+
+  // Google Calendar connect-links
+  calendarConnections CalendarConnection[]
+
+  // Base de conhecimento / RAG
+  knowledgeCollections KnowledgeCollection[]
+
   @@index([document])
   @@index([slug])
   @@index([billingType])
@@ -237,6 +247,12 @@ model User {
   builderProjects                BuilderProject[]
   builderProjectConversations    BuilderProjectConversation[]
   builderPublishedPromptVersions BuilderPromptVersion[]       @relation("BuilderPromptVersionPublisher")
+
+  // Departamentos / roleta
+  departmentMemberships    DepartmentMember[] @relation("DepartmentMembership")
+  lastAssignedDepartments  Department[]       @relation("DepartmentLastAssigned")
+  assignedSessions         ChatSession[]      @relation("SessionAssignedAgent")
+  assignedCustomerSessions ChatSession[]      @relation("SessionAssignedCustomer")
 
   @@index([email])
   @@index([currentOrgId])
@@ -442,16 +458,51 @@ model Department {
   description    String?
   type           String   @default("support") // support, sales, custom
   isActive       Boolean  @default(true)
+
+  // Round-robin (roleta) — ponteiro do último atendente sorteado. A próxima
+  // escolha é o primeiro membro ATIVO após este, em ordem circular por
+  // (position, createdAt). NULL = roleta nunca rodou (começa do primeiro).
+  lastAssignedUserId String?
+  lastAssignedAt     DateTime?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  chatSessions ChatSession[]
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lastAssignedUser User?              @relation("DepartmentLastAssigned", fields: [lastAssignedUserId], references: [id], onDelete: SetNull)
+  members          DepartmentMember[]
+  chatSessions     ChatSession[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
   @@index([slug])
   @@index([type])
   @@index([isActive])
+  @@index([lastAssignedUserId])
+}
+
+// Membros do departamento (fila da roleta). `position` define a ordem; `isActive`
+// permite pausar um atendente sem removê-lo.
+model DepartmentMember {
+  id             String   @id @default(uuid())
+  organizationId String
+  departmentId   String
+  userId         String
+  position       Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User         @relation("DepartmentMembership", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([userId])
+  @@index([departmentId, isActive, position])
+  @@map("department_members")
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -504,6 +555,13 @@ model Connection {
   cloudApiPhoneNumberId String? @map("cloud_api_phone_number_id") // Phone Number ID do Meta Business
   cloudApiWabaId        String? @map("cloud_api_waba_id") // WhatsApp Business Account ID
   cloudApiVerifiedName  String? @map("cloud_api_verified_name") // Nome verificado da conta business
+  cloudApiVerifyToken   String? @map("cloud_api_verify_token") // Verify token do webhook (Meta GET challenge)
+
+  // Instagram Direct Integration (Meta — credenciais manuais; sem parceria oficial)
+  igAccountId       String? @map("ig_account_id") // Instagram Business Account ID
+  igPageAccessToken String? @map("ig_page_access_token") @db.Text // Page Access Token (pode ser longo)
+  igAppSecret       String? @map("ig_app_secret") // App Secret (valida assinatura X-Hub do webhook)
+  igVerifyToken     String? @map("ig_verify_token") // Verify token do webhook
 
   // n8n Integration (AI Agent)
   n8nWebhookUrl  String? // URL do workflow n8n
@@ -908,6 +966,8 @@ model ChatSession {
   connection    Connection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department    Department?    @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  assignedAgent    User?       @relation("SessionAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  assignedCustomer User?       @relation("SessionAssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
   aiAgentConfig AIAgentConfig? @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
   messages      Message[]
 
@@ -1228,6 +1288,42 @@ model OrganizationProvider {
   @@map("organization_providers")
 }
 
+// ── Calendar Connections (Google Calendar connect-link — Wave 4b) ────────────
+// Estado do LINK público de conexão (análogo ao Connection.shareToken). O token
+// OAuth em si (refresh_token) NÃO fica aqui — vai encriptado em
+// OrganizationProvider (provider='google-calendar', category AUXILIARY).
+
+enum CalendarConnectionStatus {
+  PENDING
+  CONNECTED
+  EXPIRED
+  REVOKED
+}
+
+model CalendarConnection {
+  id               String @id @default(uuid())
+  organizationId   String
+  builderProjectId String? // null = nível org; set = link específico do projeto
+
+  connectToken          String   @unique
+  connectTokenExpiresAt DateTime
+
+  status        CalendarConnectionStatus @default(PENDING)
+  calendarEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  builderProject BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([builderProjectId])
+  @@index([status])
+  @@index([connectToken])
+  @@map("calendar_connections")
+}
+
 // ── Short Links with Click Tracking (Features module) ────────────────────────
 
 model ShortLink {
@@ -1321,6 +1417,7 @@ model AIAgentConfig {
   sessions       ChatSession[]
   promptVersions AgentPromptVersion[]
   deployments    AgentDeployment[]
+  ragCollection  KnowledgeCollection? @relation(fields: [ragCollectionId], references: [id], onDelete: SetNull)
 
   // Builder (home-chat-builder)
   builderProject        BuilderProject?
@@ -1329,6 +1426,76 @@ model AIAgentConfig {
   @@unique([organizationId, name])
   @@index([organizationId])
   @@index([isActive])
+}
+
+// ── Knowledge Base / RAG (pgvector — Wave RAG) ───────────────────────────────
+// pgvector no Postgres da app (= Supabase, extensão já instalada). A coluna
+// embedding é Unsupported("vector(1536)") — INSERT/SELECT do vetor SEMPRE via
+// $executeRaw/$queryRaw (Prisma não tipa vector). Índice HNSW vai na migration.
+
+model KnowledgeCollection {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  embeddingModel String  @default("text-embedding-3-small")
+  dimensions     Int     @default(1536)
+  isActive       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sources      KnowledgeSource[]
+  chunks       KnowledgeChunk[]
+  agents       AIAgentConfig[] // agentes que apontam ragCollectionId pra cá
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("knowledge_collections")
+}
+
+model KnowledgeSource {
+  id             String  @id @default(uuid())
+  collectionId   String
+  organizationId String
+  type           String // 'pdf' | 'url' | 'text'
+  source         String // nome do arquivo ou URL
+  storageKey     String? // chave no Supabase storage (PDF original)
+  status         String  @default("pending") // pending|processing|ready|error
+  error          String? @db.Text
+  chunkCount     Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  chunks     KnowledgeChunk[]
+
+  @@index([collectionId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeChunk {
+  id           String  @id @default(uuid())
+  collectionId String
+  sourceId     String?
+
+  content   String                       @db.Text
+  embedding Unsupported("vector(1536)")? // lida/escrita SOMENTE via raw
+  metadata  Json? // { page, heading, tokens, ... }
+  ordinal   Int                          @default(0)
+
+  createdAt DateTime @default(now())
+
+  collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  source     KnowledgeSource?    @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([collectionId])
+  @@index([sourceId])
+  @@map("knowledge_chunks")
 }
 
 // ── Agent Prompt Versions ─────────────────────────────────────────────────────
@@ -1433,6 +1600,7 @@ model BuilderProject {
   conversation     BuilderProjectConversation?
   deployments      BuilderDeployment[]
   projectProviders OrganizationProvider[]
+  calendarConnections CalendarConnection[]
 
   @@index([organizationId, type, status])
   @@index([userId, updatedAt(sort: Desc)])

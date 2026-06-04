@@ -14,7 +14,15 @@ const PROVIDER_CATEGORY: Record<SupportedProvider, ProviderCategory> = {
   openai: ProviderCategory.AI,
   anthropic: ProviderCategory.AI,
   google: ProviderCategory.AI,
+  elevenlabs: ProviderCategory.TTS,
 }
+
+const SUPPORTED_PROVIDER_LIST: SupportedProvider[] = [
+  'openai',
+  'anthropic',
+  'google',
+  'elevenlabs',
+]
 
 /**
  * Extract the last-four characters from an encrypted apiKey blob.
@@ -42,15 +50,14 @@ function parseCredentials(raw: unknown): { apiKey?: string } {
 
 export const providersRepository = {
   /**
-   * Return the list shape for all three supported AI providers.
+   * Return the list shape for supported AI and TTS providers.
    * Rows that have no DB record are returned with isConfigured=false.
    */
   async list(organizationId: string): Promise<ProviderListItem[]> {
     const rows = await db.organizationProvider.findMany({
       where: {
         organizationId,
-        category: ProviderCategory.AI,
-        provider: { in: ['openai', 'anthropic', 'google'] },
+        provider: { in: SUPPORTED_PROVIDER_LIST },
         isActive: true,
       },
       select: {
@@ -62,7 +69,7 @@ export const providersRepository = {
 
     const rowMap = new Map(rows.map((r) => [r.provider, r]))
 
-    return (['openai', 'anthropic', 'google'] as SupportedProvider[]).map(
+    return SUPPORTED_PROVIDER_LIST.map(
       (p) => {
         const row = rowMap.get(p)
         if (!row) {

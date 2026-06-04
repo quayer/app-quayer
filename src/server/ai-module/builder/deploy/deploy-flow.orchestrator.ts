@@ -99,8 +99,10 @@ export async function executeDeployFlow(
           projectId: project.id,
           promptVersionId: input.promptVersionId,
           aiAgentId: project.aiAgentId,
-          organizationId: project.organizationId,
-          userId: input.userId,
+          // schema: BuilderDeployment has NO organizationId column (org is
+          // reachable via the project relation) and uses `triggeredBy` for the
+          // user id — writing `organizationId`/`userId` made every create throw.
+          triggeredBy: input.userId,
           status: 'pending' satisfies DeployStatus,
           startedAt,
         },
@@ -142,7 +144,10 @@ export async function executeDeployFlow(
     fn: () => Promise<T>,
   ): Promise<T> => {
     result.status = status
-    await updateDeploymentStatus(deploymentId, { status, currentStep: name })
+    // `currentStep` is not a column on BuilderDeployment — the `status` enum
+    // already encodes the active step (publishing/instance_creating/attaching).
+    void name
+    await updateDeploymentStatus(deploymentId, { status })
     return fn()
   }
 
