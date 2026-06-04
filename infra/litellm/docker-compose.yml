@@ -1,0 +1,25 @@
+# LiteLLM proxy — sobe o gateway de LLM da Quayer.
+#   docker compose -f infra/litellm/docker-compose.yml up -d
+# Depois aponte a app: LITELLM_URL=http://localhost:4000 + LITELLM_MASTER_KEY=...
+# (ver .env.example / docs/infra/SECRETS.md). Sem essas envs, a app cai no
+# caminho direto de provider (provider-factory.ts) — nada quebra.
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

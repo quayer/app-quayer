@@ -155,7 +155,7 @@ src/
 │   ├── rate-limit/, geocoding/, providers/, utils/, crypto.ts, config.ts
 │
 ├── igniter.ts               # Init framework
-├── igniter.router.ts        # 5 controllers: auth, builder, device-sessions, logs, logs-sse
+├── igniter.router.ts        # 8 controllers: auth, builder, device-sessions, logs, logs-sse, messages, departments, providers
 ├── igniter.client.ts        # auto-gerado — NÃO EDITAR
 ├── igniter.schema.ts        # auto-gerado — NÃO EDITAR
 └── middleware.ts            # Edge auth + redirects

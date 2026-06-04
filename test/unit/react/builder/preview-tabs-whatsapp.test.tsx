@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChatMessage, WorkspaceProject } from '@/client/components/projetos/types'
 import { ActivityTab } from '@/client/components/projetos/preview/tabs/_core/activity/activity-tab'
 import { deriveChecklist } from '@/client/components/projetos/preview/tabs/deploy/connection-step'
+import { DEFAULT_AGENT_RUNTIME_SETTINGS } from '@/lib/agent-runtime-settings'
 
 vi.mock('next-themes', () => ({
   useTheme: () => ({ resolvedTheme: 'light' }),
@@ -24,6 +25,7 @@ function makeProject(overrides: Partial<WorkspaceProject> = {}): WorkspaceProjec
       systemPrompt:
         'Voce e um assistente de atendimento via WhatsApp para responder clientes com clareza.',
     },
+    runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS,
     hasWhatsAppConnection: false,
     ...overrides,
   }

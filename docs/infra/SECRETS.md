@@ -100,3 +100,12 @@ Se um dia automatizarmos cache purge ou DNS via API:
 - `HOMOL_TEST_PASSWORD` — NOT USED (passwordless) — this secret is reserved for future non-passwordless flows. For OTP flows, the smoke-homol workflow relies on EMAIL_PROVIDER=mock and OTP capture via database or internal endpoint.
 
 Both secrets are optional. If missing, the smoke-homol workflow still runs but specs that require authentication will skip at runtime.
+
+## IA / LLM (LiteLLM)
+
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (e opcional `OPENROUTER_API_KEY`) — keys diretas dos provedores. Usadas no caminho direto e pelo próprio proxy LiteLLM.
+- `LITELLM_URL` + `LITELLM_MASTER_KEY` — quando **ambos** setados, todo o LLM (chat do projeto + agente WhatsApp) passa pelo proxy LiteLLM (`provider-factory.ts`), preservando o prompt cache da Anthropic. Vazios = caminho direto (nada quebra). Proxy em `infra/litellm/` (ver `infra/litellm/README.md`). Rotacionar a master key a cada incidente.
+
+## Google Calendar (connect-link — Wave 4b)
+
+- `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI` — OAuth **separado** do login Google (escopo calendar, `access_type=offline`). Redirect = `.../api/v1/calendar/oauth/callback`. O refresh_token é encriptado (`@/lib/crypto`/`ENCRYPTION_KEY`) e guardado em `OrganizationProvider` (provider `google-calendar`). Sem essas 3 envs, `/oauth/start` responde 503 e as tools de agenda degradam. **Verificação OAuth do Google** (escopos de Calendar) é externa — disparar no Google Cloud com antecedência.

@@ -197,3 +197,64 @@ describe('bot-echo-guard — markBotMessages (batch)', () => {
     expect(setMock).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('bot-echo-guard — alias helpers', () => {
+  it('markBotMessageAliases marca aliases únicos no mesmo tenant e ignora ids vazios', async () => {
+    const { markBotMessageAliases } = await import(
+      '@/server/communication/services/bot-echo-guard.service'
+    );
+
+    const count = await markBotMessageAliases('org-1', [
+      'provider-1',
+      'source-1',
+      'provider-1',
+      '',
+    ]);
+
+    expect(count).toBe(2);
+    expect(setMock).toHaveBeenCalledTimes(2);
+    const keys = setMock.mock.calls.map((c) => c[0]).sort();
+    expect(keys).toEqual([
+      'quayer:bot_msg:org-1:provider-1',
+      'quayer:bot_msg:org-1:source-1',
+    ]);
+  });
+
+  it('isBotEchoAny retorna true quando qualquer alias está marcado e para no primeiro match', async () => {
+    getMock.mockResolvedValueOnce(null).mockResolvedValueOnce('1');
+    const { isBotEchoAny } = await import(
+      '@/server/communication/services/bot-echo-guard.service'
+    );
+
+    const result = await isBotEchoAny('org-1', [
+      'provider-miss',
+      'source-hit',
+      'not-checked',
+    ]);
+
+    expect(result).toBe(true);
+    expect(getMock).toHaveBeenCalledTimes(2);
+    expect(getMock).toHaveBeenNthCalledWith(
+      1,
+      'quayer:bot_msg:org-1:provider-miss',
+    );
+    expect(getMock).toHaveBeenNthCalledWith(
+      2,
+      'quayer:bot_msg:org-1:source-hit',
+    );
+  });
+
+  it('isBotEchoAny mantém fail-safe: erro de Redis em um alias não bloqueia os demais', async () => {
+    getMock
+      .mockRejectedValueOnce(new Error('Redis read timeout'))
+      .mockResolvedValueOnce('1');
+    const { isBotEchoAny } = await import(
+      '@/server/communication/services/bot-echo-guard.service'
+    );
+
+    const result = await isBotEchoAny('org-1', ['alias-error', 'alias-hit']);
+
+    expect(result).toBe(true);
+    expect(getMock).toHaveBeenCalledTimes(2);
+  });
+});

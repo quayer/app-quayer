@@ -1,0 +1,35 @@
+# LiteLLM proxy — roteia TODO o LLM da Quayer (chat do projeto/meta-agente +
+# agente publicado no WhatsApp; ambos via getModel em provider-factory.ts).
+#
+# IMPORTANTE: os `model_name` DEVEM bater com os valores gravados em
+# AIAgentConfig.model no banco (default 'gpt-4o'; anthropic usa os abaixo).
+# Mantenha em sincronia com cost-calculator.service.ts MODEL_PRICING.
+
+model_list:
+  - model_name: claude-sonnet-4-20250514
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-haiku-3-5-20241022
+    litellm_params:
+      model: anthropic/claude-haiku-3-5-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  num_retries: 2
+  # Fallbacks declarativos (Wave 6.5 — aposentar retry-with-fallback do app):
+  # fallbacks: [{ "claude-sonnet-4-20250514": ["gpt-4o"] }]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # O provider-factory usa os passthroughs /anthropic/v1 (preserva prompt cache)
+  # e /v1 (OpenAI-compatible). Confirme que estão habilitados na versão do proxy.

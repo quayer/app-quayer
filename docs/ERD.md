@@ -369,3 +369,9 @@ erDiagram
 | 2026-04-30 | `add_otp_disabled_flags` | UserPreferences.otpEmailDisabled + otpPhoneDisabled |
 | 2026-05-10 | `normalize_role_lowercase` | UPDATE User.role para lowercase (fix UserRole enum case) |
 | **2026-05-10** | **`add_user_identities`** | **UserIdentity para login federado (Google, WhatsApp) — usado em `/conta/linked-accounts`** |
+| 2026-05-12 | `add_agent_deployments` | AgentDeployment (vínculo agente↔Connection) |
+| **2026-06-03** | **`add_channel_credentials`** | **Connection: + cloudApiVerifyToken + colunas Instagram (igAccountId/igPageAccessToken/igAppSecret/igVerifyToken) — Wave 2 (3 canais)** |
+| **2026-06-03** | **`add_department_round_robin`** | **Department estendido (lastAssignedUserId/At + FK→Organization) + novo `department_members` + ChatSession FKs assignedAgent/assignedCustomer — Wave 4a (roleta/departamentos)** |
+| **2026-06-03** | **`add_calendar_connections`** | **Novo `calendar_connections` + enum CalendarConnectionStatus (estado do link público de conexão do Google Calendar; refresh_token vai no OrganizationProvider) — Wave 4b** |
+
+> Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
