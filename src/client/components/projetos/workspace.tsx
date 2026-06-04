@@ -46,6 +46,20 @@ interface WorkspaceProps {
   initialMessages: ChatMessage[]
 }
 
+export function Workspace(props: WorkspaceProps) {
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return <div className="h-screen bg-background" aria-hidden="true" />
+  }
+
+  return <WorkspaceContent {...props} />
+}
+
 /**
  * Workspace — split layout (chat à esquerda, preview à direita)
  *
@@ -58,7 +72,7 @@ interface WorkspaceProps {
  *
  * Tema reativo via useAppTokens — mesmo padrão da home + sidebar.
  */
-export function Workspace({ project, initialMessages }: WorkspaceProps) {
+function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
   const { tokens } = useAppTokens()
   const router = useRouter()
 
@@ -151,6 +165,12 @@ export function Workspace({ project, initialMessages }: WorkspaceProps) {
         `${window.location.pathname}?tab=${tab}`,
       )
     }
+  }, [])
+
+  React.useEffect(() => {
+    const handleFocusChat = () => setMobilePanel("chat")
+    window.addEventListener("builder:focus-chat", handleFocusChat)
+    return () => window.removeEventListener("builder:focus-chat", handleFocusChat)
   }, [])
 
   const handleNameSubmit = React.useCallback(

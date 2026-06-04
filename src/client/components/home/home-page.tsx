@@ -106,7 +106,17 @@ export function HomePage({
         if (!projectId) throw new Error("Projeto criado mas ID não retornado")
         router.push(`/projetos/${projectId}`)
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Erro desconhecido")
+        if (err && typeof err === "object" && "error" in err) {
+          const msg = String((err as { error: unknown }).error)
+          // Auth errors mean session expired — redirect to login
+          if (msg.toLowerCase().includes("token") || msg.includes("autenticad")) {
+            router.push("/login?redirect=/")
+            return
+          }
+          setError(msg)
+        } else {
+          setError(err instanceof Error ? err.message : "Erro desconhecido")
+        }
       }
     })
   }, [prompt, router, createProject])

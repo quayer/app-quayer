@@ -153,7 +153,6 @@ export function MessageInput({
   }, [voiceActive, isListening, disabled, value, startRecording, stopRecording])
 
   const sendStyle = { backgroundColor: tokens.brand, color: tokens.textInverse }
-  const micStyle = { backgroundColor: "transparent", color: tokens.brand, borderColor: tokens.border }
 
   const baseBtn =
     "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[var(--q-brand)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -170,18 +169,40 @@ export function MessageInput({
       <ArrowUp className="h-4 w-4" aria-hidden />
     </button>
   )
-  const micBtn = (
+
+  // Primary mic — campo vazio, é a única CTA: mesmo peso visual do send
+  const micPrimaryBtn = (
+    <button
+      type="button"
+      onClick={handleMicClick}
+      aria-label="Gravar por áudio"
+      aria-describedby={micDescribedBy}
+      className={baseBtn}
+      style={sendStyle}
+    >
+      <Mic className="h-4 w-4" aria-hidden />
+    </button>
+  )
+
+  // Secondary mic — aparece ao lado do send: visível mas não compete
+  const micSecondaryBtn = (
     <button
       type="button"
       onClick={handleMicClick}
       aria-label="Gravar por áudio"
       aria-describedby={micDescribedBy}
       className={`${baseBtn} border`}
-      style={micStyle}
+      style={{
+        backgroundColor: tokens.brandSubtle,
+        color: tokens.brand,
+        borderColor: tokens.brandBorder,
+      }}
     >
       <Mic className="h-4 w-4" aria-hidden />
     </button>
   )
+
+  // Stop — estado de gravação: azul para diferenciar claramente das outras ações
   const stopBtn = (
     <button
       type="button"
@@ -189,14 +210,14 @@ export function MessageInput({
       aria-label="Parar gravação"
       aria-pressed={true}
       aria-describedby={micDescribedBy}
-      className="flex h-9 items-center gap-2 rounded-full px-3 shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#3b82f6] disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-9 items-center gap-1.5 rounded-full px-3 shrink-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[#3b82f6] disabled:cursor-not-allowed disabled:opacity-40"
       style={{ backgroundColor: REC_BLUE, color: "#fff" }}
     >
       <AudioWaveform analyser={analyser} bars={3} color="currentColor" />
-      <span className="hidden sm:inline text-[13px] font-medium leading-none">Ouvindo</span>
       <Mic className="h-4 w-4" aria-hidden />
     </button>
   )
+
   const loaderBtn = (
     <button type="button" disabled aria-label="Enviando" className={baseBtn} style={sendStyle}>
       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -252,14 +273,14 @@ export function MessageInput({
         <div className="flex items-center gap-2">
           {showOnlyLoader ? loaderBtn
             : showOnlyStop ? stopBtn
-            : showMicPlusSend ? (<>{micBtn}{sendBtn}</>)
-            : showOnlyMic ? micBtn
+            : showMicPlusSend ? (<>{micSecondaryBtn}{sendBtn}</>)
+            : showOnlyMic ? micPrimaryBtn
             : showOnlySend ? sendBtn
             : idleSendBtn}
         </div>
       </div>
 
-      {voiceActive && !canSend && !isListening && !disabled && (
+      {voiceActive && !isListening && !disabled && (
         <div
           className="hidden sm:flex items-center justify-end gap-1.5 px-4 pb-2 text-[11px] opacity-60"
           style={{ color: tokens.textTertiary }}

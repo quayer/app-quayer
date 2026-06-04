@@ -70,12 +70,12 @@ function ChecklistRow({
             {item.met ? (
               <CheckCircle2
                 className="h-4 w-4 shrink-0"
-                style={{ color: "#22c55e" }}
+                style={{ color: tokens.success }}
               />
             ) : (
               <XCircle
                 className="h-4 w-4 shrink-0"
-                style={{ color: "#ef4444" }}
+                style={{ color: tokens.danger }}
               />
             )}
             <span
@@ -134,7 +134,7 @@ export function ConnectionStep({
       className="border p-0 shadow-none"
       style={{
         backgroundColor: tokens.bgSurface,
-        borderColor: allMet ? "rgba(34,197,94,0.3)" : tokens.divider,
+        borderColor: allMet ? tokens.success : tokens.divider,
       }}
     >
       <CardContent className="p-0">
@@ -151,10 +151,8 @@ export function ConnectionStep({
           <span
             className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
             style={{
-              backgroundColor: allMet
-                ? "rgba(34,197,94,0.12)"
-                : "rgba(245,158,11,0.12)",
-              color: allMet ? "#22c55e" : "#f59e0b",
+              backgroundColor: allMet ? tokens.successSubtle : tokens.warningSubtle,
+              color: allMet ? tokens.successText : tokens.warningText,
             }}
           >
             {metCount} de {checklist.length}
@@ -173,10 +171,10 @@ export function ConnectionStep({
         >
           {allMet ? (
             <div className="flex items-center gap-2">
-              <Check className="h-3.5 w-3.5" style={{ color: "#22c55e" }} />
+              <Check className="h-3.5 w-3.5" style={{ color: tokens.success }} />
               <span
                 className="text-[12px] font-semibold"
-                style={{ color: "#22c55e" }}
+                style={{ color: tokens.successText }}
               >
                 Pronto para publicar!
               </span>
@@ -185,7 +183,7 @@ export function ConnectionStep({
             <div className="flex items-center gap-2">
               <AlertTriangle
                 className="h-3.5 w-3.5"
-                style={{ color: "#f59e0b" }}
+                style={{ color: tokens.warning }}
               />
               <span
                 className="text-[12px] font-medium"
@@ -193,7 +191,7 @@ export function ConnectionStep({
               >
                 {metCount} de {checklist.length} requisitos atendidos
                 {" \u2014 "}
-                nao e possivel publicar ainda
+                não é possível publicar ainda
               </span>
             </div>
           )}

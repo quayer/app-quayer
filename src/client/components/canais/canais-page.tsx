@@ -47,34 +47,32 @@ export function CanaisPage({ connections }: CanaisPageProps) {
 
   return (
     <div
-      className="flex min-h-screen flex-col"
+      className="space-y-6"
       style={{ color: tokens.textPrimary }}
     >
-      <header className="border-b" style={{ borderColor: tokens.divider }}>
-        <div className="container mx-auto flex flex-col gap-4 px-6 py-8 md:flex-row md:items-end md:justify-between">
-          <div className="flex flex-col gap-1">
-            <h1
-              className="text-2xl font-semibold tracking-tight"
-              style={{ color: tokens.textPrimary }}
-            >
-              Canais WhatsApp
-            </h1>
-            <p
-              className="text-sm"
-              style={{ color: tokens.textTertiary }}
-            >
-              Conecte e gerencie suas instâncias para receber/enviar mensagens
-            </p>
-          </div>
-
-          <Button type="button" onClick={() => setCreateOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Conectar canal
-          </Button>
+      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            style={{ color: tokens.textPrimary }}
+          >
+            Canais WhatsApp
+          </h1>
+          <p
+            className="text-sm"
+            style={{ color: tokens.textTertiary }}
+          >
+            Conecte e gerencie suas instâncias para receber/enviar mensagens
+          </p>
         </div>
+
+        <Button type="button" onClick={() => setCreateOpen(true)} className="gap-2">
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Conectar canal
+        </Button>
       </header>
 
-      <main className="container mx-auto flex-1 px-6 py-8">
+      <main>
         {isEmpty ? (
           <div className="flex flex-col items-center gap-4">
             <EmptyState

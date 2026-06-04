@@ -33,6 +33,7 @@ vi.mock('@/server/services/database', () => ({
 
 vi.mock('@/server/communication/services/bot-echo-guard.service', () => ({
   isBotEcho: vi.fn(),
+  isBotEchoAny: vi.fn(),
   markBotMessage: vi.fn(),
 }))
 
@@ -151,7 +152,7 @@ beforeEach(async () => {
   process.env.UAZAPI_WEBHOOK_SECRET = 'super-secret-token'
 
   const { database } = await import('@/server/services/database')
-  const { isBotEcho } = await import(
+  const { isBotEchoAny } = await import(
     '@/server/communication/services/bot-echo-guard.service'
   )
   const { processAgentMessage } = await import(
@@ -185,7 +186,7 @@ beforeEach(async () => {
       ...data,
     }),
   )
-  ;(isBotEcho as any).mockResolvedValue(false)
+  ;(isBotEchoAny as any).mockResolvedValue(false)
   ;(processAgentMessage as any).mockResolvedValue({
     text: 'Olá! Como posso ajudar?',
     toolCalls: [],
@@ -283,11 +284,11 @@ describe('UAZapi webhook — connection resolution', () => {
 
 describe('UAZapi webhook — bot-echo guard (outbound)', () => {
   it('quando direction=OUT e isBotEcho=true → 200 com skip:bot_echo e NÃO cria Message', async () => {
-    const { isBotEcho } = await import(
+    const { isBotEchoAny } = await import(
       '@/server/communication/services/bot-echo-guard.service'
     )
     const { database } = await import('@/server/services/database')
-    ;(isBotEcho as any).mockResolvedValueOnce(true)
+    ;(isBotEchoAny as any).mockResolvedValueOnce(true)
 
     const { POST } = await import('./route')
     const res = await POST(
@@ -303,29 +304,41 @@ describe('UAZapi webhook — bot-echo guard (outbound)', () => {
     expect(database.message.create).not.toHaveBeenCalled()
   })
 
-  it('chama isBotEcho com (organizationId, externalMessageId) corretos', async () => {
-    const { isBotEcho } = await import(
+  it('chama isBotEchoAny com organizationId e aliases plausíveis do payload OUT', async () => {
+    const { isBotEchoAny } = await import(
       '@/server/communication/services/bot-echo-guard.service'
     )
-    ;(isBotEcho as any).mockResolvedValueOnce(true)
+    ;(isBotEchoAny as any).mockResolvedValueOnce(true)
 
     const { POST } = await import('./route')
     await POST(
       makeRequest({
-        body: outboundPayload({ id: 'wamid.OUT-XYZ' }),
+        body: outboundPayload({
+          id: 'wamid.OUT-XYZ',
+          source_id: 'chatwoot-source-1',
+          sourceId: 'chatwoot-source-2',
+          messageId: 'provider-msg-1',
+          key: { id: 'key-msg-1' },
+        }),
         secret: 'super-secret-token',
       }),
     )
 
-    expect(isBotEcho).toHaveBeenCalledWith('org-1', 'wamid.OUT-XYZ')
+    expect(isBotEchoAny).toHaveBeenCalledWith('org-1', [
+      'wamid.OUT-XYZ',
+      'chatwoot-source-1',
+      'chatwoot-source-2',
+      'provider-msg-1',
+      'key-msg-1',
+    ])
   })
 
   it('quando direction=OUT e isBotEcho=false → cria Message com author=HUMAN (operador no painel)', async () => {
-    const { isBotEcho } = await import(
+    const { isBotEchoAny } = await import(
       '@/server/communication/services/bot-echo-guard.service'
     )
     const { database } = await import('@/server/services/database')
-    ;(isBotEcho as any).mockResolvedValueOnce(false)
+    ;(isBotEchoAny as any).mockResolvedValueOnce(false)
 
     const { POST } = await import('./route')
     const res = await POST(
@@ -361,7 +374,9 @@ describe('UAZapi webhook — ChatSession upsert', () => {
     expect(createArg.data.contactPhone).toBe('5511999998888')
     expect(createArg.data.connectionId).toBe('conn-1')
     expect(createArg.data.organizationId).toBe('org-1')
-    expect(createArg.data.status).toBe('OPEN')
+    // Status must be a valid SessionStatus enum value (was wrongly 'OPEN',
+    // which is not in QUEUED/ACTIVE/PAUSED/CLOSED → Postgres enum violation).
+    expect(createArg.data.status).toBe('ACTIVE')
   })
 
   it('reutiliza ChatSession existente OPEN — não cria nova', async () => {

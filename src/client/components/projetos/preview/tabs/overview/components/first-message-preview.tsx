@@ -66,7 +66,7 @@ export function FirstMessagePreviewCard({
             className="truncate text-[11px] font-semibold uppercase tracking-[0.14em]"
             style={{ color: tokens.textTertiary }}
           >
-            Primeira mensagem que seus clientes vao ver
+            Primeira mensagem que seus clientes vão ver
           </span>
         </div>
         {!isEmpty && source && <SourceBadge tokens={tokens} source={source} />}
@@ -85,14 +85,15 @@ export function FirstMessagePreviewCard({
               className="text-[13px] leading-snug"
               style={{ color: tokens.textSecondary }}
             >
-              Ainda nao definida. Peca ao Builder para criar a saudacao
+              Ainda não definida. Peça ao Builder para criar a saudação
               inicial.
             </p>
             <AskBuilderButton
               tokens={tokens}
               variant="small"
-              label="Criar saudacao"
-              message="Crie uma primeira mensagem amigavel para meus clientes no WhatsApp"
+              label="Criar saudação"
+              message="Crie uma primeira mensagem amigável para meus clientes no WhatsApp"
+              autoSend
             />
           </div>
         ) : (
@@ -115,7 +116,7 @@ export function FirstMessagePreviewCard({
               <button
                 type="button"
                 onClick={onEdit}
-                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors"
+                className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-md border px-3 text-[11px] font-medium transition-colors"
                 style={{
                   borderColor: tokens.divider,
                   color: tokens.textSecondary,

@@ -56,25 +56,23 @@ export function IntegracoesPage() {
 
   return (
     <div
-      className="flex min-h-screen flex-col"
+      className="space-y-6"
       style={{ color: tokens.textPrimary }}
     >
-      <header className="border-b" style={{ borderColor: tokens.divider }}>
-        <div className="container mx-auto flex flex-col gap-1 px-6 py-8">
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            style={{ color: tokens.textPrimary }}
-          >
-            Integrações
-          </h1>
-          <p className="text-sm" style={{ color: tokens.textTertiary }}>
-            Cole suas próprias chaves de API. O agente vai usar essas em vez das
-            chaves globais da plataforma.
-          </p>
-        </div>
+      <header className="flex flex-col gap-1">
+        <h1
+          className="text-2xl font-semibold tracking-tight"
+          style={{ color: tokens.textPrimary }}
+        >
+          Integrações
+        </h1>
+        <p className="text-sm" style={{ color: tokens.textTertiary }}>
+          Cole suas próprias chaves de API. O agente vai usar essas em vez das
+          chaves globais da plataforma.
+        </p>
       </header>
 
-      <main className="container mx-auto flex-1 px-6 py-8">
+      <main>
         <div className="mx-auto max-w-3xl space-y-4">
           {error && !backendMissing && (
             <Alert variant="destructive">

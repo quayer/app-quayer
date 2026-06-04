@@ -33,11 +33,19 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { database } from '@/server/services/database'
-import { isBotEcho, markBotMessage } from '@/server/communication/services/bot-echo-guard.service'
-import { processAgentMessage } from '@/server/ai-module/ai-agents/agent-runtime.service'
+import { isBotEchoAny, markBotMessage } from '@/server/communication/services/bot-echo-guard.service'
+import {
+  processAgentMessage,
+  type AgentRuntimeResponse,
+} from '@/server/ai-module/ai-agents/agent-runtime.service'
 import { processInboundMessage } from '@/server/communication/services/inbound-pipeline.service'
 import { sendAgentResponse } from '@/server/communication/services/outbound.service'
 import { sendTypingIndicator } from '@/server/communication/services/typing-indicator.service'
+import { loadAgentRuntimeSettingsForAgent } from '@/server/communication/services/agent-runtime-settings.service'
+import {
+  detectMessageLanguage,
+  prependLanguageContext,
+} from '@/server/communication/services/language-detection.service'
 import * as uazapiSender from '@/server/communication/services/uazapi-sender.service'
 import { getRedis } from '@/server/services/redis'
 
@@ -56,6 +64,17 @@ interface UazapiData {
   media_url?: string
   media_mimetype?: string
   timestamp?: number
+  source_id?: string
+  sourceId?: string
+  message_id?: string
+  messageId?: string
+  provider_message_id?: string
+  providerMessageId?: string
+  external_message_id?: string
+  externalMessageId?: string
+  key?: {
+    id?: string
+  }
 }
 
 interface UazapiPayload {
@@ -127,6 +146,124 @@ function noop(): void {
   /* swallow */
 }
 
+function addAlias(target: string[], value: unknown): void {
+  if (typeof value === 'string' && value.length > 0 && !target.includes(value)) {
+    target.push(value)
+  }
+}
+
+function collectBotEchoAliases(payload: UazapiPayload): string[] {
+  const data = payload.data
+  const aliases: string[] = []
+  const roots: Array<Record<string, unknown> | undefined> = [
+    data as unknown as Record<string, unknown> | undefined,
+    payload as unknown as Record<string, unknown>,
+  ]
+
+  for (const root of roots) {
+    if (!root) continue
+    addAlias(aliases, root.id)
+    addAlias(aliases, root.source_id)
+    addAlias(aliases, root.sourceId)
+    addAlias(aliases, root.message_id)
+    addAlias(aliases, root.messageId)
+    addAlias(aliases, root.provider_message_id)
+    addAlias(aliases, root.providerMessageId)
+    addAlias(aliases, root.external_message_id)
+    addAlias(aliases, root.externalMessageId)
+    addAlias(aliases, root.chatwoot_message_id)
+    addAlias(aliases, root.chatwootMessageId)
+
+    const key = root.key as { id?: unknown } | undefined
+    addAlias(aliases, key?.id)
+  }
+
+  return aliases
+}
+
+async function resolveAgentIdForConnection(
+  connectionId: string,
+  organizationId: string,
+  fallbackAgentId?: string | null,
+): Promise<string | null> {
+  let activeDeployment: { agentConfigId: string } | null | undefined
+  try {
+    activeDeployment = await (database as unknown as {
+      agentDeployment?: {
+        findFirst?: (args: unknown) => Promise<{ agentConfigId: string } | null>
+      }
+    }).agentDeployment?.findFirst?.({
+      where: {
+        connectionId,
+        status: 'ACTIVE',
+        agentConfig: { organizationId },
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: { agentConfigId: true },
+    })
+  } catch (err) {
+    console.warn(
+      '[uazapi-webhook] agent deployment lookup failed, using fallback:',
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
+  return activeDeployment?.agentConfigId ?? fallbackAgentId ?? null
+}
+
+/**
+ * Reads a connected/disconnected signal from a UAZAPI connection-lifecycle
+ * event and updates the owning Connection.status. This closes the gap where an
+ * instance paired via QR stayed `DISCONNECTED` forever (the QR path never had a
+ * status-promotion handler).
+ *
+ * Best-effort + defensive: UAZAPI's event shape differs across versions, so we
+ * probe several common fields (status/state/connection/connected/loggedIn).
+ * ⚠️ Confirm the exact field names against the live broker in the E2E wave.
+ */
+async function promoteConnectionFromEvent(payload: UazapiPayload): Promise<boolean> {
+  const orClauses: Array<Record<string, string>> = []
+  if (payload.instance) orClauses.push({ uazapiInstanceId: payload.instance })
+  if (payload.token) orClauses.push({ uazapiToken: payload.token })
+  if (orClauses.length === 0) return false
+
+  const conn = await database.connection.findFirst({
+    where: { OR: orClauses },
+    select: { id: true, status: true },
+  })
+  if (!conn) return false
+
+  const raw = (payload.data ?? payload) as Record<string, unknown>
+  const signal = String(
+    raw.status ??
+      raw.state ??
+      raw.connection ??
+      (raw.connected === true || raw.loggedIn === true ? 'connected' : ''),
+  ).toLowerCase()
+
+  let nextStatus: 'CONNECTED' | 'DISCONNECTED' | null = null
+  if (/disconnect|close|offline|logout|unpair/.test(signal)) {
+    nextStatus = 'DISCONNECTED'
+  } else if (/connecting|pairing|qr|scanning/.test(signal)) {
+    // Estado em progresso — NÃO promove (evita CONNECTED prematuro).
+    nextStatus = null
+  } else if (/connected|open|online|logged|paired/.test(signal)) {
+    nextStatus = 'CONNECTED'
+  }
+  if (!nextStatus || conn.status === nextStatus) return false
+
+  try {
+    await database.connection.update({
+      where: { id: conn.id },
+      data: { status: nextStatus },
+    })
+    return true
+  } catch (err) {
+    console.warn('[uazapi-webhook] connection status update failed:', err)
+    return false
+  }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -138,7 +275,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 503 },
     )
   }
-  const provided = req.headers.get('x-webhook-secret')
+  // Accept the secret via header OR `?secret=` query param. UAZAPI does not
+  // guarantee custom-header delivery on registered webhooks, so the registered
+  // URL carries the secret in the query (see buildUazapiWebhookUrl).
+  const provided =
+    req.headers.get('x-webhook-secret') ?? req.nextUrl.searchParams.get('secret')
   if (!provided || provided !== configuredSecret) {
     return unauthorized()
   }
@@ -149,6 +290,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     payload = (await req.json()) as UazapiPayload
   } catch {
     return badRequest('invalid json')
+  }
+
+  // 2.5) Connection lifecycle events (QR paired, disconnected) carry no message
+  // (no data.from), so handle them BEFORE the message-shape checks below.
+  const eventName = (payload.event ?? '').toLowerCase()
+  const hasMessageFrom = !!(
+    payload.data &&
+    typeof payload.data === 'object' &&
+    typeof payload.data.from === 'string'
+  )
+  if (
+    // 'presence' is contact online/offline, NOT channel state — excluded so it
+    // never promotes the connection status.
+    !hasMessageFrom &&
+    /connect|status|state|logged|pair/.test(eventName)
+  ) {
+    const connectionUpdated = await promoteConnectionFromEvent(payload)
+    return NextResponse.json(
+      { ok: true, event: payload.event, connectionUpdated },
+      { status: 200 },
+    )
   }
 
   const data = payload?.data
@@ -194,6 +356,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
+  // Opportunistic status promotion: inbound traffic from the customer is a
+  // strong signal the channel is live, so flip a stale DISCONNECTED. Gated to
+  // IN only — an OUTBOUND echo is a weaker signal and shouldn't mask a logout.
+  // Fire-and-forget — never blocks the message.
+  const connectionStatus = (connection as { status?: string }).status
+  if (direction === 'IN' && connectionStatus && connectionStatus !== 'CONNECTED') {
+    database.connection
+      .update({ where: { id: connection.id }, data: { status: 'CONNECTED' } })
+      .catch((err: unknown) =>
+        console.warn('[uazapi-webhook] opportunistic status promotion failed:', err),
+      )
+  }
+
   // Loose-typed access for fields that are not yet first-class in the schema.
   const connectionLoose = connection as unknown as {
     aiAgentId?: string | null
@@ -201,12 +376,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     uazapiBaseUrl?: string | null
     uazapiToken?: string | null
   }
-  const connectionAiAgentId = connectionLoose.aiAgentId ?? null
+  const connectionAiAgentId = await resolveAgentIdForConnection(
+    connection.id,
+    organizationId,
+    connectionLoose.aiAgentId,
+  )
+  const runtimeSettings = await loadAgentRuntimeSettingsForAgent(
+    connectionAiAgentId,
+    organizationId,
+  )
 
   // 4) Bot-echo guard (OUT only). If we sent it, skip everything.
   let author: 'CUSTOMER' | 'AGENT' = 'CUSTOMER'
   if (direction === 'OUT') {
-    const echo = await isBotEcho(organizationId, externalMessageId)
+    const echoAliases = collectBotEchoAliases(payload)
+    const echo = await isBotEchoAny(organizationId, echoAliases)
     if (echo === true) {
       return NextResponse.json({ skip: 'bot_echo' }, { status: 200 })
     }
@@ -217,6 +401,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 5) Inbound pipeline (only for INBOUND messages — OUT operator messages
   // bypass enrichment/buffer entirely and are persisted as-is).
   let enrichedContent = data.body ?? ''
+  let pipelineResult: Awaited<ReturnType<typeof processInboundMessage>> | null = null
   if (direction === 'IN') {
     let redisClient: ReturnType<typeof getRedis> | null = null
     try {
@@ -228,12 +413,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const openaiApiKey =
       connectionLoose.openaiApiKey ?? process.env.OPENAI_API_KEY ?? undefined
 
-    let pipelineResult
     try {
       pipelineResult = await processInboundMessage({
         payload,
         redis: redisClient,
         openaiApiKey,
+        bufferEnabled: runtimeSettings.messageBuffer.enabled,
+        bufferTimeoutSeconds: Math.round(runtimeSettings.messageBuffer.timeoutMs / 1000),
+        whisperEnabled: runtimeSettings.media.audioTranscriptionEnabled,
+        imageVisionEnabled: runtimeSettings.media.imageUnderstandingEnabled,
+        documentVisionEnabled: runtimeSettings.media.documentUnderstandingEnabled,
+        videoUnderstandingEnabled: runtimeSettings.media.videoUnderstandingEnabled,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -286,9 +476,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         contactPhone,
         connectionId: connection.id,
         organizationId,
-        // 'OPEN' isn't in the Prisma enum yet — cast to satisfy types until the
-        // schema lands. Functionally equivalent to ACTIVE for the runtime.
-        status: 'OPEN' as never,
+        // SessionStatus enum is QUEUED/ACTIVE/PAUSED/CLOSED. Was wrongly set to
+        // 'OPEN' (not in the enum → Postgres enum violation at runtime).
+        status: 'ACTIVE',
         aiEnabled: true,
         lastMessageAt: new Date(),
       } as never,
@@ -316,8 +506,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // 8) AI dispatch — INBOUND only, gated by aiEnabled / aiBlockedUntil / agent config.
   if (direction === 'IN' && connectionAiAgentId && canDispatchAi(session)) {
+    const detectedLanguage =
+      runtimeSettings.languageDetectionEnabled
+        ? pipelineResult?.detectedLanguage ??
+          detectMessageLanguage(enrichedContent)?.code ??
+          null
+        : null
+    const messageContent = runtimeSettings.languageDetectionEnabled
+      ? prependLanguageContext(enrichedContent, detectedLanguage)
+      : enrichedContent
+
     // Fire typing indicator (don't await) before dispatching the AI.
-    if (connectionLoose.uazapiToken) {
+    if (runtimeSettings.typingIndicatorEnabled && connectionLoose.uazapiToken) {
       const baseUrl = connectionLoose.uazapiBaseUrl ?? FALLBACK_UAZAPI_BASE_URL
       sendTypingIndicator(connectionLoose.uazapiToken, baseUrl, contactPhone).catch(noop)
     }
@@ -329,10 +529,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         contactId: contactPhone,
         connectionId: connection.id,
         organizationId,
-        messageContent: enrichedContent,
+        messageContent,
       })
 
-      const aiText = (result as { text?: string } | null)?.text ?? null
+      const typedResult = result as AgentRuntimeResponse | null
+      const aiText = typedResult?.text ?? null
+
+      // Per-turn cost/token attribution for the OUTBOUND Message (these schema
+      // columns existed but were always NULL — the runtime computed and threw
+      // them away). Now persisted so "why did it respond X, at what cost" is
+      // answerable per message.
+      const aiMeta = typedResult
+        ? {
+            model: typedResult.model,
+            provider: typedResult.provider,
+            agentId: connectionAiAgentId,
+            inputTokens: typedResult.usage?.inputTokens,
+            outputTokens: typedResult.usage?.outputTokens,
+            inputCost: typedResult.cost?.inputCost,
+            outputCost: typedResult.cost?.outputCost,
+            totalCost: typedResult.cost?.totalCost,
+            latencyMs: typedResult.latencyMs,
+          }
+        : undefined
 
       // 9) Outbound — push reply back to WhatsApp. Failures are isolated.
       let outbound: { blocksSent: number; errors: string[]; persisted?: boolean } | undefined
@@ -345,6 +564,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               organizationId,
               contactPhone,
               agentText: aiText,
+              tts: runtimeSettings.tts,
+              aiMeta,
             },
             {
               database: database as never,

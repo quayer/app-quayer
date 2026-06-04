@@ -107,6 +107,16 @@
   --q-brand-text:           #FFE566;
   --q-hover-bg:             rgba(255,255,255,0.06);
   --q-text-inverse:         #1A0800;
+  /* Feedback (dark) — *-text saturado p/ contraste >=4.5:1 sobre *-subtle/dark */
+  --q-success:              #22C55E;
+  --q-success-subtle:       rgba(34,197,94,0.12);
+  --q-success-text:         #4ADE80;
+  --q-danger:               #EF4444;
+  --q-danger-subtle:        rgba(239,68,68,0.12);
+  --q-danger-text:          #F87171;
+  --q-warning:              #F59E0B;
+  --q-warning-subtle:       rgba(245,158,11,0.12);
+  --q-warning-text:         #FBBF24;
   --q-shadow:               0 16px 48px -16px rgba(0,0,0,0.75);
   --q-sidebar-bg:           #0B0704;
   --q-admin-nav-bg:         #0B0704;
@@ -137,6 +147,16 @@
   --q-brand-text:           #9A3D08;
   --q-hover-bg:             rgba(26,8,0,0.05);
   --q-text-inverse:         #FFFFFF;
+  /* Feedback (light) — *-text escuro p/ contraste >=4.5:1 sobre *-subtle/branco */
+  --q-success:              #16A34A;
+  --q-success-subtle:       rgba(22,163,74,0.12);
+  --q-success-text:         #15803D;
+  --q-danger:               #DC2626;
+  --q-danger-subtle:        rgba(220,38,38,0.10);
+  --q-danger-text:          #B91C1C;
+  --q-warning:              #D97706;
+  --q-warning-subtle:       rgba(217,119,6,0.12);
+  --q-warning-text:         #B45309;
   --q-shadow:               0 12px 36px -12px rgba(26,8,0,0.18);
   --q-sidebar-bg:           #F5F2ED;
   --q-admin-nav-bg:         #FFFFFF;

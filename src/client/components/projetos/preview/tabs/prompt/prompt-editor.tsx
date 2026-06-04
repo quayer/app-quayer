@@ -86,7 +86,7 @@ export function PromptEditor({
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="O Builder gerara o prompt automaticamente durante a conversa. Voce tambem pode escrever manualmente aqui."
+          placeholder="O Builder gerará o prompt automaticamente durante a conversa. Você também pode escrever manualmente aqui."
           className={`flex-1 resize-none border-0 bg-transparent font-mono text-[13px] leading-relaxed shadow-none focus-visible:ring-0 ${
             expanded ? "min-h-[600px]" : "min-h-[340px]"
           }`}

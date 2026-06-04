@@ -97,8 +97,14 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
           systemPrompt: project.aiAgent.systemPrompt,
           provider: project.aiAgent.provider,
           model: project.aiAgent.model,
+          enableTTS: project.aiAgent.enableTTS,
+          ttsProvider: project.aiAgent.ttsProvider,
+          ttsVoiceId: project.aiAgent.ttsVoiceId,
+          ttsModel: project.aiAgent.ttsModel,
+          ttsSpeechRate: project.aiAgent.ttsSpeechRate,
         }
       : null,
+    runtimeSettings: project.runtimeSettings,
     hasWhatsAppConnection,
   }
 

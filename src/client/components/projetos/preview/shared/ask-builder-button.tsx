@@ -19,10 +19,12 @@ export interface AskBuilderButtonProps {
   message: string
   /** Visible label — defaults to "Pedir ao Builder". */
   label?: string
-  /** small = 28px height / compact padding. default = 36px. */
+  /** small = compact label with a 40px target. default = 44px. */
   variant?: "default" | "small"
   /** Optional aria-label override for accessibility. */
   ariaLabel?: string
+  /** When true, submit the message to Builder immediately instead of only pre-filling the chat. */
+  autoSend?: boolean
 }
 
 export function AskBuilderButton({
@@ -31,15 +33,16 @@ export function AskBuilderButton({
   label = "Pedir ao Builder",
   variant = "default",
   ariaLabel,
+  autoSend = false,
 }: AskBuilderButtonProps) {
   const handleClick = useCallback(() => {
     if (typeof window === "undefined") return
     window.dispatchEvent(
       new CustomEvent("builder:focus-chat", {
-        detail: { message },
+        detail: { message, autoSend },
       }),
     )
-  }, [message])
+  }, [autoSend, message])
 
   const isSmall = variant === "small"
 
@@ -50,8 +53,8 @@ export function AskBuilderButton({
       aria-label={ariaLabel ?? label}
       className={
         isSmall
-          ? "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors"
-          : "inline-flex h-9 items-center gap-2 rounded-lg border px-4 text-[13px] font-medium transition-colors"
+          ? "inline-flex min-h-10 items-center gap-1.5 rounded-md border px-3 text-[11px] font-medium transition-colors"
+          : "inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 text-[13px] font-medium transition-colors"
       }
       style={{
         backgroundColor: tokens.brandSubtle,

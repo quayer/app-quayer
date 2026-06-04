@@ -10,6 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyAccessToken, extractTokenFromHeader } from '@/lib/auth/jwt'
 
 export const runtime = 'nodejs'
 
@@ -32,9 +33,11 @@ function pickExtension(mimeType: string): string {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // ── Auth ──────────────────────────────────────────────────────────────────
-  const userId = request.headers.get('x-user-id')
-  if (!userId) {
+  // ── Auth — validate JWT directly (middleware excludes /api routes) ────────
+  const cookieToken = request.cookies.get('accessToken')?.value
+  const headerToken = extractTokenFromHeader(request.headers.get('authorization') ?? '')
+  const token = cookieToken ?? headerToken
+  if (!token || !verifyAccessToken(token)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 

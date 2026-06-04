@@ -84,7 +84,9 @@ export default async function CanaisRoute() {
 
   return (
     <AppShell>
-      <CanaisPage connections={connections} />
+      <div className="container mx-auto px-4 py-8">
+        <CanaisPage connections={connections} />
+      </div>
     </AppShell>
   )
 }

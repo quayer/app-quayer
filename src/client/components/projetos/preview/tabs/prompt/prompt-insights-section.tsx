@@ -49,7 +49,7 @@ export function PromptInsightsSection({
           className="text-[11px] font-semibold uppercase tracking-[0.14em]"
           style={{ color: tokens.textTertiary }}
         >
-          Analise do prompt
+          Análise do prompt
         </span>
         {open ? (
           <ChevronUp
@@ -83,7 +83,7 @@ export function PromptInsightsSection({
             />
             <InsightMetric
               tokens={tokens}
-              label="Secoes"
+              label="Seções"
               value={String(insights.sectionCount)}
             />
             <InsightMetric
@@ -97,11 +97,11 @@ export function PromptInsightsSection({
           <div className="flex flex-wrap gap-1.5">
             <QualityPill label="Identidade" active={insights.hasIdentity} />
             <QualityPill
-              label="Instrucoes"
+              label="Instruções"
               active={insights.hasInstructions}
             />
             <QualityPill
-              label="Restricoes"
+              label="Restrições"
               active={insights.hasRestrictions}
             />
             <QualityPill label="Tom" active={insights.hasTone} />
@@ -149,7 +149,7 @@ function BuilderAnatomyBlock({
           className="text-[11px] font-semibold uppercase tracking-[0.14em]"
           style={{ color: tokens.textTertiary }}
         >
-          Analise do Builder
+          Análise do Builder
         </span>
       </div>
 
@@ -197,7 +197,7 @@ function BuilderAnatomyBlock({
       />
       <PillGroup
         tokens={tokens}
-        label="Limitacoes"
+        label="Limitações"
         items={splitLines(sections.limitacoes)}
       />
       <PillGroup

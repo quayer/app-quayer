@@ -56,7 +56,7 @@ export function DeployReadinessCard({
             type="button"
             disabled={readinessMet < readiness.length}
             onClick={() => onTabChange?.("deploy")}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-semibold transition-opacity disabled:opacity-40"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 text-[12px] font-semibold transition-opacity disabled:opacity-40"
             style={{
               backgroundColor: tokens.brand,
               color: tokens.textInverse,

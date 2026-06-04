@@ -43,14 +43,15 @@ const PROTECTED_PATHS = [
  * The nonce eliminates the need for 'unsafe-inline' in script-src.
  */
 function buildCSP(nonce: string): string {
+  const isDev = process.env.NODE_ENV === 'development';
   return [
     "default-src 'self'",
-    // 'strict-dynamic' lets Next.js framework scripts (RSC streaming,
-    // hydration shims) inherit trust from the nonced root script instead
-    // of each individual inline script needing its own nonce. Without it
-    // pages with React Server Components throw CSP violations on the
-    // auto-injected hydration scripts (observed on /conta?tab=seguranca).
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com`,
+    // In development, Turbopack injects HMR/React-Refresh scripts without a nonce.
+    // 'unsafe-inline' is added only in dev so those scripts aren't blocked.
+    // Production stays strict: nonce + 'strict-dynamic' only.
+    isDev
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline' https://challenges.cloudflare.com`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",

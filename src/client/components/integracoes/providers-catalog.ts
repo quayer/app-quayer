@@ -2,7 +2,7 @@
  * Catálogo fixo dos provedores de IA suportados via BYOK.
  * A ordem aqui define a ordem visual na página.
  */
-export type ProviderKey = 'openai' | 'anthropic' | 'google'
+export type ProviderKey = 'openai' | 'anthropic' | 'google' | 'elevenlabs'
 
 export interface ProviderMeta {
   key: ProviderKey
@@ -35,6 +35,13 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     description: 'Gemini 1.5, 2.0',
     letter: 'G',
     keyPlaceholder: 'AIza...',
+  },
+  {
+    key: 'elevenlabs',
+    name: 'ElevenLabs',
+    description: 'Voz do agente para respostas em áudio no callback',
+    letter: 'E',
+    keyPlaceholder: 'xi-...',
   },
 ] as const
 

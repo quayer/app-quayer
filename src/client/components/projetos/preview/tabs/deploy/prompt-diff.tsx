@@ -112,7 +112,7 @@ export function PromptDiff({
             className="px-3 py-4 text-center text-[12px]"
             style={{ color: tokens.textTertiary }}
           >
-            Sem diferencas entre as versoes.
+            Sem diferenças entre as versões.
           </div>
         ) : (
           lines.map((line, idx) => {

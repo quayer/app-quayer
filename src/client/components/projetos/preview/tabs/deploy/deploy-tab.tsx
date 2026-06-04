@@ -14,7 +14,6 @@ import { useEffect, useState, useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Rocket } from "lucide-react"
-import { api } from "@/igniter.client"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
@@ -37,21 +36,49 @@ interface ProjectChannelResponse {
     name: string
     phoneNumber: string | null
     status: string
+    provider?: string
+    profileName?: string | null
   } | null
+}
+
+const CONNECTED_CHANNEL_STATUSES = new Set(["CONNECTED", "ACTIVE", "READY"])
+
+function unwrapProjectChannel(value: unknown): ProjectChannelResponse {
+  if (
+    value &&
+    typeof value === "object" &&
+    "channel" in value
+  ) {
+    return value as ProjectChannelResponse
+  }
+
+  if (value && typeof value === "object" && "data" in value) {
+    return unwrapProjectChannel((value as { data: unknown }).data)
+  }
+
+  return { channel: null }
 }
 
 function StepIndicator({ step, tokens }: { step: 1 | 2 | 3 | 4; tokens: AppTokens }) {
   const steps = ["Canal", "Requisitos", "Publicar", "Histórico"]
   return (
-    <div className="flex items-center gap-0">
+    <div
+      className="flex items-center gap-0"
+      role="group"
+      aria-label="Progresso da publicação"
+    >
       {steps.map((label, i) => {
         const n = i + 1
         const done = n < step
         const active = n === step
         return (
           <React.Fragment key={label}>
-            <div className="flex flex-col items-center gap-1">
+            <div
+              className="flex flex-col items-center gap-1"
+              aria-current={active ? "step" : undefined}
+            >
               <div
+                aria-hidden="true"
                 className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold"
                 style={{
                   backgroundColor: done || active ? tokens.brand : tokens.hoverBg,
@@ -62,6 +89,9 @@ function StepIndicator({ step, tokens }: { step: 1 | 2 | 3 | 4; tokens: AppToken
               </div>
               <span className="text-[10px]" style={{ color: active ? tokens.brand : tokens.textTertiary }}>
                 {label}
+                <span className="sr-only">
+                  {done ? " (concluído)" : active ? " (etapa atual)" : ""}
+                </span>
               </span>
             </div>
             {i < steps.length - 1 && (
@@ -94,10 +124,15 @@ export function DeployTab({ project }: DeployTabProps) {
   const { data: channelData, isLoading: channelLoading } = useQuery<ProjectChannelResponse>({
     queryKey: ["project-channel", project.id],
     queryFn: async () => {
-      const res = await api.builder.getProjectChannel.query({
-        params: { id: project.id },
+      const response = await fetch(`/api/v1/builder/projects/${project.id}/channel`, {
+        credentials: "same-origin",
       })
-      return (res?.data ?? { channel: null }) as ProjectChannelResponse
+
+      if (!response.ok) {
+        throw new Error(`Erro ${response.status} ao carregar canal vinculado`)
+      }
+
+      return unwrapProjectChannel(await response.json())
     },
     enabled: !!project.aiAgent,
     staleTime: 0,
@@ -106,12 +141,15 @@ export function DeployTab({ project }: DeployTabProps) {
   })
 
   const projectChannel = channelData?.channel ?? null
+  const hasConnectedChannel = projectChannel
+    ? CONNECTED_CHANNEL_STATUSES.has(projectChannel.status.toUpperCase())
+    : project.hasWhatsAppConnection
 
   // Build a derived project that reflects the live channel state so the
   // checklist doesn't depend on a SSR-only hasWhatsAppConnection boolean.
   const liveProject: WorkspaceProject = {
     ...project,
-    hasWhatsAppConnection: project.hasWhatsAppConnection || projectChannel !== null,
+    hasWhatsAppConnection: hasConnectedChannel,
   }
 
   const { checklist, metCount, allMet, unmetItems } = useChecklist(liveProject)
@@ -201,13 +239,21 @@ export function DeployTab({ project }: DeployTabProps) {
     if (!draft) return
     setPublishing(true)
     try {
-      const res = await fetch("/api/v1/builder/projects/publish", {
+      // "Salvar como rascunho" é um no-op de servidor: a versão já existe como
+      // rascunho (publishedAt === null). Só confirma na UI.
+      if (publishAsDraft) {
+        setConfirmOpen(false)
+        toast.success(`Versão v${draft.versionNumber} mantida como rascunho.`)
+        return
+      }
+
+      // Rota real da saga (a antiga /projects/publish não existe → era 404).
+      const res = await fetch("/api/v1/builder/deploy/publish-version", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: project.id,
           promptVersionId: draft.id,
-          asDraft: publishAsDraft,
         }),
       })
       if (!res.ok) {
@@ -215,15 +261,10 @@ export function DeployTab({ project }: DeployTabProps) {
         throw new Error(text || `HTTP ${res.status}`)
       }
       setConfirmOpen(false)
-
-      if (publishAsDraft) {
-        toast.success(`Versao v${draft.versionNumber} salva como rascunho.`)
-      } else {
-        setJustPublished(draft.versionNumber)
-        toast.success(`Versao v${draft.versionNumber} publicada com sucesso.`)
-        // Re-fetch versions from server instead of optimistic update
-        await loadVersions()
-      }
+      setJustPublished(draft.versionNumber)
+      toast.success(`Versão v${draft.versionNumber} publicada com sucesso.`)
+      // Re-fetch versions from server instead of optimistic update
+      await loadVersions()
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao publicar"
       toast.error(`Falha ao publicar: ${msg}`)
@@ -246,7 +287,7 @@ export function DeployTab({ project }: DeployTabProps) {
           className="mt-0.5 text-[13px]"
           style={{ color: tokens.textSecondary }}
         >
-          Conecte um canal, verifique os requisitos e publique versoes do seu agente.
+          Conecte um canal, verifique os requisitos e publique versões do seu agente.
         </p>
       </div>
 
@@ -258,9 +299,10 @@ export function DeployTab({ project }: DeployTabProps) {
         projectId={project.id}
         projectChannel={projectChannel}
         channelLoading={channelLoading}
-        onChannelAttached={() =>
-          queryClient.invalidateQueries({ queryKey: ["project-channel", project.id] })
-        }
+        onChannelAttached={async () => {
+          await queryClient.invalidateQueries({ queryKey: ["project-channel", project.id] })
+          await queryClient.invalidateQueries({ queryKey: ["project-channel-options", project.id] })
+        }}
       />
 
       {/* Step 2 — readiness checklist */}

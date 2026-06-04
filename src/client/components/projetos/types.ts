@@ -10,10 +10,20 @@
  */
 
 import type { ProjectType } from '@/lib/project-type'
+import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
 
 export type { ProjectType }
 export type ProjectStatus = 'draft' | 'production' | 'paused' | 'archived'
-export type PreviewTab = 'overview' | 'prompt' | 'playground' | 'deploy' | 'credentials'
+export type PreviewTab =
+  | 'overview'
+  | 'prompt'
+  | 'identity'
+  | 'knowledge'
+  | 'playground'
+  | 'activity'
+  | 'deploy'
+  | 'credentials'
+  | 'advanced'
 
 export interface WorkspaceProject {
   id: string
@@ -27,7 +37,13 @@ export interface WorkspaceProject {
     systemPrompt: string | null
     provider: string
     model: string
+    enableTTS?: boolean | null
+    ttsProvider?: string | null
+    ttsVoiceId?: string | null
+    ttsModel?: string | null
+    ttsSpeechRate?: number | null
   } | null
+  runtimeSettings: AgentRuntimeSettings
   /**
    * Option A (minimum) — derived from BuilderDeployment.status === 'live'
    * && connectionId != null. Avoids adding the full connections array to the

@@ -58,7 +58,7 @@ export function SuccessCard({
             className="mt-1 text-[13px]"
             style={{ color: tokens.textSecondary }}
           >
-            Versao v{versionNumber} esta ativa em producao.
+            Versão v{versionNumber} está ativa em produção.
           </p>
         </div>
         <button
@@ -141,7 +141,7 @@ export function VersionStatusCards({
               className="mt-2 text-[13px]"
               style={{ color: tokens.textTertiary }}
             >
-              Nenhuma versao em producao
+              Nenhuma versão em produção
             </div>
           )}
         </div>
@@ -167,7 +167,7 @@ export function VersionStatusCards({
           style={{ borderColor: tokens.divider }}
         >
           <p className="text-[12px]" style={{ color: tokens.textTertiary }}>
-            Nenhuma versao criada ainda. O Builder criara automaticamente.
+            Nenhuma versão criada ainda. O Builder criará automaticamente.
           </p>
         </div>
       )}
@@ -220,7 +220,7 @@ function DraftInner({
             <span
               className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
               style={{
-                backgroundColor: `${tokens.brand}18`,
+                backgroundColor: tokens.brandSubtle,
                 color: tokens.brand,
               }}
             >

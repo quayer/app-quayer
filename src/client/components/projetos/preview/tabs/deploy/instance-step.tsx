@@ -111,7 +111,7 @@ export function InstanceStep({
             type="button"
             disabled={publishing}
             onClick={() => onOpenConfirm(true)}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border text-[12px] font-medium transition-colors hover:opacity-80 disabled:opacity-30 sm:w-auto sm:px-5"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-4 text-[12px] font-medium transition-colors hover:opacity-80 disabled:opacity-30 sm:w-auto"
             style={{
               borderColor: tokens.border,
               color: tokens.textSecondary,
@@ -134,17 +134,17 @@ export function InstanceStep({
             <AlertDialogDescription>
               {publishAsDraft ? (
                 <>
-                  A versao sera salva mas nao ativada em producao. Voce podera
-                  publica-la posteriormente.
+                  A versão será salva mas não ativada em produção. Você poderá
+                  publicá-la posteriormente.
                 </>
               ) : (
                 <>
                   Conversas em andamento continuam com v
                   {production?.versionNumber ?? "\u2014"} ate terminarem. Novas
-                  conversas comecam na versao publicada.
+                  conversas começam na versão publicada.
                   {!allMet && (
                     <span className="mt-2 block text-amber-500">
-                      Atencao: nem todos os pre-requisitos foram atendidos.
+                      Atenção: nem todos os pré-requisitos foram atendidos.
                     </span>
                   )}
                 </>

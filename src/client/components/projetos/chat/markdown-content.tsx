@@ -17,7 +17,7 @@ export function MarkdownContent({ content, className, tokens: tokensProp }: Mark
   return (
     <div
       className={className}
-      style={{ color: tokens.textPrimary, fontSize: "0.875rem", lineHeight: 1.55 }}
+      style={{ color: tokens.textPrimary, fontSize: "0.875rem", lineHeight: 1.55, overflowWrap: "anywhere" }}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

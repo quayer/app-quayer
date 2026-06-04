@@ -123,7 +123,7 @@ function SaveIndicator({
         aria-live="polite"
       >
         <Check className="h-3 w-3" style={{ color: "#22c55e" }} />
-        salvo ha {secs}s
+        salvo há {secs}s
       </span>
     )
   }

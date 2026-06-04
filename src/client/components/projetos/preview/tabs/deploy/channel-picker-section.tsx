@@ -4,24 +4,28 @@
  * ChannelPickerSection — step 1 of the deploy wizard.
  *
  * Renders the WhatsApp channel attached to the project (when present)
- * and a detach action. When no channel is attached we show an empty
- * state with an "Em breve" CTA — there's no client-exposed endpoint
- * yet to list/create connections directly from the builder UI.
+ * and lets the user attach an existing organization channel.
  */
 
 import * as React from "react"
+import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { CheckCircle2, MessageSquare, Phone, Plug, Unplug } from "lucide-react"
-import { api } from "@/igniter.client"
+import { CheckCircle2, ExternalLink, MessageSquare, Phone, Plug, Unplug } from "lucide-react"
+import { Badge } from "@/client/components/ui/badge"
+import { Button } from "@/client/components/ui/button"
 import { Card, CardContent } from "@/client/components/ui/card"
 import { Skeleton } from "@/client/components/ui/skeleton"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import { ChannelSelectorCard } from "./channel-selector-card"
 
 export interface ProjectChannel {
   id: string
   name: string
   phoneNumber: string | null
   status: string
+  provider?: string
+  profileName?: string | null
 }
 
 interface ChannelPickerSectionProps {
@@ -29,16 +33,44 @@ interface ChannelPickerSectionProps {
   projectId: string
   projectChannel: ProjectChannel | null
   channelLoading: boolean
-  onChannelAttached: () => void
+  onChannelAttached: () => void | Promise<void>
 }
 
 const CONNECTED = new Set(["CONNECTED", "ACTIVE", "READY"])
 
-function statusPalette(status: string) {
-  if (CONNECTED.has(status.toUpperCase())) {
-    return { fg: "#22c55e", bg: "rgba(34,197,94,0.12)", label: "Conectado" }
+interface ChannelOptionsResponse {
+  channels: ProjectChannel[]
+}
+
+function unwrapChannelOptions(value: unknown): ChannelOptionsResponse {
+  if (
+    value &&
+    typeof value === "object" &&
+    "channels" in value &&
+    Array.isArray((value as { channels?: unknown }).channels)
+  ) {
+    return value as ChannelOptionsResponse
   }
-  return { fg: "#f59e0b", bg: "rgba(245,158,11,0.12)", label: "Desconectado" }
+
+  if (value && typeof value === "object" && "data" in value) {
+    return unwrapChannelOptions((value as { data: unknown }).data)
+  }
+
+  return { channels: [] }
+}
+
+function statusPalette(status: string) {
+  const s = status.toUpperCase()
+  if (CONNECTED.has(s)) {
+    return { fg: "var(--q-success)", bg: "var(--q-success-subtle)", label: "Conectado" }
+  }
+  if (s === "CONNECTING" || s === "QR_PENDING" || s === "PENDING") {
+    return { fg: "var(--q-warning)", bg: "var(--q-warning-subtle)", label: "Conectando" }
+  }
+  if (s === "FAILED" || s === "ERROR" || s === "BANNED") {
+    return { fg: "var(--q-danger)", bg: "var(--q-danger-subtle)", label: "Falha" }
+  }
+  return { fg: "var(--q-warning)", bg: "var(--q-warning-subtle)", label: "Desconectado" }
 }
 
 function ConnectedChannel({
@@ -68,7 +100,7 @@ function ConnectedChannel({
           </span>
           <span className="flex items-center gap-1 text-[12px]" style={{ color: tokens.textSecondary }}>
             <Phone className="h-3 w-3" />
-            {channel.phoneNumber ?? "Numero ainda nao detectado"}
+            {channel.phoneNumber ?? "Número ainda não detectado"}
           </span>
         </div>
         <span
@@ -82,7 +114,7 @@ function ConnectedChannel({
         type="button"
         onClick={onDetach}
         disabled={detaching}
-        className="inline-flex h-8 items-center justify-center gap-1.5 self-start rounded-md border px-3 text-[12px] font-medium transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex min-h-10 items-center justify-center gap-1.5 self-start rounded-md border px-3 text-[12px] font-medium transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
         style={{ borderColor: tokens.divider, color: tokens.textSecondary, backgroundColor: tokens.bgElevated }}
       >
         <Unplug className="h-3 w-3" />
@@ -106,27 +138,92 @@ function EmptyChannel({ tokens }: { tokens: AppTokens }) {
           Nenhum canal vinculado ainda
         </p>
         <p className="max-w-sm text-[12px]" style={{ color: tokens.textSecondary }}>
-          Conecte uma instancia do WhatsApp para que o agente possa receber e responder mensagens.
+          Conecte uma instância do WhatsApp para que o agente possa receber e responder mensagens.
         </p>
       </div>
-      <button
-        type="button"
-        disabled
-        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-3 text-[12px] font-medium opacity-60"
-        style={{ borderColor: tokens.divider, color: tokens.textTertiary, backgroundColor: tokens.bgElevated, cursor: "not-allowed" }}
-      >
-        Conectar WhatsApp
-        <span
-          className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase"
-          style={{ backgroundColor: tokens.hoverBg, color: tokens.textTertiary }}
-        >
-          Em breve
-        </span>
-      </button>
       <p className="text-[11px]" style={{ color: tokens.textTertiary }}>
-        Por enquanto, pedir ao Builder no chat para conectar um canal existente.
+        Escolha um canal existente abaixo ou conecte um novo em Canais.
       </p>
     </div>
+  )
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const text = await response.text().catch(() => "")
+  if (!text) return fallback
+
+  try {
+    const json = JSON.parse(text) as {
+      error?: unknown
+      message?: unknown
+      data?: { error?: unknown; message?: unknown }
+    }
+    const candidate =
+      json.message ??
+      json.error ??
+      json.data?.message ??
+      json.data?.error
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate
+    }
+  } catch {
+    // Response is plain text/HTML; trim it below.
+  }
+
+  return text.trim().slice(0, 240) || fallback
+}
+
+function ChannelOption({
+  tokens,
+  channel,
+  attaching,
+  onAttach,
+}: {
+  tokens: AppTokens
+  channel: ProjectChannel
+  attaching: boolean
+  onAttach: () => void
+}) {
+  const palette = statusPalette(channel.status)
+  const isConnected = CONNECTED.has(channel.status.toUpperCase())
+
+  return (
+    <article
+      className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+      style={{ borderColor: tokens.divider }}
+    >
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-[13px] font-semibold" style={{ color: tokens.textPrimary }}>
+            {channel.name}
+          </span>
+          <Badge
+            className="border-transparent"
+            style={{ backgroundColor: palette.bg, color: palette.fg }}
+          >
+            {palette.label}
+          </Badge>
+          {channel.provider && (
+            <Badge variant="outline">{channel.provider.replace(/_/g, " ")}</Badge>
+          )}
+        </div>
+        <p className="flex items-center gap-1 text-[12px]" style={{ color: tokens.textSecondary }}>
+          <Phone className="h-3 w-3" aria-hidden="true" />
+          {channel.phoneNumber ?? channel.profileName ?? "Número ainda não detectado"}
+        </p>
+      </div>
+
+      <Button
+        type="button"
+        size="sm"
+        variant={isConnected ? "default" : "outline"}
+        className="min-h-10"
+        disabled={attaching}
+        onClick={onAttach}
+      >
+        {attaching ? "Vinculando..." : "Usar este canal"}
+      </Button>
+    </article>
   )
 }
 
@@ -137,23 +234,83 @@ export function ChannelPickerSection({
   channelLoading,
   onChannelAttached,
 }: ChannelPickerSectionProps) {
-  const detachMutation = api.builder.detachChannel.useMutation()
+  const optionsQuery = useQuery({
+    queryKey: ["project-channel-options", projectId],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/v1/builder/projects/${projectId}/channel/options`,
+        { credentials: "same-origin" },
+      )
+
+      if (!response.ok) {
+        throw new Error(`Erro ${response.status} ao carregar canais`)
+      }
+
+      return unwrapChannelOptions(await response.json())
+    },
+  })
   const [detaching, setDetaching] = React.useState(false)
+  const [attachingId, setAttachingId] = React.useState<string | null>(null)
+
+  const channels = optionsQuery.data?.channels ?? []
 
   const handleDetach = React.useCallback(async () => {
     if (detaching) return
     setDetaching(true)
     try {
-      await detachMutation.mutate({ params: { id: projectId } })
+      const response = await fetch(`/api/v1/builder/projects/${projectId}/channel`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(response, `Erro ${response.status} ao desvincular canal`),
+        )
+      }
+
       toast.success("Canal desvinculado do projeto.")
-      onChannelAttached()
+      await onChannelAttached()
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao desvincular canal"
       toast.error(msg)
     } finally {
       setDetaching(false)
     }
-  }, [detachMutation, projectId, onChannelAttached, detaching])
+  }, [projectId, onChannelAttached, detaching])
+
+  const handleAttach = React.useCallback(
+    async (connectionId: string) => {
+      if (attachingId) return
+      setAttachingId(connectionId)
+      try {
+        const response = await fetch(`/api/v1/builder/projects/${projectId}/channel`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionId }),
+        })
+
+        if (!response.ok) {
+          throw new Error(
+            await readErrorMessage(response, `Erro ${response.status} ao vincular canal`),
+          )
+        }
+
+        toast.success("Canal vinculado ao projeto.")
+        await onChannelAttached()
+        await optionsQuery.refetch()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Erro ao vincular canal"
+        toast.error(msg)
+      } finally {
+        setAttachingId(null)
+      }
+    },
+    [attachingId, onChannelAttached, optionsQuery, projectId],
+  )
 
   const accent = projectChannel !== null
   return (
@@ -161,7 +318,7 @@ export function ChannelPickerSection({
       className="border p-0 shadow-none"
       style={{
         backgroundColor: tokens.bgSurface,
-        borderColor: accent ? "rgba(34,197,94,0.3)" : tokens.divider,
+        borderColor: accent ? tokens.success : tokens.divider,
       }}
     >
       <CardContent className="p-0">
@@ -191,7 +348,60 @@ export function ChannelPickerSection({
             onDetach={handleDetach}
           />
         ) : (
-          <EmptyChannel tokens={tokens} />
+          <>
+            <EmptyChannel tokens={tokens} />
+
+            {optionsQuery.isLoading ? (
+              <div className="space-y-2 border-t px-4 py-3" style={{ borderColor: tokens.divider }}>
+                <Skeleton className="h-12 w-full rounded-md" />
+                <Skeleton className="h-12 w-full rounded-md" />
+              </div>
+            ) : channels.length > 0 ? (
+              <div>
+                <div
+                  className="border-t px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  style={{ borderColor: tokens.divider, color: tokens.textTertiary }}
+                >
+                  Canais disponíveis
+                </div>
+                {channels.map((channel) => (
+                  <ChannelOption
+                    key={channel.id}
+                    tokens={tokens}
+                    channel={channel}
+                    attaching={attachingId === channel.id}
+                    onAttach={() => handleAttach(channel.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div
+                className="flex flex-col gap-3 border-t px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                style={{ borderColor: tokens.divider }}
+              >
+                <p className="text-[12px]" style={{ color: tokens.textSecondary }}>
+                  Nenhum canal WhatsApp existe nesta organização.
+                </p>
+                <Button asChild size="sm" variant="outline" className="gap-2">
+                  <Link href="/canais">
+                    Conectar novo canal
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Link>
+                </Button>
+              </div>
+            )}
+
+            {/* Connect a brand-new channel inline: WhatsApp Business (QR/share
+                link), WhatsApp Cloud API or Instagram (manual credentials). */}
+            <div className="border-t px-4 py-4" style={{ borderColor: tokens.divider }}>
+              <ChannelSelectorCard
+                tokens={tokens}
+                projectId={projectId}
+                shareToken={null}
+                onChannelConnected={onChannelAttached}
+              />
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

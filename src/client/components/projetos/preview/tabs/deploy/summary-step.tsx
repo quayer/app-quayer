@@ -86,7 +86,7 @@ function VersionTimelineEntry({
   isLast: boolean
 }) {
   const isPublished = version.publishedAt !== null
-  const dotColor = isPublished ? "#22c55e" : tokens.brand
+  const dotColor = isPublished ? tokens.success : tokens.brand
 
   return (
     <div className="flex gap-3">
@@ -113,9 +113,9 @@ function VersionTimelineEntry({
               className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
               style={{
                 backgroundColor: isPublished
-                  ? "rgba(34,197,94,0.12)"
-                  : `${tokens.brand}18`,
-                color: isPublished ? "#22c55e" : tokens.brand,
+                  ? tokens.successSubtle
+                  : tokens.brandSubtle,
+                color: isPublished ? tokens.successText : tokens.brand,
               }}
             >
               {isPublished ? "Publicado" : "Rascunho"}
@@ -143,12 +143,12 @@ function VersionTimelineEntry({
           <button
             type="button"
             disabled
-            className="ml-3 inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-medium opacity-50 transition-opacity"
+            className="ml-3 inline-flex min-h-10 shrink-0 items-center gap-1 rounded-md px-3 text-[11px] font-medium opacity-50 transition-opacity"
             style={{
               color: tokens.textTertiary,
               backgroundColor: tokens.hoverBg,
             }}
-            title="Restaurar versao (em breve)"
+            title="Restaurar versão"
           >
             <RotateCcw className="h-3 w-3" />
             Restaurar
@@ -259,20 +259,20 @@ export function SummaryStep({
             className="text-[11px] font-semibold uppercase tracking-[0.14em]"
             style={{ color: tokens.textTertiary }}
           >
-            Resumo da publicacao
+            Resumo da publicação
           </h3>
           <div className="flex items-center gap-2">
             <AskBuilderButton
               tokens={tokens}
               variant="small"
-              message="Estou pronto para publicar. Ha algo que voce recomendaria ajustar antes?"
+              message="Estou pronto para publicar. Há algo que você recomendaria ajustar antes?"
             />
             {canRollback && prevProdVersion && (
               <button
                 type="button"
                 disabled={rollbackPrompt.isPending}
                 onClick={() => setRollbackOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+                className="inline-flex min-h-10 items-center gap-1 rounded-md border px-3 text-[11px] font-medium transition-colors disabled:opacity-50"
                 style={{
                   borderColor: tokens.divider,
                   color: tokens.textPrimary,
@@ -287,7 +287,7 @@ export function SummaryStep({
               <button
                 type="button"
                 onClick={() => setDiffOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors"
+                className="inline-flex min-h-10 items-center gap-1 rounded-md border px-3 text-[11px] font-medium transition-colors"
                 style={{
                   borderColor: tokens.divider,
                   color: tokens.textPrimary,
@@ -317,7 +317,7 @@ export function SummaryStep({
           >
             <div className="flex items-center justify-between gap-3">
               <span style={{ color: tokens.textTertiary }}>
-                Versao a publicar
+                Versão a publicar
               </span>
               <span
                 className="font-semibold"
@@ -328,7 +328,7 @@ export function SummaryStep({
             </div>
             <div className="mt-1.5 flex items-center justify-between gap-3">
               <span style={{ color: tokens.textTertiary }}>
-                Versao atual em producao
+                Versão atual em produção
               </span>
               <span
                 className="font-semibold"
@@ -336,7 +336,7 @@ export function SummaryStep({
               >
                 {prodVersion
                   ? `v${prodVersion.versionNumber}`
-                  : "Sera a primeira versao publicada"}
+                  : "Será a primeira versão publicada"}
               </span>
             </div>
           </div>
@@ -391,7 +391,7 @@ export function SummaryStep({
                     className="text-[13px]"
                     style={{ color: tokens.textTertiary }}
                   >
-                    Historico aparecera aqui apos a primeira versao.
+                    Histórico aparecerá aqui após a primeira versão.
                   </p>
                 </CardContent>
               </Card>
@@ -443,7 +443,7 @@ export function SummaryStep({
             <DialogHeader>
               <DialogTitle>Comparar versoes</DialogTitle>
               <DialogDescription>
-                Revise as mudancas entre a versao em producao e a versao a
+                Revise as mudanças entre a versão em produção e a versão a
                 publicar antes de confirmar.
               </DialogDescription>
             </DialogHeader>

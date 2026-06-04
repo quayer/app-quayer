@@ -13,32 +13,99 @@
 
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { History } from "lucide-react"
+import { GitCompare, History, RotateCcw } from "lucide-react"
+import { useMemo, useState } from "react"
+import { toast } from "sonner"
 import { api } from "@/igniter.client"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/client/components/ui/alert-dialog"
 import { Card, CardContent } from "@/client/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/client/components/ui/dialog"
 import { Skeleton } from "@/client/components/ui/skeleton"
 import type { VersionHistoryProps, VersionListItem } from "./prompt-types"
+import { PromptDiff } from "../deploy/prompt-diff"
 
 type ListVersionsHook = {
   useQuery: (args: { params: { id: string } }) => {
     data?: { versions: VersionListItem[] } | { versions: VersionListItem[] }[]
     isPending: boolean
     error?: Error
+    refetch: () => Promise<unknown>
   }
 }
 
+interface RollbackPromptClient {
+  mutate: (
+    args: { params: { id: string }; body: { targetVersionId: string } },
+    options: {
+      onSuccess: (data: { versionNumber: number }) => void
+      onError: (err: unknown) => void
+    },
+  ) => void
+  isPending: boolean
+}
+
 export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
+  const [selectedVersion, setSelectedVersion] =
+    useState<VersionListItem | null>(null)
+  const [rollbackTarget, setRollbackTarget] =
+    useState<VersionListItem | null>(null)
+
   const listVersions = (
     api.builder as unknown as { listVersions: ListVersionsHook }
   ).listVersions
-  const { data, isPending, error } = listVersions.useQuery({
+  const { data, isPending, error, refetch } = listVersions.useQuery({
     params: { id: projectId },
   })
+  const rollbackPrompt = api.builder.rollbackPrompt as unknown as RollbackPromptClient
 
   // Unwrap tolerant: Igniter pode devolver { versions } ou envoltorio.
-  const versions: VersionListItem[] = Array.isArray(data)
-    ? (data[0]?.versions ?? [])
-    : (data?.versions ?? [])
+  const versions: VersionListItem[] = useMemo(() => {
+    const rows = Array.isArray(data)
+      ? (data[0]?.versions ?? [])
+      : (data?.versions ?? [])
+    return [...rows].sort((a, b) => b.versionNumber - a.versionNumber)
+  }, [data])
+
+  const currentVersion = versions[0] ?? null
+
+  function handleRollbackConfirm() {
+    if (!rollbackTarget) return
+    rollbackPrompt.mutate(
+      {
+        params: { id: projectId },
+        body: { targetVersionId: rollbackTarget.id },
+      },
+      {
+        onSuccess: (result) => {
+          toast.success(
+            `Prompt restaurado para v${rollbackTarget.versionNumber} (nova v${result.versionNumber})`,
+          )
+          setRollbackTarget(null)
+          void refetch()
+        },
+        onError: (err) => {
+          const msg = err instanceof Error ? err.message : "Erro ao restaurar prompt"
+          toast.error(msg)
+          setRollbackTarget(null)
+        },
+      },
+    )
+  }
 
   return (
     <section>
@@ -68,7 +135,7 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
               className="px-2 py-4 text-center text-[13px]"
               style={{ color: tokens.textSecondary }}
             >
-              Nao foi possivel carregar o historico. Tente novamente em instantes.
+              Não foi possível carregar o histórico. Tente novamente em instantes.
             </p>
           ) : versions.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-8 text-center">
@@ -81,15 +148,85 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
                 className="text-[13px]"
                 style={{ color: tokens.textSecondary }}
               >
-                Ainda nao ha versoes publicadas. Publique pela primeira vez
-                para comecar o historico.
+                Ainda não há versões publicadas. Publique pela primeira vez
+                para começar o histórico.
               </p>
             </div>
           ) : (
-            versions.map((v) => <VersionRow key={v.id} version={v} tokens={tokens} />)
+            versions.map((v) => (
+              <VersionRow
+                key={v.id}
+                version={v}
+                tokens={tokens}
+                currentVersionId={currentVersion?.id ?? null}
+                rollbackPending={rollbackPrompt.isPending}
+                onInspect={() => setSelectedVersion(v)}
+                onRollback={() => setRollbackTarget(v)}
+              />
+            ))
           )}
         </CardContent>
       </Card>
+
+      {selectedVersion && currentVersion && (
+        <Dialog
+          open={selectedVersion !== null}
+          onOpenChange={(open) => {
+            if (!open) setSelectedVersion(null)
+          }}
+        >
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Comparar prompt v{selectedVersion.versionNumber}</DialogTitle>
+              <DialogDescription>
+                Compare a versão selecionada com a versão mais recente do histórico.
+              </DialogDescription>
+            </DialogHeader>
+            <PromptDiff
+              oldContent={selectedVersion.content}
+              newContent={currentVersion.content}
+              oldLabel={`v${selectedVersion.versionNumber}`}
+              newLabel={`v${currentVersion.versionNumber} (atual)`}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {rollbackTarget && currentVersion && (
+        <AlertDialog
+          open={rollbackTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setRollbackTarget(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Restaurar v{rollbackTarget.versionNumber}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Isso cria uma nova versão v{currentVersion.versionNumber + 1}
+                com o conteúdo de v{rollbackTarget.versionNumber}. O histórico
+                existente não é alterado.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={rollbackPrompt.isPending}>
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={rollbackPrompt.isPending}
+                onClick={(event) => {
+                  event.preventDefault()
+                  handleRollbackConfirm()
+                }}
+              >
+                {rollbackPrompt.isPending ? "Restaurando..." : "Restaurar"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </section>
   )
 }
@@ -97,10 +234,19 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
 function VersionRow({
   version,
   tokens,
+  currentVersionId,
+  rollbackPending,
+  onInspect,
+  onRollback,
 }: {
   version: VersionListItem
   tokens: VersionHistoryProps["tokens"]
+  currentVersionId: string | null
+  rollbackPending: boolean
+  onInspect: () => void
+  onRollback: () => void
 }) {
+  const isCurrent = version.id === currentVersionId
   const isPublished = version.publishedAt !== null
   const statusLabel = isPublished ? "Publicada" : "Rascunho"
   const statusBg = isPublished ? tokens.brandSubtle : tokens.hoverBg
@@ -113,60 +259,103 @@ function VersionRow({
   })
 
   return (
-    <button
-      type="button"
-      // TODO(fase3-diff): abrir PromptDiff quando C3 expuser API
-      onClick={() => {
-        /* no-op: reservado para diff/rollback */
-      }}
-      className="flex w-full flex-col gap-1 rounded-md border p-3 text-left transition-colors hover:bg-overlay10 focus-visible:outline-none focus-visible:ring-2"
+    <article
+      className="flex flex-col gap-3 rounded-md border p-3 transition-colors hover:bg-overlay10"
       style={{
         borderColor: tokens.divider,
         backgroundColor: "transparent",
       }}
     >
-      <div className="flex items-center gap-2">
-        <span
-          className="text-[13px] font-semibold"
-          style={{ color: tokens.textPrimary }}
-        >
-          v{version.versionNumber}
-        </span>
-        <span
-          className="rounded-full border px-2 py-[1px] text-[10px] font-medium uppercase tracking-wide"
-          style={{
-            backgroundColor: statusBg,
-            color: statusFg,
-            borderColor: statusBorder,
-          }}
-        >
-          {statusLabel}
-        </span>
-      </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className="text-[13px] font-semibold"
+              style={{ color: tokens.textPrimary }}
+            >
+              v{version.versionNumber}
+            </span>
+            <span
+              className="rounded-full border px-2 py-[1px] text-[10px] font-medium uppercase tracking-wide"
+              style={{
+                backgroundColor: statusBg,
+                color: statusFg,
+                borderColor: statusBorder,
+              }}
+            >
+              {statusLabel}
+            </span>
+            {isCurrent && (
+              <span
+                className="rounded-full border px-2 py-[1px] text-[10px] font-medium uppercase tracking-wide"
+                style={{
+                  backgroundColor: tokens.brandSubtle,
+                  color: tokens.brandText,
+                  borderColor: tokens.brandBorder,
+                }}
+              >
+                Atual
+              </span>
+            )}
+          </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className="truncate text-[12px]"
-          style={{ color: tokens.textSecondary }}
-        >
-          {version.description ?? "Sem descricao"}
-        </span>
-        <span
-          className="shrink-0 text-[11px]"
-          style={{ color: tokens.textTertiary }}
-        >
-          {relative}
-        </span>
-      </div>
+          <p
+            className="mt-1 truncate text-[12px]"
+            style={{ color: tokens.textSecondary }}
+          >
+            {version.description ?? "Sem descricao"}
+          </p>
 
-      {version.publishedBy ? (
-        <span
-          className="text-[11px]"
-          style={{ color: tokens.textTertiary }}
-        >
-          por {version.publishedBy.name}
-        </span>
-      ) : null}
-    </button>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span
+              className="shrink-0 text-[11px]"
+              style={{ color: tokens.textTertiary }}
+            >
+              {relative}
+            </span>
+            {version.publishedBy ? (
+              <span
+                className="text-[11px]"
+                style={{ color: tokens.textTertiary }}
+              >
+                por {version.publishedBy.name}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onInspect}
+            className="inline-flex min-h-10 items-center gap-1 rounded-md border px-3 text-[11px] font-medium transition-colors hover:opacity-80"
+            style={{
+              borderColor: tokens.divider,
+              color: tokens.textPrimary,
+              backgroundColor: tokens.bgSurface,
+            }}
+          >
+            <GitCompare className="h-3 w-3" />
+            Diff
+          </button>
+          {!isCurrent && (
+            <button
+              type="button"
+              disabled={rollbackPending}
+              onClick={onRollback}
+              className="inline-flex min-h-10 items-center gap-1 rounded-md border px-3 text-[11px] font-medium transition-colors hover:opacity-80 disabled:opacity-50"
+              style={{
+                borderColor: tokens.divider,
+                color: tokens.textPrimary,
+                backgroundColor: tokens.bgSurface,
+              }}
+            >
+              <RotateCcw className="h-3 w-3" />
+              Restaurar
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
   )
 }

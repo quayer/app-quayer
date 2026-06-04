@@ -35,17 +35,18 @@ interface SpeechRecognition extends EventTarget {
 }
 type SpeechRecognitionCtor = new () => SpeechRecognition
 
-const PERIODIC_INTERVAL_MS = 2000 // send chunk to Whisper every 2s when Web Speech unavailable
+const PERIODIC_INTERVAL_MS = 2000
 
-async function whisperTranscribe(chunks: Blob[], mimeType: string): Promise<string | null> {
+async function whisperTranscribe(chunks: Blob[], mimeType: string, lang: string): Promise<string | null> {
   const blob = new Blob(chunks, { type: mimeType })
-  if (blob.size < 1000) return null // too short to bother
+  if (blob.size < 500) return null
 
   const cleanType = mimeType.split(";")[0]!
   const ext = cleanType.split("/")[1]!
   const file = new File([blob], `rec.${ext}`, { type: cleanType })
   const form = new FormData()
   form.append("audio", file)
+  form.append("lang", lang)
 
   const res = await fetch("/api/transcribe", { method: "POST", body: form, credentials: "include" })
   const json = (await res.json()) as { text?: string; error?: string }
@@ -53,16 +54,19 @@ async function whisperTranscribe(chunks: Blob[], mimeType: string): Promise<stri
 }
 
 /**
- * Hybrid speech-to-text with two streaming paths:
+ * Hybrid speech-to-text — Web Speech + Whisper working together:
  *
  * Path A — Web Speech API (Chrome/Edge):
- *   Real-time interim text while speaking. If it fails with "network"
- *   error (common on localhost), silently switches to Path B.
+ *   Real-time interim text while speaking.
  *
  * Path B — Periodic Whisper (all browsers):
- *   Sends all accumulated audio to /api/transcribe every 3 s.
- *   Whisper returns the full transcript so far → text updates progressively.
- *   Final stop also sends to Whisper for the complete result.
+ *   Active when Web Speech is unavailable (Brave/Firefox/Safari).
+ *   Sends accumulated audio every 2s for progressive updates.
+ *
+ * Final — Whisper always runs on stop:
+ *   Regardless of which path provided interim text, Whisper always
+ *   produces the definitive final result for best accuracy.
+ *   Falls back to Web Speech text if Whisper returns nothing.
  */
 export function useSpeechToText({
   lang = "pt-BR",
@@ -79,8 +83,10 @@ export function useSpeechToText({
 
   const onFinalRef = useRef(onFinalTranscript)
   const onInterimRef = useRef(onInterimTranscript)
+  const langRef = useRef(lang)
   useEffect(() => { onFinalRef.current = onFinalTranscript }, [onFinalTranscript])
   useEffect(() => { onInterimRef.current = onInterimTranscript }, [onInterimTranscript])
+  useEffect(() => { langRef.current = lang }, [lang])
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -89,8 +95,8 @@ export function useSpeechToText({
   const audioContextRef = useRef<AudioContext | null>(null)
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
-  const webSpeechActiveRef = useRef(false) // true = Web Speech is delivering results
-  const webSpeechFinalRef = useRef("") // accumulated final text from Web Speech this session
+  const webSpeechActiveRef = useRef(false)
+  const webSpeechFinalRef = useRef("")
   const periodicTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const periodicBusyRef = useRef(false)
 
@@ -109,7 +115,7 @@ export function useSpeechToText({
 
       periodicBusyRef.current = true
       try {
-        const text = await whisperTranscribe([...chunksRef.current], mimeType)
+        const text = await whisperTranscribe([...chunksRef.current], mimeType, langRef.current)
         if (text) onInterimRef.current?.(text)
       } catch { /* ignore */ } finally {
         periodicBusyRef.current = false
@@ -145,10 +151,7 @@ export function useSpeechToText({
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       const audioContext = new AudioCtx()
-      // iOS Safari: AudioContext can start suspended — resume after user gesture
-      if (audioContext.state === "suspended") {
-        await audioContext.resume()
-      }
+      if (audioContext.state === "suspended") await audioContext.resume()
       const source = audioContext.createMediaStreamSource(stream)
       const node = audioContext.createAnalyser()
       node.fftSize = 64
@@ -157,7 +160,6 @@ export function useSpeechToText({
       audioContextRef.current = audioContext
       setAnalyser(node)
     } catch {
-      // Web Audio API failure is non-fatal — recording still works, só sem visualizer
       setAnalyser(null)
     }
 
@@ -186,23 +188,24 @@ export function useSpeechToText({
       }
       setAnalyser(null)
 
-      // If Web Speech delivered results, emit final and we're done
-      if (webSpeechActiveRef.current) {
-        const final = webSpeechFinalRef.current.trim()
-        if (final) onFinalRef.current?.(final)
-        setIsListening(false)
-        return
-      }
-
-      // Final Whisper transcription
+      // Whisper always runs for the definitive final result.
+      // Web Speech interim text is already visible in the textarea.
+      // If Whisper returns nothing, fall back to what Web Speech accumulated.
       setIsTranscribing(true)
       try {
-        const text = await whisperTranscribe(chunksRef.current, mimeType)
+        const text = await whisperTranscribe(chunksRef.current, mimeType, langRef.current)
         chunksRef.current = []
-        if (text) onFinalRef.current?.(text)
-        else setError("Nenhum texto detectado.")
+        if (text) {
+          onFinalRef.current?.(text)
+        } else {
+          const webFinal = webSpeechFinalRef.current.trim()
+          if (webFinal) onFinalRef.current?.(webFinal)
+          else setError("Nenhum texto detectado.")
+        }
       } catch {
-        setError("Erro ao transcrever áudio.")
+        const webFinal = webSpeechFinalRef.current.trim()
+        if (webFinal) onFinalRef.current?.(webFinal)
+        else setError("Erro ao transcrever áudio.")
       } finally {
         setIsListening(false)
         setIsTranscribing(false)
@@ -210,12 +213,9 @@ export function useSpeechToText({
     }
 
     recorder.start(100)
-
-    // Periodic Whisper runs immediately — always-on fallback.
-    // Web Speech (if working) will call stopPeriodic() when it delivers results.
     startPeriodic(mimeType)
 
-    // ── Web Speech API (Path A — real-time, Chrome/Edge) ──────────
+    // ── Web Speech API (Path A — real-time interim, Chrome/Edge) ──
     const Ctor = (
       (window as unknown as Record<string, unknown>).SpeechRecognition ??
       (window as unknown as Record<string, unknown>).webkitSpeechRecognition
@@ -236,16 +236,15 @@ export function useSpeechToText({
           else interim += t
         }
         webSpeechActiveRef.current = true
-        stopPeriodic() // Web Speech is working — no need for periodic Whisper
+        stopPeriodic() // Web Speech handling interim — pause periodic Whisper
         const full = (webSpeechFinalRef.current + interim).trim()
         if (full) onInterimRef.current?.(full)
       }
 
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        if (event.error === "not-allowed") {
-          setError("Permissão de microfone negada.")
-        }
-        // Any error: Web Speech is dead, periodic Whisper is already running
+        if (event.error === "not-allowed") setError("Permissão de microfone negada.")
+        // Web Speech dead — re-enable periodic Whisper for interim
+        if (!webSpeechActiveRef.current) startPeriodic(mimeTypeRef.current)
         recognitionRef.current = null
       }
 
@@ -253,10 +252,8 @@ export function useSpeechToText({
         const rec = recognitionRef.current
         if (!rec || mediaRecorderRef.current?.state !== "recording") return
         if (webSpeechActiveRef.current) {
-          // Web Speech is delivering results — keep it alive
           try { rec.start() } catch { /* ignore */ }
         } else {
-          // Ended without results — periodic Whisper already running
           recognitionRef.current = null
         }
       }

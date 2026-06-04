@@ -19,8 +19,8 @@ export function StageRow({
   let circleBg: string
   let circleColor: string
   if (isDone) {
-    circleBg = "rgba(34,197,94,0.15)"
-    circleColor = "#22c55e"
+    circleBg = tokens.successSubtle
+    circleColor = tokens.success
   } else if (isActive) {
     circleBg = tokens.brandSubtle
     circleColor = tokens.brand
@@ -33,7 +33,7 @@ export function StageRow({
   let statusColor: string
   if (isDone) {
     statusText = "Concluído"
-    statusColor = "#4ade80"
+    statusColor = tokens.successText
   } else if (isActive) {
     statusText = "Em progresso"
     statusColor = tokens.brand

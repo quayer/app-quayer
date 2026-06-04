@@ -16,15 +16,13 @@ export function ReadinessRow({
       <div
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
         style={{
-          backgroundColor: item.met
-            ? "rgba(34,197,94,0.15)"
-            : "rgba(239,68,68,0.12)",
+          backgroundColor: item.met ? tokens.successSubtle : tokens.dangerSubtle,
         }}
       >
         {item.met ? (
-          <Check className="h-3 w-3" style={{ color: "#22c55e" }} />
+          <Check className="h-3 w-3" style={{ color: tokens.success }} aria-hidden="true" />
         ) : (
-          <X className="h-3 w-3" style={{ color: "#f87171" }} />
+          <X className="h-3 w-3" style={{ color: tokens.danger }} aria-hidden="true" />
         )}
       </div>
       <span
@@ -34,6 +32,7 @@ export function ReadinessRow({
         }}
       >
         {item.label}
+        <span className="sr-only">{item.met ? " — atendido" : " — pendente"}</span>
       </span>
     </div>
   )

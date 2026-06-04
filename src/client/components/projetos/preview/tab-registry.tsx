@@ -35,9 +35,13 @@ import type {
 
 import { OverviewTab } from "./tabs/overview/overview-tab"
 import { PromptTab } from "./tabs/prompt/prompt-tab"
+import { IdentityTab } from "./tabs/identity/identity-tab"
+import { KnowledgeTab } from "./tabs/knowledge/knowledge-tab"
 import { DeployTab } from "./tabs/deploy/deploy-tab"
 import { PlaygroundTab } from "./tabs/agent/playground/playground-tab"
 import { CredentialsTab } from "./tabs/credentials/credentials-tab"
+import { AdvancedTab } from "./tabs/advanced/advanced-tab"
+import { ActivityTab } from "./tabs/_core/activity/activity-tab"
 
 /** Context passed to every tab renderer. Superset of what any tab consumes. */
 export interface TabRenderContext {
@@ -93,11 +97,31 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     ),
   },
   {
+    value: "identity",
+    label: "Identidade",
+    visibleFor: ["ai_agent"],
+    render: ({ project }) => <IdentityTab project={project} />,
+  },
+  {
+    value: "knowledge",
+    label: "Conhecimento",
+    visibleFor: ["ai_agent"],
+    render: ({ project }) => <KnowledgeTab project={project} />,
+  },
+  {
     value: "playground",
     label: "Testar",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
     render: ({ project }) => <PlaygroundTab project={project} />,
+  },
+  {
+    value: "activity",
+    label: "Atividade",
+    visibleFor: ["ai_agent"],
+    render: ({ project, messages }) => (
+      <ActivityTab project={project} messages={messages} />
+    ),
   },
   {
     value: "deploy",
@@ -111,6 +135,15 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Credenciais",
     visibleFor: ["ai_agent"],
     render: ({ project }) => <CredentialsTab project={project} />,
+  },
+  {
+    value: "advanced",
+    label: "Avançado",
+    visibleFor: ["ai_agent"],
+    requiresAgent: true,
+    render: ({ project, onTabChange }) => (
+      <AdvancedTab project={project} onTabChange={onTabChange} />
+    ),
   },
 ]
 

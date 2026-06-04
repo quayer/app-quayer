@@ -20,7 +20,7 @@ export function ActionButton({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-9 items-center gap-2 rounded-lg border px-4 text-[13px] font-medium transition-colors"
+      className="inline-flex min-h-11 items-center gap-2 rounded-lg border px-4 text-[13px] font-medium transition-colors"
       style={
         primary
           ? {

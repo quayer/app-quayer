@@ -269,11 +269,11 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
   }
 
   return (
-    <div className="flex h-full flex-col" style={{ backgroundColor: tokens.bgBase }}>
+    <div className="mx-auto flex max-w-2xl flex-col gap-4">
       {/* Header badge + clear button */}
       <div
-        className="flex shrink-0 items-center justify-between border-b px-4 py-2"
-        style={{ borderColor: tokens.divider }}
+        className="flex shrink-0 flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        style={{ borderColor: tokens.divider, backgroundColor: tokens.bgSurface }}
       >
         <div
           className="flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
@@ -290,7 +290,7 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
           size="sm"
           onClick={clearConversation}
           disabled={isStreaming || messages.length === 0}
-          className="h-7 gap-1.5 text-[12px]"
+          className="min-h-10 gap-1.5 text-[12px]"
           style={{ color: tokens.textSecondary }}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -299,7 +299,11 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
       </div>
 
       {/* Message list */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        className="min-h-[320px] overflow-y-auto rounded-xl border px-4 py-4"
+        style={{ borderColor: tokens.divider, backgroundColor: tokens.bgSurface }}
+      >
         {messages.length === 0 && !isStreaming && (
           <div className="flex h-full items-center justify-center text-[13px]" style={{ color: tokens.textTertiary }}>
             Envie uma mensagem para testar o agente
@@ -344,8 +348,7 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
 
       {/* Input area */}
       <div
-        className="shrink-0 border-t px-4 py-3"
-        style={{ borderColor: tokens.divider }}
+        className="shrink-0"
       >
         <div
           className="flex items-end gap-2 rounded-xl border px-3 py-2"
@@ -366,11 +369,11 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
             }}
           />
           <Button
-            size="sm"
             disabled={!input.trim() || isStreaming}
             onClick={() => void sendMessage(input)}
-            className="h-8 w-8 shrink-0 p-0"
+            className="min-h-11 w-11 shrink-0 p-0"
             style={{ backgroundColor: tokens.brand, color: tokens.textInverse }}
+            aria-label="Enviar mensagem de teste"
           >
             {isStreaming ? (
               <Loader2 className="h-4 w-4 animate-spin" />

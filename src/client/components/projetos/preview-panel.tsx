@@ -71,11 +71,11 @@ export function PreviewPanel({
       >
         {/* Tab strip — sempre estável, locked tabs não clicáveis */}
         <div
-          className="flex shrink-0 items-center px-4 py-3"
+          className="flex shrink-0 items-center overflow-x-auto px-4 py-3"
           style={{ borderBottom: `1px solid ${tokens.divider}` }}
         >
           <TabsList
-            className="h-9 gap-1 border p-1"
+            className="h-12 min-w-max gap-1 border p-1"
             style={{
               backgroundColor: tokens.bgSurface,
               borderColor: tokens.divider,
@@ -88,7 +88,7 @@ export function PreviewPanel({
                   type="button"
                   disabled
                   title="Disponível após o Builder criar o agente"
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium cursor-not-allowed select-none"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium cursor-not-allowed select-none"
                   style={{ color: tokens.textTertiary, opacity: 0.55 }}
                 >
                   <Lock className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
@@ -98,7 +98,7 @@ export function PreviewPanel({
                 <TabsTrigger
                   key={tab.value}
                   value={tab.value}
-                  className="rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none"
+                  className="h-10 rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none"
                   style={{
                     color:
                       safeActiveTab === tab.value
@@ -125,6 +125,7 @@ export function PreviewPanel({
               {bannerState.working && <BuilderWorkingBanner />}
               {errorBanner !== null && (
                 <ErrorBanner
+                  message={errorBanner.message}
                   onDismiss={() =>
                     setDismissedErrorId(errorBanner.lastErrorId)
                   }

@@ -31,6 +31,15 @@ export interface AppTokens {
   hoverBg: string
   textInverse: string
   shadow: string
+  success: string
+  successSubtle: string
+  successText: string
+  danger: string
+  dangerSubtle: string
+  dangerText: string
+  warning: string
+  warningSubtle: string
+  warningText: string
 }
 
 const TOKENS: AppTokens = {
@@ -51,6 +60,15 @@ const TOKENS: AppTokens = {
   hoverBg:       "var(--q-hover-bg)",
   textInverse:   "var(--q-text-inverse)",
   shadow:        "var(--q-shadow)",
+  success:       "var(--q-success)",
+  successSubtle: "var(--q-success-subtle)",
+  successText:   "var(--q-success-text)",
+  danger:        "var(--q-danger)",
+  dangerSubtle:  "var(--q-danger-subtle)",
+  dangerText:    "var(--q-danger-text)",
+  warning:       "var(--q-warning)",
+  warningSubtle: "var(--q-warning-subtle)",
+  warningText:   "var(--q-warning-text)",
 }
 
 export function useAppTokens(): { tokens: AppTokens; isLight: boolean } {

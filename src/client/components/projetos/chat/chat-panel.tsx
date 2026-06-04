@@ -1,30 +1,39 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import {
   AlertCircle,
-  ArrowUp,
+  Bell,
   Bot,
-  ChevronDown,
+  Calendar,
+  Check,
+  Headphones,
+  ImageIcon,
+  Info,
+  Instagram,
+  Keyboard,
+  Languages,
   Loader2,
+  MessageCircle,
   Mic,
+  Pencil,
+  QrCode,
   RefreshCw,
-  Square,
+  Sparkles,
+  Tag,
+  Timer,
   User,
-  Wrench,
+  UserPlus,
+  Volume2,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/client/components/ui/avatar"
 import { Button } from "@/client/components/ui/button"
 import { Card } from "@/client/components/ui/card"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/client/components/ui/collapsible"
-import { Textarea } from "@/client/components/ui/textarea"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
-import { useSpeechToText } from "@/client/hooks/use-speech-to-text"
+import { MessageInput } from "@/client/components/ds/message-input"
+import { MarkdownContent } from "./markdown-content"
 
 import type { ChatMessage } from "../types"
 
@@ -64,14 +73,6 @@ function createId(): string {
     return crypto.randomUUID()
   }
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
 }
 
 /**
@@ -140,17 +141,7 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Speech-to-text (reuse home's hook) ─────────────────────────
-  const appendTranscript = React.useCallback((text: string) => {
-    setInput((prev) => (prev ? `${prev} ${text}`.trim() : text.trim()))
-  }, [])
-  const {
-    isSupported: speechSupported,
-    isListening,
-    start: startRecording,
-    stop: stopRecording,
-  } = useSpeechToText({ lang: "pt-BR", onFinalTranscript: appendTranscript })
-  const toggleRecording = () => (isListening ? stopRecording() : startRecording())
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
   // ── SSE parser (preserved) ─────────────────────────────────────
   const parseSseBuffer = React.useCallback(
@@ -179,7 +170,7 @@ export function ChatPanel({
 
   // ── Send ───────────────────────────────────────────────────────
   const sendMessage = React.useCallback(
-    async (content: string) => {
+    async (content: string, skipUserPersist = false) => {
       const trimmed = content.trim()
       if (!trimmed || isStreaming) return
 
@@ -187,14 +178,20 @@ export function ChatPanel({
       setLastUserMessage(trimmed)
       autoScrollRef.current = true
 
-      const userMessage: ChatMessage = {
-        id: createId(),
-        role: "user",
-        content: trimmed,
-        createdAt: new Date().toISOString(),
+      if (!skipUserPersist) {
+        // Normal path: optimistically add user message to UI and clear input.
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: createId(),
+            role: "user" as const,
+            content: trimmed,
+            createdAt: new Date().toISOString(),
+          },
+        ])
+        setInput("")
       }
-      setMessages((prev) => [...prev, userMessage])
-      setInput("")
+
       setIsStreaming(true)
       setStreamingText("")
       setStreamingToolCalls([])
@@ -208,7 +205,7 @@ export function ChatPanel({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: trimmed }),
+            body: JSON.stringify({ content: trimmed, skipUserPersist }),
           },
         )
         if (!response.ok || !response.body) {
@@ -278,6 +275,48 @@ export function ChatPanel({
     [isStreaming, parseSseBuffer, projectId],
   )
 
+  React.useEffect(() => {
+    const handleFocusChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string; autoSend?: boolean }>).detail
+      const message = detail?.message?.trim()
+      if (!message) {
+        textareaRef.current?.focus()
+        return
+      }
+
+      if (detail?.autoSend) {
+        void sendMessage(message)
+        return
+      }
+
+      setInput(message)
+      window.requestAnimationFrame(() => {
+        textareaRef.current?.focus()
+        const length = textareaRef.current?.value.length ?? 0
+        textareaRef.current?.setSelectionRange(length, length)
+      })
+    }
+
+    window.addEventListener("builder:focus-chat", handleFocusChat)
+    return () => window.removeEventListener("builder:focus-chat", handleFocusChat)
+  }, [sendMessage])
+
+  // ── Auto-trigger initial message ───────────────────────────────
+  // When a project is first created, the initial prompt is persisted as a
+  // user message by createProject. On mount, if the last loaded message is
+  // unanswered (role === 'user'), trigger the AI response automatically.
+  const autoTriggeredRef = React.useRef(false)
+  React.useEffect(() => {
+    if (autoTriggeredRef.current) return
+    const last = initialMessages[initialMessages.length - 1]
+    if (last?.role === "user") {
+      autoTriggeredRef.current = true
+      void sendMessage(last.content, true)
+    }
+    // sendMessage is stable (useCallback with deps), safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleSubmit = React.useCallback(
     () => void sendMessage(input),
     [input, sendMessage],
@@ -296,17 +335,6 @@ export function ChatPanel({
     void sendMessage(lastUserMessage)
   }, [lastUserMessage, sendMessage])
 
-  const handleKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        handleSubmit()
-      }
-    },
-    [handleSubmit],
-  )
-
-  const canSubmit = input.trim().length > 0 && !isStreaming
   const isEmpty = messages.length === 0 && !streamingText && !error
 
   // ── Render ─────────────────────────────────────────────────────
@@ -323,7 +351,14 @@ export function ChatPanel({
         ) : (
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
             {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} tokens={tokens} />
+              <MessageBubble
+                key={m.id}
+                message={m}
+                tokens={tokens}
+                onSend={sendMessage}
+                onDraft={setInput}
+                isStreaming={isStreaming}
+              />
             ))}
 
             {/* Streaming assistant bubble */}
@@ -332,6 +367,8 @@ export function ChatPanel({
                 text={streamingText}
                 toolCalls={streamingToolCalls}
                 tokens={tokens}
+                onSend={sendMessage}
+                onDraft={setInput}
               />
             )}
 
@@ -340,12 +377,15 @@ export function ChatPanel({
               <div
                 className="flex items-start gap-3 rounded-lg border p-3"
                 style={{
-                  borderColor: "rgba(239,68,68,0.30)",
-                  backgroundColor: "rgba(239,68,68,0.06)",
+                  borderColor: tokens.danger,
+                  backgroundColor: tokens.dangerSubtle,
                 }}
                 role="alert"
               >
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                <AlertCircle
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                  style={{ color: tokens.dangerText }}
+                />
                 <div className="flex-1 text-[13px]" style={{ color: tokens.textPrimary }}>
                   <p className="font-medium">{error}</p>
                   {lastUserMessage && (
@@ -367,110 +407,21 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* ───── Composer (mesmo pattern da home) ───── */}
+      {/* ───── Composer ───── */}
       <div className="px-4 pb-4 pt-2 md:px-6">
-        <div
-          className="mx-auto w-full max-w-2xl rounded-2xl border transition-all focus-within:shadow-[0_0_0_3px_rgba(255,214,10,0.15)]"
-          style={{
-            backgroundColor: tokens.bgSurface,
-            borderColor: tokens.borderStrong,
-            boxShadow: tokens.shadow,
-          }}
-        >
-          <Textarea
+        <div className="mx-auto w-full max-w-2xl">
+          <MessageInput
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={setInput}
+            onSend={handleSubmit}
+            disabled={isStreaming}
             placeholder="Continue a conversa com o Builder…"
             rows={2}
-            disabled={isStreaming}
-            className="min-h-[48px] resize-none border-0 bg-transparent text-[15px] leading-relaxed shadow-none focus-visible:ring-0"
-            style={{ color: tokens.textPrimary }}
+            tokens={tokens}
+            textareaRef={textareaRef}
+            voiceEnabled
+            voiceLang="pt-BR"
           />
-
-          <div className="flex items-center justify-between gap-2 px-3 pb-3">
-            <span
-              className="px-2 text-[11px]"
-              style={{ color: tokens.textTertiary }}
-            >
-              <kbd
-                className="rounded px-1.5 py-0.5 font-mono text-[10px]"
-                style={{
-                  backgroundColor: tokens.hoverBg,
-                  color: tokens.textSecondary,
-                }}
-              >
-                ⌘
-              </kbd>{" "}
-              +{" "}
-              <kbd
-                className="rounded px-1.5 py-0.5 font-mono text-[10px]"
-                style={{
-                  backgroundColor: tokens.hoverBg,
-                  color: tokens.textSecondary,
-                }}
-              >
-                Enter
-              </kbd>{" "}
-              para enviar
-            </span>
-
-            <div className="flex items-center gap-1.5">
-              {speechSupported && (
-                <button
-                  type="button"
-                  onClick={toggleRecording}
-                  disabled={isStreaming}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors disabled:opacity-50"
-                  style={{
-                    borderColor: isListening
-                      ? "rgba(239,68,68,0.45)"
-                      : tokens.border,
-                    backgroundColor: isListening
-                      ? "rgba(239,68,68,0.12)"
-                      : "transparent",
-                    color: isListening ? "#ef4444" : tokens.textPrimary,
-                  }}
-                  aria-label={isListening ? "Parar gravação" : "Gravar áudio"}
-                  aria-pressed={isListening}
-                >
-                  {isListening ? (
-                    <Square
-                      className="h-3.5 w-3.5 animate-pulse"
-                      fill="currentColor"
-                    />
-                  ) : (
-                    <Mic className="h-4 w-4" />
-                  )}
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                className="flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-30"
-                style={{
-                  backgroundColor: canSubmit
-                    ? tokens.brand
-                    : tokens.hoverBg,
-                  color: canSubmit
-                    ? tokens.textInverse
-                    : tokens.textTertiary,
-                  boxShadow: canSubmit
-                    ? "0 4px 12px -2px rgba(255,214,10,0.35)"
-                    : "none",
-                }}
-                aria-label="Enviar mensagem"
-              >
-                {isStreaming ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                )}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -517,9 +468,16 @@ function EmptyState({
 function MessageBubble({
   message,
   tokens,
+  onSend,
+  onDraft,
+  isStreaming = false,
 }: {
   message: ChatMessage
   tokens: ReturnType<typeof useAppTokens>["tokens"]
+  onSend: (content: string) => void
+  onDraft: (content: string) => void
+  /** Global chat streaming state — disables interactive cards mid-send. */
+  isStreaming?: boolean
 }) {
   if (message.role === "user") {
     return (
@@ -577,12 +535,7 @@ function MessageBubble({
       </Avatar>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {message.content && (
-          <div
-            className="max-w-[95%] whitespace-pre-wrap text-[14px] leading-relaxed"
-            style={{ color: tokens.textPrimary }}
-          >
-            {message.content}
-          </div>
+          <MarkdownContent content={message.content} className="max-w-[95%]" tokens={tokens} />
         )}
         {message.toolCalls?.map((tc, i) => (
           <ToolCallCard
@@ -591,6 +544,9 @@ function MessageBubble({
             args={tc.args}
             result={tc.result}
             tokens={tokens}
+            isStreaming={isStreaming}
+            onSend={onSend}
+            onDraft={onDraft}
           />
         ))}
       </div>
@@ -602,10 +558,14 @@ function StreamingBubble({
   text,
   toolCalls,
   tokens,
+  onSend,
+  onDraft,
 }: {
   text: string
   toolCalls: ToolCallView[]
   tokens: ReturnType<typeof useAppTokens>["tokens"]
+  onSend: (content: string) => void
+  onDraft: (content: string) => void
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -621,11 +581,8 @@ function StreamingBubble({
       </Avatar>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {text && (
-          <div
-            className="max-w-[95%] whitespace-pre-wrap text-[14px] leading-relaxed"
-            style={{ color: tokens.textPrimary }}
-          >
-            {text}
+          <div className="relative max-w-[95%]">
+            <MarkdownContent content={text} tokens={tokens} />
             <span
               className="ml-0.5 inline-block animate-pulse"
               style={{ color: tokens.brand }}
@@ -643,9 +600,577 @@ function StreamingBubble({
             result={tc.result}
             tokens={tokens}
             streaming={tc.result === undefined}
+            isStreaming
+            onSend={onSend}
+            onDraft={onDraft}
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+// Human-readable labels for builder tool names.
+const TOOL_LABELS: Record<string, string> = {
+  generate_prompt_anatomy:   "Gerando prompt",
+  propose_agent_creation:    "Propondo agente",
+  propose_tool_selection:    "Escolhendo capacidades",
+  create_agent:              "Criando agente",
+  update_agent:              "Atualizando agente",
+  select_channel:            "Escolhendo canal",
+  list_whatsapp_instances:   "Buscando canais WhatsApp",
+  create_whatsapp_instance:  "Criando conexão WhatsApp",
+  connect_whatsapp_instance: "Conectando WhatsApp",
+  deploy_agent:              "Publicando agente",
+  validate_prompt:           "Validando prompt",
+  get_project_status:        "Verificando status",
+  transfer_to_human:         "Transferindo para humano",
+  schedule_appointment:      "Agendando reunião",
+  create_lead:               "Registrando lead",
+}
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? name.replace(/_/g, " ")
+}
+
+// Extract a short human-readable summary from tool result.
+// Shows only the message/error field — never the full payload.
+function toolResultSummary(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null
+  const r = result as Record<string, unknown>
+  if (typeof r.message === "string" && r.message) return r.message
+  if (typeof r.error === "string" && r.error) return `Erro: ${r.error}`
+  if (r.success === false) return "Falha na operação"
+  return null
+}
+
+function getStringField(value: unknown, field: string): string | null {
+  if (!value || typeof value !== "object") return null
+  const raw = (value as Record<string, unknown>)[field]
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null
+}
+
+function getAgentProposal(args: unknown, result: unknown) {
+  return {
+    name:
+      getStringField(result, "proposedName") ??
+      getStringField(args, "name") ??
+      "Novo agente",
+    description:
+      getStringField(result, "proposedDescription") ??
+      getStringField(args, "description") ??
+      "Revise a proposta e confirme para criar o agente.",
+  }
+}
+
+interface ToolSelectionEntry {
+  key: string
+  title: string
+  description: string
+  toolKeys: string[]
+  icon?: string
+  recommended?: boolean
+  note?: string
+}
+
+function getToolSelection(result: unknown) {
+  if (!result || typeof result !== "object") return null
+  const r = result as Record<string, unknown>
+  const rawTools = Array.isArray(r.tools) ? r.tools : []
+  const tools = rawTools
+    .map((item): ToolSelectionEntry | null => {
+      if (!item || typeof item !== "object") return null
+      const raw = item as Record<string, unknown>
+      const key = typeof raw.key === "string" ? raw.key : null
+      const title = typeof raw.title === "string" ? raw.title : null
+      const description =
+        typeof raw.description === "string" ? raw.description : null
+      if (!key || !title || !description) return null
+      return {
+        key,
+        title,
+        description,
+        toolKeys: Array.isArray(raw.toolKeys)
+          ? raw.toolKeys.filter((value): value is string => typeof value === "string")
+          : [key],
+        icon: typeof raw.icon === "string" ? raw.icon : undefined,
+        recommended: raw.recommended === true,
+        note: typeof raw.note === "string" ? raw.note : undefined,
+      }
+    })
+    .filter((item): item is ToolSelectionEntry => item !== null)
+
+  if (tools.length === 0) return null
+
+  return {
+    agentId: getStringField(result, "agentId"),
+    reason: getStringField(result, "reason"),
+    tools,
+  }
+}
+
+function ToolIcon({ icon }: { icon?: string }) {
+  const className = "h-4 w-4"
+  if (icon === "calendar") return <Calendar className={className} />
+  if (icon === "tag") return <Tag className={className} />
+  if (icon === "user-plus") return <UserPlus className={className} />
+  if (icon === "headphones") return <Headphones className={className} />
+  if (icon === "bell") return <Bell className={className} />
+  return <Sparkles className={className} />
+}
+
+function toolHelpText(key: string): string {
+  const help: Record<string, string> = {
+    schedule_appointment:
+      "Use quando o agente puder coletar intenção de agenda e organizar pedido de consulta. A disponibilidade real ainda depende das regras conectadas.",
+    send_pricing:
+      "Use quando fizer sentido registrar valores ou propostas enviadas. Para advocacia, evite preço automático se isso conflitar com sua regra comercial/OAB.",
+    create_lead:
+      "Use para marcar o contato como lead qualificado quando houver dados mínimos e interesse claro.",
+    transfer_to_human:
+      "No WhatsApp, a IA sinaliza a transferência e pausa ou encaminha a conversa conforme a integração. É ideal para casos sensíveis, dúvidas jurídicas ou pedido de advogado.",
+    notify_team:
+      "Envia um aviso interno sem necessariamente parar a IA. Útil para urgências ou oportunidades que precisam de atenção rápida.",
+    qualified_handoff:
+      "Ativa qualificação e transferência: a IA registra o lead, pausa a conversa e deixa um humano assumir no painel.",
+    team_alert:
+      "Cria um alerta interno. Enviar o resumo para outro WhatsApp ainda precisa de ferramenta custom por webhook.",
+    appointment_intent:
+      "Registra intenção de agenda para a equipe confirmar. Não consulta calendário real ainda.",
+    pricing_log:
+      "Registra valores enviados. Para advocacia, use apenas quando essa regra comercial estiver clara.",
+    lead_only:
+      "Marca o lead como qualificado, mas mantém a IA conversando.",
+  }
+  return help[key] ?? "Ativa uma capacidade operacional do agente."
+}
+
+function ToolSelectionCard({
+  selection,
+  tokens,
+  onSend,
+  disabled = false,
+}: {
+  selection: NonNullable<ReturnType<typeof getToolSelection>>
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+  onSend: (content: string) => void
+  /** True while the assistant is streaming — blocks re-submitting the card. */
+  disabled?: boolean
+}) {
+  const recommended = React.useMemo(
+    () =>
+      selection.tools
+        .filter((tool) => tool.recommended)
+        .map((tool) => tool.key),
+    [selection.tools],
+  )
+  const [selected, setSelected] = React.useState<string[]>(recommended)
+
+  const toggleTool = React.useCallback((key: string) => {
+    setSelected((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    )
+  }, [])
+
+  const applySelection = React.useCallback(() => {
+    const labels = selection.tools
+      .filter((tool) => selected.includes(tool.key))
+      .map((tool) => `${tool.title} (${tool.toolKeys.join(" + ")})`)
+
+    const toolKeys = Array.from(
+      new Set(
+        selection.tools
+          .filter((tool) => selected.includes(tool.key))
+          .flatMap((tool) => tool.toolKeys),
+      ),
+    )
+
+    const message =
+      selected.length > 0
+        ? `Aplicar estas capacidades ao agente: ${labels.join(", ")}. Ferramentas técnicas: ${toolKeys.join(", ")}.`
+        : "Não quero ativar ferramentas extras agora."
+
+    onSend(message)
+  }, [onSend, selected, selection.tools])
+
+  return (
+    <div
+      className="max-w-[95%] rounded-lg border p-4"
+      style={{
+        backgroundColor: tokens.bgSurface,
+        borderColor: tokens.divider,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            color: tokens.brand,
+          }}
+        >
+          <Sparkles className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold" style={{ color: tokens.textPrimary }}>
+            Escolher ferramentas
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+            {selection.reason ??
+              "Selecione o que este agente poderá fazer além de responder mensagens."}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2">
+        {selection.tools.map((tool) => {
+          const checked = selected.includes(tool.key)
+          return (
+            <button
+              key={tool.key}
+              type="button"
+              role="checkbox"
+              aria-checked={checked}
+              disabled={disabled}
+              onClick={() => toggleTool(tool.key)}
+              className="group rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              style={{
+                backgroundColor: checked ? tokens.brandSubtle : tokens.bgBase,
+                borderColor: checked ? tokens.brand : tokens.divider,
+              }}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+                  style={{
+                    backgroundColor: checked ? tokens.brand : tokens.hoverBg,
+                    color: checked ? tokens.textInverse : tokens.textSecondary,
+                  }}
+                >
+                  <ToolIcon icon={tool.icon} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[13px] font-medium"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      {tool.title}
+                    </span>
+                    {tool.recommended && (
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                        style={{
+                          backgroundColor: tokens.hoverBg,
+                          color: tokens.textTertiary,
+                        }}
+                      >
+                        recomendado
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+                    {tool.description}
+                  </p>
+                  <p className="mt-2 flex gap-1.5 text-[11px] leading-relaxed" style={{ color: tokens.textTertiary }}>
+                    <Info className="mt-0.5 h-3 w-3 shrink-0" />
+                    <span>{tool.note ?? toolHelpText(tool.key)}</span>
+                  </p>
+                </div>
+                <span
+                  aria-hidden="true"
+                  className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border"
+                  style={{
+                    backgroundColor: checked ? tokens.brand : "transparent",
+                    borderColor: checked ? tokens.brand : tokens.divider,
+                    color: checked ? tokens.textInverse : "transparent",
+                  }}
+                >
+                  {checked && <Check className="h-3 w-3" strokeWidth={3} />}
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 gap-1.5 text-[12px]"
+          onClick={applySelection}
+          disabled={disabled}
+        >
+          <Check className="h-3.5 w-3.5" />
+          Aplicar seleção
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 text-[12px]"
+          onClick={() => onSend("Não quero ativar ferramentas extras agora.")}
+          disabled={disabled}
+        >
+          Sem ferramentas agora
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+interface ChannelEntry {
+  key: string
+  title: string
+  description: string
+  requiresApproval?: boolean
+}
+
+function getChannelSelection(result: unknown) {
+  if (!result || typeof result !== "object") return null
+  const r = result as Record<string, unknown>
+  const rawChannels = Array.isArray(r.channels) ? r.channels : []
+  const channels = rawChannels
+    .map((item): ChannelEntry | null => {
+      if (!item || typeof item !== "object") return null
+      const raw = item as Record<string, unknown>
+      const key = typeof raw.key === "string" ? raw.key : null
+      const title = typeof raw.title === "string" ? raw.title : null
+      const description =
+        typeof raw.description === "string" ? raw.description : null
+      if (!key || !title || !description) return null
+      return {
+        key,
+        title,
+        description,
+        requiresApproval: raw.requiresApproval === true,
+      }
+    })
+    .filter((item): item is ChannelEntry => item !== null)
+
+  if (channels.length === 0) return null
+
+  return {
+    reason: getStringField(result, "reason"),
+    channels,
+  }
+}
+
+function ChannelIcon({ channel }: { channel: string }) {
+  const className = "h-4 w-4"
+  if (channel === "instagram") return <Instagram className={className} />
+  if (channel === "uazapi") return <QrCode className={className} />
+  return <MessageCircle className={className} />
+}
+
+function ChannelSelectionCard({
+  selection,
+  tokens,
+  onSend,
+  disabled = false,
+}: {
+  selection: NonNullable<ReturnType<typeof getChannelSelection>>
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+  onSend: (content: string) => void
+  /** True while streaming — prevents queuing conflicting channel choices. */
+  disabled?: boolean
+}) {
+  return (
+    <div
+      className="max-w-[95%] rounded-lg border p-4"
+      style={{
+        backgroundColor: tokens.bgSurface,
+        borderColor: tokens.divider,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            color: tokens.brand,
+          }}
+        >
+          <MessageCircle className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold" style={{ color: tokens.textPrimary }}>
+            Escolher canal
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+            {selection.reason ?? "Escolha onde este agente vai atender os clientes."}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {selection.channels.map((channel) => (
+          <button
+            key={channel.key}
+            type="button"
+            disabled={disabled}
+            className="rounded-md border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{
+              backgroundColor: tokens.bgBase,
+              borderColor: tokens.divider,
+            }}
+            onClick={() =>
+              void onSend(
+                `Quero publicar no canal: ${channel.title} (${channel.key}).`,
+              )
+            }
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+                style={{
+                  backgroundColor: tokens.hoverBg,
+                  color: tokens.textSecondary,
+                }}
+              >
+                <ChannelIcon channel={channel.key} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13px] font-medium" style={{ color: tokens.textPrimary }}>
+                    {channel.title}
+                  </span>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    style={{
+                      backgroundColor: tokens.hoverBg,
+                      color: tokens.textTertiary,
+                    }}
+                  >
+                    {channel.requiresApproval ? "requer aprovação" : "QR rápido"}
+                  </span>
+                </div>
+                <p className="mt-1 text-[12px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+                  {channel.description}
+                </p>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function getQrResult(result: unknown) {
+  if (!result || typeof result !== "object") return null
+  const r = result as Record<string, unknown>
+  if (r.success !== true) return null
+  const instanceId = getStringField(result, "instanceId")
+  const qrCodeBase64 = getStringField(result, "qrCodeBase64")
+  const shareLink = getStringField(result, "shareLink")
+  const expiresIn =
+    typeof r.expiresIn === "number" && Number.isFinite(r.expiresIn)
+      ? r.expiresIn
+      : null
+  if (!instanceId && !qrCodeBase64 && !shareLink) return null
+  return { instanceId, qrCodeBase64, shareLink, expiresIn }
+}
+
+function WhatsAppQrCard({
+  data,
+  tokens,
+}: {
+  data: NonNullable<ReturnType<typeof getQrResult>>
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+}) {
+  const [copied, setCopied] = React.useState(false)
+  const handleCopyLink = React.useCallback(async () => {
+    if (!data.shareLink) return
+    try {
+      await navigator.clipboard?.writeText(data.shareLink)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard indisponível — link continua visível/selecionável
+    }
+  }, [data.shareLink])
+
+  const qrSrc = data.qrCodeBase64
+    ? data.qrCodeBase64.startsWith("data:")
+      ? data.qrCodeBase64
+      : `data:image/png;base64,${data.qrCodeBase64}`
+    : null
+
+  return (
+    <div
+      className="max-w-[95%] rounded-lg border p-4"
+      style={{
+        backgroundColor: tokens.bgSurface,
+        borderColor: tokens.divider,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            color: tokens.brand,
+          }}
+        >
+          <QrCode className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-semibold" style={{ color: tokens.textPrimary }}>
+            Conectar WhatsApp
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: tokens.textSecondary }}>
+            Escaneie o QR Code no celular ou envie o link de pareamento para quem tem acesso ao número.
+          </p>
+        </div>
+      </div>
+
+      {qrSrc && (
+        <div className="mt-4 flex justify-center">
+          <Image
+            src={qrSrc}
+            alt="QR Code para conectar WhatsApp"
+            width={176}
+            height={176}
+            unoptimized
+            className="h-44 w-44 rounded-md border bg-white p-2"
+            style={{ borderColor: tokens.divider }}
+          />
+        </div>
+      )}
+
+      {data.shareLink && (
+        <div
+          className="mt-4 rounded-md border px-3 py-2 text-[12px]"
+          style={{
+            borderColor: tokens.divider,
+            backgroundColor: tokens.bgBase,
+            color: tokens.textSecondary,
+          }}
+        >
+          <p className="truncate" title={data.shareLink}>{data.shareLink}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-2 h-7 gap-1.5 text-[11px]"
+            onClick={() => void handleCopyLink()}
+            aria-live="polite"
+          >
+            {copied ? <Check className="h-3 w-3" aria-hidden="true" /> : null}
+            {copied ? "Copiado" : "Copiar link"}
+          </Button>
+        </div>
+      )}
+
+      {data.expiresIn && (
+        <p className="mt-2 text-[11px]" style={{ color: tokens.textTertiary }}>
+          Link expira em aproximadamente {Math.round(data.expiresIn / 60)} minutos.
+        </p>
+      )}
     </div>
   )
 }
@@ -656,91 +1181,233 @@ function ToolCallCard({
   result,
   tokens,
   streaming = false,
+  isStreaming = false,
+  onSend,
+  onDraft,
 }: {
   toolName: string
   args: unknown
   result?: unknown
   tokens: ReturnType<typeof useAppTokens>["tokens"]
+  /** This specific tool call is still streaming (no result yet). */
   streaming?: boolean
+  /** The chat as a whole is streaming — disables interactive card actions. */
+  isStreaming?: boolean
+  onSend: (content: string) => void
+  onDraft: (content: string) => void
 }) {
-  return (
-    <Collapsible>
-      <Card
-        className="border p-0 shadow-none"
+  if (toolName === "propose_agent_creation" && !streaming) {
+    const proposal = getAgentProposal(args, result)
+
+    return (
+      <div
+        className="max-w-[95%] rounded-lg border p-4"
         style={{
           backgroundColor: tokens.bgSurface,
           borderColor: tokens.divider,
         }}
       >
-        <CollapsibleTrigger
-          className="group flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition-colors"
-          style={{ color: tokens.textSecondary }}
-        >
-          <Wrench
-            className="h-3 w-3 shrink-0"
-            style={{ color: tokens.brand }}
-          />
-          <span
-            className="font-mono"
-            style={{ color: tokens.textPrimary }}
-          >
-            {toolName}
-          </span>
-          {streaming ? (
-            <span className="flex items-center gap-1" style={{ color: tokens.textTertiary }}>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              executando
-            </span>
-          ) : (
-            <span style={{ color: tokens.textTertiary }}>concluído</span>
-          )}
-          <ChevronDown
-            className="ml-auto h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
-            style={{ color: tokens.textTertiary }}
-          />
-        </CollapsibleTrigger>
-        <CollapsibleContent>
+        <div className="flex items-start gap-3">
           <div
-            className="border-t px-3 py-2"
-            style={{ borderColor: tokens.divider }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+            style={{
+              backgroundColor: tokens.brandSubtle,
+              color: tokens.brand,
+            }}
           >
-            <div
-              className="mb-1 text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: tokens.textTertiary }}
-            >
-              Argumentos
-            </div>
-            <pre
-              className="overflow-x-auto rounded p-2 text-[11px]"
-              style={{
-                backgroundColor: tokens.bgBase,
-                color: tokens.textSecondary,
-              }}
-            >
-              {prettyJson(args)}
-            </pre>
-            {result !== undefined && (
-              <>
-                <div
-                  className="mb-1 mt-2 text-[10px] font-semibold uppercase tracking-wider"
-                  style={{ color: tokens.textTertiary }}
-                >
-                  Resultado
-                </div>
-                <pre
-                  className="overflow-x-auto rounded p-2 text-[11px]"
-                  style={{
-                    backgroundColor: tokens.bgBase,
-                    color: tokens.textSecondary,
-                  }}
-                >
-                  {prettyJson(result)}
-                </pre>
-              </>
-            )}
+            <Sparkles className="h-4 w-4" />
           </div>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
+          <div className="min-w-0 flex-1">
+            <p
+              className="text-[13px] font-semibold"
+              style={{ color: tokens.textPrimary }}
+            >
+              {proposal.name}
+            </p>
+            <p
+              className="mt-1 text-[13px] leading-relaxed"
+              style={{ color: tokens.textSecondary }}
+            >
+              {proposal.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {[
+            {
+              icon: ImageIcon,
+              title: "Mídia",
+              detail: "imagem, áudio, documento e vídeo",
+              state: "ativo",
+            },
+            {
+              icon: Timer,
+              title: "Buffer",
+              detail: "concatenação de mensagens",
+              state: "ativo",
+            },
+            {
+              icon: Keyboard,
+              title: "Digitando",
+              detail: "presença antes da resposta",
+              state: "ativo",
+            },
+            {
+              icon: Languages,
+              title: "Idioma",
+              detail: "detecção opcional",
+              state: "opcional",
+            },
+            {
+              icon: Volume2,
+              title: "Áudio",
+              detail: "callback com ElevenLabs",
+              state: "opcional",
+            },
+            {
+              icon: Mic,
+              title: "Custos",
+              detail: "leitura de mídia pode ser desligada",
+              state: "controle",
+            },
+          ].map((item) => {
+            const Icon = item.icon
+            return (
+              <div
+                key={item.title}
+                className="flex min-w-0 items-start gap-2 rounded-md border px-3 py-2"
+                style={{
+                  borderColor: tokens.divider,
+                  backgroundColor: tokens.bgBase,
+                }}
+              >
+                <Icon
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                  style={{ color: tokens.brand }}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="text-[12px] font-medium"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      {item.title}
+                    </span>
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        backgroundColor: tokens.brandSubtle,
+                        color: tokens.brandText,
+                      }}
+                    >
+                      {item.state}
+                    </span>
+                  </div>
+                  <p
+                    className="mt-0.5 text-[11px] leading-snug"
+                    style={{ color: tokens.textTertiary }}
+                  >
+                    {item.detail}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 gap-1.5 text-[12px]"
+            onClick={() => void onSend("Pode criar, tá bom assim.")}
+            disabled={isStreaming}
+          >
+            <Check className="h-3.5 w-3.5" />
+            Criar agente
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-[12px]"
+            onClick={() => onDraft("Quero ajustar antes: ")}
+            disabled={isStreaming}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Ajustar
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolName === "propose_tool_selection" && !streaming) {
+    const selection = getToolSelection(result)
+    if (selection) {
+      return (
+        <ToolSelectionCard
+          selection={selection}
+          tokens={tokens}
+          onSend={onSend}
+          disabled={isStreaming}
+        />
+      )
+    }
+  }
+
+  if (toolName === "select_channel" && !streaming) {
+    const selection = getChannelSelection(result)
+    if (selection) {
+      return (
+        <ChannelSelectionCard
+          selection={selection}
+          tokens={tokens}
+          onSend={onSend}
+          disabled={isStreaming}
+        />
+      )
+    }
+  }
+
+  if (toolName === "create_whatsapp_instance" && !streaming) {
+    const qr = getQrResult(result)
+    if (qr) {
+      return <WhatsAppQrCard data={qr} tokens={tokens} />
+    }
+  }
+
+  const label = toolLabel(toolName)
+  const summary = result !== undefined ? toolResultSummary(result) : null
+  const hasError =
+    result !== null &&
+    typeof result === "object" &&
+    ((result as Record<string, unknown>).success === false ||
+      typeof (result as Record<string, unknown>).error === "string")
+
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px]"
+      style={{
+        backgroundColor: tokens.bgSurface,
+        border: `1px solid ${tokens.divider}`,
+        color: tokens.textSecondary,
+      }}
+    >
+      {streaming ? (
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin" style={{ color: tokens.brand }} />
+      ) : hasError ? (
+        <span className="h-3 w-3 shrink-0 text-[10px]">✗</span>
+      ) : (
+        <span className="h-3 w-3 shrink-0 text-[10px]" style={{ color: tokens.brand }}>✓</span>
+      )}
+      <span style={{ color: tokens.textPrimary }}>{label}</span>
+      {summary && (
+        <span className="ml-1 truncate" style={{ color: hasError ? tokens.dangerText : tokens.textTertiary }}>
+          — {summary}
+        </span>
+      )}
+    </div>
   )
 }
