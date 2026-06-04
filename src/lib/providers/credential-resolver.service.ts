@@ -23,6 +23,8 @@ export interface ResolvedCredentials {
 interface ResolveContext {
   organizationId: string
   projectId?: string
+  /** BYOK por agente: resolve ESTA chave específica (AIAgentConfig.organizationProviderId). */
+  organizationProviderId?: string
 }
 
 // ── In-memory cache ───────────────────────────────────────────────────────────
@@ -86,7 +88,19 @@ export const credentialResolver = {
     provider: string,
     context: ResolveContext,
   ): Promise<ResolvedCredentials | null> {
-    const { organizationId } = context
+    const { organizationId, organizationProviderId } = context
+
+    // 0. BYOK por agente: se uma chave específica foi escolhida, resolve ela
+    // diretamente (por id, com checagem de org). Se a chave sumiu/inválida,
+    // cai no fluxo normal (fallback por provider) — nunca derruba o agente.
+    if (organizationProviderId) {
+      const byId = await providersRepository.getDecryptedKeyById(
+        organizationId,
+        organizationProviderId,
+      )
+      if (byId) return { provider, credentials: { apiKey: byId } }
+      // não achou → segue pro fallback abaixo
+    }
 
     // 1. Check in-memory cache
     const cached = getCached(organizationId, provider)

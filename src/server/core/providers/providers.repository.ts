@@ -166,8 +166,33 @@ export const providersRepository = {
     organizationId: string,
     provider: string,
   ): Promise<string | null> {
+    // Fallback determinístico: chave primária → menor priority → primeira ativa.
     const row = await db.organizationProvider.findFirst({
       where: { organizationId, provider, isActive: true },
+      orderBy: [{ isPrimary: 'desc' }, { priority: 'asc' }, { createdAt: 'asc' }],
+      select: { credentials: true },
+    })
+    if (!row) return null
+    const creds = parseCredentials(row.credentials)
+    if (!creds.apiKey) return null
+    try {
+      return decrypt(creds.apiKey)
+    } catch {
+      return null
+    }
+  },
+
+  /**
+   * Decrypted apiKey de UMA chave específica (por id), validando que pertence à
+   * org. Usado pelo BYOK por agente (AIAgentConfig.organizationProviderId).
+   * Retorna null se não existir / outra org / inativa / sem key.
+   */
+  async getDecryptedKeyById(
+    organizationId: string,
+    organizationProviderId: string,
+  ): Promise<string | null> {
+    const row = await db.organizationProvider.findFirst({
+      where: { id: organizationProviderId, organizationId, isActive: true },
       select: { credentials: true },
     })
     if (!row) return null

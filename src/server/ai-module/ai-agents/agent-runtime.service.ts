@@ -500,6 +500,10 @@ async function prepareAgentCall(
     try {
       const cred = await credentialResolver.resolve('AI', agentConfig.provider, {
         organizationId: params.organizationId,
+        // BYOK por agente: usa a chave escolhida (se houver); senão fallback.
+        organizationProviderId:
+          (agentConfig as { organizationProviderId?: string | null }).organizationProviderId ??
+          undefined,
       })
       resolvedApiKey = cred?.credentials?.apiKey
     } catch (err) {

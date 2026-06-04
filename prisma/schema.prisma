@@ -1282,6 +1282,7 @@ model OrganizationProvider {
 
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   builderProject BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
+  agentCredentials AIAgentConfig[] @relation("AgentCredential") // agentes que escolheram esta chave
 
   @@unique([organizationId, category, provider, builderProjectId, priority])
   @@index([organizationId, category])
@@ -1394,6 +1395,10 @@ model AIAgentConfig {
   // Catálogo de preços (tool get_pricing lê desta lista)
   priceListId String?
 
+  // BYOK por agente: qual chave (OrganizationProvider) este agente usa.
+  // null = resolução por fallback (isPrimary → priority → primeira ativa).
+  organizationProviderId String?
+
   // Tool settings
   enabledTools String[] @default([])
 
@@ -1425,6 +1430,7 @@ model AIAgentConfig {
   deployments    AgentDeployment[]
   ragCollection  KnowledgeCollection? @relation(fields: [ragCollectionId], references: [id], onDelete: SetNull)
   priceList      PriceList?           @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+  credential     OrganizationProvider? @relation("AgentCredential", fields: [organizationProviderId], references: [id], onDelete: SetNull)
 
   // Builder (home-chat-builder)
   builderProject        BuilderProject?
