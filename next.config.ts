@@ -38,6 +38,12 @@ const nextConfig: NextConfig = {
     'https-proxy-agent',
     'pg',
     '@prisma/adapter-pg',
+    // pdf-parse usa pdfjs com um worker (pdf.worker.mjs). Se for bundlado pelo
+    // Next, o import do worker vira um chunk .next/server/chunks/pdf.worker.mjs
+    // que não existe em runtime → "Setting up fake worker failed" no upload de
+    // PDF da base de conhecimento. Externalizar faz rodar do node_modules real.
+    'pdf-parse',
+    'pdfjs-dist',
     // OTel hooks usados por @sentry/nextjs precisam ser resolvidos via
     // require nativo em runtime (não bundlados pelo Turbopack). Sem isso,
     // o Next.js gera referência hashed (import-in-the-middle-<hash>) que
