@@ -129,6 +129,9 @@ model Organization {
   // Base de conhecimento / RAG
   knowledgeCollections KnowledgeCollection[]
 
+  // Catálogo de preços
+  priceLists PriceList[]
+
   @@index([document])
   @@index([slug])
   @@index([billingType])
@@ -1388,6 +1391,9 @@ model AIAgentConfig {
   useRAG          Boolean @default(false)
   ragCollectionId String?
 
+  // Catálogo de preços (tool get_pricing lê desta lista)
+  priceListId String?
+
   // Tool settings
   enabledTools String[] @default([])
 
@@ -1418,6 +1424,7 @@ model AIAgentConfig {
   promptVersions AgentPromptVersion[]
   deployments    AgentDeployment[]
   ragCollection  KnowledgeCollection? @relation(fields: [ragCollectionId], references: [id], onDelete: SetNull)
+  priceList      PriceList?           @relation(fields: [priceListId], references: [id], onDelete: SetNull)
 
   // Builder (home-chat-builder)
   builderProject        BuilderProject?
@@ -1555,6 +1562,49 @@ model AgentRuntimeDecision {
   @@index([sessionId])
   @@index([agentConfigId, createdAt])
   @@map("agent_runtime_decisions")
+}
+
+// ── Catálogo de preços (Wave Orayon) ─────────────────────────────────────────
+// Fonte de dados da tool get_pricing. DB-first (MVP); sync de Google Sheets é
+// fase 2 (molde do Google Calendar). O agente aponta AIAgentConfig.priceListId.
+
+model PriceList {
+  id             String  @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  currency       String  @default("BRL")
+  isActive       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items        PriceItem[]
+  agents       AIAgentConfig[] // agentes que apontam priceListId pra cá
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("price_lists")
+}
+
+model PriceItem {
+  id          String   @id @default(uuid())
+  priceListId String
+  name        String
+  priceCents  Int // preço em centavos (evita float)
+  description String?
+  aliases     String[] @default([]) // sinônimos p/ busca (ex: "corte", "cabelo")
+  category    String?
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+
+  @@index([priceListId, isActive])
+  @@map("price_items")
 }
 
 // ── Agent Prompt Versions ─────────────────────────────────────────────────────

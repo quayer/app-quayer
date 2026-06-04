@@ -21,6 +21,7 @@ import {
   createCreateEventTool,
   createCancelEventTool,
 } from './calendar'
+import { createGetPricingTool } from './pricing'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -549,6 +550,10 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     create_event: createCreateEventTool(ctx),
     cancel_event: createCancelEventTool(ctx),
 
+    // get_pricing — consulta o catálogo de preços real (PriceList/PriceItem).
+    // Degrada ("catálogo não configurado") até o profissional preencher a lista.
+    get_pricing: createGetPricingTool(ctx),
+
   }
 }
 
@@ -598,4 +603,5 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'check_availability',
   'create_event',
   'cancel_event',
+  'get_pricing',
 ]
