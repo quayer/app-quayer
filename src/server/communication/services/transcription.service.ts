@@ -1,9 +1,10 @@
 /**
- * Transcription Service — Whisper audio transcription
+ * Transcription Service — Whisper audio/vídeo transcription
  *
- * Recebe um audio (mediaUrl + mimetype) vindo do WhatsApp, baixa, envia para
- * Whisper e retorna o texto transcrito + idioma detectado. Usado pelo agente
- * para virar audio do cliente em prompt textual antes de chamar o LLM.
+ * Recebe um audio OU vídeo (mediaUrl + mimetype) vindo do WhatsApp, baixa, envia
+ * para Whisper e retorna o texto transcrito + idioma detectado. Para vídeo, o
+ * Whisper extrai e transcreve a faixa de áudio (padrão Orayon — sem ffmpeg/frames).
+ * Usado pelo agente para virar fala do cliente em prompt textual antes do LLM.
  *
  * Falhas (URL/key/mime invalidos, download ou API com erro) retornam null —
  * o caller decide o fallback (ex.: pedir reenvio ao cliente).
@@ -36,10 +37,15 @@ export interface TranscriptionResult {
 
 /**
  * Determina a extensao do arquivo a partir do mimetype. Whisper aceita ogg,
- * mp3, wav, m4a e webm — fora dessas, defaultamos para ogg (formato nativo
- * do WhatsApp).
+ * mp3, wav, m4a, webm (áudio) e mp4/mpeg/webm (vídeo — extrai o áudio). Vídeo do
+ * WhatsApp é tipicamente mp4; fora das conhecidas, defaultamos para ogg (áudio
+ * nativo do WhatsApp).
  */
 function pickExtension(mimetype: string): string {
+  // Vídeo primeiro (video/mpeg não deve virar 'mp3').
+  if (mimetype.startsWith('video/')) {
+    return mimetype.includes('webm') ? 'webm' : 'mp4'
+  }
   if (mimetype.includes('mp3') || mimetype.includes('mpeg')) return 'mp3'
   if (mimetype.includes('wav')) return 'wav'
   if (mimetype.includes('m4a')) return 'm4a'
@@ -62,7 +68,8 @@ export async function transcribeAudio(
     return null
   }
 
-  if (!mimetype || !mimetype.startsWith('audio/')) {
+  // Aceita áudio E vídeo (Whisper extrai a faixa de áudio do vídeo).
+  if (!mimetype || !(mimetype.startsWith('audio/') || mimetype.startsWith('video/'))) {
     return null
   }
 

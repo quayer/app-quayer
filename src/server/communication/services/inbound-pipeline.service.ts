@@ -110,15 +110,19 @@ export async function processInboundMessage(
   let detectedLanguage: string | undefined
   let mediaProcessed = false
 
-  // 4. Whisper para áudio.
+  // 4. Whisper para áudio E vídeo. Para vídeo, o Whisper transcreve a faixa de
+  // áudio (padrão Orayon — sem ffmpeg/frames; análise visual de frame fica p/ fase
+  // 2). Áudio é gated por whisperEnabled; vídeo por videoUnderstandingEnabled.
+  const wantsAudioTranscription = normalized.type === 'audio' && whisperEnabled
+  const wantsVideoTranscription =
+    normalized.type === 'video' && videoUnderstandingEnabled
   if (
-    normalized.type === 'audio' &&
-    whisperEnabled &&
+    (wantsAudioTranscription || wantsVideoTranscription) &&
     openaiApiKey &&
     normalized.mediaUrl &&
     normalized.mediaMimetype
   ) {
-    processingSteps.push('whisper')
+    processingSteps.push(wantsVideoTranscription ? 'whisper_video' : 'whisper')
     try {
       const transcription = await transcribeAudio(
         normalized.mediaUrl,
@@ -169,6 +173,7 @@ export async function processInboundMessage(
   }
 
   if (normalized.type === 'video' && !videoUnderstandingEnabled) {
+    // Vídeo recebido mas transcrição desabilitada na conexão.
     processingSteps.push('video_skipped')
   }
 
