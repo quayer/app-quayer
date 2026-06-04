@@ -20,6 +20,7 @@ import { PromptHeader } from "./prompt-header"
 import { PromptEditor } from "./prompt-editor"
 import { PromptInsightsSection } from "./prompt-insights-section"
 import { VersionHistory } from "./version-history"
+import { IdentityTab } from "../identity/identity-tab"
 import type { PromptTabProps } from "./prompt-types"
 
 export type { PromptTabProps } from "./prompt-types"
@@ -66,6 +67,17 @@ export function PromptTab({ project, messages, onOpenChat }: PromptTabProps) {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
+      {/* Section 0: Identidade & Comportamento (merged from the former
+          "Identidade" tab — lives at the top of Prompt so persona + prompt
+          are edited together). Renders its own autosave + load lifecycle. */}
+      <IdentityTab project={project} />
+
+      <div
+        className="h-px w-full"
+        style={{ backgroundColor: tokens.divider }}
+        aria-hidden="true"
+      />
+
       {/* Section 1: Header */}
       <PromptHeader
         tokens={tokens}

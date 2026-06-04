@@ -26,16 +26,8 @@ import type {
   WorkspaceProject,
 } from "@/client/components/projetos/types"
 
-/**
- * Controls whether a tab requires the project to have an aiAgent configured.
- * Tabs marked `requiresAgent: true` are hidden until the Builder creates the
- * agent (tool call `create_agent`). This prevents showing Prompt/Playground/
- * Publicar on brand-new projects where those tabs have no content.
- */
-
 import { OverviewTab } from "./tabs/overview/overview-tab"
 import { PromptTab } from "./tabs/prompt/prompt-tab"
-import { IdentityTab } from "./tabs/identity/identity-tab"
 import { KnowledgeTab } from "./tabs/knowledge/knowledge-tab"
 import { DeployTab } from "./tabs/deploy/deploy-tab"
 import { PlaygroundTab } from "./tabs/agent/playground/playground-tab"
@@ -63,7 +55,22 @@ export interface TabDescriptor {
    * — no layout shift when the agent is created.
    */
   requiresAgent?: boolean
+  /**
+   * When true, the tab is hidden entirely (not just locked) until the project
+   * has a PUBLISHED agent — see {@link isProjectPublished}. Used by "Atividade":
+   * there is no production activity to show until the agent goes live.
+   */
+  requiresPublished?: boolean
   render: (ctx: TabRenderContext) => ReactNode
+}
+
+/**
+ * A project counts as "published" once it has a live WhatsApp connection or its
+ * status was flipped to production by the deploy saga. `aiAgentId` alone is NOT
+ * enough — it is set at agent creation, long before the publish step.
+ */
+export function isProjectPublished(project: WorkspaceProject): boolean {
+  return project.hasWhatsAppConnection || project.status === "production"
 }
 
 export interface TabDescriptorWithState extends TabDescriptor {
@@ -97,12 +104,6 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     ),
   },
   {
-    value: "identity",
-    label: "Identidade",
-    visibleFor: ["ai_agent"],
-    render: ({ project }) => <IdentityTab project={project} />,
-  },
-  {
     value: "knowledge",
     label: "Conhecimento",
     visibleFor: ["ai_agent"],
@@ -119,6 +120,7 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     value: "activity",
     label: "Atividade",
     visibleFor: ["ai_agent"],
+    requiresPublished: true,
     render: ({ project, messages }) => (
       <ActivityTab project={project} messages={messages} />
     ),
@@ -132,7 +134,7 @@ export const TAB_REGISTRY: TabDescriptor[] = [
   },
   {
     value: "credentials",
-    label: "Credenciais",
+    label: "Config",
     visibleFor: ["ai_agent"],
     render: ({ project }) => <CredentialsTab project={project} />,
   },
@@ -163,9 +165,14 @@ export function getTabsForProjectWithLocked(
   project: WorkspaceProject,
 ): TabDescriptorWithState[] {
   const hasAgent = project.aiAgent !== null
-  return TAB_REGISTRY.filter(
-    (tab) => !tab.visibleFor || tab.visibleFor.includes(project.type),
-  ).map((tab) => ({
+  const published = isProjectPublished(project)
+  return TAB_REGISTRY.filter((tab) => {
+    if (tab.visibleFor && !tab.visibleFor.includes(project.type)) return false
+    // Post-publish-only tabs (e.g. Atividade) are removed from the strip
+    // entirely until the agent goes live — they have no pre-publish content.
+    if (tab.requiresPublished && !published) return false
+    return true
+  }).map((tab) => ({
     ...tab,
     locked: !!(tab.requiresAgent && !hasAgent),
   }))
@@ -177,9 +184,11 @@ export function getTabsForProjectWithLocked(
  */
 export function getTabsForProject(project: WorkspaceProject): TabDescriptor[] {
   const hasAgent = project.aiAgent !== null
+  const published = isProjectPublished(project)
   return TAB_REGISTRY.filter((tab) => {
     if (tab.visibleFor && !tab.visibleFor.includes(project.type)) return false
     if (tab.requiresAgent && !hasAgent) return false
+    if (tab.requiresPublished && !published) return false
     return true
   })
 }

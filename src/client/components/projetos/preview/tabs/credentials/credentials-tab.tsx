@@ -22,6 +22,7 @@ import {
 import { useProviders } from "@/client/components/integracoes/use-providers"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
+import { AgentConfigSection } from "./agent-config-section"
 
 export interface CredentialsTabProps {
   project: WorkspaceProject
@@ -67,6 +68,14 @@ export function CredentialsTab({ project }: CredentialsTabProps) {
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-3 flex flex-col gap-5 py-2 duration-500">
+      {/* Config do agente: modelo (curado) + chave BYOK que o agente usa. */}
+      <AgentConfigSection
+        projectId={project.id}
+        provider={activeProvider}
+        currentModelId={project.aiAgent?.model ?? null}
+        tokens={tokens}
+      />
+
       <section
         className="rounded-xl border p-4"
         style={{

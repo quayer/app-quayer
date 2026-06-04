@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/client/components/ui/dialog'
+import { Input } from '@/client/components/ui/input'
 import { Label } from '@/client/components/ui/label'
 import { Textarea } from '@/client/components/ui/textarea'
 import { Alert, AlertDescription } from '@/client/components/ui/alert'
@@ -23,19 +24,18 @@ import type {
 
 interface ApiKeyModalProps {
   meta: ProviderMeta | null
-  currentRecord: ProviderRecord | null
   open: boolean
   onClose: () => void
-  onSave: (provider: ProviderKey, apiKey: string) => Promise<void>
+  onSave: (provider: ProviderKey, apiKey: string, name: string) => Promise<void>
+  /**
+   * @deprecated Ignorado — surface legada single-key. O modal agora sempre cria
+   * uma nova chave rotulada. Mantido p/ consumidores fora desta refatoração.
+   */
+  currentRecord?: ProviderRecord | null
 }
 
-export function ApiKeyModal({
-  meta,
-  currentRecord,
-  open,
-  onClose,
-  onSave,
-}: ApiKeyModalProps) {
+export function ApiKeyModal({ meta, open, onClose, onSave }: ApiKeyModalProps) {
+  const [name, setName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [inlineError, setInlineError] = useState<string | null>(null)
@@ -43,35 +43,39 @@ export function ApiKeyModal({
   // Reset state every time the modal opens for a different provider.
   useEffect(() => {
     if (open) {
+      setName('')
       setApiKey('')
       setInlineError(null)
       setSaving(false)
     }
   }, [open, meta?.key])
 
-  const isUpdate = Boolean(currentRecord?.isConfigured)
-
   const handleSave = async () => {
     if (!meta) return
-    const trimmed = apiKey.trim()
-    if (!trimmed) {
+    const trimmedName = name.trim()
+    const trimmedKey = apiKey.trim()
+    if (!trimmedName) {
+      setInlineError('Dê um nome (rótulo) para a chave.')
+      return
+    }
+    if (!trimmedKey) {
       setInlineError('Cole a chave de API antes de salvar.')
       return
     }
     setSaving(true)
     setInlineError(null)
     try {
-      await onSave(meta.key, trimmed)
+      await onSave(meta.key, trimmedKey, trimmedName)
       toast.success('Chave salva')
       onClose()
     } catch (err) {
-      setInlineError(
-        (err as Error).message || 'Não foi possível salvar a chave.'
-      )
+      setInlineError((err as Error).message || 'Não foi possível salvar a chave.')
     } finally {
       setSaving(false)
     }
   }
+
+  const canSave = name.trim().length > 0 && apiKey.trim().length > 0
 
   return (
     <Dialog
@@ -82,27 +86,33 @@ export function ApiKeyModal({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {isUpdate ? 'Atualizar chave' : 'Configurar chave'}
-          </DialogTitle>
+          <DialogTitle>Nova chave</DialogTitle>
           <DialogDescription>
             {meta
-              ? `Cole sua chave de API ${meta.name}.`
-              : 'Cole sua chave de API.'}
+              ? `Adicione uma chave de API ${meta.name}. Você pode ter várias.`
+              : 'Adicione uma chave de API.'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="integracoes-provider-name">Provedor</Label>
-            <input
-              id="integracoes-provider-name"
+            <Label htmlFor="integracoes-key-name">Nome (rótulo)</Label>
+            <Input
+              id="integracoes-key-name"
               type="text"
-              value={meta?.name ?? ''}
-              readOnly
-              disabled
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-70"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setInlineError(null)
+              }}
+              placeholder="Ex.: Produção, Conta cliente X"
+              maxLength={60}
+              autoComplete="off"
+              disabled={saving}
             />
+            <p className="text-xs text-muted-foreground">
+              Use um rótulo para identificar esta chave depois.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -124,8 +134,7 @@ export function ApiKeyModal({
               disabled={saving}
             />
             <p className="text-xs text-muted-foreground">
-              Sua chave fica criptografada no banco. Nunca exibida em texto
-              puro.
+              Sua chave fica criptografada no banco. Nunca exibida em texto puro.
             </p>
           </div>
 
@@ -145,11 +154,7 @@ export function ApiKeyModal({
           >
             Cancelar
           </Button>
-          <Button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || apiKey.trim().length === 0}
-          >
+          <Button type="button" onClick={handleSave} disabled={saving || !canSave}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Salvar
           </Button>

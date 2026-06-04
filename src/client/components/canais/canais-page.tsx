@@ -6,9 +6,9 @@ import type { Channel, ConnectionStatus, Provider } from '@prisma/client'
 import { Button } from '@/client/components/ui/button'
 import { EmptyState } from '@/client/components/custom/empty-state'
 import { useAppTokens } from '@/client/hooks/use-app-tokens'
-import { CreateInstanceModal } from '@/client/components/whatsapp/create-instance-modal'
 import { DetailsModal } from '@/client/components/whatsapp/details-modal'
 import { ConnectionCard } from './connection-card'
+import { ChannelSelectorModal } from './channel-selector-modal'
 
 /**
  * Forma serializada de `Connection` para o boundary server → client.
@@ -108,9 +108,9 @@ export function CanaisPage({ connections }: CanaisPageProps) {
         onClose={() => setSelected(null)}
       />
 
-      <CreateInstanceModal
-        isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+      <ChannelSelectorModal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
       />
     </div>
   )

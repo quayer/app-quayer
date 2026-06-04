@@ -32,6 +32,20 @@ export const metadata: Metadata = {
   description: "Gerencie múltiplas instâncias WhatsApp em uma única plataforma inteligente",
 };
 
+// CSP nonce requires per-request rendering. The theme-bootstrap <script> below
+// receives its `nonce` from the `x-nonce` request header injected by
+// src/middleware.ts, and the middleware sets a matching `'nonce-<n>'` in the
+// Content-Security-Policy response header on the SAME request. If this layout is
+// statically prerendered/cached (the default for public routes like /login that
+// don't otherwise opt into dynamic rendering), the served HTML keeps a stale (or
+// empty) nonce attribute while the middleware emits a fresh nonce per request —
+// the two no longer match and the browser blocks the inline script with:
+//   "Executing inline script violates ... script-src 'self' 'nonce-...' 'strict-dynamic'".
+// Forcing dynamic rendering at the root layout guarantees every route (including
+// /login) re-reads the live request's x-nonce so the attribute always matches the
+// response header. This does NOT relax the CSP — production stays nonce-only.
+export const dynamic = 'force-dynamic';
+
 export default async function RootLayout({
   children,
 }: Readonly<{

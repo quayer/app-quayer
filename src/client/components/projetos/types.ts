@@ -17,7 +17,6 @@ export type ProjectStatus = 'draft' | 'production' | 'paused' | 'archived'
 export type PreviewTab =
   | 'overview'
   | 'prompt'
-  | 'identity'
   | 'knowledge'
   | 'playground'
   | 'activity'
