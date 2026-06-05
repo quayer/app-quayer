@@ -5,47 +5,21 @@
  * agent will respond BEFORE publishing. No judge LLM, no pass/fail —
  * this is pure "show me what it sounds like".
  *
- * Pattern mirrors run-playground-test.tool.ts for the model resolution
- * and agent loading, but the execution is simpler (one-shot generate per
- * scenario, no JSON parsing, no scoring).
+ * QH-08: Each scenario now goes through `runFaithfulPreview` (the real
+ * runtime's playground path — same tools, BYOK, cooldown fallback) instead of
+ * a bare `generateText`. This ensures the preview is faithful to production.
+ *
+ * Fallback: if the agent has no linked BuilderProject yet (agentId → projectId
+ * lookup fails), we still return an error with a clear message rather than
+ * silently falling back to simulated output.
  */
 
 import { tool } from 'ai'
-import { generateText } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
-
-// ---------------------------------------------------------------------------
-// Helpers (duplicate of run-playground-test.tool.ts — kept local to avoid
-// a shared-module churn; extract when we add the 3rd consumer)
-// ---------------------------------------------------------------------------
-
-async function resolveModel(provider: string, model: string) {
-  switch (provider) {
-    case 'openai': {
-      const { openai } = await import('@ai-sdk/openai')
-      return openai(model)
-    }
-    case 'anthropic': {
-      const { anthropic } = await import('@ai-sdk/anthropic')
-      return anthropic(model)
-    }
-    case 'openrouter': {
-      const { createOpenAI } = await import('@ai-sdk/openai')
-      const openrouter = createOpenAI({
-        apiKey: process.env.OPENROUTER_API_KEY,
-        baseURL: 'https://openrouter.ai/api/v1',
-      })
-      return openrouter(model)
-    }
-    default: {
-      const { openai } = await import('@ai-sdk/openai')
-      return openai('gpt-4o-mini')
-    }
-  }
-}
+import { runFaithfulPreview } from '@/server/ai-module/builder/services/faithful-preview.service'
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -86,19 +60,13 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
       execute: async (input) => {
         const startTime = Date.now()
         try {
+          // QH-08: load agent for name + org-scope check
           const agent = await database.aIAgentConfig.findFirst({
             where: {
               id: input.agentId,
               organizationId: ctx.organizationId,
             },
-            select: {
-              id: true,
-              name: true,
-              systemPrompt: true,
-              provider: true,
-              model: true,
-              temperature: true,
-            },
+            select: { id: true, name: true },
           })
 
           if (!agent) {
@@ -107,15 +75,23 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
               message: `Agent ${input.agentId} not found in this organization.`,
             }
           }
-          if (!agent.systemPrompt) {
+
+          // QH-08: resolve projectId from agentId (1:1 relation)
+          const project = await database.builderProject.findFirst({
+            where: {
+              aiAgentId: input.agentId,
+              organizationId: ctx.organizationId,
+            },
+            select: { id: true },
+          })
+
+          if (!project) {
             return {
               success: false as const,
               message:
-                'Agent has no system prompt configured. Create or update the prompt first.',
+                'Agent has no linked Builder project yet. Publish the agent first so the faithful preview can use the real runtime.',
             }
           }
-
-          const agentModel = await resolveModel(agent.provider, agent.model)
 
           const examples: Array<{
             label?: string
@@ -124,21 +100,21 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
           }> = []
 
           let totalTokens = 0
+          let totalLatencyMs = 0
+
+          // QH-08: use the real runtime path (same tools, BYOK, model routing)
           for (const scenario of input.scenarios) {
-            const result = await generateText({
-              model: agentModel,
-              system: agent.systemPrompt,
-              prompt: scenario.userMessage,
-              temperature: agent.temperature,
-              maxOutputTokens: 512,
+            const result = await runFaithfulPreview({
+              projectId: project.id,
+              organizationId: ctx.organizationId,
+              messages: [{ role: 'user', content: scenario.userMessage }],
             })
-            totalTokens +=
-              (result.usage?.inputTokens ?? 0) +
-              (result.usage?.outputTokens ?? 0)
+            totalTokens += result.usage.totalTokens
+            totalLatencyMs += result.latencyMs
             examples.push({
               label: scenario.label,
               userMessage: scenario.userMessage,
-              agentResponse: result.text,
+              agentResponse: result.reply,
             })
           }
 

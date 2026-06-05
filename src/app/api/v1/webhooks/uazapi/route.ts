@@ -52,6 +52,10 @@ import {
   isDuplicateInbound,
   pauseAiForOperatorTakeover,
 } from '@/lib/webhook/inbound-resilience'
+import {
+  parseOperatorCommand,
+  applyOperatorCommand,
+} from '@/lib/webhook/operator-commands'
 import { checkAndMarkProcessed } from '@/server/ai-module/ai-agents/infra/idempotency.service'
 import { evaluateActivationGate } from '@/lib/webhook/activation-gate'
 import { newTraceId } from '@/server/ai-module/ai-agents/infra/trace-context.service'
@@ -570,11 +574,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // existing session here (humans only reply to existing conversations); if a
   // brand-new session was just created we still pause it — harmless and matches
   // "human is now driving this contact".
+  //
+  // Operator commands: if the OUT/AGENT message is a `@comando` (the whole text),
+  // apply the action instead of the generic takeover pause — the command itself
+  // governs aiEnabled (e.g. @fechar closes, @ia hands back, @blacklist tags).
+  let operatorCommand: ReturnType<typeof parseOperatorCommand> = null
   if (direction === 'OUT' && author === 'AGENT') {
-    await pauseAiForOperatorTakeover(
-      database as unknown as Parameters<typeof pauseAiForOperatorTakeover>[0],
-      session.id,
-    )
+    operatorCommand = parseOperatorCommand(enrichedContent)
+    if (operatorCommand) {
+      await applyOperatorCommand(
+        database as unknown as Parameters<typeof applyOperatorCommand>[0],
+        session.id,
+        operatorCommand,
+        session.tags ?? [],
+      )
+    } else {
+      await pauseAiForOperatorTakeover(
+        database as unknown as Parameters<typeof pauseAiForOperatorTakeover>[0],
+        session.id,
+      )
+    }
   }
 
   // 7) Create Message row (using enrichedContent — e.g. Whisper transcription).
@@ -594,6 +613,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   })
 
   const messageId = (created as unknown as { id: string }).id
+
+  // 7.5) Operator command processed → ack and stop (OUT never dispatches AI).
+  // The message stays persisted for audit; the action was applied in step 6.5.
+  if (operatorCommand) {
+    return NextResponse.json({
+      ok: true,
+      sessionId: session.id,
+      messageId,
+      operatorCommand: operatorCommand.kind,
+    })
+  }
 
   // 8) AI dispatch — INBOUND only, gated by aiEnabled / aiBlockedUntil / agent config.
   if (direction === 'IN' && connectionAiAgentId && canDispatchAi(session)) {
