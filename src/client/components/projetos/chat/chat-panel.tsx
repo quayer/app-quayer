@@ -33,7 +33,14 @@ import { Button } from "@/client/components/ui/button"
 import { Card } from "@/client/components/ui/card"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { MessageInput } from "@/client/components/ds/message-input"
+import { api } from "@/igniter.client"
 import { MarkdownContent } from "./markdown-content"
+
+import { getCardForStep } from "./cards/card-registry"
+import { parseBuilderState } from "@/server/ai-module/builder/cards/builder-state"
+import type { BuilderState } from "@/server/ai-module/builder/cards/builder-state"
+import type { CardKey } from "./cards/types"
+import type { Readiness, StepId } from "@/server/ai-module/builder/state/readiness.types"
 
 import type { ChatMessage } from "../types"
 
@@ -73,6 +80,60 @@ function createId(): string {
     return crypto.randomUUID()
   }
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
+
+/**
+ * Minimal structural view of the auto-generated `api.builder.getReadiness`
+ * query hook. The generated client (`igniter.schema.ts`) now exposes this action
+ * (`builder.getReadiness` → `GET /projects/:id/readiness`), so the cast that
+ * used to bridge a missing action is no longer required. We keep this structural
+ * type as the call contract and a defensive resolver ({@link resolveReadinessQuery})
+ * so a regenerate that ever drops the action degrades to a no-op hook instead of
+ * crashing at module-eval. The server returns `{ success, data: Readiness }`
+ * (see chat.routes.ts `getReadinessAction`).
+ */
+interface GetReadinessQuery {
+  useQuery: (opts: { params: { id: string } }) => {
+    data: { success?: boolean; data?: Readiness } | undefined
+    refetch: () => unknown
+  }
+}
+
+/**
+ * Resolve the readiness query hook off the typed client with a defensive guard,
+ * ONCE at module-eval. The typed client now resolves `api.builder.getReadiness`
+ * directly (no `as unknown as` cast needed); if a future regenerate ever drops
+ * the action we fall back to a stable no-op hook
+ * (`{ data: undefined, refetch: () => {} }`) so the panel renders without the
+ * active-step card rather than throwing.
+ *
+ * Resolving once (module scope, not per-render) keeps the chosen hook IDENTITY
+ * stable across renders — the Rules-of-Hooks contract holds because the same
+ * `useQuery` function is invoked unconditionally on every render.
+ */
+const READINESS_QUERY: GetReadinessQuery = (() => {
+  const candidate = (api.builder as { getReadiness?: unknown }).getReadiness
+  if (
+    candidate &&
+    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
+  ) {
+    return candidate as GetReadinessQuery
+  }
+  return {
+    useQuery: () => ({ data: undefined, refetch: () => {} }),
+  }
+})()
+
+/**
+ * The canonical BuilderState the active-step card pre-fills from. The readiness
+ * endpoint (`getReadiness`) returns the persisted `builderState`; we run it
+ * through the dependency-free `parseBuilderState` (never throws) which backfills
+ * a fully-defaulted state when it's missing (legacy rows) or malformed.
+ */
+function resolveBuilderState(readiness: Readiness | undefined): BuilderState {
+  const candidate = (readiness as { builderState?: unknown } | undefined)
+    ?.builderState
+  return parseBuilderState(candidate)
 }
 
 /**
@@ -168,6 +229,94 @@ export function ChatPanel({
     [],
   )
 
+  // ── Readiness (deterministic step-engine — single source of truth) ──
+  // Drives the pinned active-step card below the conversation. Invalidated on
+  // SSE finish + after a card submit (no polling — per the spec).
+  const { data: readinessEnvelope, refetch: refetchReadiness } =
+    READINESS_QUERY.useQuery({ params: { id: projectId } })
+  const readiness = readinessEnvelope?.data
+
+  // Keep a stable ref so the stream-consumer can invalidate readiness on finish
+  // without re-creating its useCallback on every readiness change.
+  const refetchReadinessRef = React.useRef(refetchReadiness)
+  React.useEffect(() => {
+    refetchReadinessRef.current = refetchReadiness
+  }, [refetchReadiness])
+
+  /**
+   * Consume the SSE body of a chat/card POST: drains the reader, accumulates
+   * text + tool calls, and on `finish` pushes the assistant message + flips the
+   * readiness query stale (so the active-step card advances). Shared by BOTH
+   * sendMessage and submitCard so the ACK turn streams identically. Throws on
+   * a non-ok / bodyless response so the caller's try/catch surfaces the error.
+   */
+  const consumeStream = React.useCallback(
+    async (response: Response, fallbackErr: string) => {
+      if (!response.ok || !response.body) {
+        throw new Error(`${fallbackErr} (HTTP ${response.status})`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let finished = false
+      let accText = ""
+      const toolCalls: ToolCallView[] = []
+
+      while (!finished) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const { events, rest } = parseSseBuffer(buffer)
+        buffer = rest
+
+        for (const event of events) {
+          if (event.type === "text-delta") {
+            accText += event.text
+            setStreamingText(accText)
+          } else if (event.type === "tool-call") {
+            toolCalls.push({ toolName: event.toolName, args: event.args })
+            setStreamingToolCalls([...toolCalls])
+          } else if (event.type === "tool-result") {
+            for (let i = toolCalls.length - 1; i >= 0; i--) {
+              if (
+                toolCalls[i]!.toolName === event.toolName &&
+                toolCalls[i]!.result === undefined
+              ) {
+                toolCalls[i] = { ...toolCalls[i]!, result: event.result }
+                break
+              }
+            }
+            setStreamingToolCalls([...toolCalls])
+          } else if (event.type === "finish") {
+            const finalToolCalls =
+              event.toolCalls && event.toolCalls.length > 0
+                ? event.toolCalls
+                : toolCalls
+            const assistantMessage: ChatMessage = {
+              id: createId(),
+              role: "assistant",
+              content: accText,
+              toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+              createdAt: new Date().toISOString(),
+            }
+            setMessages((prev) => [...prev, assistantMessage])
+            setStreamingText("")
+            setStreamingToolCalls([])
+            finished = true
+            // Step-engine state may have advanced this turn — refresh readiness.
+            void refetchReadinessRef.current?.()
+          } else if (event.type === "error") {
+            setError(event.message || "Erro ao processar mensagem")
+            finished = true
+          }
+          if (finished) break
+        }
+      }
+    },
+    [parseSseBuffer],
+  )
+
   // ── Send ───────────────────────────────────────────────────────
   const sendMessage = React.useCallback(
     async (content: string, skipUserPersist = false) => {
@@ -196,9 +345,6 @@ export function ChatPanel({
       setStreamingText("")
       setStreamingToolCalls([])
 
-      let accText = ""
-      const toolCalls: ToolCallView[] = []
-
       try {
         const response = await fetch(
           `/api/v1/builder/projects/${projectId}/chat/message`,
@@ -208,72 +354,91 @@ export function ChatPanel({
             body: JSON.stringify({ content: trimmed, skipUserPersist }),
           },
         )
-        if (!response.ok || !response.body) {
-          throw new Error(`Falha ao enviar mensagem (HTTP ${response.status})`)
-        }
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        let finished = false
-
-        while (!finished) {
-          const { value, done } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const { events, rest } = parseSseBuffer(buffer)
-          buffer = rest
-
-          for (const event of events) {
-            if (event.type === "text-delta") {
-              accText += event.text
-              setStreamingText(accText)
-            } else if (event.type === "tool-call") {
-              toolCalls.push({ toolName: event.toolName, args: event.args })
-              setStreamingToolCalls([...toolCalls])
-            } else if (event.type === "tool-result") {
-              for (let i = toolCalls.length - 1; i >= 0; i--) {
-                if (
-                  toolCalls[i]!.toolName === event.toolName &&
-                  toolCalls[i]!.result === undefined
-                ) {
-                  toolCalls[i] = { ...toolCalls[i]!, result: event.result }
-                  break
-                }
-              }
-              setStreamingToolCalls([...toolCalls])
-            } else if (event.type === "finish") {
-              const finalToolCalls =
-                event.toolCalls && event.toolCalls.length > 0
-                  ? event.toolCalls
-                  : toolCalls
-              const assistantMessage: ChatMessage = {
-                id: createId(),
-                role: "assistant",
-                content: accText,
-                toolCalls:
-                  finalToolCalls.length > 0 ? finalToolCalls : undefined,
-                createdAt: new Date().toISOString(),
-              }
-              setMessages((prev) => [...prev, assistantMessage])
-              setStreamingText("")
-              setStreamingToolCalls([])
-              finished = true
-            } else if (event.type === "error") {
-              setError(event.message || "Erro ao processar mensagem")
-              finished = true
-            }
-            if (finished) break
-          }
-        }
+        await consumeStream(response, "Falha ao enviar mensagem")
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
       } finally {
         setIsStreaming(false)
       }
     },
-    [isStreaming, parseSseBuffer, projectId],
+    [consumeStream, isStreaming, projectId],
   )
+
+  /**
+   * Submit a card payload through the card-action protocol. POSTs to
+   * `/builder/projects/:id/cards/:cardKey/submit` and consumes the SAME SSE
+   * stream as chat (via {@link consumeStream}) so the deterministic ACK turn —
+   * the meta-agent acknowledging the card + advancing the journey — streams
+   * straight into the message list.
+   *
+   * Cards emit ONLY their owned slice; the backend body is discriminated on
+   * `cardKey`, so we merge `{ cardKey, ...payload }` before POSTing (matches the
+   * `cardSubmitBodySchema` discriminated union). Readiness is invalidated on
+   * SSE finish (inside consumeStream) AND defensively here in finally — so the
+   * pinned active-step card always re-resolves after a submit.
+   */
+  const submitCard = React.useCallback(
+    async (cardKey: CardKey, payload: Record<string, unknown>) => {
+      if (isStreaming) return
+
+      setError(null)
+      autoScrollRef.current = true
+      setIsStreaming(true)
+      setStreamingText("")
+      setStreamingToolCalls([])
+
+      try {
+        const response = await fetch(
+          `/api/v1/builder/projects/${projectId}/cards/${cardKey}/submit`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // The backend re-validates against the per-card schema; it expects
+            // the cardKey discriminator IN the body alongside the owned slice.
+            body: JSON.stringify({ cardKey, ...payload }),
+          },
+        )
+        await consumeStream(response, "Falha ao enviar card")
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erro desconhecido")
+      } finally {
+        setIsStreaming(false)
+        // Belt-and-suspenders: ensure readiness re-resolves even if the stream
+        // ended without a clean `finish` event.
+        void refetchReadinessRef.current?.()
+      }
+    },
+    [consumeStream, isStreaming, projectId],
+  )
+
+  // Keep `submitCard` in a ref (mirroring `refetchReadinessRef`) so the card
+  // `onSubmit` identity stays STABLE across renders. `submitCard` itself is a
+  // useCallback that re-creates whenever `isStreaming` toggles; cards (e.g.
+  // CalendarConnectCard) put `onSubmit` in an effect dependency array, so an
+  // unstable identity re-runs those effects on every stream toggle. The ref +
+  // stable wrapper below decouple the card-facing identity from those deps.
+  const submitCardRef = React.useRef(submitCard)
+  React.useEffect(() => {
+    submitCardRef.current = submitCard
+  }, [submitCard])
+
+  // Stable, never-changing wrapper handed to ActiveStepCard. Its identity is
+  // constant for the component's lifetime ([] deps) — it always dispatches to
+  // the LATEST `submitCard` via the ref.
+  const stableSubmitCard = React.useCallback(
+    (cardKey: CardKey, payload: Record<string, unknown>) => {
+      void submitCardRef.current(cardKey, payload)
+    },
+    [],
+  )
+
+  // Card "skip / Agora não" affordance: a lightweight free-text chat turn so the
+  // meta-agent can acknowledge the skip and re-orient the journey. Cards expose
+  // this via `onDismiss`; without it the skip button never renders. We route it
+  // through `sendMessage` (NOT a card submit) so no confirmation sentinel flips.
+  const handleCardDismiss = React.useCallback(() => {
+    void sendMessage("Pular este passo por agora.")
+  }, [sendMessage])
 
   React.useEffect(() => {
     const handleFocusChat = (event: Event) => {
@@ -355,8 +520,8 @@ export function ChatPanel({
                 key={m.id}
                 message={m}
                 tokens={tokens}
-                onSend={sendMessage}
                 onDraft={setInput}
+                onSubmitCard={stableSubmitCard}
                 isStreaming={isStreaming}
               />
             ))}
@@ -367,8 +532,8 @@ export function ChatPanel({
                 text={streamingText}
                 toolCalls={streamingToolCalls}
                 tokens={tokens}
-                onSend={sendMessage}
                 onDraft={setInput}
+                onSubmitCard={stableSubmitCard}
               />
             )}
 
@@ -407,6 +572,16 @@ export function ChatPanel({
         )}
       </div>
 
+      {/* ───── Pinned active-step card (driven by readiness) ───── */}
+      <ActiveStepCard
+        projectId={projectId}
+        readiness={readiness}
+        disabled={isStreaming}
+        onSubmit={stableSubmitCard}
+        onDismiss={handleCardDismiss}
+        tokens={tokens}
+      />
+
       {/* ───── Composer ───── */}
       <div className="px-4 pb-4 pt-2 md:px-6">
         <div className="mx-auto w-full max-w-2xl">
@@ -431,6 +606,74 @@ export function ChatPanel({
 // ─────────────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * ActiveStepCard — the pinned slot that renders the card for the CURRENT
+ * journey step, driven by the deterministic readiness snapshot. It maps
+ * `readiness.step.id` (a StepId) onto a registered W3 card via `getCardForStep`
+ * and renders it with the canonical BuilderState (`value`), wiring its
+ * `onSubmit` to chat-panel's `submitCard(cardKey, payload)` (which owns POST +
+ * SSE). Renders nothing when the step has no card (free-text steps like
+ * `project_identity`/`objective`, or legacy steps still served inline by
+ * ToolCallCard: tools/channel/agent_approval).
+ *
+ * The card payload is typed per-card; the registry stores components as
+ * `CardComponentProps<unknown>`, so the bound `onSubmit` accepts the card's
+ * payload as `unknown` and forwards it untouched (the backend re-validates).
+ */
+function ActiveStepCard({
+  projectId,
+  readiness,
+  disabled,
+  onSubmit,
+  onDismiss,
+  tokens,
+}: {
+  projectId: string
+  readiness: Readiness | undefined
+  disabled: boolean
+  onSubmit: (cardKey: CardKey, payload: Record<string, unknown>) => void
+  /** Skip affordance ("Agora não"/"Ajustar") — forwarded to every card so the
+   *  dismiss button actually renders. Routes to a lightweight chat turn. */
+  onDismiss: () => void
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+}) {
+  const stepId = readiness?.step.id as StepId | undefined
+  const descriptor = stepId ? getCardForStep(stepId) : undefined
+
+  // Bind this card's onSubmit to its cardKey so the card can stay payload-only.
+  const handleSubmit = React.useCallback(
+    (payload: unknown) => {
+      if (!descriptor) return
+      onSubmit(
+        descriptor.cardKey,
+        (payload ?? {}) as Record<string, unknown>,
+      )
+    },
+    [descriptor, onSubmit],
+  )
+
+  if (!descriptor) return null
+
+  const CardComponent = descriptor.component
+  const value = resolveBuilderState(readiness)
+
+  return (
+    <div className="px-4 pb-1 pt-2 md:px-6">
+      <div className="mx-auto w-full max-w-2xl">
+        <CardComponent
+          projectId={projectId}
+          cardKey={descriptor.cardKey}
+          value={value}
+          disabled={disabled}
+          onSubmit={handleSubmit}
+          onDismiss={onDismiss}
+          tokens={tokens}
+        />
+      </div>
+    </div>
+  )
+}
 
 function EmptyState({
   tokens,
@@ -468,14 +711,18 @@ function EmptyState({
 function MessageBubble({
   message,
   tokens,
-  onSend,
   onDraft,
+  onSubmitCard,
   isStreaming = false,
 }: {
   message: ChatMessage
   tokens: ReturnType<typeof useAppTokens>["tokens"]
-  onSend: (content: string) => void
+  /** Pre-fill the composer (the "Ajustar" free-form draft path). */
   onDraft: (content: string) => void
+  /** Card-action protocol submit — legacy inline cards (agent_approval /
+   *  tool_selection / channel) flip their deterministic sentinel through this
+   *  instead of posting free text. */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** Global chat streaming state — disables interactive cards mid-send. */
   isStreaming?: boolean
 }) {
@@ -545,8 +792,8 @@ function MessageBubble({
             result={tc.result}
             tokens={tokens}
             isStreaming={isStreaming}
-            onSend={onSend}
             onDraft={onDraft}
+            onSubmitCard={onSubmitCard}
           />
         ))}
       </div>
@@ -558,14 +805,16 @@ function StreamingBubble({
   text,
   toolCalls,
   tokens,
-  onSend,
   onDraft,
+  onSubmitCard,
 }: {
   text: string
   toolCalls: ToolCallView[]
   tokens: ReturnType<typeof useAppTokens>["tokens"]
-  onSend: (content: string) => void
+  /** Pre-fill the composer (the "Ajustar" free-form draft path). */
   onDraft: (content: string) => void
+  /** Card-action protocol submit — see MessageBubble. */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -601,8 +850,8 @@ function StreamingBubble({
             tokens={tokens}
             streaming={tc.result === undefined}
             isStreaming
-            onSend={onSend}
             onDraft={onDraft}
+            onSubmitCard={onSubmitCard}
           />
         ))}
       </div>
@@ -748,12 +997,13 @@ function toolHelpText(key: string): string {
 function ToolSelectionCard({
   selection,
   tokens,
-  onSend,
+  onSubmitCard,
   disabled = false,
 }: {
   selection: NonNullable<ReturnType<typeof getToolSelection>>
   tokens: ReturnType<typeof useAppTokens>["tokens"]
-  onSend: (content: string) => void
+  /** Card-action protocol submit — flips the `tool_selection` sentinel. */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** True while the assistant is streaming — blocks re-submitting the card. */
   disabled?: boolean
 }) {
@@ -774,26 +1024,24 @@ function ToolSelectionCard({
     )
   }, [])
 
+  // Submit the typed payload via the card-action protocol (no free-text build).
+  // `capabilityKeys` = curated catalog ids the user picked (tool.key);
+  // `toolKeys` = the underlying BUILTIN_TOOL_NAMES, flattened + deduped. Both are
+  // RE-VALIDATED server-side. An empty selection is a valid deterministic
+  // "no extra tools" apply.
   const applySelection = React.useCallback(() => {
-    const labels = selection.tools
-      .filter((tool) => selected.includes(tool.key))
-      .map((tool) => `${tool.title} (${tool.toolKeys.join(" + ")})`)
-
+    const picked = selection.tools.filter((tool) => selected.includes(tool.key))
+    const capabilityKeys = picked.map((tool) => tool.key)
     const toolKeys = Array.from(
-      new Set(
-        selection.tools
-          .filter((tool) => selected.includes(tool.key))
-          .flatMap((tool) => tool.toolKeys),
-      ),
+      new Set(picked.flatMap((tool) => tool.toolKeys)),
     )
 
-    const message =
-      selected.length > 0
-        ? `Aplicar estas capacidades ao agente: ${labels.join(", ")}. Ferramentas técnicas: ${toolKeys.join(", ")}.`
-        : "Não quero ativar ferramentas extras agora."
-
-    onSend(message)
-  }, [onSend, selected, selection.tools])
+    onSubmitCard("tool_selection", {
+      action: "apply",
+      capabilityKeys,
+      toolKeys,
+    })
+  }, [onSubmitCard, selected, selection.tools])
 
   return (
     <div
@@ -912,7 +1160,15 @@ function ToolSelectionCard({
           size="sm"
           variant="outline"
           className="h-8 text-[12px]"
-          onClick={() => onSend("Não quero ativar ferramentas extras agora.")}
+          // "No extra tools" is a deterministic empty apply (flips the same
+          // sentinel) — not a free-text turn.
+          onClick={() =>
+            onSubmitCard("tool_selection", {
+              action: "apply",
+              capabilityKeys: [],
+              toolKeys: [],
+            })
+          }
           disabled={disabled}
         >
           Sem ferramentas agora
@@ -969,12 +1225,15 @@ function ChannelIcon({ channel }: { channel: string }) {
 function ChannelSelectionCard({
   selection,
   tokens,
-  onSend,
+  onSubmitCard,
   disabled = false,
 }: {
   selection: NonNullable<ReturnType<typeof getChannelSelection>>
   tokens: ReturnType<typeof useAppTokens>["tokens"]
-  onSend: (content: string) => void
+  /** Card-action protocol submit — flips the `channel` sentinel. The server
+   *  re-validates `channelKey` against the channel catalog (cloudapi | uazapi |
+   *  instagram). */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** True while streaming — prevents queuing conflicting channel choices. */
   disabled?: boolean
 }) {
@@ -1018,9 +1277,10 @@ function ChannelSelectionCard({
               borderColor: tokens.divider,
             }}
             onClick={() =>
-              void onSend(
-                `Quero publicar no canal: ${channel.title} (${channel.key}).`,
-              )
+              onSubmitCard("channel", {
+                action: "select",
+                channelKey: channel.key,
+              })
             }
           >
             <div className="flex items-start gap-3">
@@ -1182,8 +1442,8 @@ function ToolCallCard({
   tokens,
   streaming = false,
   isStreaming = false,
-  onSend,
   onDraft,
+  onSubmitCard,
 }: {
   toolName: string
   args: unknown
@@ -1193,8 +1453,13 @@ function ToolCallCard({
   streaming?: boolean
   /** The chat as a whole is streaming — disables interactive card actions. */
   isStreaming?: boolean
-  onSend: (content: string) => void
+  /** Pre-fill the composer (the "Ajustar" free-form draft path). */
   onDraft: (content: string) => void
+  /** Card-action protocol submit — the 3 legacy inline cards
+   *  (agent_approval / tool_selection / channel) post their typed payload here
+   *  so the deterministic confirmation sentinel flips (instead of posting free
+   *  text, which never advanced the journey). */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
 }) {
   if (toolName === "propose_agent_creation" && !streaming) {
     const proposal = getAgentProposal(args, result)
@@ -1321,7 +1586,12 @@ function ToolCallCard({
             type="button"
             size="sm"
             className="h-8 gap-1.5 text-[12px]"
-            onClick={() => void onSend("Pode criar, tá bom assim.")}
+            // Card-action protocol: flips the `agent_approval` sentinel so the
+            // meta-agent may proceed with create_agent. (Was: free-text onSend,
+            // which never advanced the deterministic journey.)
+            onClick={() =>
+              onSubmitCard("agent_approval", { action: "confirm" })
+            }
             disabled={isStreaming}
           >
             <Check className="h-3.5 w-3.5" />
@@ -1332,6 +1602,7 @@ function ToolCallCard({
             size="sm"
             variant="outline"
             className="h-8 gap-1.5 text-[12px]"
+            // Free-form draft path kept as-is: the user tweaks before confirming.
             onClick={() => onDraft("Quero ajustar antes: ")}
             disabled={isStreaming}
           >
@@ -1350,7 +1621,7 @@ function ToolCallCard({
         <ToolSelectionCard
           selection={selection}
           tokens={tokens}
-          onSend={onSend}
+          onSubmitCard={onSubmitCard}
           disabled={isStreaming}
         />
       )
@@ -1364,7 +1635,7 @@ function ToolCallCard({
         <ChannelSelectionCard
           selection={selection}
           tokens={tokens}
-          onSend={onSend}
+          onSubmitCard={onSubmitCard}
           disabled={isStreaming}
         />
       )

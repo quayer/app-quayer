@@ -12,8 +12,28 @@ import {
   type StreamAgentResponseParams,
 } from './handlers/stream-agent-response'
 import { persistErrorMessage } from './handlers/persist-message'
+import type { Readiness } from '../state/readiness.types'
 
-export function buildSseResponse(params: StreamAgentResponseParams): Response {
+/**
+ * Input accepted by {@link buildSseResponse}. It is the canonical
+ * `StreamAgentResponseParams` plus the two Orayon-uplift turn inputs that
+ * the SSE layer threads straight through to `streamAgentResponse`:
+ *
+ *   - `readiness`       — deterministic step-engine snapshot for the journey
+ *                         banner (undefined on legacy convos / engine off).
+ *   - `cardInstruction` — pt-BR system note seeding a card-ACK turn.
+ *
+ * Declared here as an intersection so the SSE entry point stays type-safe and
+ * self-documenting regardless of the merge ordering of stream-agent-response.ts
+ * (the owner of `StreamAgentResponseParams`). Both fields are pure pass-through:
+ * this file applies no logic to them — it only forwards `params` unchanged.
+ */
+export type BuildSseResponseParams = StreamAgentResponseParams & {
+  readiness?: Readiness
+  cardInstruction?: string
+}
+
+export function buildSseResponse(params: BuildSseResponseParams): Response {
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

@@ -1771,6 +1771,7 @@ model BuilderProjectConversation {
   organizationId String
   userId         String
   stateSummary   String?   @db.Text // auto-generated summary of project state (saves tokens in LLM ctx)
+  builderState   Json? // card-owned fields + *_confirmed sentinels; null = DEFAULT_BUILDER_STATE (lazy backfill)
   lastMessageAt  DateTime?
   createdAt      DateTime  @default(now())
 

@@ -24,6 +24,8 @@ import { compactIfNeeded } from './compact-if-needed'
 import { persistAssistantMessage, persistErrorMessage } from './persist-message'
 import { logToolCallComplete } from './log-tool-call'
 import { credentialResolver } from '@/lib/providers/credential-resolver.service'
+import { buildJourneyBanner } from './build-journey-banner'
+import type { Readiness } from '../../state/readiness.types'
 import type { Prisma } from '@prisma/client'
 
 /**
@@ -72,6 +74,20 @@ export interface StreamAgentResponseParams {
   userMessage: string
   /** Optional pre-existing project state summary to include as banner. */
   stateSummary?: string | null
+  /**
+   * Deterministic step-engine snapshot (Orayon uplift). When provided, the
+   * journey banner (`buildJourneyBanner`) drives the per-turn `# PRÓXIMO PASSO`
+   * / `# PRONTIDÃO` / `# CAMPOS` sections. When `undefined`, the banner degrades
+   * to a minimal `# ESTADO ATUAL` block — fully non-breaking for legacy turns.
+   */
+  readiness?: Readiness
+  /**
+   * System note injected by a card action instead of a free-typed user message.
+   * When set, the augmented content carries `# System note (card action)` with
+   * this text rather than echoing a `# New user message`. Used by the
+   * card-submit ACK turn (card-submit.routes.ts).
+   */
+  cardInstruction?: string
   /** How many recent history rows to pull as conversation context. */
   historyLimit?: number
 }
@@ -99,6 +115,8 @@ async function buildAugmentedMessageContent(params: {
   conversationId: string
   userMessage: string
   stateSummary?: string | null
+  readiness?: Readiness
+  cardInstruction?: string
   historyLimit: number
 }): Promise<
   | { ok: true; augmented: string }
@@ -126,11 +144,23 @@ async function buildAugmentedMessageContent(params: {
     .map((m) => `[${m.role}] ${m.content}`)
     .join('\n')
 
-  const stateBanner = params.stateSummary
-    ? `# Current Project State\n${params.stateSummary}\n\n`
-    : ''
+  // Journey banner (Orayon uplift): single source of truth for the per-turn
+  // `# PRÓXIMO PASSO` / `# PRONTIDÃO` / `# CAMPOS` / `# ESTADO ATUAL` sections.
+  // When `readiness` is undefined it degrades to a minimal `# ESTADO ATUAL`
+  // block, so this replaces (not stacks with) the old plain state banner.
+  const stateBanner = buildJourneyBanner(
+    params.readiness,
+    params.stateSummary ?? undefined,
+  )
 
-  const augmented = `${stateBanner}# Conversation so far\n${historyBlock}\n\n# New user message\n${params.userMessage}`
+  // Trailing block: a card action injects a system note instead of echoing a
+  // free-typed user message; otherwise we surface the new user message.
+  const instruction = params.cardInstruction?.trim()
+  const tailBlock = instruction
+    ? `# System note (card action)\n${instruction}`
+    : `# New user message\n${params.userMessage}`
+
+  const augmented = `${stateBanner}\n\n# Conversation so far\n${historyBlock}\n\n${tailBlock}`
 
   return { ok: true, augmented }
 }
@@ -148,6 +178,8 @@ export async function* streamAgentResponse(
     conversationId: params.conversationId,
     userMessage: params.userMessage,
     stateSummary: params.stateSummary,
+    readiness: params.readiness,
+    cardInstruction: params.cardInstruction,
     historyLimit,
   })
 

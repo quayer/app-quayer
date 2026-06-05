@@ -1,9 +1,19 @@
 # Mapa Completo do Sistema de Autenticação — Quayer
 
-> Atualizado em 2026-03-14 | Cobertura: Frontend, Backend, Database, APIs, Jornadas
+> Atualizado em 2026-06-05 | Cobertura: Frontend, Backend, Database, APIs, Jornadas
 >
 > **Versão atualizada 10/Mai/2026:** admin surface removida — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
 > `UserRole.ADMIN` permanece no schema/JWT apenas para controle cross-org no Builder (sem UI dedicada). Todos os usuários — incluindo admins — caem em `/` (home Builder) após login.
+>
+> **Orayon Uplift (W2, Jun/2026):** o `builderController` ganhou novas surfaces autenticadas (`authOrApiKeyProcedure({ required: true })`, escopo por `organizationId`):
+> - `POST /api/v1/builder/projects/:id/cards/:cardKey/submit` — card-action protocol (aplica `builderState` determinístico + ACK via SSE).
+> - `GET /api/v1/builder/projects/:id/readiness` — step-engine determinístico (`nextPendingStep` + blockers de deploy).
+>
+> **Orayon Uplift (W4 source-ingestion, Jun/2026):** surface "cole seu site/IG" no mesmo `builderController` (mesma guard `authOrApiKeyProcedure({ required: true })`, toda query filtrada por `organizationId`):
+> - `POST /api/v1/builder/projects/:id/sources/ingest` — cria 1 `KnowledgeSource` (status=pending) por ref colada, semeia `builderState.sourceIngestion.sources` e ENFILEIRA o job async `quayer:source-enrich` (extract→chunk→embed→pgvector + síntese que escreve só `proposed`). Enriquecimento nunca roda inline no turno SSE.
+> - `GET /api/v1/builder/projects/:id/sources/status` — poll: cada `KnowledgeSource` da collection do projeto + `builderState.sourceIngestion.proposed` (valores PROPOSTOS aguardando "Aceitar").
+> O worker `quayer:source-enrich` roda no entrypoint dedicado de workers (não no runtime Next); fallback síncrono de dev atrás de `SOURCE_ENRICH_SYNC=1`.
+> Estas rotas seguem as mesmas guards de auth do chat do Builder; não alteram o fluxo de login.
 
 ---
 

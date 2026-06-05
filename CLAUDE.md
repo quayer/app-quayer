@@ -124,8 +124,11 @@ src/
 │   │   └── logs/            → controllers: logs + logs-sse (8 actions)
 │   ├── ai-module/
 │   │   ├── ai-agents/       → runtime dos agentes WhatsApp (sem controller registrado)
-│   │   ├── builder/         → ⭐ DESIGN-TIME: 23 actions (projects 17 + chat 3 + deploy 3)
-│   │   │   ├── chat/        → conversação com meta-agente
+│   │   ├── builder/         → ⭐ DESIGN-TIME: projects + chat + cards + deploy (+ channel/identity/calendar/knowledge/pricing/credential)
+│   │   │   ├── chat/        → conversação com meta-agente (+ getReadiness: GET /builder/projects/:id/readiness)
+│   │   │   ├── cards/       → card-action protocol (Orayon Uplift): POST /builder/projects/:id/cards/:cardKey/submit + builder-state
+│   │   │   ├── sources/     → ingestão "cole seu site/IG" (Orayon Uplift W4): POST .../sources/ingest + GET .../sources/status + source-enrich job
+│   │   │   ├── state/       → step-engine determinístico (nextPendingStep + getReadiness resolver)
 │   │   │   ├── projects/    → CRUD de BuilderProject
 │   │   │   ├── deploy/      → saga de publicação cross-module
 │   │   │   ├── sub-agents/  → deploy-runner, niche-researcher, prompt-writer, validator

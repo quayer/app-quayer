@@ -111,7 +111,7 @@ export function publishAgentTool(ctx: BuilderToolExecutionContext) {
                 'No BYOK AI provider configured. Add your own API key (OpenAI, Anthropic, etc.) to publish.',
               cta: 'Configure a provider',
             })
-            redirects.byok = '/configuracoes/provedores'
+            redirects.byok = '/integracoes'
           }
 
           if (blockers.length > 0) {
