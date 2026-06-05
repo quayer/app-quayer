@@ -100,7 +100,6 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
           }> = []
 
           let totalTokens = 0
-          let totalLatencyMs = 0
 
           // QH-08: use the real runtime path (same tools, BYOK, model routing)
           for (const scenario of input.scenarios) {
@@ -110,7 +109,6 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
               messages: [{ role: 'user', content: scenario.userMessage }],
             })
             totalTokens += result.usage.totalTokens
-            totalLatencyMs += result.latencyMs
             examples.push({
               label: scenario.label,
               userMessage: scenario.userMessage,

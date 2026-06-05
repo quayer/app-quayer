@@ -17,7 +17,8 @@ export interface AgentRuntimeSettings {
   }
   tts: {
     enabled: boolean
-    provider: 'elevenlabs'
+    /** QH-09: widened to include deepgram; defaults to 'elevenlabs'. */
+    provider: 'elevenlabs' | 'deepgram'
     voiceId: string
     model: string
     speechRate: number
@@ -135,7 +136,7 @@ export function normalizeAgentRuntimeSettings(
     },
     tts: {
       enabled: asBoolean(tts.enabled, defaults.tts.enabled),
-      provider: 'elevenlabs',
+      provider: defaults.tts.provider,
       voiceId: asString(tts.voiceId, defaults.tts.voiceId),
       model: asString(tts.model, defaults.tts.model),
       speechRate: asNumber(tts.speechRate, defaults.tts.speechRate, 0.7, 1.3),
@@ -147,6 +148,10 @@ export function normalizeAgentRuntimeSettings(
       typeof agentTts.enableTTS === 'boolean'
         ? agentTts.enableTTS
         : normalized.tts.enabled
+    // QH-09: pass through provider from DB field (supports 'deepgram' | 'elevenlabs')
+    if (agentTts.ttsProvider === 'deepgram' || agentTts.ttsProvider === 'elevenlabs') {
+      normalized.tts.provider = agentTts.ttsProvider
+    }
     normalized.tts.voiceId = asString(agentTts.ttsVoiceId, normalized.tts.voiceId)
     normalized.tts.model = asString(agentTts.ttsModel, normalized.tts.model)
     normalized.tts.speechRate = asNumber(

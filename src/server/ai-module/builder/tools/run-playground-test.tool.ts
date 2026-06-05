@@ -4,8 +4,12 @@
  * Read-only but NOT concurrent-safe (uses LLM calls). Runs scenario-based
  * tests against an agent's system prompt using the Vercel AI SDK.
  *
+ * QH-08: Agent response step now uses `runFaithfulPreview` (the real runtime's
+ * playground path — same tools, BYOK, model routing) instead of bare
+ * `generateText`. The judge LLM step is unchanged.
+ *
  * For each scenario:
- *   1. Calls `generateText()` with the agent's system prompt + user message.
+ *   1. Calls `runFaithfulPreview()` with the scenario user message.
  *   2. Calls a secondary LLM to judge if the response matches expected behavior.
  *
  * Returns per-scenario results with pass/fail, an overall score, suggestions,
@@ -18,41 +22,7 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Dynamically resolve a Vercel AI SDK provider/model from the agent's config.
- * Falls back to a lightweight model for cost efficiency in playground tests.
- */
-async function resolveModel(provider: string, model: string) {
-  switch (provider) {
-    case 'openai': {
-      const { openai } = await import('@ai-sdk/openai')
-      return openai(model)
-    }
-    case 'anthropic': {
-      const { anthropic } = await import('@ai-sdk/anthropic')
-      return anthropic(model)
-    }
-    case 'openrouter': {
-      // OpenRouter uses OpenAI-compatible API
-      const { createOpenAI } = await import('@ai-sdk/openai')
-      const openrouter = createOpenAI({
-        apiKey: process.env.OPENROUTER_API_KEY,
-        baseURL: 'https://openrouter.ai/api/v1',
-      })
-      return openrouter(model)
-    }
-    default: {
-      // Fallback to openai for unknown providers
-      const { openai } = await import('@ai-sdk/openai')
-      return openai('gpt-4o-mini')
-    }
-  }
-}
+import { runFaithfulPreview } from '@/server/ai-module/builder/services/faithful-preview.service'
 
 /**
  * Get a lightweight judge model for evaluation.
@@ -109,19 +79,13 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
         const startTime = Date.now()
 
         try {
-          // 1. Load agent config (scoped to org)
+          // 1. Load agent config (scoped to org) — only for existence check
           const agent = await database.aIAgentConfig.findFirst({
             where: {
               id: input.agentId,
               organizationId: ctx.organizationId,
             },
-            select: {
-              id: true,
-              systemPrompt: true,
-              provider: true,
-              model: true,
-              temperature: true,
-            },
+            select: { id: true },
           })
 
           if (!agent) {
@@ -131,15 +95,23 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          if (!agent.systemPrompt) {
+          // QH-08: resolve projectId from agentId (1:1 BuilderProject.aiAgentId)
+          const project = await database.builderProject.findFirst({
+            where: {
+              aiAgentId: input.agentId,
+              organizationId: ctx.organizationId,
+            },
+            select: { id: true },
+          })
+
+          if (!project) {
             return {
               success: false,
               message:
-                'Agent has no system prompt configured. Create or update the prompt first.',
+                'Agent has no linked Builder project yet. Publish the agent first so the faithful preview can use the real runtime.',
             }
           }
 
-          const agentModel = await resolveModel(agent.provider, agent.model)
           const judgeModel = await getJudgeModel()
 
           // 2. Run each scenario
@@ -147,19 +119,16 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
           const results: ScenarioResult[] = []
 
           for (const scenario of input.scenarios) {
-            // 2a. Generate agent response
-            const agentResult = await generateText({
-              model: agentModel,
-              system: agent.systemPrompt,
-              prompt: scenario.userMessage,
-              temperature: agent.temperature,
-              maxOutputTokens: 1024,
+            // 2a. QH-08: Generate agent response via the real runtime playground path
+            //     (same tools, BYOK, model routing, cooldown fallback — no side-effects)
+            const previewResult = await runFaithfulPreview({
+              projectId: project.id,
+              organizationId: ctx.organizationId,
+              messages: [{ role: 'user', content: scenario.userMessage }],
             })
 
-            const agentResponse = agentResult.text
-            totalTokens +=
-              (agentResult.usage?.inputTokens ?? 0) +
-              (agentResult.usage?.outputTokens ?? 0)
+            const agentResponse = previewResult.reply
+            totalTokens += previewResult.usage.totalTokens
 
             // 2b. Judge the response
             const judgePrompt = `You are a strict QA evaluator. Analyze whether an AI agent's response meets the expected behavior.

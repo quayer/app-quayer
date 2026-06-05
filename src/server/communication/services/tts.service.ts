@@ -1,19 +1,22 @@
+/**
+ * QH-09: synthesizeTtsToMediaUrl delegates audio synthesis to the low-level
+ * `synthesizeSpeech` primitive (ai-agents/outbound/tts.service.ts), which
+ * supports both ElevenLabs and Deepgram. The storage upload + signed-URL step
+ * lives here so outbound.service.ts only ever receives a URL (not raw bytes).
+ */
 import { createHash } from 'node:crypto'
 import { BUCKETS, storage } from '@/server/services/storage'
 import { credentialResolver } from '@/lib/providers/credential-resolver.service'
+import { type AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
 import {
-  DEFAULT_ELEVENLABS_MODEL,
-  DEFAULT_ELEVENLABS_VOICE_ID,
-  type AgentRuntimeSettings,
-} from '@/lib/agent-runtime-settings'
+  synthesizeSpeech,
+} from '@/server/ai-module/ai-agents/outbound/tts.service'
 
 export interface TtsToMediaUrlInput {
   organizationId: string
   text: string
   settings: AgentRuntimeSettings['tts']
 }
-
-const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1'
 
 function buildAudioPath(organizationId: string, text: string): string {
   const hash = createHash('sha256')
@@ -23,38 +26,6 @@ function buildAudioPath(organizationId: string, text: string): string {
   return `tts/${organizationId}/${hash}.mp3`
 }
 
-async function synthesizeElevenLabsAudio(input: {
-  apiKey: string
-  text: string
-  voiceId?: string
-  model?: string
-}): Promise<Buffer> {
-  const voiceId = input.voiceId || DEFAULT_ELEVENLABS_VOICE_ID
-  const modelId = input.model || DEFAULT_ELEVENLABS_MODEL
-  const response = await fetch(
-    `${ELEVENLABS_BASE_URL}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    {
-      method: 'POST',
-      headers: {
-        Accept: 'audio/mpeg',
-        'Content-Type': 'application/json',
-        'xi-api-key': input.apiKey,
-      },
-      body: JSON.stringify({
-        text: input.text,
-        model_id: modelId,
-      }),
-    },
-  )
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new Error(`ElevenLabs TTS failed: HTTP ${response.status}${body ? ` - ${body}` : ''}`)
-  }
-
-  return Buffer.from(await response.arrayBuffer())
-}
-
 export async function synthesizeTtsToMediaUrl(
   input: TtsToMediaUrlInput,
 ): Promise<string | null> {
@@ -62,7 +33,8 @@ export async function synthesizeTtsToMediaUrl(
     return null
   }
 
-  if (input.settings.provider !== 'elevenlabs') {
+  const provider = input.settings.provider
+  if (provider !== 'elevenlabs' && provider !== 'deepgram') {
     return null
   }
 
@@ -71,25 +43,32 @@ export async function synthesizeTtsToMediaUrl(
     return null
   }
 
-  const credentials = await credentialResolver.resolve('apiKey', 'elevenlabs', {
+  // BYOK: resolve via credentialResolver (same pattern as STT inbound)
+  const credentials = await credentialResolver.resolve('apiKey', provider, {
     organizationId: input.organizationId,
   })
-  const apiKey = credentials?.credentials.apiKey ?? process.env.ELEVENLABS_API_KEY
+  const apiKey = credentials?.credentials.apiKey
   if (!apiKey) {
-    console.warn('[tts] ElevenLabs key unavailable; falling back to text')
+    console.warn(`[tts] ${provider} key unavailable; falling back to text`)
     return null
   }
 
-  const audio = await synthesizeElevenLabsAudio({
-    apiKey,
+  const result = await synthesizeSpeech({
     text: input.text,
+    provider,
+    apiKey,
     voiceId: input.settings.voiceId,
     model: input.settings.model,
   })
 
+  if ('skipped' in result) {
+    console.warn(`[tts] synthesis skipped (${result.reason}); falling back to text`)
+    return null
+  }
+
   const path = buildAudioPath(input.organizationId, input.text)
-  await storage.upload(BUCKETS.MEDIA, path, audio, {
-    contentType: 'audio/mpeg',
+  await storage.upload(BUCKETS.MEDIA, path, result.audio, {
+    contentType: result.mimeType,
     upsert: true,
   })
 
