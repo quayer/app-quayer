@@ -39,6 +39,7 @@ import { synthesizeTtsToMediaUrl } from './tts.service'
 import { checkOutboundRateLimit } from './outbound-rate-limit'
 import { sendWithRetry } from './outbound-deadletter'
 import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
+import { checkRateLimit } from '@/server/ai-module/ai-agents/infra/rate-limit.service'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -218,6 +219,20 @@ export async function sendAgentResponse(
   if (!rl.allowed) {
     const msg = `rate_limited scope=${rl.scope} current=${rl.current} limit=${rl.limit} org=${req.organizationId}`
     console.warn(`[outbound] ${msg}`)
+    errors.push(msg)
+    return { blocksSent: 0, persisted: false, errors, rateLimited: true }
+  }
+
+  // QH-02: Rate limit por instância (60 msgs/min por connectionId) — token bucket
+  // Redis Lua. Fail-open: Redis down → allowed=true, retryAfterMs=0.
+  // Quando excedido, o turno é barrado com rateLimited=true (mesma semântica do
+  // checkOutboundRateLimit acima). O caller (webhook route) já trata rateLimited
+  // como não-erro de infra — o lead é preservado no histórico via Message INBOUND
+  // já persistida antes do envio.
+  const instanceRl = await checkRateLimit({ scope: 'instance', key: req.connectionId })
+  if (!instanceRl.allowed) {
+    const msg = `rate_limited scope=instance key=${req.connectionId} retryAfterMs=${instanceRl.retryAfterMs}`
+    console.warn(`[outbound] QH-02: ${msg}`)
     errors.push(msg)
     return { blocksSent: 0, persisted: false, errors, rateLimited: true }
   }

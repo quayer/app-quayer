@@ -31,6 +31,10 @@ export interface RuntimeDecisionMeta {
   ragChunksRetrieved: number
   skillsActivated: string[]
   enabledTools: string[]
+  /** QH-05: tier escolhido pelo model router ('mini' | 'full' | null). */
+  modelTier?: 'mini' | 'full' | null
+  /** QH-05: razão human-readable do model router. */
+  modelRouterReason?: string | null
 }
 
 /** Meta default (usado em caminhos que falham antes de popular o meta). */

@@ -64,6 +64,20 @@ import {
   applyWindow,
   estimateTokens as estimateMessageTokens,
 } from './services/memory-window.service'
+import {
+  checkSessionCostCap,
+  incrementSessionCost,
+} from './infra/hard-caps.service'
+// ── QH-04: Contact lock ───────────────────────────────────────────────────────
+import {
+  acquireContactLock,
+  releaseContactLock,
+} from './infra/contact-lock.service'
+// ── QH-05: Model router ───────────────────────────────────────────────────────
+import {
+  modelForTurn,
+  parseMiniModelEnv,
+} from './services/model-router.service'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -287,6 +301,10 @@ type PreparedAgentCall = {
   apiKey?: string
   /** Decisões coletadas no setup (RAG/skills/memória) p/ observabilidade. */
   decisionMeta: RuntimeDecisionMeta
+  /** QH-05: provider resolvido pelo model router (pode ser mini). */
+  routedProvider: string
+  /** QH-05: modelo resolvido pelo model router (pode ser mini). */
+  routedModel: string
 }
 
 /**
@@ -543,7 +561,31 @@ async function prepareAgentCall(
       console.warn('[AgentRuntime] BYOK resolve failed, falling back to env:', err)
     }
   }
-  const model = getModel(agentConfig.provider, agentConfig.model, resolvedApiKey)
+  // ── QH-05: Model router — decide full vs mini antes de instanciar o modelo ──
+  // Busca o último AgentRuntimeDecision da sessão p/ obter previousTools.
+  // Query barata (idx sessionId+createdAt). Fail-safe: qualquer erro → full model.
+  let routedProvider = agentConfig.provider
+  let routedModel = agentConfig.model
+  try {
+    const lastDecision = await database.agentRuntimeDecision.findFirst({
+      where: { sessionId: params.sessionId },
+      orderBy: { createdAt: 'desc' },
+      select: { toolsCalled: true },
+    })
+    const routerResult = modelForTurn({
+      previousTools: lastDecision?.toolsCalled as string[] | undefined,
+      fullModel: { provider: agentConfig.provider, model: agentConfig.model },
+      miniModel: parseMiniModelEnv(process.env.AGENT_MINI_MODEL),
+    })
+    routedProvider = routerResult.provider
+    routedModel = routerResult.model
+    decisionMeta.modelTier = routerResult.tier
+    decisionMeta.modelRouterReason = routerResult.reason
+  } catch (err) {
+    console.warn('[AgentRuntime] modelForTurn failed (using full model):', err)
+  }
+
+  const model = getModel(routedProvider, routedModel, resolvedApiKey)
 
   // ── US-036: Token budget tracker ──────────────────────────────────────
   const systemTokens = estimateTokens(systemPrompt)
@@ -572,6 +614,39 @@ async function prepareAgentCall(
       'Desculpe, estou com dificuldades no momento. Um atendente vai te ajudar em breve.'
   }
 
+  // ── QH-03: Hard cap de custo por sessão — gate antes da chamada LLM ───
+  // Lê totalAiCost da sessão como fallback; Redis é o fast-path O(1).
+  // Fail-open: se checkSessionCostCap falhar, o agente continua normalmente.
+  try {
+    const session = await database.chatSession.findUnique({
+      where: { id: params.sessionId },
+      select: { totalAiCost: true },
+    })
+    const capCheck = await checkSessionCostCap({
+      sessionId: params.sessionId,
+      organizationId: params.organizationId,
+      currentCostUsd: session?.totalAiCost ?? 0,
+    })
+    if (capCheck.exceeded) {
+      // Bloqueia sessão de forma durável (fire-and-forget) e lança p/ o caller.
+      void database.chatSession.update({
+        where: { id: params.sessionId },
+        data: {
+          aiBlockedUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 dias
+          aiBlockReason: capCheck.reason,
+          aiEnabled: false,
+        },
+      }).catch((err: unknown) =>
+        console.warn('[AgentRuntime] capBlock update failed:', err),
+      )
+      throw new Error(capCheck.reason ?? 'Session cost cap exceeded')
+    }
+  } catch (err) {
+    // Re-lança erros de cap excedido; engole falhas inesperadas (fail-open).
+    if (err instanceof Error && err.message.includes('cost cap')) throw err
+    console.warn('[AgentRuntime] checkSessionCostCap failed (fail-open):', err)
+  }
+
   return {
     agentConfig,
     promptVersion,
@@ -583,6 +658,8 @@ async function prepareAgentCall(
     // Resolved BYOK key (or undefined) so fallback model swaps reuse it.
     apiKey: resolvedApiKey,
     decisionMeta,
+    routedProvider,
+    routedModel,
   }
 }
 
@@ -657,6 +734,31 @@ function updateRuntimeMetrics(
 export async function processAgentMessage(
   params: ProcessAgentMessageParams
 ): Promise<AgentRuntimeResponse> {
+  // ── QH-04: Contact lock — serializa turnos do mesmo contato ──────────────
+  // Adquire antes de prepareAgentCall para cobrir todo o turno (incluindo I/O).
+  // fail-open: se Redis indisponível, acquired=true e segue sem serialização.
+  const lockResult = await acquireContactLock({
+    organizationId: params.organizationId,
+    contactPhone: params.contactId, // contactId IS the phone (see callers)
+    ttlMs: 90_000,
+  })
+  if (!lockResult.acquired) {
+    console.log(
+      `[AgentRuntime] QH-04: lock não adquirido para contactId=${params.contactId} — descartando turno`,
+    )
+    // Return an empty response — caller (webhook) treats this as a no-op.
+    return {
+      text: '',
+      toolCalls: [],
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      cost: { inputCost: 0, outputCost: 0, totalCost: 0 },
+      latencyMs: 0,
+      model: '',
+      provider: '',
+    }
+  }
+
+  try {
   const {
     agentConfig,
     promptVersion,
@@ -667,6 +769,8 @@ export async function processAgentMessage(
     startTime,
     apiKey: resolvedApiKey,
     decisionMeta,
+    routedModel,
+    routedProvider,
   } = await prepareAgentCall(params)
 
   // agentConfig is guaranteed non-null here (prepareAgentCall throws otherwise)
@@ -680,15 +784,18 @@ export async function processAgentMessage(
   const cooldownUntil = PROVIDER_COOLDOWNS.get(providerKey) ?? 0
   const isInCooldown = Date.now() < cooldownUntil
 
-  // Choose which model to use (skip primary if in cooldown and fallback exists)
+  // Choose which model to use (skip primary if in cooldown and fallback exists).
+  // QH-05: start from the router-resolved model (may be mini), not agentConfig.model.
   let activeModel = model
-  let activeModelName = agentConfig.model
+  let activeModelName = routedModel
+  let activeProvider = routedProvider
   let usedFallback = false
 
   if (isInCooldown && fallbackModel) {
     console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown, using fallback ${fallbackModel}`)
     activeModel = getModel(agentConfig.provider, fallbackModel, resolvedApiKey ?? params.apiKey)
     activeModelName = fallbackModel
+    activeProvider = agentConfig.provider
     usedFallback = true
   }
 
@@ -741,6 +848,13 @@ export async function processAgentMessage(
         baseDelayMs: 500,
         maxDelayMs: 5000,
         isRetriable: isRetriableError,
+        // QH-06: circuit breaker por provider/modelo.
+        circuitBreaker: {
+          primaryProvider: routedProvider,
+          primaryModel: routedModel,
+          fallbackProvider: agentConfig.provider,
+          fallbackModel: fallbackModel,
+        },
       },
     )
 
@@ -803,6 +917,9 @@ export async function processAgentMessage(
       console.warn('[AgentRuntime] persistTurn skipped:', err)
     }
 
+    // QH-03: Acumula custo no Redis após turno bem-sucedido (fire-and-forget).
+    void incrementSessionCost(params.sessionId, cost.totalCost)
+
     // 8c. Observabilidade por turno (fire-and-forget — nunca derruba o agente).
     void recordRuntimeDecision({
       ...decisionMeta,
@@ -813,7 +930,7 @@ export async function processAgentMessage(
       modelPrimary: agentConfig.model,
       providerPrimary: agentConfig.provider,
       modelUsed: activeModelName,
-      providerUsed: agentConfig.provider,
+      providerUsed: activeProvider,
       fallbackTriggered: usedFallback,
       fallbackReason: usedFallback ? 'cooldown_or_retry' : null,
       toolsCalled: toolCalls.map((t) => t.toolName),
@@ -840,7 +957,7 @@ export async function processAgentMessage(
       cost,
       latencyMs,
       model: activeModelName,
-      provider: agentConfig.provider,
+      provider: activeProvider,
       promptVersionId: promptVersion?.id,
     }
   } catch (error: unknown) {
@@ -859,13 +976,21 @@ export async function processAgentMessage(
       modelPrimary: agentConfig.model,
       providerPrimary: agentConfig.provider,
       modelUsed: activeModelName,
-      providerUsed: agentConfig.provider,
+      providerUsed: activeProvider,
       fallbackTriggered: usedFallback,
       latencyMs: Date.now() - startTime,
       status: 'error',
       errorMessage: message,
     })
     throw error
+  }
+  } finally {
+    // QH-04: sempre libera o lock — even on error/cap-exceeded.
+    await releaseContactLock({
+      organizationId: params.organizationId,
+      contactPhone: params.contactId,
+      token: lockResult.token ?? '',
+    })
   }
 }
 
@@ -926,6 +1051,20 @@ export type AgentStreamEvent =
 export async function* processAgentMessageStream(
   params: ProcessAgentMessageParams
 ): AsyncGenerator<AgentStreamEvent, void, unknown> {
+  // ── QH-04: Contact lock ───────────────────────────────────────────────────
+  const streamLockResult = await acquireContactLock({
+    organizationId: params.organizationId,
+    contactPhone: params.contactId,
+    ttlMs: 90_000,
+  })
+  if (!streamLockResult.acquired) {
+    console.log(
+      `[AgentRuntime] QH-04: lock não adquirido (stream) para contactId=${params.contactId} — descartando turno`,
+    )
+    return
+  }
+
+  try {
   let prepared: PreparedAgentCall
   try {
     prepared = await prepareAgentCall(params)
@@ -945,6 +1084,8 @@ export async function* processAgentMessageStream(
     systemPrompt,
     startTime,
     decisionMeta,
+    routedModel: preparedRoutedModel,
+    routedProvider: preparedRoutedProvider,
   } = prepared
 
   if (!agentConfig) {
@@ -958,13 +1099,17 @@ export async function* processAgentMessageStream(
   const streamCooldownUntil = PROVIDER_COOLDOWNS.get(streamProviderKey) ?? 0
   const streamIsInCooldown = Date.now() < streamCooldownUntil
 
+  // QH-05: start from the router-resolved model (may be mini).
   let streamActiveModel = model
-  let streamActiveModelName = agentConfig.model
+  let streamActiveModelName = preparedRoutedModel
+  // QH-05: track the routed provider for providerUsed in recordRuntimeDecision.
+  let streamActiveProvider = preparedRoutedProvider
 
   if (streamIsInCooldown && streamFallbackModel) {
     console.log(`[AgentRuntime] Primary model ${agentConfig.model} in cooldown (stream), using fallback ${streamFallbackModel}`)
     streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, prepared.apiKey ?? params.apiKey)
     streamActiveModelName = streamFallbackModel
+    streamActiveProvider = agentConfig.provider
   }
 
   // Aggregators collected from the stream to build the final `finish` event.
@@ -1017,6 +1162,7 @@ export async function* processAgentMessageStream(
         PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
         streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, prepared.apiKey ?? params.apiKey)
         streamActiveModelName = streamFallbackModel
+        streamActiveProvider = agentConfig.provider
         result = callStreamText(streamActiveModel)
       } else {
         throw primaryError
@@ -1073,6 +1219,9 @@ export async function* processAgentMessageStream(
     const latencyMs = Date.now() - startTime
     const cost = calculateCost(streamActiveModelName, inputTokens, outputTokens)
 
+    // QH-03: Acumula custo no Redis após turno bem-sucedido (fire-and-forget).
+    void incrementSessionCost(params.sessionId, cost.totalCost)
+
     // Fire-and-forget metrics update (non-blocking), mirroring the sync path.
     updateRuntimeMetrics(
       agentConfig,
@@ -1093,7 +1242,7 @@ export async function* processAgentMessageStream(
       modelPrimary: agentConfig.model,
       providerPrimary: agentConfig.provider,
       modelUsed: streamActiveModelName,
-      providerUsed: agentConfig.provider,
+      providerUsed: streamActiveProvider,
       fallbackTriggered: streamActiveModelName !== agentConfig.model,
       toolsCalled: aggregatedToolCalls.map((t) => t.toolName),
       inputTokens,
@@ -1114,7 +1263,7 @@ export async function* processAgentMessageStream(
       cost,
       latencyMs,
       model: streamActiveModelName,
-      provider: agentConfig.provider,
+      provider: streamActiveProvider,
       toolCalls: aggregatedToolCalls,
     }
   } catch (error: unknown) {
@@ -1141,13 +1290,21 @@ export async function* processAgentMessageStream(
         modelPrimary: agentConfig.model,
         providerPrimary: agentConfig.provider,
         modelUsed: streamActiveModelName,
-        providerUsed: agentConfig.provider,
+        providerUsed: streamActiveProvider,
         latencyMs: Date.now() - startTime,
         status: 'error',
         errorMessage: message,
       })
       yield { type: 'error', message }
     }
+  }
+  } finally {
+    // QH-04: sempre libera o lock após o turno (mesmo em erro/return precoce).
+    await releaseContactLock({
+      organizationId: params.organizationId,
+      contactPhone: params.contactId,
+      token: streamLockResult.token ?? '',
+    })
   }
 }
 

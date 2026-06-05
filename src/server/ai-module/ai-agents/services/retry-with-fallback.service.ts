@@ -15,7 +15,18 @@
  *
  * Errors não-retriable (HTTP 4xx exceto 429, AbortError) são propagados
  * imediatamente sem retry.
+ *
+ * QH-06: quando `circuitBreaker` está presente, cada tentativa consulta
+ * `canAttempt` antes de chamar a fn. Circuit aberto → pula p/ fallback
+ * imediatamente; sucesso → `recordSuccess`; falha retriable → `recordFailure`.
  */
+
+// ── QH-06: Circuit Breaker import ─────────────────────────────────────────────
+import {
+  canAttempt,
+  recordSuccess,
+  recordFailure,
+} from '../infra/circuit-breaker.service'
 
 export interface RetryOptions {
   /** Tentativas totais no primary (default 3). */
@@ -28,6 +39,18 @@ export interface RetryOptions {
   fallbackModel?: string
   /** Override do classificador retriable. */
   isRetriable?: (err: unknown) => boolean
+  /**
+   * QH-06: se presente, o circuit breaker é consultado antes de cada tentativa
+   * e atualizado após sucesso/falha. Fail-open: erros do Redis não bloqueiam.
+   */
+  circuitBreaker?: {
+    primaryProvider: string
+    primaryModel: string
+    /** Provider do fallbackFn (default: mesmo do primary). */
+    fallbackProvider?: string
+    /** Modelo do fallbackFn — pode ser o mesmo de options.fallbackModel. */
+    fallbackModel?: string
+  }
 }
 
 export interface RetryResult<T> {
@@ -112,6 +135,7 @@ export async function retryWithFallback<T>(
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
   const isRetriable = options.isRetriable ?? isRetriableError
   const fallbackThreshold = Math.floor(maxAttempts / 2)
+  const cb = options.circuitBreaker ?? null
 
   const startedAt = Date.now()
   let lastError: unknown
@@ -127,11 +151,40 @@ export async function retryWithFallback<T>(
       usedFallback = true
     }
 
+    // QH-06: resolve provider/model para este attempt e consulta o circuit.
+    const cbProvider = usedFallback
+      ? (cb?.fallbackProvider ?? cb?.primaryProvider ?? '')
+      : (cb?.primaryProvider ?? '')
+    const cbModel = usedFallback
+      ? (cb?.fallbackModel ?? cb?.primaryModel ?? '')
+      : (cb?.primaryModel ?? '')
+
+    if (cb && cbProvider && cbModel) {
+      const circuit = await canAttempt({ provider: cbProvider, model: cbModel })
+      if (!circuit.allowed) {
+        // Circuit OPEN: pula para fallback se disponível, ou esgota o loop.
+        if (!usedFallback && fallbackFn !== null) {
+          usedFallback = true
+          // Continua a iteração usando o fallbackFn.
+        } else {
+          // Sem fallback restante — retorna como erro retriable sem tentar.
+          lastError = new Error(
+            `[circuit-breaker] circuit open for ${cbProvider}/${cbModel} — skipped`,
+          )
+          break
+        }
+      }
+    }
+
     const fn = usedFallback && fallbackFn ? fallbackFn : primaryFn
     attemptsUsed++
 
     try {
       const data = await fn()
+      // QH-06: registra sucesso no circuit breaker.
+      if (cb && cbProvider && cbModel) {
+        await recordSuccess({ provider: cbProvider, model: cbModel })
+      }
       return {
         data,
         attemptsUsed,
@@ -141,7 +194,7 @@ export async function retryWithFallback<T>(
     } catch (err) {
       lastError = err
 
-      // Não-retriable: propaga imediatamente.
+      // Não-retriable: propaga imediatamente (sem recordFailure — não é falha do provider).
       if (!isRetriable(err)) {
         return {
           error: err,
@@ -149,6 +202,11 @@ export async function retryWithFallback<T>(
           usedFallback,
           totalLatencyMs: Date.now() - startedAt,
         }
+      }
+
+      // QH-06: registra falha retriable no circuit breaker.
+      if (cb && cbProvider && cbModel) {
+        await recordFailure({ provider: cbProvider, model: cbModel })
       }
 
       // Última tentativa? Não dorme, só sai do loop.

@@ -52,6 +52,7 @@ import {
   isDuplicateInbound,
   pauseAiForOperatorTakeover,
 } from '@/lib/webhook/inbound-resilience'
+import { checkAndMarkProcessed } from '@/server/ai-module/ai-agents/infra/idempotency.service'
 import { evaluateActivationGate } from '@/lib/webhook/activation-gate'
 
 export const dynamic = 'force-dynamic'
@@ -622,6 +623,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (runtimeSettings.typingIndicatorEnabled && connectionLoose.uazapiToken) {
       const baseUrl = connectionLoose.uazapiBaseUrl ?? FALLBACK_UAZAPI_BASE_URL
       sendTypingIndicator(connectionLoose.uazapiToken, baseUrl, contactPhone).catch(noop)
+    }
+
+    // QH-01: Dedup por waMessageId (token bucket Redis, complementar ao dedup de
+    // fingerprint acima). O gate usa a chave `wa:dedup:{connectionId}:{waMessageId}`
+    // com TTL 24h — atômico SET NX. Fail-open: Redis down → isDuplicate=false.
+    const dedupResult = await checkAndMarkProcessed({
+      connectionId: connection.id,
+      waMessageId: externalMessageId,
+    })
+    if (dedupResult.isDuplicate) {
+      console.debug('[uazapi-webhook] QH-01: waMessageId duplicado — drop silencioso', {
+        waMessageId: externalMessageId,
+        connectionId: connection.id,
+      })
+      return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
     }
 
     try {
