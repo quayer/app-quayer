@@ -6,12 +6,13 @@
  * (multi-key) — o agente seleciona qual chave usar.
  *
  * openai / anthropic / google → LLM (texto).  elevenlabs → voz (separado).
+ * deepgram → STT (transcrição de áudio; Whisper/OpenAI é o fallback).
  * A ordem aqui define a ordem visual na página.
  */
-export type ProviderKey = 'openai' | 'anthropic' | 'google' | 'elevenlabs'
+export type ProviderKey = 'openai' | 'anthropic' | 'google' | 'elevenlabs' | 'deepgram'
 
 /** Categoria do provider — usada para agrupar/rotular na UI. */
-export type ProviderCategory = 'llm' | 'voice'
+export type ProviderCategory = 'llm' | 'voice' | 'transcription'
 
 export interface ProviderModel {
   /** ID LiteLLM do modelo (ex.: 'gpt-4o', 'claude-3-5-sonnet'). */
@@ -80,6 +81,16 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     category: 'voice',
     letter: 'E',
     keyPlaceholder: 'xi-...',
+    models: [],
+  },
+  {
+    key: 'deepgram',
+    name: 'Deepgram',
+    description:
+      'STT — transcrição de áudio recebido (principal). Whisper/OpenAI é o fallback.',
+    category: 'transcription',
+    letter: 'D',
+    keyPlaceholder: 'Token ...',
     models: [],
   },
 ] as const

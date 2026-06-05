@@ -1,22 +1,23 @@
 /**
- * Transcription Service — Whisper audio/vídeo transcription
+ * Transcription Service — STT de áudio/vídeo com provider abstrato.
  *
  * Recebe um audio OU vídeo (mediaUrl + mimetype) vindo do WhatsApp, baixa, envia
- * para Whisper e retorna o texto transcrito + idioma detectado. Para vídeo, o
- * Whisper extrai e transcreve a faixa de áudio (padrão Orayon — sem ffmpeg/frames).
- * Usado pelo agente para virar fala do cliente em prompt textual antes do LLM.
+ * para o STT e retorna o texto transcrito + idioma detectado. Para vídeo, o STT
+ * transcreve a faixa de áudio (padrão Orayon — sem ffmpeg/frames).
  *
- * Falhas (URL/key/mime invalidos, download ou API com erro) retornam null —
- * o caller decide o fallback (ex.: pedir reenvio ao cliente).
+ * Estratégia (BYOK, fail-safe):
+ *   1. Deepgram (principal) — se `deepgramKey` presente.
+ *   2. Whisper OpenAI (fallback) — se Deepgram falhar OU sem `deepgramKey`.
+ *   3. Ambos falham / sem chaves → `null` (caller decide o fallback).
+ *
+ * `transcribeAudio` (Whisper) é mantida para compat com chamadores existentes.
  */
 
 const WHISPER_API_URL = 'https://api.openai.com/v1/audio/transcriptions'
+const DEEPGRAM_API_URL =
+  'https://api.deepgram.com/v1/listen?model=nova-3&detect_language=true&smart_format=true'
 
-/**
- * Mapa de codigos de idioma do produto (ISO-639-1 upper) para os codigos
- * aceitos pela API do Whisper (lower). Idiomas fora deste mapa caem em
- * deteccao automatica.
- */
+/** ISO-639-1 (upper) do produto → código aceito pelo Whisper (lower). Fora do mapa = auto-detect. */
 export const WHISPER_LANGUAGE_MAP: Record<string, string> = {
   PT: 'pt',
   EN: 'en',
@@ -30,17 +31,26 @@ export const WHISPER_LANGUAGE_MAP: Record<string, string> = {
   AR: 'ar',
 }
 
+export type TranscriptionProvider = 'deepgram' | 'whisper'
+
 export interface TranscriptionResult {
   text: string
   detectedLanguage?: string
+  /** Provider que efetivamente produziu o texto. Ausente em chamadas legadas. */
+  provider?: TranscriptionProvider
 }
 
-/**
- * Determina a extensao do arquivo a partir do mimetype. Whisper aceita ogg,
- * mp3, wav, m4a, webm (áudio) e mp4/mpeg/webm (vídeo — extrai o áudio). Vídeo do
- * WhatsApp é tipicamente mp4; fora das conhecidas, defaultamos para ogg (áudio
- * nativo do WhatsApp).
- */
+export interface TranscribeMediaInput {
+  mediaUrl: string
+  mimetype: string
+  /** Chave Deepgram (principal). Quando ausente, vai direto pro Whisper. */
+  deepgramKey?: string
+  /** Chave OpenAI (fallback Whisper). */
+  openaiKey?: string
+  preferredLanguage?: string
+}
+
+/** Extensão a partir do mimetype (Whisper precisa de filename). Default: ogg (áudio WhatsApp). */
 function pickExtension(mimetype: string): string {
   // Vídeo primeiro (video/mpeg não deve virar 'mp3').
   if (mimetype.startsWith('video/')) {
@@ -53,23 +63,84 @@ function pickExtension(mimetype: string): string {
   return 'ogg'
 }
 
+/** Aceita áudio E vídeo (STT extrai a faixa de áudio do vídeo). */
+function isTranscribableMime(mimetype: string): boolean {
+  return Boolean(
+    mimetype &&
+      (mimetype.startsWith('audio/') || mimetype.startsWith('video/')),
+  )
+}
+
 /**
- * Transcreve audio via Whisper. Retorna `null` em qualquer falha — incluindo
- * input invalido, falha de download ou erro da API. detectedLanguage e
- * retornado em uppercase para casar com o resto do dominio.
+ * Transcreve via Deepgram (nova-3, detect_language, smart_format). O corpo da
+ * requisição são os bytes brutos do áudio com o Content-Type do mimetype.
+ * Retorna `null` em qualquer falha (caller faz fallback p/ Whisper).
+ */
+async function transcribeWithDeepgram(
+  mediaUrl: string,
+  mimetype: string,
+  deepgramKey: string,
+): Promise<TranscriptionResult | null> {
+  try {
+    const mediaResponse = await fetch(mediaUrl)
+    if (!mediaResponse.ok) {
+      console.warn(`[transcription] deepgram download falhou: ${mediaResponse.status}`)
+      return null
+    }
+    const audioBytes = await mediaResponse.arrayBuffer()
+
+    const dgResponse = await fetch(DEEPGRAM_API_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${deepgramKey}`,
+        'Content-Type': mimetype,
+      },
+      body: audioBytes,
+    })
+
+    if (!dgResponse.ok) {
+      console.warn(`[transcription] deepgram API falhou: ${dgResponse.status}`)
+      return null
+    }
+
+    const result = (await dgResponse.json()) as {
+      results?: {
+        channels?: Array<{
+          detected_language?: string
+          alternatives?: Array<{ transcript?: string }>
+        }>
+      }
+    }
+
+    const channel = result.results?.channels?.[0]
+    const text = (channel?.alternatives?.[0]?.transcript ?? '').trim()
+    if (!text) return null
+
+    const detectedLanguage = channel?.detected_language
+      ? channel.detected_language.toUpperCase()
+      : undefined
+
+    return { text, detectedLanguage, provider: 'deepgram' }
+  } catch (error) {
+    console.warn('[transcription] deepgram erro inesperado:', error)
+    return null
+  }
+}
+
+/**
+ * Transcreve via Whisper. `null` em qualquer falha. detectedLanguage em uppercase.
  */
 export async function transcribeAudio(
   mediaUrl: string,
   mimetype: string,
   openaiApiKey: string,
-  preferredLanguage?: string
+  preferredLanguage?: string,
 ): Promise<TranscriptionResult | null> {
   if (!mediaUrl || !openaiApiKey) {
     return null
   }
 
-  // Aceita áudio E vídeo (Whisper extrai a faixa de áudio do vídeo).
-  if (!mimetype || !(mimetype.startsWith('audio/') || mimetype.startsWith('video/'))) {
+  if (!isTranscribableMime(mimetype)) {
     return null
   }
 
@@ -77,9 +148,7 @@ export async function transcribeAudio(
     // 1. Baixar audio da URL fornecida (CDN do WhatsApp tipicamente).
     const audioResponse = await fetch(mediaUrl)
     if (!audioResponse.ok) {
-      console.warn(
-        `[transcription] download falhou: ${audioResponse.status}`
-      )
+      console.warn(`[transcription] download falhou: ${audioResponse.status}`)
       return null
     }
 
@@ -106,9 +175,7 @@ export async function transcribeAudio(
     })
 
     if (!whisperResponse.ok) {
-      console.warn(
-        `[transcription] Whisper API falhou: ${whisperResponse.status}`
-      )
+      console.warn(`[transcription] Whisper API falhou: ${whisperResponse.status}`)
       return null
     }
 
@@ -122,9 +189,43 @@ export async function transcribeAudio(
       ? result.language.toUpperCase()
       : undefined
 
+    // Shape preservada p/ compat (sem `provider`); transcribeMedia carimba o provider.
     return { text, detectedLanguage }
   } catch (error) {
     console.warn('[transcription] erro inesperado:', error)
     return null
   }
+}
+
+/**
+ * STT com Deepgram (principal) → fallback Whisper. `null` se ambos falharem / sem chaves.
+ */
+export async function transcribeMedia(
+  input: TranscribeMediaInput,
+): Promise<TranscriptionResult | null> {
+  const { mediaUrl, mimetype, deepgramKey, openaiKey, preferredLanguage } = input
+
+  if (!mediaUrl || !isTranscribableMime(mimetype)) {
+    return null
+  }
+
+  // 1. Deepgram (principal).
+  if (deepgramKey) {
+    const dg = await transcribeWithDeepgram(mediaUrl, mimetype, deepgramKey)
+    if (dg && dg.text) return dg
+  }
+
+  // 2. Whisper (fallback). Carimba o provider na saída (transcribeAudio omite p/ compat).
+  if (openaiKey) {
+    const whisper = await transcribeAudio(
+      mediaUrl,
+      mimetype,
+      openaiKey,
+      preferredLanguage,
+    )
+    if (whisper && whisper.text) return { ...whisper, provider: 'whisper' }
+  }
+
+  // 3. Ambos falharam / sem chaves.
+  return null
 }

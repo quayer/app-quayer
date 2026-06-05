@@ -50,6 +50,7 @@ import {
   type PrismaLike as SessionSummaryPrismaLike,
 } from './services/session-summary.service'
 import { loadContactMemory } from '@/server/communication/services/contact-memory.service'
+import { loadRollingSummary } from './services/rolling-summary.service'
 import {
   loadSkillsFromDirectory,
 } from './services/skill-registry.service'
@@ -367,6 +368,20 @@ async function prepareAgentCall(
     }
   } catch (err) {
     console.warn('[AgentRuntime] loadContactMemory failed (ignored):', err)
+  }
+
+  // 2a-ter. Rolling summary (Orayon): resumo incremental da sessão ATUAL,
+  // atualizado a cada N turnos e mantido no Redis. Sobrevive à poda da janela
+  // dinâmica/microcompact, mantendo o fio da conversa em diálogos longos.
+  // Injetado após o perfil do cliente. Wrap em try/catch — sem rolling, segue.
+  try {
+    const redis = getRedis()
+    const rollingSummary = await loadRollingSummary(redis, params.sessionId)
+    if (rollingSummary) {
+      systemPrompt = `${systemPrompt}\n\n## Resumo recente da conversa\n\n${rollingSummary}`
+    }
+  } catch (err) {
+    console.warn('[AgentRuntime] loadRollingSummary failed (ignored):', err)
   }
 
   // 2b. Conditional skills: carrega skills do registry (.claude/skills/agent)
@@ -777,7 +792,13 @@ export async function processAgentMessage(
     // Fire-and-forget — erros são logados pelo próprio service.
     try {
       const redis = getRedis()
-      void persistTurn(redis, params.sessionId, params.messageContent, result.text || '')
+      void persistTurn(
+        redis,
+        params.sessionId,
+        params.messageContent,
+        result.text || '',
+        params.organizationId,
+      )
     } catch (err) {
       console.warn('[AgentRuntime] persistTurn skipped:', err)
     }

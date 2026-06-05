@@ -11,6 +11,7 @@
 
 import type { Redis } from 'ioredis'
 import { loadShortMemory, pushToShortMemory } from './memory.service'
+import { updateRollingSummary } from './rolling-summary.service'
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -110,12 +111,18 @@ export async function loadMemoryForAgent(
  * Persiste mensagem do user e resposta do assistant no Redis (TTL 24h).
  * Fire-and-forget: erros geram warning mas não jogam.
  * Redis null → no-op silencioso.
+ *
+ * Quando `organizationId` é informado, dispara (fire-and-forget) a atualização
+ * do rolling summary da sessão — resumo incremental que sobrevive à poda da
+ * janela dinâmica. Não bloqueia o turno: o void garante que não esperamos o LLM
+ * barato, e o próprio service é fail-safe.
  */
 export async function persistTurn(
   redis: Redis | null,
   sessionId: string,
   userMessage: string,
-  assistantResponse: string
+  assistantResponse: string,
+  organizationId?: string
 ): Promise<void> {
   if (!redis) return
 
@@ -133,5 +140,11 @@ export async function persistTurn(
       '[memory-integration] persistTurn failed:',
       err instanceof Error ? err.message : err
     )
+  }
+
+  // Rolling summary (Orayon): só quando temos org (multi-tenant). Fire-and-forget
+  // — não bloqueia o turno e degrada sozinho se Redis/LLM falharem.
+  if (organizationId) {
+    void updateRollingSummary(redis, sessionId, organizationId)
   }
 }

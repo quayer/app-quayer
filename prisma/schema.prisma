@@ -1419,6 +1419,14 @@ model AIAgentConfig {
   // null = resolução por fallback (isPrimary → priority → primeira ativa).
   organizationProviderId String?
 
+  // Activation mode (Orayon): controla QUAIS mensagens inbound disparam a IA.
+  // 'all'                  → toda inbound dispara (comportamento legado / default).
+  // 'all_except_blacklist' → dispara, exceto contatos com tag 'blacklist' na session.
+  // 'keyword_trigger'      → só dispara se o texto contém alguma activationKeyword.
+  // 'whitelist_only'       → só dispara se a session tem tag 'whitelist'.
+  activationMode     String   @default("all")
+  activationKeywords String[] @default([]) // usado por activationMode='keyword_trigger'
+
   // Tool settings
   enabledTools String[] @default([])
 

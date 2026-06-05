@@ -35,7 +35,12 @@ export function ProviderRow({
   onRemoveKey,
 }: ProviderRowProps) {
   const { tokens } = useAppTokens()
-  const categoryLabel = meta.category === 'voice' ? 'Voz' : 'LLM'
+  const categoryLabel =
+    meta.category === 'voice'
+      ? 'Voz'
+      : meta.category === 'transcription'
+        ? 'Transcrição'
+        : 'LLM'
 
   return (
     <article

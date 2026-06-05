@@ -11,7 +11,7 @@ import type { Redis } from 'ioredis'
 import { processInboundMessage } from './inbound-pipeline.service'
 import { extractFromWebhook } from './webhook-extractor.service'
 import { cleanMessage, isBinaryGarbage } from './text-normalizer.service'
-import { transcribeAudio } from './transcription.service'
+import { transcribeMedia } from './transcription.service'
 import { processImage } from './vision.service'
 import { processBuffer } from './buffer-concat.service'
 
@@ -24,7 +24,7 @@ vi.mock('./buffer-concat.service')
 const mockExtract = vi.mocked(extractFromWebhook)
 const mockCleanMessage = vi.mocked(cleanMessage)
 const mockIsBinaryGarbage = vi.mocked(isBinaryGarbage)
-const mockTranscribeAudio = vi.mocked(transcribeAudio)
+const mockTranscribeMedia = vi.mocked(transcribeMedia)
 const mockProcessImage = vi.mocked(processImage)
 const mockProcessBuffer = vi.mocked(processBuffer)
 
@@ -61,7 +61,7 @@ describe('processInboundMessage', () => {
     mockExtract.mockReturnValue({ ...baseNormalized })
     mockCleanMessage.mockImplementation((t: string) => (t ?? '').trim())
     mockIsBinaryGarbage.mockReturnValue(false)
-    mockTranscribeAudio.mockResolvedValue(null)
+    mockTranscribeMedia.mockResolvedValue(null)
     mockProcessImage.mockResolvedValue({ success: false, error: 'noop' })
     mockProcessBuffer.mockResolvedValue(bufferPass('oi tudo bem'))
   })
@@ -78,7 +78,7 @@ describe('processInboundMessage', () => {
     expect(result.reason).toBe('INVALID_WEBHOOK')
     expect(result.normalized).toBeNull()
     expect(mockProcessBuffer).not.toHaveBeenCalled()
-    expect(mockTranscribeAudio).not.toHaveBeenCalled()
+    expect(mockTranscribeMedia).not.toHaveBeenCalled()
   })
 
   // 2. Direção OUT
@@ -93,7 +93,7 @@ describe('processInboundMessage', () => {
 
     expect(result.shouldDispatchAi).toBe(false)
     expect(result.reason).toBe('OUTBOUND_MESSAGE')
-    expect(mockTranscribeAudio).not.toHaveBeenCalled()
+    expect(mockTranscribeMedia).not.toHaveBeenCalled()
     expect(mockProcessImage).not.toHaveBeenCalled()
     expect(mockProcessBuffer).not.toHaveBeenCalled()
   })
@@ -123,9 +123,10 @@ describe('processInboundMessage', () => {
       mediaUrl: 'https://cdn/audio.ogg',
       mediaMimetype: 'audio/ogg',
     })
-    mockTranscribeAudio.mockResolvedValue({
+    mockTranscribeMedia.mockResolvedValue({
       text: 'olá quero saber o preço',
       detectedLanguage: 'PT',
+      provider: 'whisper',
     })
     mockProcessBuffer.mockResolvedValue(bufferPass('olá quero saber o preço'))
     mockCleanMessage.mockImplementation((t: string) => t)
@@ -136,10 +137,12 @@ describe('processInboundMessage', () => {
       openaiApiKey: 'sk-test',
     })
 
-    expect(mockTranscribeAudio).toHaveBeenCalledWith(
-      'https://cdn/audio.ogg',
-      'audio/ogg',
-      'sk-test',
+    expect(mockTranscribeMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: 'https://cdn/audio.ogg',
+        mimetype: 'audio/ogg',
+        openaiKey: 'sk-test',
+      }),
     )
     expect(result.enrichedContent).toBe('olá quero saber o preço')
     expect(result.detectedLanguage).toBe('PT')
@@ -148,7 +151,7 @@ describe('processInboundMessage', () => {
   })
 
   // 5. Áudio com whisperEnabled=false
-  it('audio com whisperEnabled=false NÃO chama transcribeAudio', async () => {
+  it('audio com whisperEnabled=false NÃO chama transcribeMedia', async () => {
     mockExtract.mockReturnValue({
       ...baseNormalized,
       type: 'audio',
@@ -165,13 +168,13 @@ describe('processInboundMessage', () => {
       whisperEnabled: false,
     })
 
-    expect(mockTranscribeAudio).not.toHaveBeenCalled()
+    expect(mockTranscribeMedia).not.toHaveBeenCalled()
     expect(result.mediaProcessed).toBe(false)
     expect(result.processingSteps).not.toContain('whisper')
   })
 
-  // 6. Áudio sem openaiApiKey
-  it('audio sem openaiApiKey NÃO chama transcribeAudio', async () => {
+  // 6. Áudio sem chaves (sem openaiApiKey e sem org → sem Deepgram)
+  it('audio sem nenhuma chave NÃO chama transcribeMedia', async () => {
     mockExtract.mockReturnValue({
       ...baseNormalized,
       type: 'audio',
@@ -186,7 +189,7 @@ describe('processInboundMessage', () => {
       redis: fakeRedis,
     })
 
-    expect(mockTranscribeAudio).not.toHaveBeenCalled()
+    expect(mockTranscribeMedia).not.toHaveBeenCalled()
     expect(result.mediaProcessed).toBe(false)
   })
 
@@ -326,7 +329,7 @@ describe('processInboundMessage', () => {
       mediaUrl: 'https://cdn/a.ogg',
       mediaMimetype: 'audio/ogg',
     })
-    mockTranscribeAudio.mockResolvedValue({ text: 'hello', detectedLanguage: 'EN' })
+    mockTranscribeMedia.mockResolvedValue({ text: 'hello', detectedLanguage: 'EN', provider: 'whisper' })
     mockProcessBuffer.mockResolvedValue(bufferPass('hello'))
     mockCleanMessage.mockImplementation((t: string) => t)
 
@@ -352,7 +355,7 @@ describe('processInboundMessage', () => {
       mediaMimetype: 'audio/ogg',
     })
     mockCleanMessage.mockImplementation((t: string) => t)
-    mockTranscribeAudio.mockRejectedValue(new Error('boom'))
+    mockTranscribeMedia.mockRejectedValue(new Error('boom'))
     mockProcessBuffer.mockResolvedValue(bufferPass('caption-fallback'))
 
     const result = await processInboundMessage({

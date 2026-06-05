@@ -66,6 +66,8 @@ const ENV_KEYS: Record<string, string | undefined> = {
   anthropic: process.env.ANTHROPIC_API_KEY,
   google: process.env.GOOGLE_API_KEY,
   elevenlabs: process.env.ELEVENLABS_API_KEY,
+  // Deepgram = STT principal (transcrição de áudio). Whisper (openai) é fallback.
+  deepgram: process.env.DEEPGRAM_API_KEY,
   // Aligned with provider-factory.getModel() supported providers so BYOK
   // doesn't silently fall through for groq/openrouter agents.
   groq: process.env.GROQ_API_KEY,

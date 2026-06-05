@@ -16,14 +16,20 @@ import {
   type NormalizedWebhook,
 } from './webhook-extractor.service'
 import { cleanMessage, isBinaryGarbage } from './text-normalizer.service'
-import { transcribeAudio } from './transcription.service'
+import { transcribeMedia } from './transcription.service'
 import { processImage } from './vision.service'
 import { processBuffer } from './buffer-concat.service'
+import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 
 export interface InboundPipelineInput {
   payload: unknown
   redis: Redis | null
   openaiApiKey?: string
+  /**
+   * Org dona da conexão. Quando presente, a deepgramKey é resolvida por org
+   * (BYOK) e usada como STT principal — Whisper (openaiApiKey) vira fallback.
+   */
+  organizationId?: string
   bufferTimeoutSeconds?: number
   whisperEnabled?: boolean
   visionEnabled?: boolean
@@ -59,6 +65,7 @@ export async function processInboundMessage(
     payload,
     redis,
     openaiApiKey,
+    organizationId,
     bufferTimeoutSeconds,
     whisperEnabled = true,
     visionEnabled = true,
@@ -110,36 +117,60 @@ export async function processInboundMessage(
   let detectedLanguage: string | undefined
   let mediaProcessed = false
 
-  // 4. Whisper para áudio E vídeo. Para vídeo, o Whisper transcreve a faixa de
-  // áudio (padrão Orayon — sem ffmpeg/frames; análise visual de frame fica p/ fase
-  // 2). Áudio é gated por whisperEnabled; vídeo por videoUnderstandingEnabled.
+  // 4. STT para áudio E vídeo. Deepgram (BYOK por org) é o STT principal; Whisper
+  // (openaiApiKey) é o fallback. Para vídeo, o STT transcreve a faixa de áudio
+  // (padrão Orayon — sem ffmpeg/frames; análise visual de frame fica p/ fase 2).
+  // Áudio é gated por whisperEnabled; vídeo por videoUnderstandingEnabled.
   const wantsAudioTranscription = normalized.type === 'audio' && whisperEnabled
   const wantsVideoTranscription =
     normalized.type === 'video' && videoUnderstandingEnabled
   if (
     (wantsAudioTranscription || wantsVideoTranscription) &&
-    openaiApiKey &&
     normalized.mediaUrl &&
     normalized.mediaMimetype
   ) {
-    processingSteps.push(wantsVideoTranscription ? 'whisper_video' : 'whisper')
-    try {
-      const transcription = await transcribeAudio(
-        normalized.mediaUrl,
-        normalized.mediaMimetype,
-        openaiApiKey,
-      )
-      if (transcription && transcription.text) {
-        enrichedContent = transcription.text
-        detectedLanguage = transcription.detectedLanguage
-        mediaProcessed = true
+    // Resolve a chave Deepgram por org (BYOK). Fail-safe: qualquer erro vira
+    // undefined e a transcrição segue só com Whisper.
+    let deepgramKey: string | undefined
+    if (organizationId) {
+      try {
+        const resolved = await credentialResolver.resolve('AI', 'deepgram', {
+          organizationId,
+        })
+        deepgramKey = resolved?.credentials.apiKey
+      } catch (err) {
+        console.warn(
+          '[inbound-pipeline] resolve deepgram falhou:',
+          (err as Error).message,
+        )
       }
-    } catch (err) {
-      // Fail-safe: mantém enrichedContent anterior.
-      console.warn(
-        '[inbound-pipeline] whisper falhou:',
-        (err as Error).message,
+    }
+
+    // Só transcreve se houver ao menos uma chave (Deepgram OU Whisper).
+    if (deepgramKey || openaiApiKey) {
+      const sttStep = deepgramKey ? 'deepgram' : 'whisper'
+      processingSteps.push(
+        wantsVideoTranscription ? `${sttStep}_video` : sttStep,
       )
+      try {
+        const transcription = await transcribeMedia({
+          mediaUrl: normalized.mediaUrl,
+          mimetype: normalized.mediaMimetype,
+          deepgramKey,
+          openaiKey: openaiApiKey,
+        })
+        if (transcription && transcription.text) {
+          enrichedContent = transcription.text
+          detectedLanguage = transcription.detectedLanguage
+          mediaProcessed = true
+        }
+      } catch (err) {
+        // Fail-safe: mantém enrichedContent anterior.
+        console.warn(
+          '[inbound-pipeline] transcrição falhou:',
+          (err as Error).message,
+        )
+      }
     }
   }
 

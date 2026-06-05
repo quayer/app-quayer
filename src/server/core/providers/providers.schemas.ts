@@ -4,7 +4,7 @@
 
 import { z } from 'zod'
 
-export const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'google', 'elevenlabs'] as const
+export const SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'google', 'elevenlabs', 'deepgram'] as const
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
 
 export const providerParamSchema = z.object({

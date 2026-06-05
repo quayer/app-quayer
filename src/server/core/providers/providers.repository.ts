@@ -15,6 +15,8 @@ const PROVIDER_CATEGORY: Record<SupportedProvider, ProviderCategory> = {
   anthropic: ProviderCategory.AI,
   google: ProviderCategory.AI,
   elevenlabs: ProviderCategory.TTS,
+  // Deepgram = STT (transcrição de áudio). Mapeado em AUXILIARY (sem enum novo).
+  deepgram: ProviderCategory.AUXILIARY,
 }
 
 const SUPPORTED_PROVIDER_LIST: SupportedProvider[] = [
@@ -22,6 +24,7 @@ const SUPPORTED_PROVIDER_LIST: SupportedProvider[] = [
   'anthropic',
   'google',
   'elevenlabs',
+  'deepgram',
 ]
 
 /**

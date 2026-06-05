@@ -52,6 +52,7 @@ import {
   isDuplicateInbound,
   pauseAiForOperatorTakeover,
 } from '@/lib/webhook/inbound-resilience'
+import { evaluateActivationGate } from '@/lib/webhook/activation-gate'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -213,6 +214,33 @@ async function resolveAgentIdForConnection(
   }
 
   return activeDeployment?.agentConfigId ?? fallbackAgentId ?? null
+}
+
+/**
+ * Loads the agent's activation-mode config (Orayon). Multi-tenant: scoped by
+ * organizationId so a leaked agentId can't read another org's config.
+ * Defensive: any failure / unknown column falls back to legacy 'all' behavior.
+ */
+async function loadActivationConfig(
+  agentConfigId: string,
+  organizationId: string,
+): Promise<{ activationMode: string | null; activationKeywords: string[] | null }> {
+  try {
+    const cfg = await database.aIAgentConfig.findFirst({
+      where: { id: agentConfigId, organizationId },
+      select: { activationMode: true, activationKeywords: true },
+    })
+    return {
+      activationMode: cfg?.activationMode ?? null,
+      activationKeywords: cfg?.activationKeywords ?? null,
+    }
+  } catch (err) {
+    console.warn(
+      '[uazapi-webhook] activation config lookup failed, defaulting to all:',
+      err instanceof Error ? err.message : String(err),
+    )
+    return { activationMode: null, activationKeywords: null }
+  }
 }
 
 /**
@@ -448,6 +476,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         payload,
         redis: redisClient,
         openaiApiKey,
+        // Org dona da conexão → resolve a chave Deepgram (BYOK) como STT principal.
+        organizationId,
         bufferEnabled: runtimeSettings.messageBuffer.enabled,
         bufferTimeoutSeconds: Math.round(runtimeSettings.messageBuffer.timeoutMs / 1000),
         whisperEnabled: runtimeSettings.media.audioTranscriptionEnabled,
@@ -495,6 +525,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     aiEnabled: boolean
     aiBlockedUntil: Date | string | null | undefined
     status?: string
+    tags?: string[] | null
   }
 
   let session: SessionLite
@@ -552,6 +583,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // 8) AI dispatch — INBOUND only, gated by aiEnabled / aiBlockedUntil / agent config.
   if (direction === 'IN' && connectionAiAgentId && canDispatchAi(session)) {
+    // 8.0) Activation-mode gate (Orayon). The Message is already persisted
+    // (step 7); here we only decide whether to RUN the AI. Default mode 'all'
+    // keeps legacy behavior (always dispatch). Blocked modes skip the dispatch
+    // entirely and return ok:true so uazapi doesn't retry.
+    const activation = await loadActivationConfig(connectionAiAgentId, organizationId)
+    const gate = evaluateActivationGate(
+      { activationMode: activation.activationMode, activationKeywords: activation.activationKeywords },
+      { tags: session.tags ?? null },
+      enrichedContent,
+    )
+    if (!gate.allowed) {
+      console.info(
+        `[uazapi-webhook] activation gate blocked dispatch: mode=${gate.mode} reason=${gate.reason} session=${session.id}`,
+      )
+      return NextResponse.json({
+        ok: true,
+        sessionId: session.id,
+        messageId,
+        ai_skipped: gate.reason ?? 'ACTIVATION_BLOCKED',
+        activationMode: gate.mode,
+      })
+    }
+
     const detectedLanguage =
       runtimeSettings.languageDetectionEnabled
         ? pipelineResult?.detectedLanguage ??
