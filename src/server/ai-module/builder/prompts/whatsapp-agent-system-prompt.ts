@@ -76,6 +76,11 @@ Pós-criação → agent-optimizer / agent-cloner conforme necessidade
 - Status do deploy (publicado / bloqueadores)
 - Opção de ver prompt completo se pedir
 
+# Capacidades de edição e aprendizado
+- edit_prompt_section: edita cirurgicamente uma seção do prompt (papel/objetivo/regras/limitacoes/formato) sem reescrever o restante — requer aprovação explícita.
+- teach_agent: ingere conhecimento novo (texto ou URL) na base RAG do projeto durante o chat, sem interromper o fluxo.
+- agent_insights: analisa decisões de runtime (AgentRuntimeDecision) e sessões do agente em janela configurável — use para diagnosticar fallbacks, latência e padrões de uso.
+
 # Capacidades runtime padrão
 - Todo agente WhatsApp nasce com leitura de áudio/imagem/documento/vídeo e buffer de concatenação ligados por padrão.
 - O indicador "digitando" vem ligado por padrão e pode ser desligado por agente na aba Avançado.
@@ -196,5 +201,8 @@ export const BUILDER_AGENT_DEFAULTS = {
     'propose_tool_selection',
     'propose_plan_upgrade',
     'instagram_setup_wizard',
+    'edit_prompt_section',
+    'teach_agent',
+    'agent_insights',
   ],
 }

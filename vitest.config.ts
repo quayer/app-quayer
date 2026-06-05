@@ -57,6 +57,7 @@ export default defineConfig({
             'src/server/ai-module/builder/state/**/*.test.ts',
             'src/server/ai-module/builder/sources/**/*.test.ts',
             'src/server/ai-module/builder/chat/handlers/**/*.test.ts',
+            'src/server/ai-module/builder/tools/**/*.test.ts',
             'src/server/communication/**/*.test.ts',
             'src/server/ai-module/ai-agents/**/*.test.ts',
             'src/app/api/**/*.test.ts',
