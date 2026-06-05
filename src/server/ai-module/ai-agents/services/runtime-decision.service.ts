@@ -35,6 +35,8 @@ export interface RuntimeDecisionMeta {
   modelTier?: 'mini' | 'full' | null
   /** QH-05: razão human-readable do model router. */
   modelRouterReason?: string | null
+  /** QH-11: SHA-256 da configuração efetiva do turno (systemPrompt + tools + provider + model). */
+  configHash?: string | null
 }
 
 /** Meta default (usado em caminhos que falham antes de popular o meta). */
@@ -127,6 +129,7 @@ export async function recordRuntimeDecision(
         latencyMs: input.latencyMs ?? 0,
         status: input.status ?? 'success',
         errorMessage: input.errorMessage ?? null,
+        configHash: input.configHash ?? null,
       },
     })
   } catch (err) {

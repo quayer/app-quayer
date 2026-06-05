@@ -378,6 +378,7 @@ erDiagram
 | **2026-06-03** | **`add_knowledge_rag`** | **`CREATE EXTENSION vector` + `knowledge_collections`/`knowledge_sources`/`knowledge_chunks` (coluna `embedding vector(1536)` + índice HNSW) + FK reativada `AIAgentConfig.ragCollectionId` — Wave RAG** |
 | **2026-06-04** | **`add_agent_runtime_decisions`** | **Novo `agent_runtime_decisions` (1 registro/turno: modelo/fallback, RAG, skills, tools, tokens, custo, latência, status). Sem FK (log de alta escrita) — Wave Orayon** |
 | **2026-06-04** | **`add_pricing_catalog`** | **`price_lists` + `price_items` (catálogo DB-first da tool get_pricing) + `AIAgentConfig.priceListId` FK. Google Sheets sync = fase 2 — Wave Orayon** |
+| **2026-06-05** | **`add_config_hash`** | **`agent_runtime_decisions`: + `config_hash TEXT` nullable (SHA-256 da config efetiva do agente por turno — QH-11)** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 
@@ -424,6 +425,7 @@ erDiagram
         string sessionId
         string agentConfigId
         string executionMode "sync|stream"
+        string configHash "nullable, SHA-256 config efetiva (QH-11)"
         string modelUsed
         bool fallbackTriggered
         bool ragQueried

@@ -27,6 +27,11 @@
 
 import type { ConnectionOptions } from 'bullmq'
 import { Queue, Worker } from 'bullmq'
+import {
+  withTrace,
+  getTraceId,
+  newTraceId,
+} from '@/server/ai-module/ai-agents/infra/trace-context.service'
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -100,6 +105,7 @@ export interface SourceEnrichResult {
  */
 export type RunSourceEnrich = (
   payload: SourceEnrichJobPayload,
+  traceId?: string,
 ) => Promise<SourceEnrichResult>
 
 // ---------------------------------------------------------------------------
@@ -168,12 +174,23 @@ async function loadRunSourceEnrich(): Promise<RunSourceEnrich> {
  */
 export async function enqueueSourceEnrich(
   payload: SourceEnrichJobPayload,
-  options: { redisUrl?: string } = {},
+  options: { redisUrl?: string; traceId?: string } = {},
 ): Promise<void> {
+  // QH-13: anexa o traceId ao payload via withTrace (fail-open: gera um novo se ausente).
+  const traceId = options.traceId ?? newTraceId()
+  const tracedPayload = withTrace(
+    traceId,
+    {
+      organizationId: payload.organizationId,
+      conversationId: payload.conversationId,
+    },
+    payload as unknown as Record<string, unknown>,
+  ) as unknown as SourceEnrichJobPayload & { _trace: unknown }
+
   if (syncFallbackEnabled()) {
     // DEV: roda direto, em background, sem Redis.
     void loadRunSourceEnrich()
-      .then((run) => run(payload))
+      .then((run) => run(payload, traceId))
       .catch((err) => {
         console.error(
           '[source-enrich.queue] sync fallback falhou:',
@@ -200,7 +217,7 @@ export async function enqueueSourceEnrich(
   })
 
   try {
-    await queue.add(SOURCE_ENRICH_JOB_NAME, payload, {
+    await queue.add(SOURCE_ENRICH_JOB_NAME, tracedPayload, {
       // Mesma política de retenção do session-close.
       removeOnComplete: { age: 3600, count: 100 },
       removeOnFail: { age: 24 * 3600, count: 50 },
@@ -230,8 +247,16 @@ export function registerSourceEnrichWorker(
   return new Worker<SourceEnrichJobPayload, SourceEnrichResult>(
     SOURCE_ENRICH_QUEUE,
     async (job) => {
+      // QH-13: extrai traceId do carrier _trace para correlação de logs.
+      const traceId = getTraceId(job.data as unknown as Record<string, unknown>)
+      console.info('[source-enrich.worker] job iniciado', {
+        jobId: job.id,
+        traceId,
+        organizationId: job.data.organizationId,
+        conversationId: job.data.conversationId,
+      })
       const run = await loadRunSourceEnrich()
-      return run(job.data)
+      return run(job.data, traceId)
     },
     { connection },
   )

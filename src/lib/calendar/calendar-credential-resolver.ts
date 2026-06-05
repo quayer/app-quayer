@@ -10,7 +10,7 @@
  */
 
 import { database as db } from '@/server/services/database';
-import { decrypt } from '@/lib/crypto';
+import { decryptToken } from '@/server/ai-module/ai-agents/infra/calendar-crypto.service';
 import { ProviderCategory } from '@prisma/client';
 import { refreshAccessToken } from './google-calendar-oauth';
 import {
@@ -115,10 +115,11 @@ export async function resolveCalendarAccess(
   const creds = parseCredentials(row.credentials);
   if (!creds) return null;
 
-  // 3. Decriptar refreshToken e trocar por access_token fresh.
+  // 3. Decriptar refreshToken e trocar por access_token fresh. (QH-12: AES-256-GCM)
+  // decryptToken é backward-compat: legados sem prefixo "enc:v1:" passam-through.
   let refreshToken: string;
   try {
-    refreshToken = decrypt(creds.refreshToken);
+    refreshToken = decryptToken(creds.refreshToken);
   } catch {
     return null; // ciphertext corrompido / ENCRYPTION_KEY trocada
   }

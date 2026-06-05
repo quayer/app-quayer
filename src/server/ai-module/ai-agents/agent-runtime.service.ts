@@ -78,6 +78,8 @@ import {
   modelForTurn,
   parseMiniModelEnv,
 } from './services/model-router.service'
+// ── QH-11: Config hash ────────────────────────────────────────────────────────
+import { computeConfigHash } from './services/config-hash.service'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,6 +115,8 @@ export interface ProcessAgentMessageParams {
   messageContent: string
   /** Bring-your-own-key: override the default provider API key */
   apiKey?: string
+  /** QH-13: traceId propagado do webhook para correlação de logs cross-worker. */
+  traceId?: string
 }
 
 // ── Tool Result Truncation Wrapper ──────────────────────────────────────────
@@ -647,6 +651,20 @@ async function prepareAgentCall(
     console.warn('[AgentRuntime] checkSessionCostCap failed (fail-open):', err)
   }
 
+  // ── QH-11: Compute config hash (fire-and-forget — erro nunca derruba o agente) ─
+  try {
+    decisionMeta.configHash = computeConfigHash({
+      systemPrompt,
+      tools: decisionMeta.enabledTools,
+      provider: routedProvider,
+      model: routedModel,
+      temperature: agentConfig.temperature ?? undefined,
+      maxTokens: agentConfig.maxTokens ?? undefined,
+    })
+  } catch (err) {
+    console.warn('[AgentRuntime] computeConfigHash failed (ignored):', err)
+  }
+
   return {
     agentConfig,
     promptVersion,
@@ -759,6 +777,15 @@ export async function processAgentMessage(
   }
 
   try {
+  // QH-13: log traceId no início do turno para correlação cross-worker.
+  if (params.traceId) {
+    console.info('[AgentRuntime] turno iniciado', {
+      traceId: params.traceId,
+      sessionId: params.sessionId,
+      organizationId: params.organizationId,
+    })
+  }
+
   const {
     agentConfig,
     promptVersion,

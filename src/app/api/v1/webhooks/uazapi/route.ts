@@ -54,6 +54,7 @@ import {
 } from '@/lib/webhook/inbound-resilience'
 import { checkAndMarkProcessed } from '@/server/ai-module/ai-agents/infra/idempotency.service'
 import { evaluateActivationGate } from '@/lib/webhook/activation-gate'
+import { newTraceId } from '@/server/ai-module/ai-agents/infra/trace-context.service'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -388,6 +389,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // QH-13: gera traceId uma vez por requisição para correlação cross-worker.
+  // Criado aqui (após dedup/validações iniciais) e propagado para o runtime + jobs.
+  const webhookTraceId = newTraceId()
+  console.info('[uazapi-webhook] request recebido', {
+    traceId: webhookTraceId,
+    externalMessageId,
+    contactPhone,
+    direction,
+  })
+
   // 3) Resolve Connection by uazapiInstanceId OR uazapiToken.
   const orClauses: Array<Record<string, string>> = []
   if (payload.instance) orClauses.push({ uazapiInstanceId: payload.instance })
@@ -648,6 +659,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         connectionId: connection.id,
         organizationId,
         messageContent,
+        traceId: webhookTraceId,
       })
 
       const typedResult = result as AgentRuntimeResponse | null

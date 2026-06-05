@@ -31,7 +31,7 @@ import crypto from 'crypto'
 import { Prisma, ProviderCategory } from '@prisma/client'
 
 import { database } from '@/server/services/database'
-import { encrypt } from '@/lib/crypto'
+import { encryptToken } from '@/server/ai-module/ai-agents/infra/calendar-crypto.service'
 import {
   exchangeCode,
   getCalendarEmail,
@@ -256,8 +256,8 @@ export async function GET(request: Request): Promise<NextResponse> {
       calendarEmail = ''
     }
 
-    // ── Encripta refresh_token e persiste OrganizationProvider ───────────────
-    const encryptedRefreshToken = encrypt(tokens.refreshToken)
+    // ── Encripta refresh_token e persiste OrganizationProvider (QH-12: AES-256-GCM) ─
+    const encryptedRefreshToken = encryptToken(tokens.refreshToken)
     await persistCalendarProvider({
       organizationId: connection.organizationId,
       builderProjectId: connection.builderProjectId,

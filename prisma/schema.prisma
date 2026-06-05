@@ -1550,6 +1550,7 @@ model AgentRuntimeDecision {
   sessionId       String
   agentConfigId   String
   promptVersionId String?
+  configHash      String?
   executionMode   String // 'sync' | 'stream' | 'playground'
 
   // Modelo & provider (used pode diferir de primary se houve fallback)
