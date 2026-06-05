@@ -4,17 +4,26 @@
  *
  * Fluxo:
  *   1. Busca Connection (token + baseUrl)
- *   2. Quebra agentText em blocos respeitando parágrafos (`\n\n`), até 800 chars
- *   3. Para cada bloco: envia via sender (UAZapi), marca bot-echo no Redis
- *   4. Persiste 1 Message OUTBOUND no Postgres com waMessageId do primeiro
+ *   2. Rate-limit (token bucket por contato + por org) — barra o turno se estourar
+ *   3. Quebra agentText em blocos respeitando parágrafos (`\n\n`), até 800 chars
+ *   4. Para cada bloco: envia via sender (UAZapi) com retry+backoff exponencial;
+ *      ao esgotar tentativas, manda o payload para a dead-letter list. Marca
+ *      bot-echo no Redis nos envios bem-sucedidos.
+ *   5. Persiste 1 Message OUTBOUND no Postgres com waMessageId do primeiro
  *      envio bem-sucedido
  *
  * Dependências injetadas (deps pattern) para facilitar testes — sem vi.mock global.
+ *
+ * Resiliência (padrões Orayon — ver outbound-rate-limit.ts / outbound-deadletter.ts):
+ *   - Rate-limit por contato + por org via Redis (INCR + EXPIRE, fail-open).
+ *   - Retry com backoff exponencial (2^n*500ms, cap 30s, máx 3) por bloco.
+ *   - Dead-letter (Redis list `outbound:deadletter`) ao esgotar retries.
  *
  * Importante:
  *   - Erros em blocos individuais não abortam os próximos (resiliência).
  *   - markBotMessage só é chamado em envios bem-sucedidos (evita echo zumbi).
  *   - Se 0 blocos forem enviados, NADA é persistido (não polui o histórico).
+ *   - Rate-limit estourado → `rateLimited: true` e NADA é enviado.
  */
 
 import { parseTags, type ParsedTag } from './tag-parser.service'
@@ -27,6 +36,8 @@ import type {
   SendListPayload,
 } from './uazapi-sender.service'
 import { synthesizeTtsToMediaUrl } from './tts.service'
+import { checkOutboundRateLimit } from './outbound-rate-limit'
+import { sendWithRetry } from './outbound-deadletter'
 import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
 
 // ---------------------------------------------------------------------------
@@ -62,6 +73,11 @@ export interface OutboundResult {
   blocksSent: number
   persisted: boolean
   errors: string[]
+  /**
+   * `true` quando o turno foi barrado por rate-limit (contato ou org) e NADA
+   * foi enviado. O caller isola isso como uma não-falha de infra.
+   */
+  rateLimited?: boolean
 }
 
 /**
@@ -196,22 +212,41 @@ export async function sendAgentResponse(
 
   const baseUrl = connection.uazapiBaseUrl ?? FALLBACK_BASE_URL
 
-  // 2. Parse tags ricas + split de texto puro
+  // 2. Rate-limit (Orayon token bucket: por contato + por org). Consome cota
+  //    UMA vez por turno — não dentro do loop de blocos. Fail-open por dentro.
+  const rl = await checkOutboundRateLimit(req.organizationId, req.contactPhone)
+  if (!rl.allowed) {
+    const msg = `rate_limited scope=${rl.scope} current=${rl.current} limit=${rl.limit} org=${req.organizationId}`
+    console.warn(`[outbound] ${msg}`)
+    errors.push(msg)
+    return { blocksSent: 0, persisted: false, errors, rateLimited: true }
+  }
+
+  // 3. Parse tags ricas + split de texto puro
   const blocks = buildOutboundBlocks(req.agentText, MAX_BLOCK_CHARS)
 
-  // 3. Envio sequencial + bot-echo tracking
+  // 4. Envio sequencial + bot-echo tracking. Cada bloco usa retry+backoff
+  //    exponencial; ao esgotar, vai para a dead-letter (sem derrubar o turno).
   let blocksSent = 0
   let firstSuccessMessageId: string | undefined
 
   for (const block of blocks) {
-    const result = await sendBlock(
-      deps.sender,
-      connection.uazapiToken,
-      baseUrl,
-      req.contactPhone,
-      block,
-      req.organizationId,
-      req.tts,
+    const result = await sendWithRetry(
+      () =>
+        sendBlock(
+          deps.sender,
+          connection.uazapiToken as string,
+          baseUrl,
+          req.contactPhone,
+          block,
+          req.organizationId,
+          req.tts,
+        ),
+      {
+        organizationId: req.organizationId,
+        phone: req.contactPhone,
+        text: block.content,
+      },
     )
 
     if (result.success) {
@@ -226,7 +261,7 @@ export async function sendAgentResponse(
     }
   }
 
-  // 4. Persistência (só se enviou algo)
+  // 5. Persistência (só se enviou algo)
   if (blocksSent === 0) {
     return { blocksSent: 0, persisted: false, errors }
   }

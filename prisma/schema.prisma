@@ -1116,6 +1116,26 @@ model Message {
   @@index([createdAt])
 }
 
+// ── ContactMemory ─────────────────────────────────────────────────────────────
+// Perfil vitalício do contato (por org + telefone). Diferente do summary por
+// sessão (ChatSession.aiAgentContext.summary), este é um perfil cumulativo que
+// agrega o histórico de TODAS as sessões fechadas: "quem é o cliente, o que
+// quer, histórico". Atualizado a cada fechamento+resumo de sessão e injetado no
+// system prompt do agente (## Perfil do cliente). Multi-tenant por
+// organizationId; sem FK relation (lookup direto por org+phone).
+model ContactMemory {
+  id                String   @id @default(uuid())
+  organizationId    String
+  contactPhone      String // WhatsApp phone number (mesma chave de ChatSession)
+  aggregatedProfile String   @db.Text // perfil cumulativo gerado por LLM
+  sessionCount      Int      @default(0) // nº de sessões já agregadas no perfil
+  updatedAt         DateTime @updatedAt
+
+  @@unique([organizationId, contactPhone])
+  @@index([organizationId])
+  @@map("contact_memories")
+}
+
 enum MessageDirection {
   INBOUND // Recebida
   OUTBOUND // Enviada

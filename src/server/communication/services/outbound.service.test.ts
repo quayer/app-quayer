@@ -14,7 +14,44 @@
  *     e nada de magic global state.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// ---------------------------------------------------------------------------
+// Redis mock — outbound.service agora chama o rate-limiter (INCR/EXPIRE) e a
+// dead-letter (LPUSH/LTRIM). Mockamos getRedis para um stub em memória, assim
+// os testes ficam determinísticos e sem rede. Cada teste pode sobrescrever o
+// comportamento via os spies expostos.
+//
+// vi.hoisted: o factory de vi.mock é içado ao topo do arquivo, então as
+// referências precisam ser criadas via vi.hoisted (também içado) para estarem
+// inicializadas quando o factory roda.
+// ---------------------------------------------------------------------------
+
+const { redisStore, deadLetterPushes, redisMock } = vi.hoisted(() => {
+  const redisStore = new Map<string, number>()
+  const deadLetterPushes: string[] = []
+
+  const redisMock = {
+    incr: vi.fn(async (key: string) => {
+      const next = (redisStore.get(key) ?? 0) + 1
+      redisStore.set(key, next)
+      return next
+    }),
+    expire: vi.fn(async () => 1),
+    lpush: vi.fn(async (_key: string, value: string) => {
+      deadLetterPushes.unshift(value)
+      return deadLetterPushes.length
+    }),
+    ltrim: vi.fn(async () => 'OK'),
+  }
+
+  return { redisStore, deadLetterPushes, redisMock }
+})
+
+vi.mock('@/server/services/redis', () => ({
+  getRedis: () => redisMock,
+  redis: redisMock,
+}))
 
 import {
   sendAgentResponse,
@@ -50,11 +87,19 @@ function buildDeps(overrides: {
   const sendTextResults =
     overrides.sendTextResults ?? [{ success: true, messageId: 'wa-1' }]
 
-  // Cada call consome um resultado da fila; se acabar, repete o último.
-  let callIdx = 0
-  const sendTextMock = vi.fn(async () => {
-    const r = sendTextResults[Math.min(callIdx, sendTextResults.length - 1)]
-    callIdx += 1
+  // Resultado é mapeado por BLOCO (não por call), keyed pelo conteúdo enviado.
+  // Assim, retries do mesmo bloco (resiliência: backoff) retornam o mesmo
+  // resultado determinístico — o N-ésimo bloco distinto recebe o N-ésimo
+  // resultado da fila (repete o último quando a fila acaba).
+  const blockResultByContent = new Map<string, { success: boolean; messageId?: string; error?: string }>()
+  let distinctBlockIdx = 0
+  const sendTextMock = vi.fn(async (...args: unknown[]) => {
+    const content = args[3] as string
+    const existing = blockResultByContent.get(content)
+    if (existing) return existing
+    const r = sendTextResults[Math.min(distinctBlockIdx, sendTextResults.length - 1)]
+    distinctBlockIdx += 1
+    blockResultByContent.set(content, r)
     return r
   })
 
@@ -125,6 +170,8 @@ function buildRequest(overrides: Partial<OutboundRequest> = {}): OutboundRequest
 
 beforeEach(() => {
   vi.clearAllMocks()
+  redisStore.clear()
+  deadLetterPushes.length = 0
 })
 
 // ---------------------------------------------------------------------------
@@ -226,14 +273,21 @@ describe('sendAgentResponse — bot-echo tracking', () => {
     expect(calls[0][0]).toBe(ORG_ID)
   })
 
-  it('não marca bot-echo quando envio falha', async () => {
-    const deps = buildDeps({
-      sendTextResults: [{ success: false, error: 'timeout' }],
-    })
+  it('não marca bot-echo quando envio falha (após esgotar retries)', async () => {
+    vi.useFakeTimers()
+    try {
+      const deps = buildDeps({
+        sendTextResults: [{ success: false, error: 'timeout' }],
+      })
 
-    await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+      const p = sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+      await vi.runAllTimersAsync()
+      await p
 
-    expect(deps._markBotMessageMock).not.toHaveBeenCalled()
+      expect(deps._markBotMessageMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -317,6 +371,21 @@ describe('sendAgentResponse — rich tags', () => {
 })
 
 describe('sendAgentResponse — error resilience', () => {
+  // Backoff usa setTimeout; com timers reais os retries adicionam delay.
+  // Fake timers + runAllTimersAsync mantém o suite rápido e determinístico.
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** Roda a promise concorrentemente, drenando os timers de backoff. */
+  async function runWithTimers<T>(p: Promise<T>): Promise<T> {
+    await vi.runAllTimersAsync()
+    return p
+  }
+
   it('erro em 1 bloco não impede próximos blocos', async () => {
     const deps = buildDeps({
       sendTextResults: [
@@ -327,10 +396,12 @@ describe('sendAgentResponse — error resilience', () => {
     })
     const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}\n\n${'c'.repeat(500)}`
 
-    const res = await sendAgentResponse(buildRequest({ agentText: text }), deps)
+    const res = await runWithTimers(sendAgentResponse(buildRequest({ agentText: text }), deps))
 
-    expect(deps._sendTextMock).toHaveBeenCalledTimes(3)
-    expect(res.blocksSent).toBe(2) // 2 success, 1 fail
+    // 3 blocos distintos; o do meio falha e é retentado até MAX_ATTEMPTS (3).
+    // 1 (bloco ok) + 3 (bloco falho com retries) + 1 (bloco ok) = 5 calls.
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(5)
+    expect(res.blocksSent).toBe(2) // 2 success, 1 fail (após esgotar retries)
     expect(res.errors.length).toBe(1)
     expect(res.errors[0]).toMatch(/rate limited/)
   })
@@ -344,7 +415,7 @@ describe('sendAgentResponse — error resilience', () => {
     })
     const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}`
 
-    const res = await sendAgentResponse(buildRequest({ agentText: text }), deps)
+    const res = await runWithTimers(sendAgentResponse(buildRequest({ agentText: text }), deps))
 
     expect(res.errors.length).toBe(2)
     expect(res.errors.join('|')).toMatch(/err-A/)
@@ -369,31 +440,151 @@ describe('sendAgentResponse — persistence', () => {
     expect(arg.data.contactPhone).toBe(CONTACT_PHONE)
   })
 
-  it('persiste com waMessageId do primeiro envio bem-sucedido', async () => {
-    const deps = buildDeps({
-      sendTextResults: [
-        { success: false, error: 'first failed' },
-        { success: true, messageId: 'wa-second' },
-      ],
-    })
-    const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}`
+  it('persiste com waMessageId do primeiro bloco bem-sucedido', async () => {
+    vi.useFakeTimers()
+    try {
+      const deps = buildDeps({
+        sendTextResults: [
+          { success: false, error: 'first failed' },
+          { success: true, messageId: 'wa-second' },
+        ],
+      })
+      const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}`
 
-    const res = await sendAgentResponse(buildRequest({ agentText: text }), deps)
+      const p = sendAgentResponse(buildRequest({ agentText: text }), deps)
+      await vi.runAllTimersAsync()
+      const res = await p
 
-    expect(res.persisted).toBe(true)
-    const arg = deps._messageCreateMock.mock.calls[0][0] as { data: Record<string, unknown> }
-    expect(arg.data.waMessageId).toBe('wa-second')
+      expect(res.persisted).toBe(true)
+      const arg = deps._messageCreateMock.mock.calls[0][0] as { data: Record<string, unknown> }
+      // 1o bloco falha (esgota retries), 2o bloco sucede → waMessageId = wa-second.
+      expect(arg.data.waMessageId).toBe('wa-second')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('NÃO persiste Message quando nenhum bloco foi enviado', async () => {
-    const deps = buildDeps({
-      sendTextResults: [{ success: false, error: 'no go' }],
-    })
+    vi.useFakeTimers()
+    try {
+      const deps = buildDeps({
+        sendTextResults: [{ success: false, error: 'no go' }],
+      })
+
+      const p = sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+      await vi.runAllTimersAsync()
+      const res = await p
+
+      expect(res.blocksSent).toBe(0)
+      expect(res.persisted).toBe(false)
+      expect(deps._messageCreateMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('sendAgentResponse — rate limit (Orayon token bucket)', () => {
+  it('barra o turno por LIMITE DE CONTATO e não envia nada', async () => {
+    const deps = buildDeps()
+    // Pré-popula a chave do contato no limite (10/min). O 11o INCR estoura.
+    redisStore.set(`outbound:rl:contact:${ORG_ID}:${CONTACT_PHONE}`, 10)
 
     const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
 
+    expect(res.rateLimited).toBe(true)
     expect(res.blocksSent).toBe(0)
     expect(res.persisted).toBe(false)
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
     expect(deps._messageCreateMock).not.toHaveBeenCalled()
+    expect(res.errors[0]).toMatch(/rate_limited scope=contact/)
+  })
+
+  it('barra o turno por LIMITE DE ORG (contato ok, org estourada)', async () => {
+    const deps = buildDeps()
+    redisStore.set(`outbound:rl:org:${ORG_ID}`, 100) // org no limite (100/min)
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.rateLimited).toBe(true)
+    expect(res.blocksSent).toBe(0)
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
+    expect(res.errors[0]).toMatch(/rate_limited scope=org/)
+  })
+
+  it('consome cota UMA vez por turno (1 INCR de contato + 1 de org)', async () => {
+    const deps = buildDeps()
+
+    await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    // Mesmo com vários blocos seria 1 check; aqui 1 bloco → 2 INCR (contato+org).
+    expect(redisMock.incr).toHaveBeenCalledTimes(2)
+    expect(redisMock.incr).toHaveBeenCalledWith(
+      `outbound:rl:contact:${ORG_ID}:${CONTACT_PHONE}`,
+    )
+    expect(redisMock.incr).toHaveBeenCalledWith(`outbound:rl:org:${ORG_ID}`)
+  })
+
+  it('fail-open: Redis com erro no INCR não barra o envio', async () => {
+    const deps = buildDeps()
+    redisMock.incr.mockRejectedValueOnce(new Error('redis down'))
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.rateLimited).toBeUndefined()
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sendAgentResponse — dead-letter + backoff', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('empurra payload na dead-letter ao esgotar retries', async () => {
+    const deps = buildDeps({
+      sendTextResults: [{ success: false, error: 'uaz 500' }],
+    })
+
+    const p = sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+    await vi.runAllTimersAsync()
+    const res = await p
+
+    expect(res.blocksSent).toBe(0)
+    // 1 bloco falho retentado MAX_ATTEMPTS (3) vezes.
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(3)
+    expect(redisMock.lpush).toHaveBeenCalledTimes(1)
+    expect(redisMock.ltrim).toHaveBeenCalledTimes(1)
+
+    const payload = JSON.parse(deadLetterPushes[0]) as Record<string, unknown>
+    expect(payload.organizationId).toBe(ORG_ID)
+    expect(payload.phone).toBe(CONTACT_PHONE)
+    expect(payload.text).toBe('oi')
+    expect(payload.error).toMatch(/uaz 500/)
+    expect(typeof payload.timestamp).toBe('string')
+  })
+
+  it('retry bem-sucedido NÃO vai para dead-letter', async () => {
+    // Mesmo bloco: 1a tentativa falha (exceção), 2a sucede.
+    let calls = 0
+    const deps = buildDeps()
+    deps._sendTextMock.mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) throw new Error('transient network blip')
+      return { success: true, messageId: 'wa-ok' }
+    })
+
+    const p = sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+    await vi.runAllTimersAsync()
+    const res = await p
+
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(2)
+    expect(redisMock.lpush).not.toHaveBeenCalled()
+    expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'wa-ok')
   })
 })

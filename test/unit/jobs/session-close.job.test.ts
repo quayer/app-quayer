@@ -17,9 +17,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock do agent-runtime: só precisamos da função summarizeSessionOnClose.
+// Mock do session-summary.service: só precisamos da função
+// summarizeSessionOnClose (o job passou a importar daqui — orquestrador
+// idempotente com modelo barato + ContactMemory).
 const summarizeMock = vi.fn()
-vi.mock('@/server/ai-module/ai-agents/agent-runtime.service', () => ({
+vi.mock('@/server/ai-module/ai-agents/services/session-summary.service', () => ({
   summarizeSessionOnClose: (...args: unknown[]) => summarizeMock(...args),
 }))
 
@@ -51,6 +53,11 @@ function makeDb(opts?: {
       findMany: (async (args: FindManyArgs) => {
         findManyCalls.push(args)
         if (opts?.findManyImpl) return opts.findManyImpl(args) as never
+        // O batch faz DUAS queries: stale (status != CLOSED) e closed-sem-summary
+        // (status = CLOSED). Por default retornamos os rows apenas para a query
+        // stale; a closed devolve [] para não duplicar a contagem dos testes.
+        const where = (args as { where?: { status?: unknown } })?.where
+        if (where?.status === 'CLOSED') return [] as never
         return (opts?.findManyResult ?? []) as never
       }) as SessionClosePrismaLike['chatSession']['findMany'],
       update: (async (args: UpdateArgs) => {

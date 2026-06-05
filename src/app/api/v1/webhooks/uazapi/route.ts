@@ -48,6 +48,10 @@ import {
 } from '@/server/communication/services/language-detection.service'
 import * as uazapiSender from '@/server/communication/services/uazapi-sender.service'
 import { getRedis } from '@/server/services/redis'
+import {
+  isDuplicateInbound,
+  pauseAiForOperatorTakeover,
+} from '@/lib/webhook/inbound-resilience'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -329,6 +333,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const direction: 'IN' | 'OUT' =
     data.direction === 'OUT' || data.fromMe === true ? 'OUT' : 'IN'
 
+  // 2.6) Idempotent dedup (Orayon: sha256(instance:messageId)). UAZapi and the
+  // brokers in front of it retry-storm webhooks; without this gate the same
+  // physical INBOUND message is processed twice → duplicate AI reply + double
+  // LLM/STT cost. Claim the fingerprint in Redis (SET NX EX 24h); first writer
+  // wins, any later delivery is flagged as a duplicate and short-circuits BEFORE
+  // the pipeline/dispatch. Gated to IN only — OUT echoes/operator messages are
+  // already deduped by the bot-echo guard / are cheap to re-stamp. Fail-open:
+  // if Redis is down `isDuplicateInbound` returns false and we process normally.
+  if (direction === 'IN') {
+    let dedupRedis: ReturnType<typeof getRedis> | null = null
+    try {
+      dedupRedis = getRedis()
+    } catch {
+      dedupRedis = null
+    }
+    const instanceForDedup = payload.instance ?? payload.token ?? ''
+    const duplicate = await isDuplicateInbound(
+      dedupRedis,
+      instanceForDedup,
+      externalMessageId,
+    )
+    if (duplicate) {
+      return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
+    }
+  }
+
   // 3) Resolve Connection by uazapiInstanceId OR uazapiToken.
   const orClauses: Array<Record<string, string>> = []
   if (payload.instance) orClauses.push({ uazapiInstanceId: payload.instance })
@@ -484,6 +514,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       } as never,
     })
     session = created as unknown as SessionLite
+  }
+
+  // 6.5) Operator takeover (Orayon: human assumes → pause AI). Reaching here
+  // with direction=OUT means it is NOT a bot echo (the guard above returned
+  // early for echoes) → a human operator replied straight from the WhatsApp
+  // app. Pause the AI for a 15min cooldown by stamping `aiBlockedUntil` (the
+  // same field `canDispatchAi` checks) so the bot doesn't talk over the human.
+  // Best-effort + defensive: failures never abort the webhook. We use the
+  // existing session here (humans only reply to existing conversations); if a
+  // brand-new session was just created we still pause it — harmless and matches
+  // "human is now driving this contact".
+  if (direction === 'OUT' && author === 'AGENT') {
+    await pauseAiForOperatorTakeover(
+      database as unknown as Parameters<typeof pauseAiForOperatorTakeover>[0],
+      session.id,
+    )
   }
 
   // 7) Create Message row (using enrichedContent — e.g. Whisper transcription).

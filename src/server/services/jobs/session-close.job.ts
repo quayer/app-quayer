@@ -95,6 +95,56 @@ export async function findStaleSessions(
 }
 
 /**
+ * Encontra sessões JÁ CLOSED que nunca ganharam summary (aiAgentContext IS
+ * NULL). Cobre o gap do fechamento MANUAL: quando alguém encerra a sessão na
+ * UI/DB direto, o status vira CLOSED mas nenhum summary é gerado, então o
+ * filtro de findStaleSessions (status != CLOSED) nunca a pega. Aqui resumimos
+ * sem reabrir/retocar closedAt — apenas persistimos a long-term memory.
+ *
+ * Idempotente: depois do summary persistido a sessão sai do scope (passa a ter
+ * aiAgentContext). summarizeSessionOnClose também é no-op se já houver summary.
+ */
+export async function findClosedUnsummarizedSessions(
+  database: SessionClosePrismaLike,
+  config: SessionCloseJobConfig = {},
+): Promise<StaleSession[]> {
+  const batchSize = config.batchSize ?? DEFAULT_BATCH_SIZE
+
+  const rows = await database.chatSession.findMany({
+    where: {
+      status: 'CLOSED',
+      aiAgentContext: { equals: Prisma.DbNull },
+    },
+    select: { id: true, contactPhone: true },
+    take: batchSize,
+  })
+
+  return rows as StaleSession[]
+}
+
+/**
+ * Resume uma sessão JÁ fechada (manual close) sem alterar status/closedAt.
+ * Fail-safe: nunca lança. Retorna se gerou summary.
+ */
+export async function summarizeClosedSession(
+  sessionId: string,
+  openaiApiKey?: string,
+): Promise<boolean> {
+  try {
+    const mod = await import(
+      '@/server/ai-module/ai-agents/services/session-summary.service'
+    )
+    return await mod.summarizeSessionOnClose(sessionId, openaiApiKey)
+  } catch (err) {
+    console.warn(
+      '[session-close.job] summarizeClosedSession threw (ignored):',
+      (err as Error)?.message ?? err,
+    )
+    return false
+  }
+}
+
+/**
  * Fecha uma sessão individual:
  *   1. Tenta summarizeSessionOnClose (import dinâmico para evitar ciclo).
  *   2. Marca CLOSED + closedAt.
@@ -110,7 +160,9 @@ export async function closeStaleSession(
   let summarized = false
 
   try {
-    const mod = await import('@/server/ai-module/ai-agents/agent-runtime.service')
+    const mod = await import(
+      '@/server/ai-module/ai-agents/services/session-summary.service'
+    )
     summarized = await mod.summarizeSessionOnClose(sessionId, openaiApiKey)
   } catch (err) {
     // Logamos mas não propagamos — fechar a sessão é prioridade.
@@ -173,6 +225,23 @@ export async function runSessionCloseBatch(
       )
       errors += 1
     }
+  }
+
+  // Gap do fechamento manual: sessões já CLOSED sem summary. Apenas resumimos
+  // (não tocamos status/closedAt). Falha de summarize não conta como error de
+  // fechamento — a sessão já está fechada.
+  try {
+    const closedPending = await findClosedUnsummarizedSessions(database, config)
+    for (const s of closedPending) {
+      processed += 1
+      const ok = await summarizeClosedSession(s.id, config.openaiApiKey)
+      if (ok) summarized += 1
+    }
+  } catch (err) {
+    console.error(
+      '[session-close.job] failed to process closed-unsummarized batch:',
+      (err as Error)?.message ?? err,
+    )
   }
 
   return { processed, summarized, errors }

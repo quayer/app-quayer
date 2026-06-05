@@ -49,6 +49,7 @@ import {
   loadPreviousSessionSummary,
   type PrismaLike as SessionSummaryPrismaLike,
 } from './services/session-summary.service'
+import { loadContactMemory } from '@/server/communication/services/contact-memory.service'
 import {
   loadSkillsFromDirectory,
 } from './services/skill-registry.service'
@@ -349,6 +350,23 @@ async function prepareAgentCall(
       '[AgentRuntime] loadPreviousSessionSummary failed (ignored):',
       err,
     )
+  }
+
+  // 2a-bis. Lifelong contact memory: perfil cumulativo do contato (todas as
+  // sessões fechadas, não só a última). Injetado após o resumo da sessão
+  // anterior. Wrap em try/catch — falha de memória nunca derruba o agente.
+  // Nota: params.contactId carrega o telefone do contato (mesma chave usada em
+  // loadPreviousSessionSummary acima).
+  try {
+    const contactMemory = await loadContactMemory(
+      params.organizationId,
+      params.contactId,
+    )
+    if (contactMemory?.aggregatedProfile) {
+      systemPrompt = `${systemPrompt}\n\n## Perfil do cliente\n\n${contactMemory.aggregatedProfile}`
+    }
+  } catch (err) {
+    console.warn('[AgentRuntime] loadContactMemory failed (ignored):', err)
   }
 
   // 2b. Conditional skills: carrega skills do registry (.claude/skills/agent)

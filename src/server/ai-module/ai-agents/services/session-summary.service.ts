@@ -15,7 +15,14 @@
  *  - persistSessionSummary(db, sessionId, summary): persiste em aiAgentContext.
  *  - loadPreviousSessionSummary(db, phone, orgId, options?): lê última sessão
  *    CLOSED do mesmo contato.
+ *  - summarizeSessionOnClose(sessionId): orquestrador idempotente — busca
+ *    mensagens, resume com modelo barato (haiku → fallback OpenAI), persiste e
+ *    agrega o ContactMemory. No-op se a sessão já tem summary. Fail-safe.
  */
+
+import { generateText } from 'ai'
+import { database } from '@/server/services/database'
+import { getModel } from './provider-factory'
 
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions'
 const DEFAULT_MODEL = 'gpt-4o-mini'
@@ -23,6 +30,15 @@ const DEFAULT_MAX_WORDS = 200
 const DEFAULT_LANGUAGE = 'pt-BR'
 const MIN_MESSAGES_TO_SUMMARIZE = 3
 const OPENAI_MAX_TOKENS = 500
+
+// summarizeSessionOnClose: modelo barato + limite de tamanho do resumo.
+const CHEAP_PROVIDER_ANTHROPIC = 'anthropic'
+const CHEAP_MODEL_HAIKU = 'claude-3-5-haiku-20241022'
+const CHEAP_PROVIDER_OPENAI = 'openai'
+const CHEAP_MODEL_OPENAI = 'gpt-4o-mini'
+const ON_CLOSE_MAX_WORDS = 130
+const ON_CLOSE_SUMMARY_MAX_CHARS = 600
+const ON_CLOSE_MAX_OUTPUT_TOKENS = 320
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,5 +257,139 @@ export async function loadPreviousSessionSummary(
       err instanceof Error ? err.message : err
     )
     return null
+  }
+}
+
+// ── summarizeSessionOnClose (orquestrador idempotente) ───────────────────────
+//
+// Único ponto que QUALQUER caminho de fechamento (job de inatividade OU
+// encerramento manual via UI) deve chamar. Garante long-term memory mesmo
+// quando a sessão é fechada à mão (o filtro do job só pega inativas).
+//
+// Idempotente: se aiAgentContext.summary já existe, é no-op (true) — re-rodar
+// é seguro. Usa modelo barato (anthropic haiku → fallback OpenAI direto via
+// fetch). Trunca o resumo a ~600 chars. Fail-safe: nunca lança, retorna false
+// em qualquer falha para não derrubar o fechamento.
+
+interface OnCloseSessionRow {
+  id: string
+  organizationId: string
+  contactPhone: string
+  aiAgentContext: unknown
+}
+
+async function generateCheapSummary(
+  messages: Array<{ role: string; content: string }>,
+): Promise<SessionSummary | null> {
+  if (messages.length < MIN_MESSAGES_TO_SUMMARIZE) return null
+
+  const hasAnthropic = Boolean(
+    process.env.ANTHROPIC_API_KEY || process.env.LITELLM_MASTER_KEY,
+  )
+  const provider = hasAnthropic ? CHEAP_PROVIDER_ANTHROPIC : CHEAP_PROVIDER_OPENAI
+  const model = hasAnthropic ? CHEAP_MODEL_HAIKU : CHEAP_MODEL_OPENAI
+
+  // Sem nenhuma key utilizável → tenta o caminho fetch/OpenAI clássico.
+  if (!hasAnthropic && !process.env.OPENAI_API_KEY) return null
+
+  try {
+    const result = await generateText({
+      model: getModel(provider, model),
+      system: buildSystemPrompt(ON_CLOSE_MAX_WORDS, DEFAULT_LANGUAGE),
+      prompt: buildUserPrompt(messages),
+      maxOutputTokens: ON_CLOSE_MAX_OUTPUT_TOKENS,
+    })
+    const content = result.text?.trim()
+    if (!content) return null
+    return {
+      summary: content.slice(0, ON_CLOSE_SUMMARY_MAX_CHARS).trimEnd(),
+      generatedAt: new Date().toISOString(),
+      messageCount: messages.length,
+      model,
+    }
+  } catch (err) {
+    console.warn(
+      '[session-summary] cheap summarize failed, fallback to OpenAI fetch:',
+      err instanceof Error ? err.message : err,
+    )
+    // Fallback: caminho fetch/OpenAI já testado.
+    if (!process.env.OPENAI_API_KEY) return null
+    const fallback = await summarizeSession(messages, {
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      maxWords: ON_CLOSE_MAX_WORDS,
+    })
+    if (!fallback) return null
+    return {
+      ...fallback,
+      summary: fallback.summary.slice(0, ON_CLOSE_SUMMARY_MAX_CHARS).trimEnd(),
+    }
+  }
+}
+
+export async function summarizeSessionOnClose(
+  sessionId: string,
+  _openaiApiKey?: string,
+): Promise<boolean> {
+  try {
+    const session = (await database.chatSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        organizationId: true,
+        contactPhone: true,
+        aiAgentContext: true,
+      },
+    })) as OnCloseSessionRow | null
+
+    if (!session) return false
+
+    // Idempotência: já tem summary persistido → no-op.
+    if (extractStoredSummary(session.aiAgentContext)) return true
+
+    const rows = await database.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+      select: { content: true, direction: true },
+    })
+    const formatted = rows.map((m) => ({
+      role: m.direction === 'INBOUND' ? 'user' : 'assistant',
+      content: m.content || '',
+    }))
+
+    const summary = await generateCheapSummary(formatted)
+    if (!summary) return false
+
+    const persisted = await persistSessionSummary(
+      database as unknown as PrismaLike,
+      sessionId,
+      summary,
+    )
+    if (!persisted) return false
+
+    // Agrega o ContactMemory (perfil vitalício). Dynamic import evita ciclo;
+    // try/catch dedicado garante que falha de memória não derruba o fechamento.
+    try {
+      const mod = await import(
+        '@/server/communication/services/contact-memory.service'
+      )
+      await mod.updateContactMemoryFromSummary(
+        session.organizationId,
+        session.contactPhone,
+        summary.summary,
+      )
+    } catch (err) {
+      console.warn(
+        '[session-summary] contact-memory update failed (ignored):',
+        err instanceof Error ? err.message : err,
+      )
+    }
+
+    return true
+  } catch (err) {
+    console.warn(
+      '[session-summary] summarizeSessionOnClose failed:',
+      err instanceof Error ? err.message : err,
+    )
+    return false
   }
 }
