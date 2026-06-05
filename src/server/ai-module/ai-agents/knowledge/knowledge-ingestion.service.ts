@@ -11,6 +11,11 @@
  *
  * v1: ingestão SÍNCRONA (chamada pela rota). Migrar para job BullMQ quando
  * coleções ficarem grandes (ver docs/backlog).
+ *
+ * O texto cru extraído é devolvido em `IngestResult.extractedText` (caminho de
+ * sucesso) para que o job `quayer:source-enrich` do Builder sintetize campos
+ * propostos a partir do MESMO fetch — sem re-baixar a URL/IG nem reexecutar o
+ * fetcher com guarda SSRF. Não é persistido; vive só no retorno.
  */
 
 import crypto from 'crypto'
@@ -42,6 +47,14 @@ export interface IngestResult {
   status: 'ready' | 'error'
   chunkCount: number
   error?: string
+  /**
+   * Raw text extracted from the source BEFORE chunking. Populated on the success
+   * path so downstream consumers (the Builder `quayer:source-enrich` job) can
+   * synthesize proposed fields from the same fetch — no second network round-trip,
+   * no re-running the SSRF-guarded fetcher. Undefined when extraction produced no
+   * text or the ingestion errored. Not persisted; lives only in the return value.
+   */
+  extractedText?: string
 }
 
 interface SourceRow {
@@ -139,7 +152,7 @@ export async function ingestSource(
       where: { id: sourceId },
       data: { status: 'ready', chunkCount: chunks.length, error: null, updatedAt: new Date() },
     })
-    return { sourceId, status: 'ready', chunkCount: chunks.length }
+    return { sourceId, status: 'ready', chunkCount: chunks.length, extractedText: text }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[KnowledgeIngestion] falha ao ingerir', sourceId, message)

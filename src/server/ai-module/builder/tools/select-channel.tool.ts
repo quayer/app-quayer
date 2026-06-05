@@ -35,8 +35,12 @@ export interface BuilderToolExecutionContext {
 /**
  * Canonical channel catalog. Mirrors the keys used on the frontend
  * ChannelPickerCard so the dispatcher can render without a mapping.
+ *
+ * SINGLE SOURCE OF TRUTH: `card-submit.schemas.ts` derives its `CHANNEL_KEYS`
+ * (the Zod enum + server-side re-validation gate) from `CHANNEL_KEYS` below, so
+ * the catalog and the card contract can never drift.
  */
-const CHANNEL_CATALOG = [
+export const CHANNEL_CATALOG = [
   {
     key: 'cloudapi' as const,
     title: 'WhatsApp Cloud API',
@@ -55,7 +59,18 @@ const CHANNEL_CATALOG = [
     description: 'DMs via Meta Graph API. Requer Meta App + webhook.',
     requiresApproval: true,
   },
+] as const
+
+/**
+ * Canonical channel keys, derived from `CHANNEL_CATALOG`. This is the ONE source
+ * of truth consumed by `card-submit.schemas.ts` (Zod enum + isValidChannelKey).
+ * Typed as a non-empty tuple so `z.enum(...)` accepts it directly.
+ */
+export const CHANNEL_KEYS = CHANNEL_CATALOG.map((c) => c.key) as [
+  (typeof CHANNEL_CATALOG)[number]['key'],
+  ...(typeof CHANNEL_CATALOG)[number]['key'][],
 ]
+export type ChannelKey = (typeof CHANNEL_KEYS)[number]
 
 // ---------------------------------------------------------------------------
 // Tool factory

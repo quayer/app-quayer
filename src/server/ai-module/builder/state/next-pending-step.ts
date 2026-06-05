@@ -1,0 +1,473 @@
+/**
+ * Builder Module — nextPendingStep (Orayon Uplift, W2 foundation)
+ *
+ * The deterministic heart of the step-engine. A SINGLE pure function decides
+ * which journey step comes next from a `BuilderState` + live `StepEngineContext`,
+ * computes a monotonic completeness %, and turns the 6 prose pre-deploy checks
+ * (whatsapp-agent-system-prompt.ts) into typed `blockers[]` reusing the
+ * deploy-runner vocabulary (agent | prompt | version | channel | plan | byok).
+ *
+ * NO IO. NO `any`. 100% testable. The resolver layer (readiness-resolver.ts)
+ * feeds it the live signals; the journey banner + UI read its output.
+ *
+ * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md.
+ */
+
+import type {
+  BuilderState,
+  ConfirmationKey,
+} from '../cards/builder-state'
+import { CHANNEL_KEYS } from '../cards/card-submit.schemas'
+import type {
+  Readiness,
+  ReadinessBlocker,
+  ReadinessStep,
+  StepEngineContext,
+  StepId,
+  FieldOwnership,
+} from './readiness.types'
+
+// ==========================================
+// Tunables
+// ==========================================
+
+/** Minimum system-prompt length treated as "a real prompt" (mirrors deploy-runner). */
+export const MIN_PROMPT_LENGTH = 50
+
+/** Canonical channel keys (catálogo). A bogus key can't satisfy the channel gate. */
+const CHANNEL_KEY_SET: ReadonlySet<string> = new Set(CHANNEL_KEYS)
+
+/** Redirect targets for blockers that need the user to leave the chat. */
+const REDIRECT_PLAN = '/conta'
+// NOTE: publish-agent.tool.ts uses '/configuracoes/provedores', but that page
+// does not exist — the real BYOK page is '/integracoes'. Using the real route.
+const REDIRECT_BYOK = '/integracoes'
+const REDIRECT_CHANNEL = '/canais'
+
+// ==========================================
+// QUAYER_STEPS — the ordered journey
+// ==========================================
+
+/**
+ * A step definition. `isDone` is a pure predicate over (state, ctx); `requiredPaths`
+ * are the canonical `BuilderState` field paths the step gates on (surfaced as
+ * `requiredMissing` while incomplete).
+ */
+interface StepDefinition {
+  id: StepId
+  title: string
+  ask: string
+  /** Canonical field paths this step needs filled (for requiredMissing). */
+  requiredPaths: string[]
+  /**
+   * Optional steps never block the journey: they are never surfaced as the
+   * active "next ask" while not-done, and they are excluded from the
+   * `allStepsDone` / `isDeployReady` computation. The user may still complete
+   * them via their inline card at any time.
+   */
+  optional?: boolean
+  /**
+   * Whether this step currently applies given the state (default: always). A
+   * non-applicable step is treated as satisfied/non-blocking and is excluded
+   * from the completeness ratio (so it neither counts as progress nor against
+   * it). Used by the action-gated team/calendar steps.
+   */
+  applies?: (state: BuilderState) => boolean
+  /** True when the step is satisfied. Pure. */
+  isDone: (state: BuilderState, ctx: StepEngineContext) => boolean
+  /** Which paths are still empty given the state (subset of requiredPaths). */
+  missing: (state: BuilderState, ctx: StepEngineContext) => string[]
+}
+
+/** A confirmation sentinel is the canonical "this card was submitted" signal. */
+function confirmed(state: BuilderState, key: ConfirmationKey): boolean {
+  return state.confirmations[key] === true
+}
+
+function hasText(value: string | undefined | null): boolean {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+/** The team/roleta step only applies when the agent notifies a team on qualify. */
+function needsTeam(state: BuilderState): boolean {
+  return state.qualification.action === 'notify_team'
+}
+
+/** The calendar step only applies when the agent books an appointment on qualify. */
+function needsCalendar(state: BuilderState): boolean {
+  return state.qualification.action === 'book_appointment'
+}
+
+/** A channel is selected only if it is a non-empty key in the canonical catálogo. */
+function isValidChannelKey(value: string | undefined | null): boolean {
+  return hasText(value) && CHANNEL_KEY_SET.has(value as string)
+}
+
+/**
+ * Ordered journey lifted from the 8-stage flow + card catalog. Each entry is a
+ * deterministic gate. Order matters: `nextPendingStep` returns the FIRST not-done.
+ */
+export const QUAYER_STEPS: readonly StepDefinition[] = [
+  {
+    id: 'project_identity',
+    title: 'Nome do projeto',
+    ask: 'Qual o nome do projeto?',
+    requiredPaths: ['project.name'],
+    isDone: (s) => hasText(s.project.name),
+    missing: (s) => (hasText(s.project.name) ? [] : ['project.name']),
+  },
+  {
+    id: 'objective',
+    title: 'Objetivo do agente',
+    ask: 'Qual o objetivo do agente? O que ele precisa resolver?',
+    requiredPaths: ['project.objective'],
+    isDone: (s) => hasText(s.project.objective),
+    missing: (s) => (hasText(s.project.objective) ? [] : ['project.objective']),
+  },
+  {
+    id: 'source_ingestion',
+    title: 'Fonte de conhecimento',
+    ask: 'Se quiser, cole o seu site ou Instagram que eu já entendo o negócio — é opcional e você pode pular.',
+    requiredPaths: ['confirmations.source'],
+    // Optional — never blocks the journey nor isDeployReady (see `optional`).
+    // "Done" once the source card was accepted; otherwise simply skipped.
+    optional: true,
+    isDone: (s) => confirmed(s, 'source'),
+    missing: (s) => (confirmed(s, 'source') ? [] : ['confirmations.source']),
+  },
+  {
+    id: 'persona',
+    title: 'Persona do agente',
+    ask: 'Vamos definir o nome, tom e saudação do agente. Use o card de persona.',
+    requiredPaths: ['confirmations.persona'],
+    isDone: (s) => confirmed(s, 'persona'),
+    missing: (s) => (confirmed(s, 'persona') ? [] : ['confirmations.persona']),
+  },
+  {
+    id: 'services',
+    title: 'O que oferece (e o que não)',
+    ask: 'O que o agente oferece e o que ele NÃO faz? Use o card de serviços.',
+    requiredPaths: ['confirmations.services'],
+    isDone: (s) => confirmed(s, 'services'),
+    missing: (s) => (confirmed(s, 'services') ? [] : ['confirmations.services']),
+  },
+  {
+    id: 'business_hours',
+    title: 'Horário de atendimento',
+    ask: 'Qual o horário de atendimento? Use o card de horários.',
+    requiredPaths: ['confirmations.hours'],
+    isDone: (s) => confirmed(s, 'hours'),
+    missing: (s) => (confirmed(s, 'hours') ? [] : ['confirmations.hours']),
+  },
+  {
+    id: 'pricing',
+    title: 'Preços',
+    ask: 'Quer cadastrar preços? Use o card de preços (valores em reais).',
+    requiredPaths: ['confirmations.pricing'],
+    isDone: (s) => confirmed(s, 'pricing'),
+    missing: (s) => (confirmed(s, 'pricing') ? [] : ['confirmations.pricing']),
+  },
+  {
+    id: 'qualification_action',
+    title: 'Ação de qualificação',
+    ask: 'Ao qualificar um lead, o agente deve avisar a equipe, agendar ou só registrar? Use o card.',
+    requiredPaths: ['qualification.action', 'confirmations.qualificationAction'],
+    isDone: (s) => confirmed(s, 'qualificationAction') && hasText(s.qualification.action),
+    missing: (s) => {
+      const out: string[] = []
+      if (!hasText(s.qualification.action)) out.push('qualification.action')
+      if (!confirmed(s, 'qualificationAction')) out.push('confirmations.qualificationAction')
+      return out
+    },
+  },
+  {
+    id: 'qualification_steps',
+    title: 'Perguntas de qualificação',
+    ask: 'Quais perguntas o agente faz para qualificar? Use o card de qualificação.',
+    requiredPaths: ['confirmations.qualificationSteps'],
+    isDone: (s) => confirmed(s, 'qualificationSteps'),
+    missing: (s) =>
+      confirmed(s, 'qualificationSteps') ? [] : ['confirmations.qualificationSteps'],
+  },
+  {
+    id: 'team',
+    title: 'Equipe / roleta',
+    ask: 'Quer montar a equipe para distribuir os atendimentos (roleta)? Use o card de equipe.',
+    requiredPaths: ['confirmations.team'],
+    // Only relevant when the qualification action notifies a team. For
+    // book_appointment / lead_only it is non-applicable, so treat as satisfied.
+    applies: needsTeam,
+    isDone: (s) => !needsTeam(s) || confirmed(s, 'team'),
+    missing: (s) =>
+      !needsTeam(s) || confirmed(s, 'team') ? [] : ['confirmations.team'],
+  },
+  {
+    id: 'calendar',
+    title: 'Agenda',
+    ask: 'Quer conectar uma agenda para o agente marcar horários? Use o card de calendário.',
+    requiredPaths: ['confirmations.calendar'],
+    // Only relevant when the qualification action books an appointment. For
+    // notify_team / lead_only it is non-applicable, so treat as satisfied.
+    applies: needsCalendar,
+    isDone: (s) => !needsCalendar(s) || confirmed(s, 'calendar'),
+    missing: (s) =>
+      !needsCalendar(s) || confirmed(s, 'calendar')
+        ? []
+        : ['confirmations.calendar'],
+  },
+  {
+    id: 'activation',
+    title: 'Modo de ativação',
+    ask: 'Quando o agente deve responder (todas as mensagens, por palavra-chave, etc)? Use o card de ativação.',
+    requiredPaths: ['confirmations.activation'],
+    isDone: (s) => confirmed(s, 'activation'),
+    missing: (s) => (confirmed(s, 'activation') ? [] : ['confirmations.activation']),
+  },
+  {
+    id: 'tools',
+    title: 'Ferramentas',
+    // Inline card (ToolCallCard renders propose_tools) is the surface here.
+    ask: 'Quais capacidades o agente precisa? Selecione no card de ferramentas.',
+    requiredPaths: ['confirmations.tools'],
+    isDone: (s) => confirmed(s, 'tools'),
+    missing: (s) => (confirmed(s, 'tools') ? [] : ['confirmations.tools']),
+  },
+  {
+    id: 'channel',
+    title: 'Canal',
+    // Inline card (ToolCallCard renders propose_channel) is the surface here.
+    ask: 'Em qual canal o agente vai atender? Escolha no card de canais.',
+    requiredPaths: ['selectedChannelKey', 'confirmations.channel'],
+    isDone: (s) => confirmed(s, 'channel') && isValidChannelKey(s.selectedChannelKey),
+    missing: (s) => {
+      const out: string[] = []
+      if (!isValidChannelKey(s.selectedChannelKey)) out.push('selectedChannelKey')
+      if (!confirmed(s, 'channel')) out.push('confirmations.channel')
+      return out
+    },
+  },
+  {
+    id: 'agent_approval',
+    title: 'Aprovação do agente',
+    // Inline card (ToolCallCard renders propose_agent) is the surface here.
+    ask: 'Revise a proposta do agente no card e aprove para eu criar.',
+    requiredPaths: ['confirmations.agentApproved'],
+    isDone: (s) => confirmed(s, 'agentApproved'),
+    missing: (s) =>
+      confirmed(s, 'agentApproved') ? [] : ['confirmations.agentApproved'],
+  },
+  {
+    id: 'summary',
+    title: 'Revisão final',
+    ask: 'Tudo certo? Revise o resumo e confirme para publicar.',
+    requiredPaths: ['confirmations.summary'],
+    isDone: (s) => confirmed(s, 'summary'),
+    missing: (s) => (confirmed(s, 'summary') ? [] : ['confirmations.summary']),
+  },
+] as const
+
+// ==========================================
+// Field ownership map (journey banner: card vs livre)
+// ==========================================
+
+/**
+ * Canonical field path → ownership. 'card' fields MUST be set through their card
+ * (the banner tells the LLM to ask the user to use the card); 'livre' fields can
+ * be captured from free-form chat text.
+ */
+export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
+  'project.name': 'livre',
+  'project.objective': 'livre',
+  'proposal.name': 'livre',
+  'proposal.description': 'livre',
+  'persona.name': 'card',
+  'persona.tone': 'card',
+  'persona.style': 'card',
+  'persona.greeting': 'card',
+  'services.offered': 'card',
+  'services.notOffered': 'card',
+  'hours.preset': 'card',
+  'hours.schedule': 'card',
+  'pricing.items': 'card',
+  'qualification.action': 'card',
+  'qualification.steps': 'card',
+  'team.members': 'card',
+  'calendar.connectionId': 'card',
+  'activation.mode': 'card',
+  'activation.keywords': 'card',
+  'selectedToolKeys': 'card',
+  'selectedChannelKey': 'card',
+  'sourceIngestion.sources': 'card',
+}
+
+// ==========================================
+// Blockers — the 6 pre-deploy checks, typed
+// ==========================================
+
+/**
+ * Maps the 6 prose pre-deploy checks (whatsapp-agent-system-prompt.ts §86-93)
+ * onto typed blockers. PURE — reads only the supplied state + live signals.
+ * Returns every UNCLEARED blocker (no short-circuit) so the UI can list them all.
+ */
+export function computeBlockers(
+  state: BuilderState,
+  ctx: StepEngineContext,
+): ReadinessBlocker[] {
+  const blockers: ReadinessBlocker[] = []
+
+  // 1. Plano ativo.
+  if (!ctx.hasActivePlan) {
+    blockers.push({
+      check: 'plan',
+      message: 'Nenhum plano ativo. Faça upgrade para publicar.',
+      cta: 'Fazer upgrade do plano',
+      redirect: REDIRECT_PLAN,
+    })
+  }
+
+  // 2. BYOK configurado.
+  if (ctx.byokProviderCount === 0) {
+    blockers.push({
+      check: 'byok',
+      message:
+        'Nenhuma chave de IA (BYOK) configurada. Adicione sua própria chave para publicar.',
+      cta: 'Configurar provedor de IA',
+      redirect: REDIRECT_BYOK,
+    })
+  }
+
+  // 3. Agente criado.
+  if (!ctx.agentExists) {
+    blockers.push({
+      check: 'agent',
+      message: 'Nenhum agente criado para este projeto.',
+      cta: 'Crie o agente antes de publicar',
+    })
+  }
+
+  // 4. Prompt presente e suficiente.
+  if (ctx.promptLength < MIN_PROMPT_LENGTH) {
+    blockers.push({
+      check: 'prompt',
+      message: 'Prompt ausente ou muito curto.',
+      cta: 'Gere o prompt do agente',
+    })
+  }
+
+  // 5. Versão de prompt existe.
+  if (ctx.latestVersionNumber == null) {
+    blockers.push({
+      check: 'version',
+      message: 'Nenhuma versão de prompt encontrada.',
+      cta: 'Gere uma versão de prompt',
+    })
+  }
+
+  // 6. Instância WhatsApp conectada.
+  if (!ctx.hasWhatsAppInstance) {
+    blockers.push({
+      check: 'channel',
+      message: 'Nenhum canal WhatsApp configurado.',
+      cta: 'Conecte um canal WhatsApp',
+      redirect: REDIRECT_CHANNEL,
+    })
+  }
+
+  return blockers
+}
+
+// ==========================================
+// Completeness
+// ==========================================
+
+/** A step applies unless its `applies` predicate says otherwise (default: yes). */
+function stepApplies(def: StepDefinition, state: BuilderState): boolean {
+  return def.applies ? def.applies(state) : true
+}
+
+/**
+ * Fraction of the journey that is done, as an integer 0-100. Monotonic:
+ * marking any step done can only increase it. Optional steps count toward the
+ * ratio once completed; non-applicable action-gated steps (team/calendar that
+ * don't match the chosen qualification action) are excluded from BOTH the
+ * numerator and the denominator, so they neither inflate nor block progress.
+ */
+function computeCompletenessPct(
+  state: BuilderState,
+  ctx: StepEngineContext,
+): number {
+  const applicable = QUAYER_STEPS.filter((step) => stepApplies(step, state))
+  const total = applicable.length
+  if (total === 0) return 100
+  const done = applicable.reduce(
+    (acc, step) => acc + (step.isDone(state, ctx) ? 1 : 0),
+    0,
+  )
+  return Math.round((done / total) * 100)
+}
+
+/** Required (non-optional) steps — the set that gates the journey + isDeployReady. */
+const REQUIRED_STEPS: readonly StepDefinition[] = QUAYER_STEPS.filter(
+  (def) => !def.optional,
+)
+
+// ==========================================
+// nextPendingStep — the pure entry point
+// ==========================================
+
+/**
+ * Compute the full `Readiness` from a resolved `BuilderState` + live signals.
+ *
+ * Algorithm:
+ *   1. Build the ordered checklist (`steps`) marking each done/not-done.
+ *   2. Pick the FIRST not-done REQUIRED step as `step` (the next ask). Optional
+ *      steps (e.g. source_ingestion) never block: they are skipped here and the
+ *      scan lands on the next pending required step instead.
+ *   3. `requiredMissing` = the canonical paths still empty for that step.
+ *   4. `completenessPct` = done/total (monotonic).
+ *   5. `blockers` = the 6 typed pre-deploy checks.
+ *   6. `isDeployReady` = all REQUIRED steps done AND zero blockers.
+ *
+ * Never throws. Pure.
+ */
+export function nextPendingStep(
+  state: BuilderState,
+  ctx: StepEngineContext,
+): Readiness {
+  const steps: ReadinessStep[] = QUAYER_STEPS.map((def) => ({
+    id: def.id,
+    title: def.title,
+    done: def.isDone(state, ctx),
+  }))
+
+  // Surface the FIRST not-done REQUIRED step in journey order. Optional steps
+  // never occupy the active-step slot (they would be a dead end when their card
+  // has no usable action), so they are skipped from the surfacing scan — they
+  // are still completable any time via their own inline/card surface.
+  const surfaced: StepDefinition | null =
+    QUAYER_STEPS.find((def) => !def.optional && !def.isDone(state, ctx)) ?? null
+
+  const blockers = computeBlockers(state, ctx)
+  const completenessPct = computeCompletenessPct(state, ctx)
+  // Only required steps gate the journey + deploy. Optional steps never block.
+  const allStepsDone = REQUIRED_STEPS.every((def) => def.isDone(state, ctx))
+  const isDeployReady = allStepsDone && blockers.length === 0
+
+  // When everything is done, surface the summary step as the terminal "ask".
+  const chosen = surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
+  const requiredMissing = surfaced ? surfaced.missing(state, ctx) : []
+
+  return {
+    step: {
+      id: chosen.id,
+      title: chosen.title,
+      ask: chosen.ask,
+    },
+    requiredMissing,
+    completenessPct,
+    isDeployReady,
+    blockers,
+    fieldOwnership: { ...FIELD_OWNERSHIP },
+    steps,
+  }
+}

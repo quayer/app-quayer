@@ -1,14 +1,19 @@
 /**
- * propose_agent_creation — Builder tool (Wave 1.2)
+ * propose_agent_creation — Builder tool (Wave 1.2; Orayon Uplift card-action)
  *
  * Presents a confirmation card BEFORE actually creating an agent. Gives
  * the user an "Ajustar" escape hatch so they don't end up with an agent
  * named/configured wrong after a quick chat.
  *
- * The LLM should call this right before it would otherwise call
- * create_agent. The card's CTA posts a follow-up user message:
- *   - "Criar Agente" → "Pode criar, tá bom assim." (triggers create_agent)
- *   - "Ajustar"       → "Quero ajustar antes — ..." (free-form edit loop)
+ * Presentational only — it does NOT write to the database. The LLM calls this
+ * right before it would otherwise call create_agent. Confirmation no longer
+ * arrives as synthetic user text: the card's "Criar Agente" CTA submits the
+ * `agent_approval` card, which flips the `agentApproved` sentinel in
+ * `builderState` and seeds an authoritative card-action system note. The LLM
+ * reacts to that confirmed state, never to free-form phrases.
+ *
+ * The proposed name/description are stamped on the result so the ACK turn that
+ * follows the card submit has them available for create_agent.
  */
 
 import { tool } from 'ai'
@@ -27,7 +32,7 @@ export function proposeAgentCreationTool(_ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: false },
     tool: tool({
       description:
-        'Proposes creating a new agent by rendering a confirmation card with name + description + "Criar Agente" / "Ajustar" buttons. Call this ONCE to show the proposal. This is a presentational tool — it does NOT write to the database. IMPORTANT: After the user sends any confirmation (e.g., "Pode criar, tá bom assim. 👍", "Pode criar", "Criar agente", "Cria", "Ok", "Sim", "Vai"), call create_agent IMMEDIATELY. Do NOT call propose_agent_creation again after confirmation.',
+        'Proposes creating a new agent by rendering a confirmation card with name + description + "Criar Agente" / "Ajustar" buttons. Call this ONCE to show the proposal, then stop. This is a presentational tool — it does NOT write to the database and does NOT create the agent. Confirmation arrives as deterministic state, not as user text: when the user taps "Criar Agente", the server flips the `agentApproved` sentinel in builderState and injects an authoritative card-action system note. Only when that confirmation is present should you call create_agent (with the same name/description). NEVER infer approval from chat phrases, and do NOT call propose_agent_creation again after it is confirmed.',
       inputSchema: z.object({
         name: z
           .string()
@@ -43,12 +48,14 @@ export function proposeAgentCreationTool(_ctx: BuilderToolExecutionContext) {
           ),
       }),
       execute: async (input) => {
+        // Stamp the proposal so the ACK turn (after the card submit flips
+        // `agentApproved`) can reuse name/description for create_agent.
         return {
           success: true as const,
           proposedName: input.name,
           proposedDescription: input.description,
           message:
-            'Card de aprovação exibido. AGUARDE a próxima mensagem do usuário. Se o usuário confirmar (qualquer mensagem positiva como "Pode criar", "tá bom assim", "Criar agente", "Sim", "Ok", "Vai"), chame create_agent IMEDIATAMENTE com o nome e prompt já gerados. NÃO chame propose_agent_creation novamente.',
+            'Card de aprovação exibido. Pare aqui e aguarde. A confirmação NÃO virá como texto do usuário: quando ele tocar "Criar Agente", o estado marca agentApproved e chega uma nota de sistema autoritativa. Só então chame create_agent com este nome/descrição. Não infira aprovação de frases do chat nem chame propose_agent_creation de novo após confirmado.',
         }
       },
     }),

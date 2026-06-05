@@ -4,12 +4,19 @@
  * Hoje:
  *   - session-close: encerra ChatSession sem atividade recente e dispara
  *     o resumo de longo prazo (aiAgentContext.summary).
+ *   - source-enrich: enriquecimento ASYNC das fontes "cole seu site/IG" do
+ *     Builder (Orayon Uplift W4) — ingestSource() (extract→chunk→embed→pgvector)
+ *     + síntese padrão niche-researcher que escreve SÓ valores PROPOSTOS em
+ *     builderState.sourceIngestion.proposed. A fila/worker vivem em
+ *     ./source-enrich.queue; aqui só re-exportamos o registrar para o boot.
  *
  * Como agendar:
  *   - BullMQ "repeat" via registerSessionCloseQueueSchedule (chamado uma
  *     vez no boot do worker dedicado, ex: scripts/start-workers.ts).
  *   - Cron externo (Vercel Cron / GitHub Actions) pode importar
  *     `runSessionCloseBatch` direto e rodar sem BullMQ, é puro service.
+ *   - source-enrich não é cron: é enfileirado on-demand pelo Builder
+ *     (enqueueSourceEnrich) — o boot só precisa subir o Worker.
  *
  * Convenção: queues sempre prefixadas com "quayer:" no Redis para isolar
  * de outros apps no mesmo cluster.
@@ -25,6 +32,11 @@ import {
   type SessionCloseBatchResult,
   type SessionCloseJobConfig,
 } from './session-close.job'
+import {
+  registerSourceEnrichWorker,
+  SOURCE_ENRICH_QUEUE,
+  SOURCE_ENRICH_JOB_NAME,
+} from './source-enrich.queue'
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -44,7 +56,16 @@ export const REGISTERED_JOBS = {
   sessionClose: {
     queue: SESSION_CLOSE_QUEUE,
     jobName: SESSION_CLOSE_JOB_NAME,
+    // Handler puro: utilizável por cron externo (Vercel / GH Actions) sem BullMQ.
     handler: runSessionCloseBatch,
+  },
+  sourceEnrich: {
+    queue: SOURCE_ENRICH_QUEUE,
+    jobName: SOURCE_ENRICH_JOB_NAME,
+    // On-demand (não-cron): o handler (runSourceEnrich) é lazy-importado pelo
+    // Worker em ./source-enrich.queue p/ não puxar as deps do job no runtime
+    // Next que importa este registry. Boot registra via registerWorker abaixo.
+    registerWorker: registerSourceEnrichWorker,
   },
 } as const
 
@@ -108,6 +129,38 @@ export async function registerSessionCloseQueueSchedule(
   return queue
 }
 
+// ---------------------------------------------------------------------------
+// Boot — sobe todos os workers registrados
+// ---------------------------------------------------------------------------
+
+/**
+ * Sobe TODOS os workers do registry com uma única chamada. É o ponto que o
+ * entrypoint dedicado de workers (ex: scripts/start-workers.ts) deve chamar no
+ * boot — nunca o runtime Next. Mantém a lista de workers num só lugar para que
+ * adicionar um job novo signifique só estender este array.
+ *
+ * Retorna os Workers criados (tipados como Worker genérico) para o caller poder
+ * fazer graceful shutdown (close()) no SIGTERM.
+ */
+export function registerAllWorkers(redisUrl: string): Worker[] {
+  return [
+    registerSessionCloseWorker(redisUrl),
+    // source-enrich: on-demand (enfileirado pelo Builder), worker-only.
+    registerSourceEnrichWorker(redisUrl),
+  ]
+}
+
 // Re-exporta o handler puro para uso por crons externos (Vercel / GH Actions)
 // que não querem subir BullMQ.
 export { runSessionCloseBatch } from './session-close.job'
+
+// Re-exporta a camada de fila do source-enrich (producer + worker registrar +
+// constantes) a partir do registry central para o boot importar de um só lugar.
+export {
+  registerSourceEnrichWorker,
+  enqueueSourceEnrich,
+  SOURCE_ENRICH_QUEUE,
+  SOURCE_ENRICH_JOB_NAME,
+  type SourceEnrichJobPayload,
+  type SourceEnrichResult,
+} from './source-enrich.queue'

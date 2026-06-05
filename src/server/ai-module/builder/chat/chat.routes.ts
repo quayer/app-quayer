@@ -15,6 +15,12 @@ import { ensureBuilderAgent } from '../services/ensure-builder-agent'
 import { persistUserMessage } from './handlers/persist-message'
 import { compactIfNeeded } from './handlers/compact-if-needed'
 import { buildSseResponse } from './sse-stream'
+import { getReadiness } from '../state/readiness-resolver'
+import type { Readiness } from '../state/readiness.types'
+
+import { extractSourceRefs } from '../sources/url-extractor'
+import type { ProjectRow } from '../knowledge/knowledge-helpers'
+import { ingestSourceRefs } from '../sources/ingest-source-refs'
 
 // Local utilities
 const UUID_REGEX =
@@ -35,6 +41,51 @@ function getUser(context: unknown): AuthedUser | null {
     auth?: { session?: { user?: AuthedUser } }
   } | null
   return ctx?.auth?.session?.user ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Source-ingestion hook (Orayon Uplift §5 — "cole seu site/IG")
+// ---------------------------------------------------------------------------
+//
+// When a chat turn pastes a site/Instagram link, we auto-seed the source
+// pipeline (create KnowledgeSource rows → seed builderState.sourceIngestion →
+// enqueue ONE async quayer:source-enrich job). All of that lives in the shared
+// `ingestSourceRefs` helper (also used by the explicit POST /sources/ingest
+// route), which seeds builderState through the race-safe atomic patch. The
+// actual extraction/synthesis runs on the WORKER (or the dev sync-fallback),
+// NEVER inline in this SSE turn.
+//
+// This helper is invoked FIRE-AND-FORGET from sendMessage (`void kickoff…`) so a
+// slow/failed seed can never block or break the response stream.
+
+/** Cap how many refs we auto-ingest from a single chat turn (DoS guard). */
+const MAX_SOURCE_REFS_PER_TURN = 10
+
+/**
+ * Detect pasted site/IG refs in the user message and, if any, kick off the
+ * shared source-ingestion pipeline. Org-scoped on EVERY query (inside the
+ * helper). Never blocks the caller — designed to be fired with `void` and an
+ * attached `.catch`.
+ */
+async function kickoffSourceIngestion(args: {
+  project: ProjectRow
+  conversationId: string
+  organizationId: string
+  userId: string
+  content: string
+}): Promise<void> {
+  const { project, conversationId, organizationId, userId, content } = args
+
+  const refs = extractSourceRefs(content).slice(0, MAX_SOURCE_REFS_PER_TURN)
+  if (refs.length === 0) return
+
+  await ingestSourceRefs({
+    project,
+    conversationId,
+    organizationId,
+    userId,
+    refs,
+  })
 }
 
 // sendMessage — SSE streaming
@@ -84,6 +135,36 @@ const sendMessage = igniter.mutation({
       })
     }
 
+    // Source-ingestion hook ("cole seu site/IG"). If this turn pasted a link,
+    // auto-create the KnowledgeSource rows, seed builderState.sourceIngestion,
+    // and enqueue the async quayer:source-enrich job — FIRE-AND-FORGET so the
+    // ingestion seed/enqueue NEVER blocks (or breaks) the SSE stream. The actual
+    // extract→chunk→embed→synthesize work runs on the worker, never inline here.
+    void kickoffSourceIngestion({
+      project: {
+        id: conversation.project.id,
+        aiAgentId: conversation.project.aiAgentId,
+        metadata: conversation.project.metadata,
+      },
+      conversationId: conversation.id,
+      organizationId: user.currentOrgId,
+      userId: user.id,
+      content,
+    }).catch((err) => {
+      console.warn('[chatRoutes.sendMessage] source-ingestion hook failed:', err)
+    })
+
+    // Deterministic step-engine snapshot for the per-turn journey banner.
+    // Tolerant: a readiness failure must NEVER break the chat stream — fall
+    // back to `undefined`, which makes buildJourneyBanner degrade gracefully.
+    let readiness: Readiness | undefined
+    try {
+      readiness = await getReadiness(conversation.id, user.currentOrgId)
+    } catch (err) {
+      console.warn('[chatRoutes.sendMessage] getReadiness failed:', err)
+      readiness = undefined
+    }
+
     return buildSseResponse({
       agentConfigId: builderAgent.id,
       conversationId: conversation.id,
@@ -92,6 +173,7 @@ const sendMessage = igniter.mutation({
       projectId,
       userMessage: content,
       stateSummary: conversation.stateSummary,
+      readiness,
     })
   },
 })
@@ -145,6 +227,44 @@ const listMessages = igniter.query({
       success: true,
       data: page,
       nextCursor,
+    })
+  },
+})
+
+// getReadiness — deterministic step-engine snapshot for a project
+const getReadinessAction = igniter.query({
+  name: 'Get Builder Project Readiness',
+  description:
+    'Resolve the deterministic step-engine Readiness for a Builder project: next step, completeness, typed deploy blockers, and field ownership. Drives the UI progress view (single source of truth with the prompt banner).',
+  path: '/projects/:id/readiness' as const,
+  method: 'GET',
+  use: [authOrApiKeyProcedure({ required: true })],
+  handler: async ({ request, context, response }) => {
+    const user = getUser(context)
+    if (!user) return response.unauthorized('Não autenticado')
+    if (!user.currentOrgId) {
+      return response.badRequest('Organização não selecionada')
+    }
+
+    const { id: projectId } = request.params as { id: string }
+    if (!projectId || !UUID_REGEX.test(projectId)) {
+      return response.badRequest('projectId inválido')
+    }
+
+    const conversation = await database.builderProjectConversation.findUnique({
+      where: { projectId },
+      select: { id: true, organizationId: true },
+    })
+    if (!conversation) return response.notFound('Conversa não encontrada')
+    if (conversation.organizationId !== user.currentOrgId) {
+      return response.forbidden('Acesso negado a esta conversa')
+    }
+
+    const readiness = await getReadiness(conversation.id, user.currentOrgId)
+
+    return response.json({
+      success: true,
+      data: readiness,
     })
   },
 })
@@ -208,5 +328,6 @@ const compact = igniter.mutation({
 export const chatRoutes = {
   sendMessage,
   listMessages,
+  getReadiness: getReadinessAction,
   compact,
 }
