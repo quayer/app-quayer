@@ -12,7 +12,6 @@ import {
   computeInboundDedupHash,
   isDuplicateInbound,
   pauseAiForOperatorTakeover,
-  OPERATOR_TAKEOVER_PAUSE_MS,
 } from './inbound-resilience'
 
 describe('computeInboundDedupHash', () => {
@@ -82,39 +81,36 @@ describe('isDuplicateInbound', () => {
 })
 
 describe('pauseAiForOperatorTakeover', () => {
-  it('stamps aiBlockedUntil = now + 15min and a reason', async () => {
+  it('disables aiEnabled (pause until session close) and stamps a reason', async () => {
     const update = vi.fn().mockResolvedValue({})
     const db = { chatSession: { update } }
-    const now = 1_000_000_000_000
 
-    const result = await pauseAiForOperatorTakeover(db, 'session-1', now)
+    const result = await pauseAiForOperatorTakeover(db, 'session-1')
 
-    expect(result).toEqual(new Date(now + OPERATOR_TAKEOVER_PAUSE_MS))
+    expect(result).toBe(true)
     expect(update).toHaveBeenCalledTimes(1)
     const arg = update.mock.calls[0][0]
     expect(arg.where).toEqual({ id: 'session-1' })
-    expect(arg.data.aiBlockedUntil).toEqual(new Date(now + OPERATOR_TAKEOVER_PAUSE_MS))
+    expect(arg.data.aiEnabled).toBe(false)
     expect(arg.data.aiBlockReason).toBe('operator_takeover')
+    // Clears any stale time-based block from older logic.
+    expect(arg.data.aiBlockedUntil).toBeNull()
   })
 
-  it('uses a 15-minute cooldown window', () => {
-    expect(OPERATOR_TAKEOVER_PAUSE_MS).toBe(15 * 60 * 1000)
-  })
-
-  it('returns null and swallows the error when the DB update throws', async () => {
+  it('returns false and swallows the error when the DB update throws', async () => {
     const update = vi.fn().mockRejectedValue(new Error('db down'))
     const db = { chatSession: { update } }
 
     const result = await pauseAiForOperatorTakeover(db, 'session-1')
 
-    expect(result).toBeNull()
+    expect(result).toBe(false)
   })
 
-  it('returns null without touching the DB when sessionId is empty', async () => {
+  it('returns false without touching the DB when sessionId is empty', async () => {
     const update = vi.fn()
     const db = { chatSession: { update } }
 
-    expect(await pauseAiForOperatorTakeover(db, '')).toBeNull()
+    expect(await pauseAiForOperatorTakeover(db, '')).toBe(false)
     expect(update).not.toHaveBeenCalled()
   })
 })

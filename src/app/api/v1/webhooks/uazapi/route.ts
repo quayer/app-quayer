@@ -550,8 +550,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 6.5) Operator takeover (Orayon: human assumes → pause AI). Reaching here
   // with direction=OUT means it is NOT a bot echo (the guard above returned
   // early for echoes) → a human operator replied straight from the WhatsApp
-  // app. Pause the AI for a 15min cooldown by stamping `aiBlockedUntil` (the
-  // same field `canDispatchAi` checks) so the bot doesn't talk over the human.
+  // app. Pause the AI *until the session closes* by setting `aiEnabled=false`
+  // (the same field `canDispatchAi` checks) so the bot doesn't talk over the
+  // human for the rest of the conversation. The AI resumes automatically when
+  // the session closes and the contact opens a new one.
   // Best-effort + defensive: failures never abort the webhook. We use the
   // existing session here (humans only reply to existing conversations); if a
   // brand-new session was just created we still pause it — harmless and matches

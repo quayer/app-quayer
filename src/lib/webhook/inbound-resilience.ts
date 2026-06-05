@@ -15,10 +15,12 @@
  *  2. Operator takeover — `pauseAiForOperatorTakeover`
  *     When a human operator replies straight from the WhatsApp app, the message
  *     comes back as an OUT/fromMe webhook that is NOT a bot echo. That signals a
- *     human took over the conversation, so we pause the AI for a cooldown window
- *     (15 min) by stamping `ChatSession.aiBlockedUntil` — the same field
- *     `canDispatchAi` already honours. This stops the bot from talking over the
- *     human agent.
+ *     human took over the conversation, so we pause the AI *until the session
+ *     closes* by setting `ChatSession.aiEnabled = false` — the same field
+ *     `canDispatchAi` already honours. When the session is later closed (manual
+ *     or inactivity) the contact's next message opens a NEW session with
+ *     aiEnabled=true → the AI resumes automatically. This keeps the human in
+ *     control for the whole conversation instead of an arbitrary timer.
  *
  * Fail-open by design: Redis/DB hiccups must never drop a real customer message.
  * Every helper swallows its own errors and degrades to "process normally"
@@ -27,9 +29,6 @@
 
 import { createHash } from 'crypto'
 import type Redis from 'ioredis'
-
-/** Cooldown applied when a human operator takes over (Orayon: 15 minutes). */
-export const OPERATOR_TAKEOVER_PAUSE_MS = 15 * 60 * 1000
 
 /** Dedup key TTL — 24h covers broker retry budgets (Orayon default). */
 const DEDUP_TTL_SECONDS = 24 * 60 * 60
@@ -91,44 +90,48 @@ interface SessionPauser {
   chatSession: {
     update: (args: {
       where: { id: string }
-      data: { aiBlockedUntil: Date; aiBlockReason?: string }
+      data: { aiEnabled?: boolean; aiBlockedUntil?: Date | null; aiBlockReason?: string }
     }) => Promise<unknown>
   }
 }
 
 /**
  * Pauses the AI on a session because a human operator replied from WhatsApp.
- * Sets `aiBlockedUntil = now + OPERATOR_TAKEOVER_PAUSE_MS`, which `canDispatchAi`
- * already checks before dispatching the runtime.
+ * Sets `aiEnabled = false` (pause until the session closes), which `canDispatchAi`
+ * already checks before dispatching the runtime. Also clears any stale
+ * time-based `aiBlockedUntil` left by older logic.
+ *
+ * The AI resumes on its own when the session closes (manual or inactivity) and
+ * the contact's next message opens a fresh session (aiEnabled defaults to true).
+ * An operator can also hand back early via the "return to AI" action.
  *
  * Best-effort + defensive: errors are swallowed (logged) so an outbound operator
- * message never fails the webhook. Returns the timestamp it set on success, or
- * `null` if it skipped/failed.
+ * message never fails the webhook. Returns `true` on success, `false` if it
+ * skipped/failed.
  */
 export async function pauseAiForOperatorTakeover(
   db: SessionPauser,
   sessionId: string,
-  nowMs: number = Date.now(),
-): Promise<Date | null> {
+): Promise<boolean> {
   if (!sessionId) {
-    return null
+    return false
   }
 
-  const blockedUntil = new Date(nowMs + OPERATOR_TAKEOVER_PAUSE_MS)
   try {
     await db.chatSession.update({
       where: { id: sessionId },
       data: {
-        aiBlockedUntil: blockedUntil,
+        aiEnabled: false,
         aiBlockReason: 'operator_takeover',
+        aiBlockedUntil: null,
       },
     })
-    return blockedUntil
+    return true
   } catch (err) {
     console.warn(
       '[uazapi-webhook] operator-takeover pause failed (non-fatal):',
       err instanceof Error ? err.message : String(err),
     )
-    return null
+    return false
   }
 }
