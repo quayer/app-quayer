@@ -17,6 +17,8 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { embed, embedMany } from 'ai'
 
 import { credentialResolver } from '@/lib/providers/credential-resolver.service'
+import { getRedis } from '@/server/services/redis'
+import { readEmbeddingCache, writeEmbeddingCache } from './embedding-cache'
 
 export const EMBEDDING_MODEL = 'text-embedding-3-small'
 export const EMBEDDING_DIMENSIONS = 1536
@@ -103,17 +105,28 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   throw lastErr
 }
 
-/** Embeda um único texto (query do retrieval). Com timeout — caminho quente. */
+/**
+ * Embeda um único texto (query do retrieval). Com timeout — caminho quente.
+ *
+ * Cache Redis 24h por (modelo, texto): perguntas repetem muito entre leads, então
+ * o hit evita a chamada paga à OpenAI e a latência. Fail-open — Redis fora do ar
+ * só vira miss, nunca derruba o turno. Ver embedding-cache.ts.
+ */
 export async function embedQuery(
   text: string,
   scope: EmbeddingScope,
 ): Promise<number[]> {
+  const redis = getRedis()
+  const cached = await readEmbeddingCache(redis, EMBEDDING_MODEL, text)
+  if (cached) return cached
+
   const model = await getEmbeddingModel(scope)
   const { embedding } = await withTimeout(
     embed({ model, value: text }),
     EMBED_TIMEOUT_MS,
     'embedQuery',
   )
+  await writeEmbeddingCache(redis, EMBEDDING_MODEL, text, embedding)
   return embedding
 }
 
