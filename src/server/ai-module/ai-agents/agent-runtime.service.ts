@@ -8,7 +8,13 @@
  *   npm install ai @ai-sdk/openai @ai-sdk/anthropic
  */
 
-import { generateText, streamText, stepCountIs, type ToolSet } from 'ai'
+import {
+  generateText,
+  streamText,
+  stepCountIs,
+  type ToolSet,
+  type StopCondition,
+} from 'ai'
 import { database } from '@/server/services/database'
 import { getModel } from './services/provider-factory'
 import { retrieveRelevantChunks, buildContextBlock } from './knowledge/knowledge-retrieval.service'
@@ -43,6 +49,10 @@ import { persistTurn } from './services/memory-integration.service'
 import { timeBasedMicrocompact } from './services/microcompact.service'
 import { truncateToolResult } from './services/tool-registry.service'
 import { retryWithFallback } from './services/retry-with-fallback.service'
+import {
+  createBudgetTracker,
+  checkTokenBudget,
+} from './services/token-budget.service'
 import {
   summarizeSession,
   persistSessionSummary,
@@ -189,16 +199,113 @@ export class ContextBudgetExhaustedError extends Error {
   }
 }
 
+// ── RT-04: Graceful fallback for ContextBudgetExhaustedError ────────────────
+//
+// Texto neutro entregue ao cliente quando o contexto não cabe no budget. Garante
+// que o lead receba ALGUMA resposta (em vez de um 500 silencioso no webhook) e
+// sinaliza, de forma natural, que um humano pode assumir.
+
+const CONTEXT_BUDGET_FALLBACK_TEXT =
+  'Desculpe, nossa conversa ficou um pouco longa e preciso de um instante para me reorganizar. Pode reenviar sua última mensagem de forma resumida? Se preferir, um atendente pode te ajudar.'
+
+function buildContextBudgetFallbackResponse(): AgentRuntimeResponse {
+  return {
+    text: CONTEXT_BUDGET_FALLBACK_TEXT,
+    toolCalls: [],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    cost: { inputCost: 0, outputCost: 0, totalCost: 0 },
+    latencyMs: 0,
+    model: '',
+    provider: '',
+  }
+}
+
 // ── US-036: Token Estimation ────────────────────────────────────────────────
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
-// ── US-043: Provider Cooldown Map ───────────────────────────────────────────
+// ── US-043 / RT-05: Provider Cooldown (Redis, distribuído) ──────────────────
+//
+// O estado de cooldown vive no Redis (não mais num Map em memória): assim ele
+// sobrevive a restarts e é compartilhado entre réplicas do worker. A chave
+// tem TTL = janela de cooldown, então o "destravamento" é automático (não
+// precisamos guardar/comparar timestamps).
+//
+// FAIL-OPEN: se o Redis cair, comportamo-nos como SEM cooldown — `isProvider
+// InCooldown` retorna false e `setProviderCooldown` vira no-op. Nunca lança;
+// um turno jamais é bloqueado por indisponibilidade do Redis.
 
-const PROVIDER_COOLDOWNS = new Map<string, number>()
 const COOLDOWN_DURATION_MS = 5 * 60 * 1000 // 5 minutes
+const COOLDOWN_TTL_SECONDS = Math.ceil(COOLDOWN_DURATION_MS / 1000)
+
+/** Chave Redis do cooldown de um provider/modelo (providerKey = `${provider}:${model}`). */
+function cooldownKey(providerKey: string): string {
+  return `runtime:breaker:cooldown:${providerKey}`
+}
+
+/**
+ * true se o provider/modelo está em cooldown (chave presente no Redis).
+ * Fail-open: qualquer erro de Redis → false (sem cooldown).
+ */
+async function isProviderInCooldown(providerKey: string): Promise<boolean> {
+  try {
+    const redis = getRedis()
+    const exists = await redis.exists(cooldownKey(providerKey))
+    return exists === 1
+  } catch (err) {
+    console.warn('[AgentRuntime] cooldown check failed (fail-open):', err)
+    return false
+  }
+}
+
+/**
+ * Marca o provider/modelo em cooldown por COOLDOWN_TTL_SECONDS.
+ * Fire-and-forget / fail-open: erro de Redis é só logado, nunca propagado.
+ */
+async function setProviderCooldown(providerKey: string): Promise<void> {
+  try {
+    const redis = getRedis()
+    await redis.set(cooldownKey(providerKey), '1', 'EX', COOLDOWN_TTL_SECONDS)
+  } catch (err) {
+    console.warn('[AgentRuntime] cooldown set failed (ignored):', err)
+  }
+}
+
+// ── RT-10: Token budget as a StopCondition ──────────────────────────────────
+//
+// `token-budget.service` decide continue|stop a partir do total de tokens
+// consumidos no turno (com detecção de diminishing returns). Aqui ele vira uma
+// `StopCondition` do AI SDK: a cada step, somamos `usage.totalTokens` de todos
+// os steps e perguntamos ao tracker se vale a pena continuar o loop de tools.
+//
+// Aplicamos um PISO ao budget: Math.max(maxTokens * 4, 8000). `maxTokens` é o
+// teto de OUTPUT por chamada — multiplicar por 4 (e nunca abaixo de 8k) dá
+// folga para input + várias rodadas de tools, evitando cortar o loop cedo
+// demais. Mantido SEMPRE junto do `stepCountIs` existente (nunca o substitui).
+
+const BUDGET_TOKEN_FLOOR = 8000
+
+function budgetTokensFor(maxTokens: number | null | undefined): number {
+  return Math.max((maxTokens ?? 0) * 4, BUDGET_TOKEN_FLOOR)
+}
+
+/**
+ * Cria uma StopCondition baseada no token-budget. Fecha sobre um tracker por
+ * chamada — cada turno (generateText/streamText) recebe a sua própria via
+ * `createBudgetStopCondition(...)`, então o estado não vaza entre turnos.
+ */
+function createBudgetStopCondition(budgetTokens: number): StopCondition<ToolSet> {
+  const tracker = createBudgetTracker()
+  return ({ steps }) => {
+    const turnTokens = steps.reduce(
+      (sum, step) => sum + (step.usage?.totalTokens ?? 0),
+      0,
+    )
+    return checkTokenBudget(tracker, turnTokens, budgetTokens).action === 'stop'
+  }
+}
 
 function calculateCost(model: string, inputTokens: number, outputTokens: number) {
   const rates = COST_TABLE[model] || FALLBACK_RATES
@@ -786,6 +893,38 @@ export async function processAgentMessage(
     })
   }
 
+  // RT-04: prepareAgentCall pode lançar ContextBudgetExhaustedError quando o
+  // contexto estimado não cabe no budget. Sem captura, isso vira 500 no webhook
+  // (cliente sem resposta, sem telemetria). Capturamos AQUI — antes de entrar no
+  // bloco de execução do LLM — para devolver um fallback gracioso e registrar a
+  // decisão exatamente uma vez. (Outros erros de setup continuam propagando.)
+  let prepared: PreparedAgentCall
+  try {
+    prepared = await prepareAgentCall(params)
+  } catch (error: unknown) {
+    if (error instanceof ContextBudgetExhaustedError) {
+      console.warn(
+        `[AgentRuntime] RT-04: context budget exhausted (sync) — fallback gracioso:`,
+        error.message,
+      )
+      void recordRuntimeDecision({
+        ...EMPTY_DECISION_META,
+        organizationId: params.organizationId,
+        sessionId: params.sessionId,
+        agentConfigId: params.agentConfigId,
+        executionMode: 'sync',
+        modelPrimary: '',
+        providerPrimary: '',
+        modelUsed: '',
+        providerUsed: '',
+        status: 'fallback',
+        errorMessage: error.message,
+      })
+      return buildContextBudgetFallbackResponse()
+    }
+    throw error
+  }
+
   const {
     agentConfig,
     promptVersion,
@@ -798,18 +937,17 @@ export async function processAgentMessage(
     decisionMeta,
     routedModel,
     routedProvider,
-  } = await prepareAgentCall(params)
+  } = prepared
 
   // agentConfig is guaranteed non-null here (prepareAgentCall throws otherwise)
   if (!agentConfig) {
     throw new Error('Agent config missing after prepareAgentCall')
   }
 
-  // US-043: Check if primary provider is in cooldown
+  // US-043 / RT-05: Check if primary provider is in cooldown (Redis-backed).
   const fallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
   const providerKey = `${agentConfig.provider}:${agentConfig.model}`
-  const cooldownUntil = PROVIDER_COOLDOWNS.get(providerKey) ?? 0
-  const isInCooldown = Date.now() < cooldownUntil
+  const isInCooldown = await isProviderInCooldown(providerKey)
 
   // Choose which model to use (skip primary if in cooldown and fallback exists).
   // QH-05: start from the router-resolved model (may be mini), not agentConfig.model.
@@ -827,6 +965,7 @@ export async function processAgentMessage(
   }
 
   // 6. Call LLM with automatic tool-calling loop + US-043 fallback
+  // RT-10: token-budget StopCondition junto do stepCountIs (piso aplicado).
   const callGenerateText = async (llmModel: ReturnType<typeof getModel>) => {
     return generateText({
       model: llmModel,
@@ -836,7 +975,10 @@ export async function processAgentMessage(
         { role: 'user', content: params.messageContent },
       ],
       tools,
-      stopWhen: stepCountIs(5),
+      stopWhen: [
+        stepCountIs(5),
+        createBudgetStopCondition(budgetTokensFor(agentConfig.maxTokens)),
+      ],
       temperature: agentConfig.temperature,
       maxOutputTokens: agentConfig.maxTokens,
       // Anthropic prompt caching: marks the system prompt as cacheable
@@ -891,7 +1033,8 @@ export async function processAgentMessage(
 
     if (retryResult.usedFallback) {
       // Trip the cooldown so subsequent calls skip the primary for 5min.
-      PROVIDER_COOLDOWNS.set(providerKey, Date.now() + COOLDOWN_DURATION_MS)
+      // Fire-and-forget (fail-open): nunca bloqueia o turno por erro de Redis.
+      void setProviderCooldown(providerKey)
       console.log(
         `[AgentRuntime] Used fallback model ${fallbackModel} (attempts=${retryResult.attemptsUsed})`,
       )
@@ -1096,6 +1239,39 @@ export async function* processAgentMessageStream(
   try {
     prepared = await prepareAgentCall(params)
   } catch (error: unknown) {
+    // RT-04: budget estourado no setup → fallback gracioso (texto neutro +
+    // finish) em vez de só um 'error'. Garante que o cliente receba ALGUMA
+    // resposta e registra a decisão de runtime exatamente uma vez.
+    if (error instanceof ContextBudgetExhaustedError) {
+      console.warn(
+        `[AgentRuntime] RT-04: context budget exhausted (stream) — fallback gracioso:`,
+        error.message,
+      )
+      void recordRuntimeDecision({
+        ...EMPTY_DECISION_META,
+        organizationId: params.organizationId,
+        sessionId: params.sessionId,
+        agentConfigId: params.agentConfigId,
+        executionMode: 'stream',
+        modelPrimary: '',
+        providerPrimary: '',
+        modelUsed: '',
+        providerUsed: '',
+        status: 'fallback',
+        errorMessage: error.message,
+      })
+      yield { type: 'text-delta', text: CONTEXT_BUDGET_FALLBACK_TEXT }
+      yield {
+        type: 'finish',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        cost: { inputCost: 0, outputCost: 0, totalCost: 0 },
+        latencyMs: 0,
+        model: '',
+        provider: '',
+        toolCalls: [],
+      }
+      return
+    }
     const message =
       error instanceof Error ? error.message : 'Unknown agent setup error'
     yield { type: 'error', message }
@@ -1120,11 +1296,10 @@ export async function* processAgentMessageStream(
     return
   }
 
-  // US-043: Check cooldown for streaming path
+  // US-043 / RT-05: Check cooldown for streaming path (Redis-backed).
   const streamFallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
   const streamProviderKey = `${agentConfig.provider}:${agentConfig.model}`
-  const streamCooldownUntil = PROVIDER_COOLDOWNS.get(streamProviderKey) ?? 0
-  const streamIsInCooldown = Date.now() < streamCooldownUntil
+  const streamIsInCooldown = await isProviderInCooldown(streamProviderKey)
 
   // QH-05: start from the router-resolved model (may be mini).
   let streamActiveModel = model
@@ -1153,6 +1328,7 @@ export async function* processAgentMessageStream(
   try {
     let result: ReturnType<typeof streamText>
 
+    // RT-10: token-budget StopCondition junto do stepCountIs (piso aplicado).
     const callStreamText = (llmModel: ReturnType<typeof getModel>) =>
       streamText({
         model: llmModel,
@@ -1162,7 +1338,10 @@ export async function* processAgentMessageStream(
           { role: 'user', content: params.messageContent },
         ],
         tools,
-        stopWhen: stepCountIs(5),
+        stopWhen: [
+          stepCountIs(5),
+          createBudgetStopCondition(budgetTokensFor(agentConfig.maxTokens)),
+        ],
         temperature: agentConfig.temperature,
         maxOutputTokens: agentConfig.maxTokens,
         ...(agentConfig.provider === 'anthropic'
@@ -1186,7 +1365,7 @@ export async function* processAgentMessageStream(
         console.log(
           `[AgentRuntime] Primary model failed (stream), falling back to ${streamFallbackModel}`
         )
-        PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
+        void setProviderCooldown(streamProviderKey)
         streamActiveModel = getModel(agentConfig.provider, streamFallbackModel, prepared.apiKey ?? params.apiKey)
         streamActiveModelName = streamFallbackModel
         streamActiveProvider = agentConfig.provider
@@ -1299,7 +1478,7 @@ export async function* processAgentMessageStream(
       console.log(
         `[AgentRuntime] Primary model failed mid-stream, falling back to ${streamFallbackModel}`
       )
-      PROVIDER_COOLDOWNS.set(streamProviderKey, Date.now() + COOLDOWN_DURATION_MS)
+      void setProviderCooldown(streamProviderKey)
       yield { type: 'error', message: `Primary model failed, retrying with fallback model ${streamFallbackModel}` }
     } else {
       const message =
@@ -1435,11 +1614,10 @@ export async function* processPlaygroundStream(
       'Desculpe, estou com dificuldades no momento. Um atendente vai te ajudar em breve.'
   }
 
-  // 6. Model selection (same cooldown logic)
+  // 6. Model selection (same cooldown logic, Redis-backed — RT-05)
   const pgFallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
   const pgProviderKey = `${agentConfig.provider}:${agentConfig.model}`
-  const pgCooldownUntil = PROVIDER_COOLDOWNS.get(pgProviderKey) ?? 0
-  const pgIsInCooldown = Date.now() < pgCooldownUntil
+  const pgIsInCooldown = await isProviderInCooldown(pgProviderKey)
 
   let pgActiveModel = getModel(agentConfig.provider, agentConfig.model)
   let pgActiveModelName = agentConfig.model
@@ -1460,6 +1638,7 @@ export async function* processPlaygroundStream(
   let inputTokens = 0
   let outputTokens = 0
 
+  // RT-10: token-budget StopCondition junto do stepCountIs (piso aplicado).
   const callStream = (m: ReturnType<typeof getModel>) =>
     streamText({
       model: m,
@@ -1469,7 +1648,10 @@ export async function* processPlaygroundStream(
         { role: 'user', content: params.message },
       ],
       tools,
-      stopWhen: stepCountIs(5),
+      stopWhen: [
+        stepCountIs(5),
+        createBudgetStopCondition(budgetTokensFor(agentConfig!.maxTokens)),
+      ],
       temperature: agentConfig!.temperature,
       maxOutputTokens: agentConfig!.maxTokens,
       ...(agentConfig!.provider === 'anthropic'
@@ -1490,7 +1672,7 @@ export async function* processPlaygroundStream(
       result = callStream(pgActiveModel)
     } catch (primaryErr: unknown) {
       if (!pgIsInCooldown && pgFallbackModel && isRetriableError(primaryErr)) {
-        PROVIDER_COOLDOWNS.set(pgProviderKey, Date.now() + COOLDOWN_DURATION_MS)
+        void setProviderCooldown(pgProviderKey)
         pgActiveModel = getModel(agentConfig.provider, pgFallbackModel)
         pgActiveModelName = pgFallbackModel
         result = callStream(pgActiveModel)

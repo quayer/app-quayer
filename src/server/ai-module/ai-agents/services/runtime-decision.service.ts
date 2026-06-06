@@ -78,7 +78,14 @@ export interface RuntimeDecisionInput extends Partial<RuntimeDecisionMeta> {
   totalCost?: number
 
   latencyMs?: number
-  status?: 'success' | 'error'
+  /**
+   * Status do turno:
+   *   - 'success'  → resposta gerada normalmente
+   *   - 'error'    → falha não recuperada (turno sem resposta)
+   *   - 'fallback' → resposta de fallback gracioso devolvida ao cliente
+   *                  (ex.: ContextBudgetExhaustedError — RT-04)
+   */
+  status?: 'success' | 'error' | 'fallback'
   errorMessage?: string | null
 }
 

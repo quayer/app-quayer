@@ -28,6 +28,10 @@ export interface ShortMemoryMessage {
  * Push a message to the short-term memory list for the given session.
  * Each entry is stored as a JSON string in a Redis list.
  * The key expires after 24 hours of inactivity.
+ *
+ * RPUSH + EXPIRE rodam no MESMO pipeline (atômico): garante que a chave do
+ * histórico NUNCA fica sem TTL. Um EXPIRE separado podia se perder se o processo
+ * morresse entre os dois comandos → chave imortal → memory leak no Redis (RT-09).
  */
 export async function pushToShortMemory(
   redis: Redis,
@@ -42,8 +46,10 @@ export async function pushToShortMemory(
     createdAt: message.createdAt ?? new Date().toISOString(),
   })
 
-  await redis.rpush(key, entry)
-  await redis.expire(key, SHORT_MEMORY_TTL)
+  // Pipeline ioredis: RPUSH (append) + EXPIRE (renova janela de 24h) num único
+  // round-trip atômico. Não existe RPUSH ... EX nativo, então o pipeline é a
+  // forma correta de escrever valor + TTL juntos.
+  await redis.pipeline().rpush(key, entry).expire(key, SHORT_MEMORY_TTL).exec()
 }
 
 /**
