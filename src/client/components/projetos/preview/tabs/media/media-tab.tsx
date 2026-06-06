@@ -56,6 +56,42 @@ const FILTER_OPTIONS: readonly FilterOption[] = [
 ] as const
 
 // ──────────────────────────────────────────────────────────────────────────
+// Filtro por categoria (derivado dos itens — só FE, sem nova query)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Valor do filtro de categoria — `"all"` = todas; demais = a chave normalizada (lowercase). */
+type CategoryFilter = string
+
+/**
+ * Categoria distinta derivada dos itens. `key` é a forma normalizada
+ * (lowercase + trim) usada para deduplicar e comparar; `label` é o primeiro
+ * rótulo original encontrado (preservado para exibição PT-BR amigável).
+ */
+interface DerivedCategory {
+  key: string
+  label: string
+}
+
+/**
+ * Deriva as categorias DISTINTAS presentes nos itens: `item.category` não-nulo,
+ * trim, deduplicado case-insensitive (a primeira grafia vira o rótulo exibido),
+ * ordenado alfabeticamente (locale pt-BR). Função pura — sem efeito colateral.
+ */
+function deriveCategories(items: readonly MediaAssetItem[]): DerivedCategory[] {
+  const byKey = new Map<string, string>()
+  for (const item of items) {
+    const raw = item.category?.trim()
+    if (!raw) continue
+    const key = raw.toLowerCase()
+    // Mantém a PRIMEIRA grafia encontrada como rótulo de exibição.
+    if (!byKey.has(key)) byKey.set(key, raw)
+  }
+  return Array.from(byKey, ([key, label]) => ({ key, label })).sort((a, b) =>
+    a.label.localeCompare(b.label, "pt-BR"),
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Props
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -87,21 +123,50 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
     return Array.isArray(env?.media) ? env.media : []
   }, [data])
 
-  // ── Filtro local por tipo ──────────────────────────────────────────────────
+  // ── Filtros locais (tipo + categoria) ──────────────────────────────────────
   const [filter, setFilter] = React.useState<MediaFilter>("all")
+  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>("all")
 
-  const filtered = React.useMemo<MediaAssetItem[]>(
-    () => (filter === "all" ? media : media.filter((m) => m.mediaType === filter)),
-    [media, filter],
+  // Categorias distintas presentes nos itens (derivadas — sem nova query).
+  const categories = React.useMemo<DerivedCategory[]>(
+    () => deriveCategories(media),
+    [media],
   )
 
-  // Contador por aba (na própria aba), para o dono ver quanto há de cada tipo.
+  // Se a categoria selecionada some dos itens (ex.: último item dela removido),
+  // volta para "Todas" para não travar a grade num filtro inexistente.
+  React.useEffect(() => {
+    if (categoryFilter === "all") return
+    if (!categories.some((c) => c.key === categoryFilter)) {
+      setCategoryFilter("all")
+    }
+  }, [categories, categoryFilter])
+
+  // Filtro combinado (tipo AND categoria) — case-insensitive na categoria.
+  const filtered = React.useMemo<MediaAssetItem[]>(
+    () =>
+      media.filter((m) => {
+        const matchesType = filter === "all" || m.mediaType === filter
+        const matchesCategory =
+          categoryFilter === "all" ||
+          m.category?.trim().toLowerCase() === categoryFilter
+        return matchesType && matchesCategory
+      }),
+    [media, filter, categoryFilter],
+  )
+
+  // Contador por aba de TIPO — respeita o filtro de categoria ativo (AND), para
+  // o número refletir o que de fato apareceria ao clicar naquela aba.
   const countFor = React.useCallback(
     (value: MediaFilter): number =>
-      value === "all"
-        ? media.length
-        : media.filter((m) => m.mediaType === value).length,
-    [media],
+      media.filter((m) => {
+        const matchesType = value === "all" || m.mediaType === value
+        const matchesCategory =
+          categoryFilter === "all" ||
+          m.category?.trim().toLowerCase() === categoryFilter
+        return matchesType && matchesCategory
+      }).length,
+    [media, categoryFilter],
   )
 
   // `refetch` estável para repassar aos filhos sem recriar callbacks por render.
@@ -177,6 +242,44 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
         </div>
       )}
 
+      {/* Barra de filtro por categoria — só quando há ao menos uma categoria.
+          Combina com o filtro de tipo (AND). Deriva da lista em memória, sem query. */}
+      {!isEmpty && categories.length > 0 && (
+        <div
+          role="group"
+          aria-label="Filtrar mídias por categoria"
+          className="flex flex-wrap items-center gap-1.5"
+        >
+          {/* Chip "Todas" + um chip por categoria distinta. */}
+          {[{ key: "all", label: "Todas" }, ...categories].map(
+            (cat) => {
+              const active = categoryFilter === cat.key
+              return (
+                <button
+                  key={cat.key}
+                  type="button"
+                  aria-pressed={active}
+                  aria-label={
+                    cat.key === "all"
+                      ? "Mostrar todas as categorias"
+                      : `Filtrar pela categoria ${cat.label}`
+                  }
+                  onClick={() => setCategoryFilter(cat.key)}
+                  className="inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
+                  style={{
+                    backgroundColor: active ? tokens.brandSubtle : tokens.bgSurface,
+                    borderColor: active ? tokens.brandBorder : tokens.divider,
+                    color: active ? tokens.brandText : tokens.textSecondary,
+                  }}
+                >
+                  {cat.label}
+                </button>
+              )
+            },
+          )}
+        </div>
+      )}
+
       {/* Empty-state geral (nenhuma mídia no catálogo) */}
       {isEmpty && (
         <div
@@ -192,13 +295,13 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
         </div>
       )}
 
-      {/* Empty-state do filtro (há mídia, mas nenhuma do tipo selecionado) */}
+      {/* Empty-state do filtro (há mídia, mas nenhuma combina com os filtros ativos) */}
       {isFilteredEmpty && (
         <p
           className="rounded-lg border border-dashed px-4 py-6 text-center text-[12px]"
           style={{ borderColor: tokens.divider, color: tokens.textTertiary }}
         >
-          Nenhuma mídia desse tipo.
+          Nenhuma mídia com esses filtros.
         </p>
       )}
 
