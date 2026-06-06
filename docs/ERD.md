@@ -6,6 +6,8 @@
 > **Mudanças desde 2026-03-14:** CRM/Inbox nukados (Abr/13) — `Contact`, `GroupChat`, `KanbanBoard`, `QuickReply`, `SessionNote` e ~15 tabelas removidas; Builder IA adicionado (`BuilderProject` família, Abr/9 + Abr/12); `UserIdentity` para login federado (Mai/10); role normalizado lowercase (Mai/10); `OTP disabled flags` em UserPreferences (Abr/30). `IpRule`, `ScimToken` foram removidos junto com admin surface.
 >
 > **Jun/04 (Wave Orayon):** RAG/base de conhecimento — `KnowledgeCollection` / `KnowledgeSource` / `KnowledgeChunk` (coluna `embedding vector(1536)` + índice HNSW `vector_cosine_ops`, escrita/leitura via raw SQL); observabilidade `AgentRuntimeDecision` (1 registro por turno, **sem FK** — tabela de log de alta escrita); canais Cloud API/Instagram (colunas novas em `Connection`); `CalendarConnection` (connect-link Google Calendar, refresh_token encriptado em `OrganizationProvider`); `Department` + `DepartmentMember` (roleta/round-robin). Modelos novos abaixo no Domain "RAG & Observability".
+>
+> **Jun/06 (M1 — roleta 6A):** `department_members` ganhou `userId` NULLABLE (FK SetNull — membro pode ser "nome + WhatsApp", não-usuário) + `name` + `whatsapp`. A saga de deploy materializa o `builderState.team` (Onda A) em Department/DepartmentMember (`materialize_team`) e a roleta — re-chaveada por `memberId` — notifica o atendente sorteado por WhatsApp (decisão 6A) com fallback in-app. Domain dedicado "Roleta / Departamentos" no fim.
 
 ---
 
@@ -383,6 +385,7 @@ erDiagram
 | **2026-06-06** | **`add_ext_service_costs`** | **`agent_runtime_decisions`: + `extServiceCosts JSONB` nullable (custo de serviços externos do turno — STT/TTS/embedding, ex.: `{"stt":0.0086}` — separado do `totalCost` do LLM)** |
 | **2026-06-06** | **`add_knowledge_images`** | **Novo `knowledge_images` (catálogo visual extraído das fontes — Onda D/G2: `storageKey` content-addressed, `caption` vision-LLM, `captionEmbedding vector(1536)` NULLABLE/NULL no MVP via raw, `@@unique(sourceId,sha256)` dedup, `confirmedAt`/`deletedAt` curadoria) + `knowledge_sources.imagesEnabled Boolean @default(true)` (toggle por fonte) — Onda D1** |
 | **2026-06-06** | **`pricing_runtime_fields`** | **price_lists += `disclosureStyle TEXT NOT NULL DEFAULT 'exact'` (como o agente FALA o preço: exact/from/average/none) + `minTicketCents INTEGER?` (ticket mínimo). price_items += `priceMaxCents INTEGER?` (teto da faixa quando average) + `imageUrl TEXT?` (foto do catálogo visual). Materialização M2: a saga de deploy grava o que o card de preço (Onda B) coletou; get_pricing formata por disclosureStyle. Aditivo, sem data-loss.** |
+| **2026-06-06** | **`20260606040000_department_member_whatsapp`** | **department_members: `userId` agora NULLABLE (FK→User SetNull — membro pode ser "nome + WhatsApp", não-usuário) + `name TEXT?` (nome de exibição do não-usuário) + `whatsapp TEXT?` (número da roleta). Materialização M1: a saga de deploy (`materialize_team`) espelha o `builderState.team` (Onda A) em Department/DepartmentMember; a ROLETA (round-robin) re-chaveada por `memberId` notifica o atendente sorteado por WhatsApp (decisão 6A) com fallback in-app. Aditivo, sem data-loss.** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 
@@ -467,3 +470,46 @@ erDiagram
 ```
 
 > `AgentRuntimeDecision` é **tabela de log sem FK** (desacoplada, alta escrita; limpeza por retenção). `KnowledgeChunk.embedding` nunca é lida/escrita via Prisma tipado — sempre raw SQL (`::vector`). `KnowledgeImage.captionEmbedding` segue a MESMA regra do `KnowledgeChunk.embedding` (sempre raw `::vector`); no MVP da Onda D fica **NULL** (não embeda — popula só na fase E de runtime). O resto de `KnowledgeImage` é CRUD tipado normal (`database.knowledgeImage`); persiste-se o `storageKey` (path content-addressed `knowledge/{org}/{sourceId}/{sha256}.{ext}` no BUCKETS.MEDIA), **nunca** a signed URL (assina on-read).
+
+---
+
+## Domain: Roleta / Departamentos (round-robin + envio 6A)
+
+```mermaid
+erDiagram
+    Organization ||--o{ Department : "tem"
+    Department ||--o{ DepartmentMember : "tem"
+    User }o--o| DepartmentMember : "userId (SetNull, NULLABLE)"
+    User }o--o| Department : "lastAssignedUserId (SetNull, legado/vestigial)"
+    Department ||--o{ ChatSession : "assignedDepartmentId"
+
+    Department {
+        uuid id PK
+        string organizationId FK
+        string name
+        string slug "UK(org,slug) — materialize_team usa team:projectId"
+        string type "support|sales|custom"
+        bool isActive
+        string lastAssignedUserId "nullable — legado/vestigial (FK física→User; não é mais o cursor)"
+        string lastAssignedMemberId "nullable — cursor da roleta: DepartmentMember.id sorteado (SEM FK)"
+        datetime lastAssignedAt "nullable"
+    }
+    DepartmentMember {
+        uuid id PK "memberId — IDENTIDADE da roleta (cursor + ordenação)"
+        string organizationId FK
+        string departmentId FK
+        string userId "FK NULLABLE (SetNull) — M1: membro pode ser não-usuário"
+        string name "nullable — M1: nome de exibição do membro não-usuário"
+        string whatsapp "nullable — M1: número que a roleta notifica (6A)"
+        int position "ordem do rodízio (reescrita pela ordem do builderState.team)"
+        bool isActive "false remove do rodízio sem deletar (soft)"
+        datetime createdAt
+        datetime updatedAt
+    }
+```
+
+> **Roleta 6A (M1):** o passo `materialize_team` da saga de deploy espelha o `builderState.team` (Onda A, card team_structure) em `Department`/`DepartmentMember` — upsert do Department por `slug = team:${projectId}` (org-scoped, determinístico) + reconciliação dos membros por IDENTIDADE 3-níveis (`userId` > `whatsapp` normalizado > `nome`), idempotente, NUNCA hard-delete (membro que sai vira `isActive=false`). O vínculo agente↔departamento vai pelo `AIAgentConfig.systemPrompt` (bloco determinístico entre `<!--ROLETA:start-->`/`<!--ROLETA:end-->`), pois `AIAgentConfig` não tem coluna `departmentId`.
+>
+> **Re-key por `memberId`:** como `userId` virou NULLABLE (membro "nome + WhatsApp"), a roleta NÃO pode mais chavear por `userId` (vários NULL colidem). A identidade/cursor/ordenação passou a ser `DepartmentMember.id` (`memberId`, sempre presente). O cursor é persistido na coluna NOVA `Department.lastAssignedMemberId` (`String?`, **SEM FK**) — NÃO em `lastAssignedUserId`, que tem FK física→`User(id)` e rejeitaria um `memberId` via SQL raw (essa coluna fica vestigial).
+>
+> **Envio 6A:** ao sortear o próximo membro ATIVO, se ele tiver `whatsapp` o runtime ENVIA a notificação por WhatsApp (uazapi-sender `sendText`), com **rate-limit dedicado** (`ratelimit:roulette-notify`, 10/min por org+atendente, fail-open) e **fallback in-app** (a `Notification` é o piso de auditoria — sempre criada; quando o membro não tem userId, vira org-wide). O envio é **fail-safe total**: NUNCA derruba o turno do agente (best-effort, só auditoria em `customFields.handoff.whatsappNotified`).

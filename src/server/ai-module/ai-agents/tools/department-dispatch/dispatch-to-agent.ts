@@ -35,6 +35,7 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import type { ToolExecutionContext } from '@/server/ai-module/ai-agents/tools/builtin-tools'
 import { selectNextMember } from './round-robin.service'
+import { trySendRouletteWhatsApp } from './notify-member-whatsapp'
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -118,6 +119,12 @@ interface HandoffMutationArgs {
   currentStatus: SessionStatus
   /** Extra tags to push besides the base department_dispatch tag. */
   extraTags: string[]
+  /**
+   * 6A audit flag — whether the WhatsApp notification to the chosen member was
+   * actually sent. `null` when WhatsApp send was not attempted (queue fallback /
+   * non-roulette). Stamped into customFields.handoff for the inbox/panel.
+   */
+  whatsappNotified?: boolean | null
 }
 
 /**
@@ -149,6 +156,10 @@ async function applyHandoffMutation(args: HandoffMutationArgs): Promise<void> {
           departmentId: args.departmentId,
           assignedAgentId: args.assignedAgentId,
           dispatchedVia: args.dispatchedVia,
+          // 6A — whether the chosen member was reached via WhatsApp (audit only;
+          // null when not attempted, e.g. queue fallback). The in-app
+          // Notification is always created regardless, as the auditable floor.
+          whatsappNotified: args.whatsappNotified ?? null,
         },
       } as Prisma.InputJsonValue,
       tags: { push: ['department_dispatch', ...args.extraTags] },
@@ -276,50 +287,126 @@ export async function executeDispatchToAgent(
 
     const { chosen } = selection
 
+    // The roleta may pick a "name + WhatsApp" member with NO userId (not a
+    // platform user). assignedAgentId tolerates null; the in-app Notification
+    // then falls into the org-wide shape (organizationId, no userId) so we never
+    // build an invalid Notification.userId=null+org record.
+    const assignedAgentId = chosen.userId ?? null
+
     await applyHandoffMutation({
       sessionId: ctx.sessionId,
       reason,
       urgency,
       summary: summary ?? null,
       departmentId,
-      assignedAgentId: chosen.userId,
+      assignedAgentId,
       dispatchedVia: 'roulette',
       existingCustomFields: existing,
       currentStatus: session.status,
       extraTags: [],
     })
 
-    // Notify the CHOSEN agent specifically — the key differentiator: every
-    // other handoff tool notifies the org; this one targets the individual.
-    await database.notification.create({
-      data: {
-        userId: chosen.userId,
-        type: urgency === 'high' ? 'ERROR' : 'WARNING',
-        title: 'Conversa atribuída a você',
-        description: `${session.contactPhone}: ${reason}`,
-        source: 'ai-agent',
-        sourceId: ctx.sessionId,
-        actionUrl: `/conversations/${ctx.sessionId}`,
-        actionLabel: 'Assumir conversa',
-        metadata: {
-          sessionId: ctx.sessionId,
-          departmentId,
-          assignedAgentId: chosen.userId,
-          urgency,
-          summary: summary ?? null,
-          dispatchedVia: 'roulette',
-          triggeredBy: 'dispatch_to_agent_tool',
-        },
+    // In-app Notification = the auditable FLOOR (always written, regardless of
+    // the WhatsApp send below). When the chosen member is a platform user, notify
+    // THAT person; when it's a "name + WhatsApp" member (no userId), fall back to
+    // the org-wide shape so the org sees the assignment in the panel.
+    const notifBase = {
+      type: (urgency === 'high' ? 'ERROR' : 'WARNING') as 'ERROR' | 'WARNING',
+      description: `${session.contactPhone}: ${reason}`,
+      source: 'ai-agent',
+      sourceId: ctx.sessionId,
+      actionUrl: `/conversations/${ctx.sessionId}`,
+      actionLabel: 'Assumir conversa',
+      metadata: {
+        sessionId: ctx.sessionId,
+        departmentId,
+        assignedAgentId,
+        assignedMemberId: chosen.memberId,
+        urgency,
+        summary: summary ?? null,
+        dispatchedVia: 'roulette',
+        triggeredBy: 'dispatch_to_agent_tool',
       },
-    })
+    }
+    if (assignedAgentId) {
+      await database.notification.create({
+        data: {
+          userId: assignedAgentId,
+          title: 'Conversa atribuída a você',
+          ...notifBase,
+        },
+      })
+    } else {
+      // Org-wide: the member has no platform user to target individually.
+      await database.notification.create({
+        data: {
+          organizationId: ctx.organizationId,
+          title: `Conversa atribuída a ${chosen.displayName} (atendente externo)`,
+          ...notifBase,
+        },
+      })
+    }
+
+    // 6A — best-effort WhatsApp notification ON TOP of the in-app floor. NEVER
+    // throws (the helper is fully fail-safe) and NEVER changes success/message:
+    // the in-app Notification already guarantees the assignment is visible.
+    let whatsappNotified = false
+    try {
+      const sendResult = await trySendRouletteWhatsApp({
+        organizationId: ctx.organizationId,
+        connectionId: ctx.connectionId,
+        member: { whatsapp: chosen.whatsapp, displayName: chosen.displayName },
+        contactPhone: session.contactPhone,
+        reason,
+        summary: summary ?? null,
+        urgency,
+      })
+      whatsappNotified = sendResult.sent
+    } catch (sendErr) {
+      // Defensive: the helper is already fail-safe, but a throw here must NOT
+      // derail the turn — the in-app Notification stands.
+      console.warn(
+        '[roulette-6A] envio falhou (ignored):',
+        sendErr instanceof Error ? sendErr.message : String(sendErr),
+      )
+    }
+
+    // Stamp the 6A audit flag into the handoff record (single targeted re-write of
+    // customFields.handoff — same shape as applyHandoffMutation plus the flag).
+    try {
+      await database.chatSession.update({
+        where: { id: ctx.sessionId },
+        data: {
+          customFields: {
+            ...existing,
+            handoff: {
+              reason,
+              urgency,
+              summary: summary ?? null,
+              transferredAt: new Date().toISOString(),
+              departmentId,
+              assignedAgentId,
+              dispatchedVia: 'roulette',
+              whatsappNotified,
+            },
+          } as Prisma.InputJsonValue,
+        },
+      })
+    } catch (stampErr) {
+      // Audit-only — never fail the dispatch over the flag write.
+      console.warn(
+        '[roulette-6A] carimbo whatsappNotified falhou (ignored):',
+        stampErr instanceof Error ? stampErr.message : String(stampErr),
+      )
+    }
 
     return {
       success: true,
       departmentId,
-      assignedAgentId: chosen.userId,
-      assignedAgentName: chosen.userName,
+      assignedAgentId,
+      assignedAgentName: chosen.displayName,
       dispatchedVia: 'roulette',
-      message: `Conversa atribuída a ${chosen.userName} via roleta (urgência ${urgency}).`,
+      message: `Conversa atribuída a ${chosen.displayName} via roleta (urgência ${urgency}).`,
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Erro desconhecido'

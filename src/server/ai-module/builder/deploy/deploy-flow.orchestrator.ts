@@ -20,6 +20,7 @@ import type {
 } from './deploy.contract'
 import { publishVersion } from './publish-version.handler'
 import { materializePricing } from './materialize-pricing.handler'
+import { materializeTeam } from './materialize-team.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -177,6 +178,21 @@ export async function executeDeployFlow(
       () => materializePricing(context),
     )
     context.state.pricing = { listId: materialized.listId }
+
+    // Materialize the TEAM collected in builderState (Onda A, card team_structure)
+    // into the runtime models (Department/DepartmentMember) so the roleta routes
+    // the lead to the next human agent (and notifies via WhatsApp — decision 6A).
+    // Runs BEFORE provisioning the WhatsApp instance, for the SAME reason as
+    // materialize_pricing: a materialization failure leaves no orphan UAZapi
+    // instance to compensate. Status reuses 'publishing' (still pre-infra "config"
+    // phase); the real step name 'materialize_team' lives in `activeStep` for
+    // failure attribution.
+    const materializedTeam = await runStep(
+      'materialize_team',
+      'publishing',
+      () => materializeTeam(context),
+    )
+    context.state.team = { departmentId: materializedTeam.departmentId }
 
     const instance = await runStep(
       'create_instance',

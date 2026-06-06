@@ -22,6 +22,7 @@ export type DeployStatus =
 export type DeployStepName =
   | 'publish_version'
   | 'materialize_pricing'
+  | 'materialize_team'
   | 'create_instance'
   | 'attach_connection'
 
@@ -60,6 +61,14 @@ export interface DeployContext {
      * self-contained (re-derives the list by `pricing:${projectId}` if needed).
      */
     pricing?: { listId: string }
+    /**
+     * Light bookkeeping written by `materialize_team`. Same semantics as
+     * `pricing`: NOT persisted on the BuilderDeployment row, so the rollback
+     * handler cannot rely on it — the compensation is a self-contained no-op
+     * (the Department/members are the user's source of truth, re-derived by
+     * `team:${projectId}` on the next deploy, never undone).
+     */
+    team?: { departmentId: string }
   }
 }
 
