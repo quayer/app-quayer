@@ -8,6 +8,7 @@
     "start": "next start",
     "start:workers": "tsx scripts/start-workers.ts",
     "build:workers": "node scripts/build-workers.mjs",
+    "deadletter:inspect": "tsx scripts/inspect-deadletter.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

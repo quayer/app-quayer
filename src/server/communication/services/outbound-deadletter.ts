@@ -38,6 +38,28 @@ export interface DeadLetterPayload {
   timestamp: string
 }
 
+/** Default de entradas retornadas pelo inspetor (as mais recentes). */
+const DEFAULT_INSPECT_LIMIT = 50
+
+export interface DeadLetterInspection {
+  /** false se o Redis falhou (fail-open) — os demais campos vêm zerados. */
+  ok: boolean
+  /** Tamanho total da list (LLEN) — pode exceder `returned`. */
+  total: number
+  /** Quantas entradas foram efetivamente lidas/parseadas. */
+  returned: number
+  /** Entradas mais recentes primeiro (até o limite pedido). */
+  entries: DeadLetterPayload[]
+  /** Contagem por organizationId (sobre `entries`). */
+  byOrg: Record<string, number>
+  /** Contagem por cabeça da mensagem de erro (80 chars, sobre `entries`). */
+  byError: Record<string, number>
+  /** Timestamp da entrada mais recente lida. */
+  newest?: string
+  /** Timestamp da entrada mais antiga lida. */
+  oldest?: string
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -62,6 +84,65 @@ export async function pushDeadLetter(payload: DeadLetterPayload): Promise<void> 
       '[outbound] dead-letter push failed:',
       err instanceof Error ? err.message : String(err),
     )
+  }
+}
+
+/**
+ * Inspeciona a dead-letter list SEM mutá-la (LLEN + LRANGE — não usa LPOP/LREM).
+ * Retorna as N entradas mais recentes + um resumo por org e por erro, para
+ * visibilidade de ops via Claude Code/MCP (não há admin UI).
+ *
+ * Fail-open: Redis down ou entrada corrompida não lançam — retorna `ok:false`
+ * (ou pula a entrada inválida) para que um painel/ops nunca quebre por causa disso.
+ */
+export async function inspectDeadLetter(
+  opts: { limit?: number } = {},
+): Promise<DeadLetterInspection> {
+  const limit = Math.max(
+    1,
+    Math.min(opts.limit ?? DEFAULT_INSPECT_LIMIT, DEADLETTER_CAP),
+  )
+  try {
+    const redis = getRedis()
+    const total = await redis.llen(DEADLETTER_KEY)
+    // LRANGE 0..limit-1 — newest-first (pushDeadLetter usa LPUSH). Não-destrutivo.
+    const raw = await redis.lrange(DEADLETTER_KEY, 0, limit - 1)
+
+    const entries: DeadLetterPayload[] = []
+    for (const item of raw) {
+      try {
+        entries.push(JSON.parse(item) as DeadLetterPayload)
+      } catch {
+        // Entrada corrompida: pula, mas não derruba a inspeção inteira.
+      }
+    }
+
+    const byOrg: Record<string, number> = {}
+    const byError: Record<string, number> = {}
+    for (const e of entries) {
+      if (e.organizationId) {
+        byOrg[e.organizationId] = (byOrg[e.organizationId] ?? 0) + 1
+      }
+      const head = (e.error ?? 'unknown').slice(0, 80)
+      byError[head] = (byError[head] ?? 0) + 1
+    }
+
+    return {
+      ok: true,
+      total,
+      returned: entries.length,
+      entries,
+      byOrg,
+      byError,
+      newest: entries[0]?.timestamp,
+      oldest: entries[entries.length - 1]?.timestamp,
+    }
+  } catch (err) {
+    console.error(
+      '[outbound] dead-letter inspect failed:',
+      err instanceof Error ? err.message : String(err),
+    )
+    return { ok: false, total: 0, returned: 0, entries: [], byOrg: {}, byError: {} }
   }
 }
 

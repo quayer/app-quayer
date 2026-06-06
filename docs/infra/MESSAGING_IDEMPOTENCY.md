@@ -62,6 +62,10 @@ fail-open (Redis down → libera).
 - Cada bloco usa `sendWithRetry` (backoff exponencial); ao esgotar, o payload vai
   para a **dead-letter** (Redis list `outbound:deadletter`).
 - Erros em blocos individuais **não abortam** os blocos seguintes.
+- **Visibilidade:** `inspectDeadLetter()` (read-only, LLEN/LRANGE) +
+  `npm run deadletter:inspect [limit]` listam as falhas mais recentes com resumo
+  por org/erro. Não há admin UI — inspeção via Claude Code/MCP. *Reprocesso*
+  ainda é pendente (tocaria o caminho de envio ao vivo).
 
 ## 5. Outbound — bot-echo tracking
 
@@ -78,12 +82,14 @@ webhook OUT do UAZ reconhece a mensagem como echo do próprio bot e não reproce
 
 Documentados para honestidade — são itens de backlog, não garantias:
 
-- **Status de entrega não consumido:** `Message.deliveredAt/readAt/sentAt` existem no
-  schema mas NÃO há rota que processe o webhook `message_status_update` → status fica
-  preso em `sent`. (backlog messaging M/high)
-- **Dead-letter write-only:** não há consumer/API/UI para revisar, reprocessar ou
-  exportar a `outbound:deadletter` — falhas terminais ficam invisíveis para ops.
-  (backlog M/high)
+- **Status de entrega — parcial:** o provider **CloudAPI** já consome `message.updated`
+  e avança `Message.status` + `deliveredAt/readAt` (`markMessageDeliveryStatus` no
+  processor, guard monotônico). O provider de **produção (uazapi)** ainda NÃO modela
+  evento de status — `UazapiData` não tem campo de ack; depende de capturar o payload
+  real. (backlog messaging M/high — só uazapi)
+- **Dead-letter sem reprocesso:** inspeção read-only já existe (`inspectDeadLetter` +
+  `npm run deadletter:inspect`), mas ainda não há consumer/recovery para *reprocessar*
+  a `outbound:deadletter` — só dá pra ver, não pra reenviar. (backlog M/high)
 - **Sem idempotência de decisão por turno:** o dedup é só da mensagem (`waMessageId`);
   não há hash de decisão (`session + inbound_ids + config`) impedindo re-aplicar um
   turno (re-disparar a IA). (backlog M/medium)
