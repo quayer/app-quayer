@@ -638,6 +638,7 @@ async function prepareAgentCall(
     organizationId: params.organizationId,
     agentConfigId: agentConfig.id,
     ragCollectionId: agentConfig.useRAG ? agentConfig.ragCollectionId : null,
+    agentDepartmentId: agentConfig.departmentId ?? null,
   }
   const tools: ToolSet = {
     ...Object.fromEntries(
@@ -1644,6 +1645,7 @@ export async function* processPlaygroundStream(
     organizationId: params.organizationId,
     agentConfigId: agentConfig.id,
     ragCollectionId: agentConfig.useRAG ? agentConfig.ragCollectionId : null,
+    agentDepartmentId: agentConfig.departmentId ?? null,
   }
   const tools: import('ai').ToolSet = {
     ...Object.fromEntries(

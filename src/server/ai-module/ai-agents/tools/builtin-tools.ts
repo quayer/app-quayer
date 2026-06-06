@@ -57,6 +57,12 @@ export interface ToolExecutionContext {
    * useRAG). Habilita a tool search_knowledge a reconsultar a base sob demanda.
    */
   ragCollectionId?: string | null
+  /**
+   * Optional: department id (AIAgentConfig.departmentId). Vínculo ESTRUTURADO
+   * agente↔departamento. O dispatch_to_agent usa como FALLBACK quando o LLM
+   * não passa um departmentId válido (robusto a qual prompt vence).
+   */
+  agentDepartmentId?: string | null
 }
 
 // ---------------------------------------------------------------------------

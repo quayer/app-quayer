@@ -45,8 +45,12 @@ import { trySendRouletteWhatsApp } from './notify-member-whatsapp'
  * Input for dispatch_to_agent.
  *
  * `departmentId` (not a free-text name): the agent is "trained" via the system
- * prompt with the org's department list (id + name + type), so it passes an id.
+ * prompt with the org's department list (id + name + type), so it can pass an id.
  * This avoids string ambiguity and maps directly to ChatSession.assignedDepartmentId.
+ * It is now OPTIONAL: when the LLM omits it, the handler falls back to the agent's
+ * configured department (AIAgentConfig.departmentId via ctx.agentDepartmentId) — the
+ * AUTHORITATIVE structured link, robust to the ROLETA prompt block being shadowed by
+ * an active AgentPromptVersion.
  *
  * `reason` / `summary` / `urgency` reuse the exact shape of transfer_to_human so
  * the panel renders handoffs identically no matter which tool dispatched.
@@ -58,8 +62,9 @@ export const dispatchToAgentInputSchema = z.object({
   departmentId: z
     .string()
     .uuid()
+    .optional()
     .describe(
-      'Department.id de destino (sales/support/custom). Obrigatório — é a fila da roleta.',
+      'Department.id de destino (sales/support/custom). OPCIONAL: se omitir, usa o departamento configurado do agente (AIAgentConfig.departmentId). Passe explicitamente só para sobrescrever o setor padrão.',
     ),
   reason: z
     .string()
@@ -191,7 +196,11 @@ export async function executeDispatchToAgent(
   ctx: ToolExecutionContext,
   input: DispatchToAgentInput,
 ): Promise<DispatchToAgentResult> {
-  const { departmentId, reason, summary, urgency } = input
+  const { reason, summary, urgency } = input
+  // Alvo da roleta: o id explícito do LLM tem prioridade; senão cai no vínculo
+  // ESTRUTURADO do agente (AIAgentConfig.departmentId via ctx). Robusto a sombreamento
+  // do bloco ROLETA no systemPrompt por um AgentPromptVersion ACTIVE.
+  const departmentId = input.departmentId?.trim() || ctx.agentDepartmentId || ''
 
   try {
     const session = await database.chatSession.findUnique({
@@ -435,7 +444,7 @@ export async function executeDispatchToAgent(
 export function createDispatchToAgentTool(ctx: ToolExecutionContext) {
   return tool({
     description:
-      'Encaminha a conversa para um departamento específico e distribui automaticamente para o próximo atendente disponível via roleta (rodízio justo). Pausa a IA e atribui a conversa à pessoa sorteada. Use quando o cliente precisar de um setor específico (vendas, suporte) e você tiver o Department.id. Se não houver departamento adequado, use transfer_to_human.',
+      'Encaminha a conversa para um departamento específico e distribui automaticamente para o próximo atendente disponível via roleta (rodízio justo). Pausa a IA e atribui a conversa à pessoa sorteada. Use quando o cliente precisar de um setor específico (vendas, suporte). O departmentId é OPCIONAL: se você omitir, usa o departamento configurado do agente. Passe um Department.id explícito só para sobrescrever o setor padrão. Se não houver departamento adequado, use transfer_to_human.',
     inputSchema: dispatchToAgentInputSchema,
     execute: async (input) => executeDispatchToAgent(ctx, input),
   })

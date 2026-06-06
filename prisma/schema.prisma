@@ -1418,6 +1418,11 @@ model AIAgentConfig {
   // Catálogo de preços (tool get_pricing lê desta lista)
   priceListId String?
 
+  // Departamento da roleta (vínculo ESTRUTURADO agente↔departamento). O dispatch_to_agent
+  // usa este id como fallback quando o LLM não passa um departmentId válido — robusto a
+  // qual tabela de prompt vence (o bloco no systemPrompt pode ser sombreado por AgentPromptVersion).
+  departmentId String?
+
   // BYOK por agente: qual chave (OrganizationProvider) este agente usa.
   // null = resolução por fallback (isPrimary → priority → primeira ativa).
   organizationProviderId String?
