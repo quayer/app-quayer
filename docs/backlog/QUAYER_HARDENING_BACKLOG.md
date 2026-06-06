@@ -148,7 +148,15 @@ Backlog de melhorias derivado da análise comparativa **Quayer (orquestrador Bui
 
 ---
 
-## Status de execução (atualizado 2026-06-05)
+## Status de execução (atualizado 2026-06-06)
+
+### ✅ Sessão 2026-06-06 — waves de hardening (multi-workflow)
+- **RT-04/05/09/10** (runtime): fallback gracioso em `ContextBudgetExhaustedError`, provider cooldown migrado p/ Redis, short-memory TTL atômico, token-budget como `StopCondition`. Commit `c83bbf6`.
+- **QH-02 retry/dead-letter** (ver nota abaixo). Commit `c272243`.
+- **Worker entrypoint** `scripts/start-workers.ts` — ativa os 3 workers (dev). Commit `e1fab02`. PROD pendente (ver nota abaixo).
+- **QH-07d** `revert_prompt` tool (4ª/4 tools do Builder, undo/rollback não-destrutivo). **QH-09** testes do caminho TTS outbound. **QH-13** trace cross-worker no hop do outbound-retry. Commit `8f4df9f`.
+- **Auditoria (Wave 1):** 74 itens verificados — 49 done, 6 inert, **0 bugs**. Gaps remanescentes: ativação prod dos workers, **QH-12** (tokens em texto plano — `encryptToken` nunca chamado, segurança), normalização de encoding UTF-16→UTF-8.
+- **Validação:** `tsc -p tsconfig.json` 0 · `eslint` 0 · pre-commit vitest verde em todos os commits.
 
 ### ✅ P0 concluído e validado
 - QH-01/02/03 implementados como módulos isolados em `src/server/ai-module/ai-agents/infra/` (idempotency, rate-limit, hard-caps).
