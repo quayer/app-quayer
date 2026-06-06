@@ -52,6 +52,7 @@ export type CardKey =
   | "preview_summary"
   | "quick_reply_chips"
   | "source_progress"
+  | "silenced_contacts"
 
 /**
  * Compile-time assertion that every backend-registered key is also a valid FE

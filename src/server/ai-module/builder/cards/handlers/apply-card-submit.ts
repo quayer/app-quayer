@@ -44,6 +44,7 @@ import {
   type ActivationModePayload,
   type QuickReplyChipsPayload,
   type SourceProgressPayload,
+  type SilencedContactsPayload,
 } from '../card-submit.schemas'
 
 // ---------------------------------------------------------------------------
@@ -134,8 +135,39 @@ function sanitizeCurrency(currency: string): string {
 }
 
 /**
- * Re-validate team members server-side: keep position as a non-negative int and
- * trim string fields. The deploy saga maps these to DepartmentMember rows later.
+ * Porta SERVER-SIDE de `phone-br.ts normalizeBrPhone` (G6/G1): normaliza um
+ * telefone brasileiro digitado livre para E.164 (`+55DDDNNNNNNNN`) SEM depender
+ * de DOM. Mantém PARIDADE EXATA com a normalização do frontend (mesma regex de
+ * validação `^\+\d{10,15}$`) para que FE e BE concordem sobre o que é um número
+ * válido. Só retorna um número quando há confiança na forma; caso contrário
+ * `undefined` — telefone é OPCIONAL, então simplesmente o omitimos.
+ */
+function normalizeWhatsappBr(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return undefined
+
+  let candidate: string | null = null
+  // Já vem com DDI 55 (12 dígitos = fixo, 13 = celular com 9).
+  if (digits.startsWith('55') && digits.length >= 12 && digits.length <= 13) {
+    candidate = `+${digits}`
+  } else if (digits.length === 10 || digits.length === 11) {
+    // Local com DDD: 10 (fixo) ou 11 (celular com 9) — assume Brasil.
+    candidate = `+55${digits}`
+  } else if (raw.startsWith('+') && digits.length >= 10 && digits.length <= 15) {
+    // Estrangeiro / já prefixado com `+` — repassa se o tamanho for plausível.
+    candidate = `+${digits}`
+  }
+
+  // Valida a forma final igual ao FE (isValidBrE164) antes de confiar nela.
+  if (candidate !== null && /^\+\d{10,15}$/.test(candidate)) return candidate
+  return undefined
+}
+
+/**
+ * Re-validate team members server-side: keep position as a non-negative int,
+ * trim string fields and normalizar o WhatsApp (G6) para E.164-BR — incluindo o
+ * campo só quando confiável (espelha o opcional `userId`).
  */
 function sanitizeTeamMembers(
   members: TeamStructurePayload['members'],
@@ -143,12 +175,35 @@ function sanitizeTeamMembers(
   return members.map((m) => {
     const userId = m.userId?.trim()
     const name = m.name?.trim()
+    const whatsapp = normalizeWhatsappBr(m.whatsapp)
     return {
       position: Math.max(0, Math.trunc(m.position)),
       ...(userId && userId.length > 0 ? { userId } : {}),
       ...(name && name.length > 0 ? { name } : {}),
+      ...(whatsapp ? { whatsapp } : {}),
     }
   })
+}
+
+/**
+ * G1 — re-valida contatos silenciados server-side: normaliza o WhatsApp para
+ * E.164-BR (descarta os que não normalizam), faz trim do nome (inclui só se não
+ * vazio), dedupe por whatsapp e capa em 50. Nunca confia no body.
+ */
+function sanitizeSilencedContacts(
+  items: SilencedContactsPayload['contacts'],
+): SilencedContactsPayload['contacts'] {
+  const seen = new Set<string>()
+  const out: SilencedContactsPayload['contacts'] = []
+  for (const item of items) {
+    const whatsapp = normalizeWhatsappBr(item.whatsapp)
+    if (!whatsapp || seen.has(whatsapp)) continue
+    seen.add(whatsapp)
+    const name = item.name?.trim()
+    out.push(name && name.length > 0 ? { name, whatsapp } : { whatsapp })
+    if (out.length >= 50) break
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +440,16 @@ function applyTeamStructure(
   const deptLabel = payload.departmentName
     ? `departamento "${payload.departmentName}"`
     : 'a roleta'
+  // G6 — alguns membros podem ter WhatsApp para receber o aviso do rodízio.
+  const withPhoneCount = members.filter((m) => Boolean(m.whatsapp)).length
+  const phoneNote =
+    withPhoneCount > 0
+      ? ` ${withPhoneCount === 1 ? '1 membro tem' : `${withPhoneCount} membros têm`} WhatsApp para receber a notificação do rodízio.`
+      : ''
   return {
     next,
     cardInstruction:
-      `O usuário CONFIGUROU a equipe via card (${deptLabel}, ${countLabel} na roleta). ` +
+      `O usuário CONFIGUROU a equipe via card (${deptLabel}, ${countLabel} na roleta).${phoneNote} ` +
       'Use essa distribuição na transferência para humano e siga para o próximo passo. ' +
       'Não reabra o card de equipe.',
   }
@@ -566,6 +627,38 @@ function applySourceProgress(
   }
 }
 
+/**
+ * G1 — silenced_contacts: o usuário definiu (ou confirmou que não há) os contatos
+ * que o agente NUNCA responde automaticamente. `contacts` é um array → o
+ * deepMerge substitui a lista inteira (replace wholesale), que é o comportamento
+ * desejado. `acknowledged` é sempre `true` no state (o sentinel real é
+ * `confirmations.silencedContacts`, resolvido só aqui via applyConfirmation —
+ * nunca lido do body). Passo OPCIONAL: lista vazia é válida.
+ */
+function applySilencedContacts(
+  state: BuilderState,
+  contacts: SilencedContactsPayload['contacts'],
+): CardApplication {
+  const clean = sanitizeSilencedContacts(contacts)
+  const patch: DeepPartial<BuilderState> = {
+    silencedContacts: { contacts: clean, acknowledged: true },
+  }
+  const next = applyConfirmation(
+    patchBuilderState(state, patch),
+    'silencedContacts',
+  )
+
+  const cardInstruction =
+    clean.length === 0
+      ? 'O usuário confirmou que não há contatos a silenciar — o agente pode responder todos. ' +
+        'Siga para o próximo passo da jornada. Não reabra o card de contatos em silêncio.'
+      : `O usuário definiu ${clean.length === 1 ? '1 contato' : `${clean.length} contatos`} que o agente NUNCA responde automaticamente (o humano responde essas pessoas no WhatsApp). ` +
+        'Respeite esse silêncio no comportamento do agente e siga para o próximo passo. ' +
+        'Não reabra o card de contatos em silêncio.'
+
+  return { next, cardInstruction }
+}
+
 // ---------------------------------------------------------------------------
 // Main entrypoint
 // ---------------------------------------------------------------------------
@@ -651,6 +744,11 @@ export async function applyCardSubmit(
       // `accept: true` is guaranteed by the Zod literal — copy proposed (with
       // optional per-field edits) into the owned fields + flip `source`.
       application = applySourceProgress(current, body.edited)
+      break
+    case 'silenced_contacts':
+      // `acknowledged: true` is guaranteed by the Zod literal — replace the
+      // silenced-contacts list wholesale + flip `silencedContacts`. Empty is OK.
+      application = applySilencedContacts(current, body.contacts)
       break
     default: {
       // Exhaustiveness guard — a new registered card without a handler branch

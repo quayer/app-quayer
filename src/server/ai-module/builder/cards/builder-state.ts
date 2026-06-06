@@ -77,6 +77,10 @@ export const qualificationStateSchema = z.object({
 export const teamMemberSchema = z.object({
   userId: z.string().optional(),
   name: z.string().optional(),
+  // G6 — WhatsApp do membro (OPCIONAL, já normalizado para E.164-BR pelo handler).
+  // É por esse número que o agente notifica a pessoa quando o lead cai no rodízio
+  // dela. Coexiste com userId/name; uma linha só-nome (legado) continua válida.
+  whatsapp: z.string().optional(),
   position: z.number().int().nonnegative(),
 })
 
@@ -123,6 +127,26 @@ export const sourceIngestionStateSchema = z.object({
   proposed: sourceProposalSchema.optional(),
 })
 
+/**
+ * G1 — um único contato silenciado: o nome é opcional (livre), o `whatsapp` é o
+ * número canônico em E.164-BR (resolvido server-side pelo handler). É a lista de
+ * pessoas que o agente NUNCA responde automaticamente (sócio, fornecedor, família).
+ */
+export const silencedContactItemSchema = z.object({
+  name: z.string().optional(),
+  whatsapp: z.string(),
+})
+
+/**
+ * G1 — silenced_contacts card → builderState. `acknowledged` registra que o passo
+ * (OPCIONAL) foi reconhecido, tanto via "confirmar" quanto via "não tenho ninguém"
+ * (lista vazia é válida, espelha o source_progress accept:true).
+ */
+export const silencedContactsStateSchema = z.object({
+  contacts: z.array(silencedContactItemSchema).default([]),
+  acknowledged: z.boolean().default(false),
+})
+
 // ==========================================
 // Confirmation sentinels (server-resolved booleans)
 // ==========================================
@@ -147,6 +171,9 @@ export const confirmationsSchema = z.object({
   activation: z.boolean().default(false),
   summary: z.boolean().default(false),
   source: z.boolean().default(false),
+  // G1 — passo OPCIONAL: vira true quando o usuário confirma a lista de contatos
+  // silenciados (mesmo vazia). Nunca bloqueia a jornada nem isDeployReady.
+  silencedContacts: z.boolean().default(false),
 })
 
 // ==========================================
@@ -168,6 +195,11 @@ export const builderStateSchema = z.object({
   calendar: calendarStateSchema.default({}),
   activation: activationStateSchema.default({ keywords: [] }),
   sourceIngestion: sourceIngestionStateSchema.default({ sources: [] }),
+  // G1 — contatos silenciados (passo OPCIONAL). Default vazio + não-reconhecido.
+  silencedContacts: silencedContactsStateSchema.default({
+    contacts: [],
+    acknowledged: false,
+  }),
   confirmations: confirmationsSchema.default({}),
 })
 
@@ -190,6 +222,8 @@ export type ActivationState = z.infer<typeof activationStateSchema>
 export type SourceIngestionItem = z.infer<typeof sourceIngestionItemSchema>
 export type SourceProposal = z.infer<typeof sourceProposalSchema>
 export type SourceIngestionState = z.infer<typeof sourceIngestionStateSchema>
+export type SilencedContactItem = z.infer<typeof silencedContactItemSchema>
+export type SilencedContactsState = z.infer<typeof silencedContactsStateSchema>
 export type BuilderConfirmations = z.infer<typeof confirmationsSchema>
 export type BuilderState = z.infer<typeof builderStateSchema>
 

@@ -24,6 +24,7 @@ import type {
   ActivationModePayload,
 } from "@/server/ai-module/builder/cards/card-submit.schemas"
 import { CardShell } from "./card-shell"
+import { suggestKeywordsForProject } from "./keyword-suggestions"
 import type { CardComponentProps } from "./types"
 
 /**
@@ -140,6 +141,29 @@ export function ActivationModeCard({
   )
 
   const isKeywordMode = mode === "keyword_trigger"
+
+  // Sugestões de keyword derivadas do TEXTO LIVRE do projeto (helper PURO).
+  // value.project / value.proposal são lidos read-only — sem mutação de state.
+  const suggested = React.useMemo(
+    () =>
+      suggestKeywordsForProject({
+        objective: value.project.objective,
+        proposalDescription: value.proposal.description,
+        projectName: value.project.name,
+      }),
+    [value.project.objective, value.proposal.description, value.project.name],
+  )
+
+  // Filtra as sugestões já presentes (dedupe case-insensitive coerente com
+  // normalizeKeywords) para não oferecer chip de keyword que já está na lista.
+  const availableSuggestions = React.useMemo(() => {
+    const present = new Set(keywords.map((kw) => kw.trim().toLowerCase()))
+    return suggested.filter((kw) => !present.has(kw.trim().toLowerCase()))
+  }, [keywords, suggested])
+
+  const addSuggested = React.useCallback((keyword: string) => {
+    setKeywords((current) => normalizeKeywords([...current, keyword]))
+  }, [])
 
   const handleConfirm = React.useCallback(() => {
     onSubmit({
@@ -291,6 +315,44 @@ export function ActivationModeCard({
               <Plus className="h-4 w-4" />
             </button>
           </div>
+
+          {availableSuggestions.length > 0 && (
+            <div className="mt-3">
+              <p
+                className="text-[11px]"
+                style={{ color: tokens.textTertiary }}
+              >
+                Sugestões para o seu negócio:
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {availableSuggestions.map((keyword) => (
+                  <button
+                    key={keyword}
+                    type="button"
+                    disabled={disabled}
+                    aria-label={`Adicionar sugestão ${keyword}`}
+                    onClick={() => addSuggested(keyword)}
+                    className="group inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-0.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      borderColor: tokens.divider,
+                      color: tokens.textSecondary,
+                    }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.borderColor = tokens.brand
+                      event.currentTarget.style.color = tokens.brandText
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.borderColor = tokens.divider
+                      event.currentTarget.style.color = tokens.textSecondary
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                    {keyword}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </CardShell>

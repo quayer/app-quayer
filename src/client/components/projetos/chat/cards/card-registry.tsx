@@ -42,6 +42,7 @@ import {
   Clock,
   KeyRound,
   ListChecks,
+  ShieldOff,
   Sparkles,
   Tag,
   UserRound,
@@ -65,6 +66,7 @@ import { ActivationModeCard } from "./activation-mode-card"
 import { PreviewSummaryCard } from "./preview-summary-card"
 import { QuickReplyChipsCard } from "./quick-reply-chips-card"
 import { SourceProgressCard } from "./source-progress-card"
+import { SilencedContactsCard } from "./silenced-contacts-card"
 
 /**
  * The `CardKey`s this registry renders — the 12 catalog cards. Excludes the 3
@@ -83,6 +85,7 @@ export type RegisteredW3CardKey =
   | "preview_summary"
   | "quick_reply_chips"
   | "source_progress"
+  | "silenced_contacts"
 
 /**
  * The registry. Heterogeneous by design — each component narrows `TPayload`
@@ -181,6 +184,17 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Fontes do negócio",
     icon: <Sparkles className="h-4 w-4" />,
     component: SourceProgressCard as ComponentType<CardComponentProps>,
+  },
+  silenced_contacts: {
+    // G1 — OPTIONAL step `silenced_contacts`. The step-engine surfaces it in the
+    // active-step slot (like the source override) only when it applies — activation
+    // confirmed with mode `all_except_blacklist` and not yet acknowledged. It never
+    // gates deploy and clears the instant the user submits (even an empty list).
+    cardKey: "silenced_contacts",
+    stepId: "silenced_contacts",
+    title: "Contatos em silêncio",
+    icon: <ShieldOff className="h-4 w-4" />,
+    component: SilencedContactsCard as ComponentType<CardComponentProps>,
   },
 }
 

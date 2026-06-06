@@ -146,6 +146,24 @@ function sourceIngestionActive(state: BuilderState): boolean {
 }
 
 /**
+ * G1 — the OPTIONAL `silenced_contacts` card likewise TAKES OVER the active-step
+ * slot so it surfaces instead of marching straight to the next step, but only when
+ * it actually applies: the user chose "atende todos, menos bloqueados"
+ * (`activation.mode === 'all_except_blacklist'`), already confirmed activation, and
+ * has NOT yet acknowledged the silenced list. As soon as the user submits — even an
+ * empty list via "não tenho ninguém" — `confirmations.silencedContacts` flips and
+ * this returns false, so it never loops forever and never gates deploy (the step is
+ * optional, outside REQUIRED_STEPS).
+ */
+function silencedContactsActive(state: BuilderState): boolean {
+  return (
+    state.activation.mode === 'all_except_blacklist' &&
+    confirmed(state, 'activation') &&
+    !confirmed(state, 'silencedContacts')
+  )
+}
+
+/**
  * Ordered journey lifted from the 8-stage flow + card catalog. Each entry is a
  * deterministic gate. Order matters: `nextPendingStep` returns the FIRST not-done.
  */
@@ -266,6 +284,21 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
     missing: (s) => (confirmed(s, 'activation') ? [] : ['confirmations.activation']),
   },
   {
+    id: 'silenced_contacts',
+    title: 'Contatos em silêncio',
+    ask: 'Algum contato que o agente deve deixar em silêncio (sócio, fornecedor, família)? É opcional.',
+    requiredPaths: ['confirmations.silencedContacts'],
+    // G1 — OPCIONAL (padrão source_ingestion): nunca bloqueia a jornada nem o
+    // isDeployReady, nunca ocupa o active-step slot. Só faz sentido quando a
+    // ativação é "atende todos, menos bloqueados"; fora disso é non-applicable
+    // (applies=false → tratado como satisfeito e fora do ratio de completeness).
+    optional: true,
+    applies: (s) => s.activation.mode === 'all_except_blacklist',
+    isDone: (s) => confirmed(s, 'silencedContacts'),
+    missing: (s) =>
+      confirmed(s, 'silencedContacts') ? [] : ['confirmations.silencedContacts'],
+  },
+  {
     id: 'tools',
     title: 'Ferramentas',
     // Inline card (ToolCallCard renders propose_tools) is the surface here.
@@ -337,6 +370,7 @@ export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
   'calendar.connectionId': 'card',
   'activation.mode': 'card',
   'activation.keywords': 'card',
+  'silencedContacts.contacts': 'card',
   'selectedToolKeys': 'card',
   'selectedChannelKey': 'card',
   'sourceIngestion.sources': 'card',
@@ -504,15 +538,26 @@ export function nextPendingStep(
       ? QUAYER_STEPS.find((def) => def.id === 'source_ingestion') ?? null
       : null
 
+  // G1 — the optional silenced_contacts card also takes over the active-step slot
+  // (lower priority than an in-flight source scan) so it surfaces after activation
+  // instead of jumping straight to tools. Clears the instant the user submits.
+  const silencedStep =
+    sourceStep === null && silencedContactsActive(state)
+      ? QUAYER_STEPS.find((def) => def.id === 'silenced_contacts') ?? null
+      : null
+
+  const overrideStep = sourceStep ?? silencedStep
+
   // When everything is done, surface the summary step as the terminal "ask".
-  const chosen = sourceStep ?? surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
+  const chosen = overrideStep ?? surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
   const ask = sourceStep
     ? hasSourceProposal(state)
       ? 'Terminei de ler o site/Instagram que você enviou. Revise os campos detectados no card "Fontes do negócio" e clique em Aceitar para aplicar ao agente (pode editar antes).'
       : 'Recebi o link e já estou lendo o seu site/Instagram para entender o negócio. Acompanhe no card "Fontes do negócio" — em instantes mostro o que entendi.'
     : chosen.ask
-  // Optional source step has no required fields; otherwise the surfaced step's.
-  const requiredMissing = sourceStep ? [] : surfaced ? surfaced.missing(state, ctx) : []
+  // Override steps (source/silenced) are optional → no required fields; otherwise
+  // the surfaced required step's missing paths.
+  const requiredMissing = overrideStep ? [] : surfaced ? surfaced.missing(state, ctx) : []
 
   return {
     step: {

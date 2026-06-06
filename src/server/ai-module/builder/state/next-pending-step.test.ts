@@ -75,7 +75,9 @@ function fullyCompletedState(): BuilderState {
     selectedChannelKey: 'uazapi',
     qualification: { action: 'book_appointment' },
   })
-  // Every confirmation sentinel.
+  // Every confirmation sentinel. 'silencedContacts' (G1, optional) is included so
+  // the full-checklist `steps.every(done)` assertion stays green — its step.done
+  // reads the raw sentinel regardless of applicability.
   const allSentinels: ConfirmationKey[] = [
     'source',
     'persona',
@@ -87,6 +89,7 @@ function fullyCompletedState(): BuilderState {
     'team',
     'calendar',
     'activation',
+    'silencedContacts',
     'tools',
     'channel',
     'agentApproved',
@@ -283,6 +286,7 @@ describe('nextPendingStep — completenessPct', () => {
       'team',
       'calendar',
       'activation',
+      'silencedContacts',
       'tools',
       'channel',
       'agentApproved',
@@ -416,6 +420,88 @@ describe('nextPendingStep — team/calendar gated by qualification.action', () =
 
     const r2 = nextPendingStep(confirm(s, 'calendar'), READY_CTX)
     expect(r2.isDeployReady).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// G1 — silenced_contacts: OPTIONAL + applies-gated by activation.mode
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStep — silenced_contacts (optional, applies-gated)', () => {
+  it('reaches isDeployReady WITHOUT confirming the optional silenced_contacts step', () => {
+    // Start fully complete, then un-confirm the optional silenced_contacts step
+    // AND force the applicable mode so it WOULD count if it were required.
+    let s = fullyCompletedState()
+    s = patchBuilderState(s, {
+      activation: { mode: 'all_except_blacklist' },
+    })
+    s = { ...s, confirmations: { ...s.confirmations, silencedContacts: false } }
+
+    const r = nextPendingStep(s, READY_CTX)
+    // The optional step is NOT done...
+    expect(r.steps.find((st) => st.id === 'silenced_contacts')?.done).toBe(false)
+    // ...yet the journey is complete and deploy-ready (optional never blocks).
+    expect(r.blockers).toHaveLength(0)
+    expect(r.isDeployReady).toBe(true)
+  })
+
+  it('is non-applicable when activation.mode !== all_except_blacklist (excluded from the ratio)', () => {
+    // mode is unset in fullyCompletedState → silenced_contacts does not apply, so
+    // it neither inflates nor blocks completeness; the journey is still 100%.
+    let s = fullyCompletedState()
+    s = { ...s, confirmations: { ...s.confirmations, silencedContacts: false } }
+    const r = nextPendingStep(s, READY_CTX)
+    // Non-applicable + unconfirmed → never surfaces, still deploy-ready and 100%.
+    expect(r.step.id).not.toBe<StepId>('silenced_contacts')
+    expect(r.isDeployReady).toBe(true)
+    expect(r.completenessPct).toBe(100)
+  })
+
+  it('G1 surfacing: takes over the active step (nudge) when applicable + pending, then yields once acknowledged', () => {
+    // Fully complete + applicable mode + optional step pending → it surfaces as the
+    // active step (over the terminal summary), like the source override.
+    let s = fullyCompletedState()
+    s = patchBuilderState(s, { activation: { mode: 'all_except_blacklist' } })
+    s = { ...s, confirmations: { ...s.confirmations, silencedContacts: false } }
+
+    let r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('silenced_contacts')
+    expect(r.requiredMissing).toHaveLength(0) // optional → no required fields
+    expect(r.isDeployReady).toBe(true) // surfacing it never blocks deploy
+
+    // Once acknowledged (even an empty list via "não tenho ninguém"), it yields to
+    // the terminal summary and never surfaces again.
+    s = confirm(s, 'silencedContacts')
+    r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('summary')
+  })
+
+  it('does not jump ahead: silenced_contacts only surfaces after activation is confirmed', () => {
+    // Pre-activation journey + the applicable mode, activation NOT yet confirmed.
+    let s = patchBuilderState(freshState(), {
+      project: { name: 'X', objective: 'Y' },
+      selectedChannelKey: 'uazapi',
+      qualification: { action: 'lead_only' },
+      activation: { mode: 'all_except_blacklist' },
+    })
+    for (const k of [
+      'persona',
+      'services',
+      'hours',
+      'pricing',
+      'qualificationAction',
+      'qualificationSteps',
+    ] as ConfirmationKey[]) {
+      s = confirm(s, k)
+    }
+    // activation pending → the optional card does NOT pre-empt it.
+    const before = nextPendingStep(s, READY_CTX)
+    expect(before.step.id).toBe<StepId>('activation')
+
+    // After confirming activation, the optional silenced card surfaces as the nudge
+    // (over the next required step, tools).
+    const after = nextPendingStep(confirm(s, 'activation'), READY_CTX)
+    expect(after.step.id).toBe<StepId>('silenced_contacts')
   })
 })
 

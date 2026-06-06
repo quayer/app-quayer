@@ -40,6 +40,7 @@ export type StepId =
   | 'team'
   | 'calendar'
   | 'activation'
+  | 'silenced_contacts'
   | 'tools'
   | 'channel'
   | 'agent_approval'

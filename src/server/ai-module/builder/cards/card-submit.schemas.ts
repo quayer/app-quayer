@@ -170,6 +170,9 @@ export const qualificationStepsPayloadSchema = z.object({
 export const teamMemberPayloadSchema = z.object({
   userId: z.string().min(1).optional(),
   name: z.string().min(1).max(200).optional(),
+  // G6 — WhatsApp do membro (OPCIONAL). Limite curto: um telefone formatado/E.164
+  // nunca passa de ~20 chars; 40 dá folga. RE-normalizado server-side no handler.
+  whatsapp: z.string().min(1).max(40).optional(),
   position: z.number().int().nonnegative(),
 })
 
@@ -248,6 +251,25 @@ export const sourceProgressPayloadSchema = z.object({
 })
 
 /**
+ * G1 — silenced_contacts: a lista de contatos que o agente NUNCA responde
+ * automaticamente (sócio, fornecedor, família). Cada item tem um `name` opcional
+ * e um `whatsapp` obrigatório (RE-normalizado para E.164-BR server-side). A lista
+ * é OPCIONAL: pode vir vazia. `acknowledged` é `z.literal(true)` — tanto
+ * "confirmar" quanto "não tenho ninguém" reconhecem o passo (espelha o
+ * `source_progress accept:true`). Cap de 50 itens contra balão da coluna JSONB.
+ */
+export const silencedContactItemPayloadSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  whatsapp: z.string().min(1).max(40),
+})
+
+export const silencedContactsPayloadSchema = z.object({
+  cardKey: z.literal('silenced_contacts'),
+  contacts: z.array(silencedContactItemPayloadSchema).max(50).default([]),
+  acknowledged: z.literal(true),
+})
+
+/**
  * Registry of per-card payload schemas. ADD a card here (W3) and the cardKey
  * enum + discriminated union below pick it up automatically. Keyed by the
  * literal `cardKey` each schema carries in its discriminator field.
@@ -268,6 +290,7 @@ export const CARD_PAYLOAD_SCHEMAS = {
   preview_summary: previewSummaryPayloadSchema,
   quick_reply_chips: quickReplyChipsPayloadSchema,
   source_progress: sourceProgressPayloadSchema,
+  silenced_contacts: silencedContactsPayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -314,6 +337,7 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   previewSummaryPayloadSchema,
   quickReplyChipsPayloadSchema,
   sourceProgressPayloadSchema,
+  silencedContactsPayloadSchema,
 ])
 export type CardSubmitBody = z.infer<typeof cardSubmitBodySchema>
 
@@ -342,3 +366,9 @@ export type ActivationModePayload = z.infer<typeof activationModePayloadSchema>
 export type PreviewSummaryPayload = z.infer<typeof previewSummaryPayloadSchema>
 export type QuickReplyChipsPayload = z.infer<typeof quickReplyChipsPayloadSchema>
 export type SourceProgressPayload = z.infer<typeof sourceProgressPayloadSchema>
+export type SilencedContactItemPayload = z.infer<
+  typeof silencedContactItemPayloadSchema
+>
+export type SilencedContactsPayload = z.infer<
+  typeof silencedContactsPayloadSchema
+>
