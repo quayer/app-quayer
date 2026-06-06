@@ -20,6 +20,8 @@ import { getModel } from './services/provider-factory'
 import { retrieveRelevantChunks, buildContextBlock } from './knowledge/knowledge-retrieval.service'
 import {
   recordRuntimeDecision,
+  claimRuntimeTurn,
+  computeDecisionIdempotencyKey,
   EMPTY_DECISION_META,
   type RuntimeDecisionMeta,
 } from './services/runtime-decision.service'
@@ -128,6 +130,12 @@ export interface ProcessAgentMessageParams {
   apiKey?: string
   /** QH-13: traceId propagado do webhook para correlação de logs cross-worker. */
   traceId?: string
+  /**
+   * Id da mensagem inbound do provider (waMessageId). Quando presente, ativa a
+   * idempotência durável de turno — um 2º dispatch do mesmo turno é
+   * short-circuitado. Ausente em playground/builder (sem retry de webhook).
+   */
+  inboundMessageId?: string
 }
 
 // ── Tool Result Truncation Wrapper ──────────────────────────────────────────
@@ -951,6 +959,42 @@ export async function processAgentMessage(
     throw new Error('Agent config missing after prepareAgentCall')
   }
 
+  // ── Idempotência durável de turno ────────────────────────────────────────
+  // Reivindica ANTES do LLM. Se o MESMO turno (sessão + msg inbound + config) já
+  // foi concluído por uma entrega anterior, short-circuita SEM reenviar — backstop
+  // durável (DB) para quando o dedup Redis do inbound falha-open (Redis down).
+  // Só ativa no caminho de webhook (inboundMessageId presente). Fail-open dentro
+  // de claimRuntimeTurn: erro de DB → processa.
+  const decisionKey = computeDecisionIdempotencyKey(
+    params.sessionId,
+    params.inboundMessageId,
+    decisionMeta.configHash,
+  )
+  if (decisionKey) {
+    const claimed = await claimRuntimeTurn({
+      decisionIdempotencyKey: decisionKey,
+      organizationId: params.organizationId,
+      sessionId: params.sessionId,
+      agentConfigId: agentConfig.id,
+      executionMode: 'sync',
+      modelPrimary: agentConfig.model,
+      providerPrimary: agentConfig.provider,
+    })
+    if (!claimed) {
+      // Turno duplicado já concluído — no-op (o caller-webhook trata text vazio
+      // como skip, exatamente como no lock-não-adquirido acima).
+      return {
+        text: '',
+        toolCalls: [],
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        cost: { inputCost: 0, outputCost: 0, totalCost: 0 },
+        latencyMs: 0,
+        model: '',
+        provider: '',
+      }
+    }
+  }
+
   // US-043 / RT-05: Check if primary provider is in cooldown (Redis-backed).
   const fallbackModel = (agentConfig as Record<string, unknown>).fallbackModel as string | undefined
   const providerKey = `${agentConfig.provider}:${agentConfig.model}`
@@ -1121,6 +1165,7 @@ export async function processAgentMessage(
       totalCost: cost.totalCost,
       latencyMs,
       status: 'success',
+      decisionIdempotencyKey: decisionKey,
     })
 
     return {
@@ -1158,6 +1203,7 @@ export async function processAgentMessage(
       latencyMs: Date.now() - startTime,
       status: 'error',
       errorMessage: message,
+      decisionIdempotencyKey: decisionKey,
     })
     throw error
   }

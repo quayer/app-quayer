@@ -143,6 +143,7 @@ describe('webhook processor CloudAPI agent dispatch', () => {
       connectionId: 'conn_1',
       organizationId: 'org_1',
       messageContent: 'hello',
+      inboundMessageId: 'wamid.inbound_1',
     });
 
     expect(sendText).toHaveBeenCalledWith('conn_1', 'cloudapi', {

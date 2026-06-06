@@ -691,6 +691,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         organizationId,
         messageContent,
         traceId: webhookTraceId,
+        // Idempotência durável de turno: o id da msg inbound do uazapi.
+        inboundMessageId: externalMessageId,
       })
 
       const typedResult = result as AgentRuntimeResponse | null

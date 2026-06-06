@@ -212,6 +212,7 @@ async function processIncomingMessageSimple(
       contactPhone: from,
       messageContent: cleanContent,
       session,
+      inboundMessageId: message.id,
     });
   }
 }
@@ -381,8 +382,9 @@ async function dispatchCloudApiAgentResponse(params: {
   session: ChatSessionForAgentDispatch;
   contactPhone: string;
   messageContent: string;
+  inboundMessageId?: string;
 }): Promise<void> {
-  const { connection, contactPhone, messageContent, session } = params;
+  const { connection, contactPhone, messageContent, session, inboundMessageId } = params;
 
   if (!messageContent.trim() || !canDispatchAgent(session)) {
     return;
@@ -412,6 +414,8 @@ async function dispatchCloudApiAgentResponse(params: {
       connectionId: connection.id,
       organizationId: connection.organizationId,
       messageContent: finalMessageContent,
+      // Idempotência durável de turno: id da msg inbound da CloudAPI.
+      inboundMessageId,
     });
 
     const aiText = result.text?.trim();

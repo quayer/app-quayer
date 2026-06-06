@@ -1551,6 +1551,11 @@ model AgentRuntimeDecision {
   agentConfigId   String
   promptVersionId String?
   configHash      String?
+  // Idempotência durável de turno: sha256(sessionId:inboundMessageId:configHash).
+  // Nullable + @unique → Postgres permite N nulls (turnos sem id de webhook, ex.:
+  // playground/builder, não participam). Um 2º dispatch do MESMO turno colide aqui
+  // (P2002) e é short-circuitado ANTES do LLM — sem resposta duplicada.
+  decisionIdempotencyKey String? @unique
   executionMode   String // 'sync' | 'stream' | 'playground'
 
   // Modelo & provider (used pode diferir de primary se houve fallback)
@@ -1588,7 +1593,7 @@ model AgentRuntimeDecision {
 
   // Latência & status
   latencyMs    Int     @default(0)
-  status       String  @default("success") // 'success' | 'error'
+  status       String  @default("success") // 'pending' (claim pré-LLM) | 'success' | 'error' | 'fallback'
   errorMessage String? @db.Text
 
   createdAt DateTime @default(now())
