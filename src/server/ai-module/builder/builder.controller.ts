@@ -18,6 +18,7 @@ import { chatRoutes }     from './chat/chat.routes'
 import { cardSubmitRoutes } from './cards/card-submit.routes'
 import { sheetParseRoutes } from './cards/sheet-parse.routes'
 import { sourcesRoutes }  from './sources/sources.routes'
+import { sourceImagesRoutes } from './sources/source-images.routes'
 import { deployRoutes }   from './deploy/deploy.routes'
 import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
 import { provisionWhatsAppRoutes } from './channel/provision-whatsapp.routes'
@@ -39,6 +40,7 @@ export const builderController = igniter.controller({
     ...cardSubmitRoutes,
     ...sheetParseRoutes,
     ...sourcesRoutes,
+    ...sourceImagesRoutes,
     ...deployRoutes,
     ...channelCredentialsRoutes,
     ...provisionWhatsAppRoutes,
