@@ -13,6 +13,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { getRedis } from '@/server/services/redis'
+import { getServerConfig } from '@/server/services/server-config'
 import { runActorSync } from '@/lib/providers/apify/apify-runner'
 import {
   normalizeInstagramProfile,
@@ -20,27 +21,37 @@ import {
 } from '@/lib/providers/apify/instagram-normalizer'
 import type { ToolExecutionContext } from '../builtin-tools'
 
-const ACTOR = 'apify~instagram-profile-scraper'
 const CACHE_TTL_SECONDS = 24 * 60 * 60
 
-function cacheKey(username: string): string {
-  return `apify:ig:${username}`
+// Cache namespaced por actor: evita colisão de key se um dia houver >1 actor
+// resolvendo o mesmo username com payloads/saídas diferentes.
+function cacheKey(actor: string, username: string): string {
+  return `apify:ig:${actor}:${username}`
 }
 
-async function readCache(username: string): Promise<InstagramProfile | null> {
+async function readCache(actor: string, username: string): Promise<InstagramProfile | null> {
   try {
     const redis = getRedis()
-    const raw = await redis.get(cacheKey(username))
+    const raw = await redis.get(cacheKey(actor, username))
     return raw ? (JSON.parse(raw) as InstagramProfile) : null
   } catch {
     return null
   }
 }
 
-async function writeCache(username: string, profile: InstagramProfile): Promise<void> {
+async function writeCache(
+  actor: string,
+  username: string,
+  profile: InstagramProfile,
+): Promise<void> {
   try {
     const redis = getRedis()
-    await redis.set(cacheKey(username), JSON.stringify(profile), 'EX', CACHE_TTL_SECONDS)
+    await redis.set(
+      cacheKey(actor, username),
+      JSON.stringify(profile),
+      'EX',
+      CACHE_TTL_SECONDS,
+    )
   } catch {
     // cache é best-effort
   }
@@ -61,7 +72,7 @@ export function createEnrichInstagramTool(_ctx: ToolExecutionContext) {
         .describe('Quantos posts recentes trazer (default 5).'),
     }),
     execute: async ({ handle, max_posts }) => {
-      const token = process.env.APIFY_TOKEN
+      const { APIFY_TOKEN: token, APIFY_INSTAGRAM_ACTOR_ID: actor } = getServerConfig()
       if (!token) {
         return { success: false, error: 'Enriquecimento de Instagram não configurado.' }
       }
@@ -69,12 +80,12 @@ export function createEnrichInstagramTool(_ctx: ToolExecutionContext) {
       const username = handle.replace(/^@/, '').trim().toLowerCase()
       if (!username) return { success: false, error: 'Handle inválido.' }
 
-      const cached = await readCache(username)
+      const cached = await readCache(actor, username)
       if (cached) return { success: true, profile: cached, cached: true }
 
       try {
         const items = await runActorSync(
-          ACTOR,
+          actor,
           { usernames: [username], resultsLimit: max_posts ?? 5 },
           token,
           { timeoutMs: 20_000 },
@@ -83,7 +94,7 @@ export function createEnrichInstagramTool(_ctx: ToolExecutionContext) {
         if (!profile) {
           return { success: false, error: 'Perfil não encontrado ou privado.' }
         }
-        await writeCache(username, profile)
+        await writeCache(actor, username, profile)
         return { success: true, profile }
       } catch (err) {
         console.error(
