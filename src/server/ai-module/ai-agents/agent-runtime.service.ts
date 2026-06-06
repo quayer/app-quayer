@@ -469,8 +469,10 @@ async function prepareAgentCall(
 
   // 2·media: ativa o envio de mídia (foto/vídeo/áudio/doc) ensinando as tags que o
   // pipeline outbound já converte. Conteúdo estático → fica cedo no prompt p/ ser
-  // prefixo estável do prompt cache. Sem tool nova, sem bypassar a resiliência.
-  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide()}`
+  // prefixo estável do prompt cache. A instrução de chamar `buscar_media` só entra
+  // quando a tool ESTÁ habilitada (senão mandaria chamar tool inexistente).
+  const hasMediaTool = (agentConfig.enabledTools ?? []).includes('buscar_media')
+  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide(hasMediaTool)}`
 
   // Observabilidade: coleta as decisões de setup conforme cada bloco roda.
   const decisionMeta: RuntimeDecisionMeta = {
@@ -1623,8 +1625,12 @@ export async function* processPlaygroundStream(
   let systemPrompt = promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
   // 2·media: paridade com o runtime real (ver função sendAgentResponse acima) —
-  // o preview tem que refletir o mesmo system prompt, incluindo o guia de mídia.
-  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide()}`
+  // o preview tem que refletir o mesmo system prompt, incluindo o guia de mídia
+  // (instrução de buscar_media só quando a tool está habilitada).
+  const previewHasMediaTool = (agentConfig.enabledTools ?? []).includes(
+    'buscar_media',
+  )
+  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide(previewHasMediaTool)}`
 
   // 3. Use caller-supplied history directly (no DB round-trip)
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> =

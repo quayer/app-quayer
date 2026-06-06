@@ -21,6 +21,7 @@ import type {
 import { publishVersion } from './publish-version.handler'
 import { materializePricing } from './materialize-pricing.handler'
 import { materializeTeam } from './materialize-team.handler'
+import { materializeMedia } from './materialize-media.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -193,6 +194,21 @@ export async function executeDeployFlow(
       () => materializeTeam(context),
     )
     context.state.team = { departmentId: materializedTeam.departmentId }
+
+    // Materialize the MEDIA CATALOG (Fase E) — gallery images (Onda D) + pricing
+    // photos (M2) → runtime model MediaAsset, so the retrieval tool `buscar_media`
+    // returns REAL URLs to the LLM (the outbound pipeline sends them). Runs BEFORE
+    // provisioning the WhatsApp instance, for the SAME reason as
+    // materialize_pricing/team: a materialization failure leaves no orphan UAZapi
+    // instance to compensate. Status reuses 'publishing' (still pre-infra "config"
+    // phase); the real step name 'materialize_media' lives in `activeStep` for
+    // failure attribution.
+    const materializedMedia = await runStep(
+      'materialize_media',
+      'publishing',
+      () => materializeMedia(context),
+    )
+    context.state.media = { collectionId: materializedMedia.collectionId }
 
     const instance = await runStep(
       'create_instance',

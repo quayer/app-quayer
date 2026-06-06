@@ -1493,6 +1493,7 @@ model KnowledgeCollection {
   sources      KnowledgeSource[]
   chunks       KnowledgeChunk[]
   images       KnowledgeImage[]
+  mediaAssets  MediaAsset[]
   agents       AIAgentConfig[] // agentes que apontam ragCollectionId pra cá
 
   @@unique([organizationId, name])
@@ -1579,6 +1580,45 @@ model KnowledgeImage {
   @@index([organizationId])
   @@index([sourceId])
   @@map("knowledge_images")
+}
+
+// ── Catálogo de Mídia (Fase E) ───────────────────────────────────────────────
+// Catálogo UNIFICADO de mídia ENVIÁVEL pelo agente (foto/vídeo/PDF) — NÃO áudio
+// (áudio é dinâmico, sai pelo outbound/TTS). A tool `buscar_media` lê daqui e
+// devolve URLs REAIS ao LLM, que emite a tag de mídia ([url da imagem:...] /
+// [video:...] / [document:...]); o pipeline outbound (tag-parser → uazapi-sender)
+// é quem ENVIA. Origens: upload manual + materialização da galeria (KnowledgeImage)
+// e das fotos de preço (PriceItem) no deploy. Scope por collection (kb:projectId),
+// igual ao RAG/galeria. storageKey = path no bucket (assina on-read); externalUrl
+// quando a mídia já é uma URL pública externa.
+model MediaAsset {
+  id             String   @id @default(uuid())
+  organizationId String // tenant boundary explícito (carimbo)
+  collectionId   String // = ragCollectionId do agente (kb:projectId)
+  mediaType      String // 'image' | 'video' | 'document'
+  storageKey     String? // path no BUCKETS.MEDIA (assina on-read) — uploads + materializados
+  externalUrl    String? // URL pública externa (ex: foto de preço hospedada fora)
+  mimeType       String?
+  caption        String?  @db.Text // legenda/título (usada na tag de mídia)
+  tags           String[] @default([]) // palavras-chave p/ o filtro simples (sem vetor)
+  category       String?
+  source         String   @default("upload") // 'upload' | 'gallery' | 'pricing'
+  sourceRef      String? // id de origem (KnowledgeImage.id / PriceItem.id) p/ materialize idempotente
+  sizeBytes      Int?
+  position       Int      @default(0)
+  confirmedAt    DateTime? // curadoria (NULL = pendente); o runtime só envia confirmedAt IS NOT NULL
+  deletedAt      DateTime? // soft-delete (runtime/listas filtram deletedAt IS NULL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([source, sourceRef]) // dedup do materialize (upload tem sourceRef NULL → múltiplos ok)
+  @@index([collectionId])
+  @@index([organizationId])
+  @@index([collectionId, mediaType, deletedAt])
+  @@map("media_assets")
 }
 
 // ── Agent Runtime Decisions (observabilidade — Wave Orayon) ──────────────────
