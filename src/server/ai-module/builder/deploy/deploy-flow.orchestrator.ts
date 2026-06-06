@@ -19,6 +19,7 @@ import type {
   DeployStepName,
 } from './deploy.contract'
 import { publishVersion } from './publish-version.handler'
+import { materializePricing } from './materialize-pricing.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -138,15 +139,22 @@ export async function executeDeployFlow(
     startedAt,
   }
 
+  // Tracks the step currently running so the catch maps `failureStep` robustly.
+  // Status alone is ambiguous: `materialize_pricing` reuses 'publishing' (it's
+  // still the "config" phase, pre-infra), so inferring the step from status would
+  // mis-attribute its failures to 'publish_version'. We capture the real name here.
+  let activeStep: DeployStepName = 'publish_version'
+
   const runStep = async <T>(
     name: DeployStepName,
     status: DeployStatus,
     fn: () => Promise<T>,
   ): Promise<T> => {
+    activeStep = name
     result.status = status
     // `currentStep` is not a column on BuilderDeployment — the `status` enum
     // already encodes the active step (publishing/instance_creating/attaching).
-    void name
+    // The step NAME is tracked in `activeStep` (above) for failure attribution.
     await updateDeploymentStatus(deploymentId, { status })
     return fn()
   }
@@ -157,6 +165,18 @@ export async function executeDeployFlow(
     )
     result.publishedAt = published.publishedAt
     result.versionNumber = published.versionNumber
+
+    // Materialize the pricing collected in builderState (Onda B) into the runtime
+    // models (PriceList/PriceItem) BEFORE provisioning the WhatsApp instance — so
+    // a materialization failure leaves no orphan UAZapi instance to compensate.
+    // Status reuses 'publishing' (still pre-infra "config" phase); the real step
+    // name 'materialize_pricing' lives in `activeStep` for failure attribution.
+    const materialized = await runStep(
+      'materialize_pricing',
+      'publishing',
+      () => materializePricing(context),
+    )
+    context.state.pricing = { listId: materialized.listId }
 
     const instance = await runStep(
       'create_instance',
@@ -182,12 +202,10 @@ export async function executeDeployFlow(
     return result
   } catch (err) {
     const failureReason = err instanceof Error ? err.message : String(err)
-    const failureStep: DeployStepName =
-      result.status === 'publishing'
-        ? 'publish_version'
-        : result.status === 'instance_creating'
-          ? 'create_instance'
-          : 'attach_connection'
+    // Use the captured active step name (not status, which is ambiguous now that
+    // materialize_pricing shares 'publishing'). This attributes failures to the
+    // exact step for ALL steps, including the new one.
+    const failureStep: DeployStepName = activeStep
 
     result.status = 'failed'
     result.failureStep = failureStep

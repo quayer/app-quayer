@@ -1656,6 +1656,9 @@ model PriceList {
   name           String
   description    String?
   currency       String  @default("BRL")
+  // M2 (materialização do pricing) — espelham o card de preço (Onda B):
+  disclosureStyle String @default("exact") // como o agente FALA o preço: exact|from|average|none
+  minTicketCents Int? // valor mínimo de atendimento (centavos), opcional
   isActive       Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -1674,7 +1677,9 @@ model PriceItem {
   id          String   @id @default(uuid())
   priceListId String
   name        String
-  priceCents  Int // preço em centavos (evita float)
+  priceCents  Int // preço em centavos (evita float) — piso da faixa quando 'average'
+  priceMaxCents Int? // M2 — teto da faixa quando disclosureStyle='average' (> priceCents)
+  imageUrl    String? // M2 — foto do catálogo visual do item (URL)
   description String?
   aliases     String[] @default([]) // sinônimos p/ busca (ex: "corte", "cabelo")
   category    String?
