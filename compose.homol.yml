@@ -160,9 +160,12 @@ services:
     image: quayer-app:homol
     container_name: homol-quayer-worker
     restart: unless-stopped
-    # Roda o bundle dos workers em vez do server.js (bypassa o docker-entrypoint
-    # do app, que rodaria migrations + next server). Migrations ficam a cargo do
-    # serviço `app` — o worker só consome filas.
+    # Entrypoint PRÓPRIO (tini direto) para BYPASSAR o docker-entrypoint.sh do app.
+    # Sem isso, o entrypoint roda migrations E hardcoda `exec node server.js`,
+    # IGNORANDO o command abaixo → o worker subia um 2º Next server (workers
+    # inertes) e ainda competia com o `app` pelas migrations (race "column already
+    # exists"). Com tini direto, o worker roda DE FATO os workers e não toca migrations.
+    entrypoint: ["/sbin/tini", "--"]
     command: ["node", "workers/start-workers.js"]
     environment:
       - NODE_ENV=production
