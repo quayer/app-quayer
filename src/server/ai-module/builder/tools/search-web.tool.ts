@@ -21,6 +21,13 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { buildBuilderTool } from './build-tool'
+import { getServerConfig } from '@/server/services/server-config'
+import { getRedis } from '@/server/services/redis'
+import {
+  readTavilyCache,
+  writeTavilyCache,
+  tavilyCacheKey,
+} from '@/server/ai-module/builder/services/tavily-cache'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other Builder tools in this directory)
@@ -62,6 +69,7 @@ interface TavilyApiResponse {
 const SNIPPET_MAX_LENGTH = 300
 const REQUEST_TIMEOUT_MS = 15_000
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search'
+const SEARCH_DEPTH = 'basic'
 
 function truncateSnippet(text: string | undefined): string {
   if (!text) return ''
@@ -102,13 +110,18 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
         .describe('Maximum number of results to return (1-10, default 3).'),
     }),
     execute: async (input): Promise<SearchWebResult> => {
-      const apiKey = process.env.TAVILY_API_KEY
+      const apiKey = getServerConfig().TAVILY_API_KEY
       if (!apiKey) {
         return {
           success: false,
           message: 'TAVILY_API_KEY not configured',
         }
       }
+
+      // Cache 1h (fail-open) — o meta-agente repete buscas na mesma sessão.
+      const cacheKey = tavilyCacheKey(input.query, input.maxResults, SEARCH_DEPTH)
+      const cached = await readTavilyCache(getRedis(), cacheKey)
+      if (cached) return { success: true, results: cached }
 
       try {
         const response = await fetch(TAVILY_ENDPOINT, {
@@ -118,7 +131,7 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
             api_key: apiKey,
             query: input.query,
             max_results: input.maxResults,
-            search_depth: 'basic',
+            search_depth: SEARCH_DEPTH,
           }),
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
@@ -141,6 +154,7 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
           }))
           .filter((r) => r.url)
 
+        await writeTavilyCache(getRedis(), cacheKey, results)
         return { success: true, results }
       } catch (err) {
         const message =

@@ -7,16 +7,26 @@
  * we want the sub-agent to have no coupling to the legacy tool file.
  *
  * Contract:
- *   - Reads `TAVILY_API_KEY` from `process.env`.
+ *   - Reads `TAVILY_API_KEY` via getServerConfig().
  *   - If the env var is missing, fails softly with `reason: 'NO_API_KEY'`
  *     WITHOUT performing any network I/O.
+ *   - Redis cache 1h (fail-open) before the network call — ver tavily-cache.ts.
  *   - Enforces a 15s timeout via AbortController (also honors a caller signal).
  *   - NEVER throws — all errors are captured into the tagged result union.
  */
 
+import { getServerConfig } from '@/server/services/server-config'
+import { getRedis } from '@/server/services/redis'
+import {
+  readTavilyCache,
+  writeTavilyCache,
+  tavilyCacheKey,
+} from '@/server/ai-module/builder/services/tavily-cache'
+
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search'
 const REQUEST_TIMEOUT_MS = 15_000
 const SNIPPET_MAX_LENGTH = 300
+const SEARCH_DEPTH = 'basic'
 
 export interface TavilySearchItem {
   title: string
@@ -64,7 +74,7 @@ export async function searchTavily(
   query: string,
   opts: SearchTavilyOptions = {},
 ): Promise<TavilyResult> {
-  const apiKey = process.env.TAVILY_API_KEY
+  const apiKey = getServerConfig().TAVILY_API_KEY
   if (!apiKey) {
     return {
       ok: false,
@@ -74,6 +84,11 @@ export async function searchTavily(
   }
 
   const maxResults = opts.maxResults ?? 5
+
+  // Cache 1h (fail-open) — perguntas de nicho repetem na mesma sessão.
+  const cacheKey = tavilyCacheKey(query, maxResults, SEARCH_DEPTH)
+  const cached = await readTavilyCache(getRedis(), cacheKey)
+  if (cached) return { ok: true, results: cached }
 
   const timeoutController = new AbortController()
   const timeoutId = setTimeout(
@@ -101,7 +116,7 @@ export async function searchTavily(
         api_key: apiKey,
         query,
         max_results: maxResults,
-        search_depth: 'basic',
+        search_depth: SEARCH_DEPTH,
       }),
       signal: timeoutController.signal,
     })
@@ -125,6 +140,7 @@ export async function searchTavily(
       }))
       .filter((r) => r.url)
 
+    await writeTavilyCache(getRedis(), cacheKey, results)
     return { ok: true, results }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown network error'
