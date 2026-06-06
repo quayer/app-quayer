@@ -30,3 +30,14 @@ export type {
   RouletteCandidate,
   SelectMemberResult,
 } from './round-robin.service'
+
+export {
+  trySendRouletteWhatsApp,
+  buildRouletteNotifyText,
+  rouletteNotifyRateLimiter,
+} from './notify-member-whatsapp'
+export type {
+  TrySendRouletteWhatsAppArgs,
+  TrySendRouletteWhatsAppResult,
+  RouletteNotifySkipReason,
+} from './notify-member-whatsapp'

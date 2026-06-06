@@ -465,8 +465,9 @@ model Department {
   // Round-robin (roleta) — ponteiro do último atendente sorteado. A próxima
   // escolha é o primeiro membro ATIVO após este, em ordem circular por
   // (position, createdAt). NULL = roleta nunca rodou (começa do primeiro).
-  lastAssignedUserId String?
-  lastAssignedAt     DateTime?
+  lastAssignedUserId   String? // legado/vestigial: cursor antigo por User.id (tem FK física p/ User)
+  lastAssignedMemberId String? // M1 — cursor por DepartmentMember.id (SEM FK; membro pode ser não-usuário)
+  lastAssignedAt       DateTime?
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -490,7 +491,9 @@ model DepartmentMember {
   id             String   @id @default(uuid())
   organizationId String
   departmentId   String
-  userId         String
+  userId         String? // M1 — nullable: membro "nome + WhatsApp" não é usuário da plataforma
+  name           String? // M1 — nome de exibição do membro (não-usuário)
+  whatsapp       String? // M1 — WhatsApp do membro; a roleta roteia a notificação pra cá
   position       Int      @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
@@ -498,7 +501,7 @@ model DepartmentMember {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department   Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  user         User         @relation("DepartmentMembership", fields: [userId], references: [id], onDelete: Cascade)
+  user         User?        @relation("DepartmentMembership", fields: [userId], references: [id], onDelete: SetNull)
 
   @@unique([departmentId, userId])
   @@index([organizationId])
