@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   transcribeAudio,
+  transcribeMedia,
   WHISPER_LANGUAGE_MAP,
 } from './transcription.service'
 
@@ -197,6 +198,86 @@ describe('transcribeAudio', () => {
 
     const result = await transcribeAudio('https://x/audio.ogg', 'audio/ogg', 'sk-test')
     expect(result).toEqual({ text: 'sem idioma', detectedLanguage: undefined })
+  })
+})
+
+describe('transcribeMedia — captura duração + custo STT', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env.STT_COST_PER_MIN_DEEPGRAM
+  })
+
+  function makeMediaBytes() {
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new ArrayBuffer(8),
+      text: async () => '',
+    } as unknown as Response
+  }
+
+  function makeDeepgramResponse(json: unknown) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => json,
+      text: async () => JSON.stringify(json),
+    } as unknown as Response
+  }
+
+  it('deepgram: captura durationSeconds (metadata.duration) e computa costUsd', async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeMediaBytes())
+      .mockResolvedValueOnce(
+        makeDeepgramResponse({
+          metadata: { duration: 120 },
+          results: {
+            channels: [
+              { detected_language: 'pt', alternatives: [{ transcript: 'ola' }] },
+            ],
+          },
+        }),
+      )
+
+    const result = await transcribeMedia({
+      mediaUrl: 'https://x/a.ogg',
+      mimetype: 'audio/ogg',
+      deepgramKey: 'dg-key',
+    })
+
+    expect(result?.text).toBe('ola')
+    expect(result?.provider).toBe('deepgram')
+    expect(result?.durationSeconds).toBe(120)
+    // 2 min × default 0.0043
+    expect(result?.costUsd).toBeCloseTo(0.0086, 6)
+  })
+
+  it('sem duração reportada → costUsd 0 (não quebra)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeMediaBytes())
+      .mockResolvedValueOnce(
+        makeDeepgramResponse({
+          results: {
+            channels: [{ alternatives: [{ transcript: 'sem duracao' }] }],
+          },
+        }),
+      )
+
+    const result = await transcribeMedia({
+      mediaUrl: 'https://x/a.ogg',
+      mimetype: 'audio/ogg',
+      deepgramKey: 'dg-key',
+    })
+
+    expect(result?.text).toBe('sem duracao')
+    expect(result?.costUsd).toBe(0)
   })
 })
 

@@ -13,6 +13,8 @@
  * `transcribeAudio` (Whisper) é mantida para compat com chamadores existentes.
  */
 
+import { computeSttCostUsd } from '@/server/ai-module/ai-agents/services/ext-service-cost.service'
+
 const WHISPER_API_URL = 'https://api.openai.com/v1/audio/transcriptions'
 const DEEPGRAM_API_URL =
   'https://api.deepgram.com/v1/listen?model=nova-3&detect_language=true&smart_format=true'
@@ -38,6 +40,10 @@ export interface TranscriptionResult {
   detectedLanguage?: string
   /** Provider que efetivamente produziu o texto. Ausente em chamadas legadas. */
   provider?: TranscriptionProvider
+  /** Duração do áudio em segundos (sinal de uso p/ custo). Ausente se o provider não reportar. */
+  durationSeconds?: number
+  /** Custo estimado do STT em USD (computado de durationSeconds × tarifa do provider). */
+  costUsd?: number
 }
 
 export interface TranscribeMediaInput {
@@ -104,6 +110,7 @@ async function transcribeWithDeepgram(
     }
 
     const result = (await dgResponse.json()) as {
+      metadata?: { duration?: number }
       results?: {
         channels?: Array<{
           detected_language?: string
@@ -120,7 +127,12 @@ async function transcribeWithDeepgram(
       ? channel.detected_language.toUpperCase()
       : undefined
 
-    return { text, detectedLanguage, provider: 'deepgram' }
+    return {
+      text,
+      detectedLanguage,
+      provider: 'deepgram',
+      durationSeconds: result.metadata?.duration,
+    }
   } catch (error) {
     console.warn('[transcription] deepgram erro inesperado:', error)
     return null
@@ -182,6 +194,7 @@ export async function transcribeAudio(
     const result = (await whisperResponse.json()) as {
       text?: string
       language?: string
+      duration?: number
     }
 
     const text = (result.text ?? '').trim()
@@ -190,7 +203,7 @@ export async function transcribeAudio(
       : undefined
 
     // Shape preservada p/ compat (sem `provider`); transcribeMedia carimba o provider.
-    return { text, detectedLanguage }
+    return { text, detectedLanguage, durationSeconds: result.duration }
   } catch (error) {
     console.warn('[transcription] erro inesperado:', error)
     return null
@@ -212,7 +225,7 @@ export async function transcribeMedia(
   // 1. Deepgram (principal).
   if (deepgramKey) {
     const dg = await transcribeWithDeepgram(mediaUrl, mimetype, deepgramKey)
-    if (dg && dg.text) return dg
+    if (dg && dg.text) return withSttCost(dg, 'deepgram')
   }
 
   // 2. Whisper (fallback). Carimba o provider na saída (transcribeAudio omite p/ compat).
@@ -223,9 +236,27 @@ export async function transcribeMedia(
       openaiKey,
       preferredLanguage,
     )
-    if (whisper && whisper.text) return { ...whisper, provider: 'whisper' }
+    if (whisper && whisper.text) return withSttCost({ ...whisper, provider: 'whisper' }, 'whisper')
   }
 
   // 3. Ambos falharam / sem chaves.
   return null
+}
+
+/**
+ * Computa o custo do STT (custo de serviço externo por turno) a partir da duração
+ * + provider, loga para observabilidade e anexa `costUsd` ao resultado. Fail-safe:
+ * nunca lança — custo é best-effort. A persistência (extServiceCosts) é fase 2.
+ */
+function withSttCost(
+  result: TranscriptionResult,
+  provider: TranscriptionProvider,
+): TranscriptionResult {
+  const costUsd = computeSttCostUsd(provider, result.durationSeconds)
+  if (costUsd > 0) {
+    console.info(
+      `[ext-cost] stt provider=${provider} duration=${result.durationSeconds}s cost=$${costUsd.toFixed(6)}`,
+    )
+  }
+  return { ...result, costUsd }
 }
