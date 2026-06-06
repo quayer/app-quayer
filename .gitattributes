@@ -1,0 +1,25 @@
+# Força o git a tratar arquivos-fonte como TEXTO em diff/blame/merge.
+#
+# Por quê: neste ambiente (Windows + OneDrive) a auto-detecção de binário do git
+# marcava arquivos .ts/.tsx como "Binary files differ" mesmo sendo UTF-8 puro
+# (sem BOM, sem byte NUL) — quebrando `git diff`, `git log -p`, blame e review.
+#
+# Usamos o atributo `diff` (NÃO `text`) de propósito: força diff textual SEM
+# normalizar EOL (evita um churn em massa de CRLF→LF no working tree atual).
+*.ts    diff
+*.tsx   diff
+*.js    diff
+*.jsx   diff
+*.mjs   diff
+*.cjs   diff
+*.json  diff
+*.md    diff
+*.mdx   diff
+*.css   diff
+*.scss  diff
+*.html  diff
+*.yml   diff
+*.yaml  diff
+*.prisma diff
+*.sh    diff
+*.env   diff
