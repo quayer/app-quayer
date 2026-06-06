@@ -15,7 +15,7 @@
  * contato) — reentregar contraria o propósito, então continuam como drop-by-design.
  *
  * Camada de fila (Leaf), espelha source-enrich.queue:
- *   - OUTBOUND_RETRY_QUEUE      → nome da fila ('quayer:outbound-retry')
+ *   - OUTBOUND_RETRY_QUEUE      → nome da fila ('quayer-outbound-retry')
  *   - enqueueOutboundRetry      → producer (delay; dev: fallback síncrono via flag)
  *   - registerOutboundRetryWorker → registra o Worker (entrypoint dedicado)
  *
@@ -41,7 +41,8 @@ import type { OutboundRequest } from './outbound.service'
 // Constantes
 // ---------------------------------------------------------------------------
 
-export const OUTBOUND_RETRY_QUEUE = 'quayer:outbound-retry'
+// NOTA: bullmq@5 REJEITA ':' em nome de fila — usar '-' (não ':'). Ver jobs/index.ts.
+export const OUTBOUND_RETRY_QUEUE = 'quayer-outbound-retry'
 export const OUTBOUND_RETRY_JOB_NAME = 'outbound-retry-send'
 
 /**

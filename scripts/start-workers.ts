@@ -3,9 +3,9 @@
  *
  * Sobe TODOS os workers do registry (`registerAllWorkers`) num processo
  * separado do servidor Next:
- *   - quayer:session-close   (cron: encerra sessões inativas + resumo de longo prazo)
- *   - quayer:source-enrich   (on-demand: ingestão "cole seu site/IG" do Builder)
- *   - quayer:outbound-retry  (QH-02: reenvio da resposta barrada por rate-limit de instância)
+ *   - quayer-session-close   (cron: encerra sessões inativas + resumo de longo prazo)
+ *   - quayer-source-enrich   (on-demand: ingestão "cole seu site/IG" do Builder)
+ *   - quayer-outbound-retry  (QH-02: reenvio da resposta barrada por rate-limit de instância)
  *
  * Por que um processo dedicado (e NÃO o runtime Next): jobs/index.ts documenta
  * que `registerAllWorkers` deve ser chamado por um entrypoint dedicado, nunca

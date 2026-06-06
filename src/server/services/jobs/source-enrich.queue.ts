@@ -12,7 +12,7 @@
  *   flipam quando o usuário clica "Aceitar" no card source_progress.
  *
  * Este arquivo (Leaf) é só a CAMADA DE FILA:
- *   - SOURCE_ENRICH_QUEUE  → nome da fila ('quayer:source-enrich')
+ *   - SOURCE_ENRICH_QUEUE  → nome da fila ('quayer-source-enrich')
  *   - enqueueSourceEnrich  → producer (dev: fallback síncrono atrás de flag)
  *   - registerSourceEnrichWorker → registra o Worker (entrypoint dedicado)
  *
@@ -37,7 +37,8 @@ import {
 // Constantes
 // ---------------------------------------------------------------------------
 
-export const SOURCE_ENRICH_QUEUE = 'quayer:source-enrich'
+// NOTA: bullmq@5 REJEITA ':' em nome de fila — usar '-' (não ':'). Ver jobs/index.ts.
+export const SOURCE_ENRICH_QUEUE = 'quayer-source-enrich'
 export const SOURCE_ENRICH_JOB_NAME = 'source-enrich-run'
 
 /**

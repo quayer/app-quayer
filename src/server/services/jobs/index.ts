@@ -47,7 +47,10 @@ import {
 // Constantes
 // ---------------------------------------------------------------------------
 
-export const SESSION_CLOSE_QUEUE = 'quayer:session-close'
+// NOTA: bullmq@5 REJEITA ':' em nome de fila ("Queue name cannot contain :").
+// Por isso usamos '-' como separador (não ':'). O isolamento "quayer" continua
+// pelo prefixo do nome. NÃO reintroduzir ':' aqui.
+export const SESSION_CLOSE_QUEUE = 'quayer-session-close'
 export const SESSION_CLOSE_JOB_NAME = 'session-close-batch'
 
 /** Default schedule: a cada 10min. Override via SESSION_CLOSE_CRON. */
