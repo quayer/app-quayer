@@ -14,6 +14,10 @@
 > - `GET /api/v1/builder/projects/:id/sources/status` — poll: cada `KnowledgeSource` da collection do projeto + `builderState.sourceIngestion.proposed` (valores PROPOSTOS aguardando "Aceitar").
 > O worker `quayer:source-enrich` roda no entrypoint dedicado de workers (não no runtime Next); fallback síncrono de dev atrás de `SOURCE_ENRICH_SYNC=1`.
 > Estas rotas seguem as mesmas guards de auth do chat do Builder; não alteram o fluxo de login.
+>
+> **Onda B (G3 import Google Sheets, Jun/2026):** import de tabela de preços no mesmo `builderController` (guard `authOrApiKeyProcedure({ required: true })`, `:id` validado por UUID + autorizado por `organizationId` via `loadProject`):
+> - `POST /api/v1/builder/projects/:id/sheet/parse` — parse STATELESS (sem escrita em DB) de uma planilha **pública** do Google Sheets. SSRF-safe: allowlist de host único (`docs.google.com/spreadsheets`), export CSV via gviz, timeout, cap de bytes e cap de linhas — tudo no helper puro `cards/sheet-parse.ts`. Retorna `{ headers, rows (preview ≤ 50), rowCount, hasHeader, columnSuggestions }` para o mapper de colunas do FE. Erros tipados (`SheetParseError.kind`) viram copy PT-BR via `response.badRequest`. SEM OAuth (planilha publicada). A tabela mapeada é persistida depois pelo fluxo existente `POST /cards/pricing/submit`.
+> - `POST /api/v1/builder/pricing-image/upload` — upload de imagem do catálogo visual (G5b). **Next route handler** (multipart, fora do Igniter), clone da guard de `knowledge/upload`: auth via JWT cookie/Bearer + `currentOrgId`, valida magic-bytes (jpeg/png/webp/gif), cap 5MB, grava em `BUCKETS.MEDIA` sob `pricing/:orgId/:projectId/:uuid.ext` e retorna `{ imageUrl }` (signed URL). Fallback: o card aceita colar uma URL `https` direto. **Follow-up:** a signed URL expira em 7d — antes de materializar o catálogo no runtime, persistir o PATH e re-assinar on-demand.
 
 ---
 

@@ -16,6 +16,7 @@ import { igniter } from '@/igniter'
 import { projectsRoutes } from './projects/projects.routes'
 import { chatRoutes }     from './chat/chat.routes'
 import { cardSubmitRoutes } from './cards/card-submit.routes'
+import { sheetParseRoutes } from './cards/sheet-parse.routes'
 import { sourcesRoutes }  from './sources/sources.routes'
 import { deployRoutes }   from './deploy/deploy.routes'
 import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
@@ -35,6 +36,7 @@ export const builderController = igniter.controller({
     ...projectsRoutes,
     ...chatRoutes,
     ...cardSubmitRoutes,
+    ...sheetParseRoutes,
     ...sourcesRoutes,
     ...deployRoutes,
     ...channelCredentialsRoutes,
