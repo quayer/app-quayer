@@ -1,6 +1,6 @@
 # Mapa Completo do Sistema de Autenticação — Quayer
 
-> Atualizado em 2026-06-05 | Cobertura: Frontend, Backend, Database, APIs, Jornadas
+> Atualizado em 2026-06-06 | Cobertura: Frontend, Backend, Database, APIs, Jornadas
 >
 > **Versão atualizada 10/Mai/2026:** admin surface removida — ver `docs/deprecated/ADMIN_SURFACE_REMOVED.md`.
 > `UserRole.ADMIN` permanece no schema/JWT apenas para controle cross-org no Builder (sem UI dedicada). Todos os usuários — incluindo admins — caem em `/` (home Builder) após login.
@@ -18,6 +18,9 @@
 > **Onda B (G3 import Google Sheets, Jun/2026):** import de tabela de preços no mesmo `builderController` (guard `authOrApiKeyProcedure({ required: true })`, `:id` validado por UUID + autorizado por `organizationId` via `loadProject`):
 > - `POST /api/v1/builder/projects/:id/sheet/parse` — parse STATELESS (sem escrita em DB) de uma planilha **pública** do Google Sheets. SSRF-safe: allowlist de host único (`docs.google.com/spreadsheets`), export CSV via gviz, timeout, cap de bytes e cap de linhas — tudo no helper puro `cards/sheet-parse.ts`. Retorna `{ headers, rows (preview ≤ 50), rowCount, hasHeader, columnSuggestions }` para o mapper de colunas do FE. Erros tipados (`SheetParseError.kind`) viram copy PT-BR via `response.badRequest`. SEM OAuth (planilha publicada). A tabela mapeada é persistida depois pelo fluxo existente `POST /cards/pricing/submit`.
 > - `POST /api/v1/builder/pricing-image/upload` — upload de imagem do catálogo visual (G5b). **Next route handler** (multipart, fora do Igniter), clone da guard de `knowledge/upload`: auth via JWT cookie/Bearer + `currentOrgId`, valida magic-bytes (jpeg/png/webp/gif), cap 5MB, grava em `BUCKETS.MEDIA` sob `pricing/:orgId/:projectId/:uuid.ext` e retorna `{ imageUrl }` (signed URL). Fallback: o card aceita colar uma URL `https` direto. **Follow-up:** a signed URL expira em 7d — antes de materializar o catálogo no runtime, persistir o PATH e re-assinar on-demand.
+>
+> **Onda C (G10 prova social da agenda, Jun/2026):** read-only no mesmo `builderController` (guard `authOrApiKeyProcedure({ required: true })`, escopo por `currentOrgId`, `:projectId` validado por UUID + ownership em `builderProject`):
+> - `GET /api/v1/builder/calendar/events-preview/:projectId` — conta os compromissos (intervalos OCUPADOS via `freeBusy`) das próximas ~3 semanas da agenda conectada ao projeto, para a "prova social" do card `calendar_connect`. Construída sobre a infra de calendário JÁ existente (`resolveCalendarAccess` + `queryFreeBusy`). Degrada para `{ available:false, busyCount:0 }` (sem credencial OU se o `freeBusy` lançar) — **nunca dá 500**, espelhando `check-availability`. Sem novo modelo/migration. (escape hatch "Continuar sem agenda" do mesmo card NÃO é rota nova: reusa `POST /cards/:cardKey/submit` com `status:'skipped'`.)
 
 ---
 
