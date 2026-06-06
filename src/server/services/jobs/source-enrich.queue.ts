@@ -130,27 +130,30 @@ function parseRedisUrl(url: string): ConnectionOptions {
 }
 
 /**
- * Specifier do job dono. Construído como expressão (não literal) de propósito:
- * o handler `runSourceEnrich` é arquivo de OUTRO agente e pode não existir
- * ainda quando esta fila compila (Leaf primeiro). Um `import('./source-enrich.job')`
- * literal faria o tsc resolver estaticamente e quebrar o build standalone.
- * O caminho é relativo e resolve em runtime para ./source-enrich.job.
+ * Carrega `runSourceEnrich` do job dono via import dinâmico (lazy).
  *
- * DEVIATION (documentada): import por TIPO (RunSourceEnrich) + specifier
- * computado. Quando o job landar, o valor resolve normalmente; o contrato de
- * tipo já está fixado aqui.
- */
-const SOURCE_ENRICH_JOB_SPECIFIER = ['.', 'source-enrich.job'].join('/')
-
-/**
- * Carrega `runSourceEnrich` do job dono via import dinâmico (lazy). Mantém a
- * fila desacoplada do arquivo do job — se o job ainda não existir, lança um
- * erro claro em vez de quebrar o boot do módulo de fila.
+ * O handler vive em OUTRO módulo (ai-module/builder/sources/source-enrich.job),
+ * NÃO ao lado desta fila. O specifier TEM que ser um LITERAL com o alias `@/`
+ * real — motivo crítico (verificado contra o bundle):
+ *   - O worker de prod é empacotado por esbuild (scripts/build-workers.mjs). Com
+ *     um specifier LITERAL o esbuild resolve o `@/`, EMPACOTA o handler + suas
+ *     deps no bundle e a fila funciona. Com um specifier COMPUTADO (o que havia
+ *     antes — `['.', 'source-enrich.job'].join('/')`) o esbuild não consegue
+ *     analisar o `import()`, deixa-o solto, e o handler fica FORA do bundle →
+ *     `MODULE_NOT_FOUND` em runtime → TODO job source-enrich falha → a fonte
+ *     "cole seu site/IG" fica eternamente "na fila".
+ *   - O caminho relativo `./source-enrich.job` também estava errado: resolveria
+ *     ao lado DESTA fila (services/jobs/), onde o handler não existe.
+ *
+ * Mantemos o import DINÂMICO (lazy), não estático: evita ciclo em tempo de
+ * módulo (o handler importa os TIPOS desta fila) e impede o runtime Next — que
+ * importa o producer — de arrastar as deps pesadas do handler (só carregadas no
+ * fallback síncrono de dev). No esbuild o import literal é inlinado no bundle.
  */
 async function loadRunSourceEnrich(): Promise<RunSourceEnrich> {
-  const mod = (await import(SOURCE_ENRICH_JOB_SPECIFIER)) as {
-    runSourceEnrich?: RunSourceEnrich
-  }
+  const mod = (await import(
+    '@/server/ai-module/builder/sources/source-enrich.job'
+  )) as { runSourceEnrich?: RunSourceEnrich }
   if (typeof mod.runSourceEnrich !== 'function') {
     throw new Error(
       "source-enrich.job não exporta 'runSourceEnrich' (handler ainda não implementado?)",
