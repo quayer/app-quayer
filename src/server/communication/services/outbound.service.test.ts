@@ -43,6 +43,11 @@ const { redisStore, deadLetterPushes, redisMock } = vi.hoisted(() => {
       return deadLetterPushes.length
     }),
     ltrim: vi.fn(async () => 'OK'),
+    // Instance rate-limit (QH-02) usa EVAL (token bucket Lua). Default sem
+    // implementação → retorna undefined → checkRateLimit faz fail-open
+    // (allowed=true), preservando o comportamento dos testes existentes. Os
+    // testes de retry sobrescrevem com mockResolvedValueOnce([0, retryAfterMs]).
+    eval: vi.fn(),
   }
 
   return { redisStore, deadLetterPushes, redisMock }
@@ -586,5 +591,121 @@ describe('sendAgentResponse — dead-letter + backoff', () => {
     expect(deps._sendTextMock).toHaveBeenCalledTimes(2)
     expect(redisMock.lpush).not.toHaveBeenCalled()
     expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'wa-ok')
+  })
+})
+
+describe('sendAgentResponse — QH-02 retry no limite de INSTÂNCIA', () => {
+  // O 1o gate (contato/org via INCR) passa com redisStore vazio; forçamos o gate
+  // de INSTÂNCIA (EVAL) a barrar com [allowed=0, retryAfterMs].
+  it('agenda retry (não descarta) quando o limite de instância estoura', async () => {
+    const scheduleRetry = vi.fn(
+      async (_payload: OutboundRequest & { attempt: number }, _delayMs: number) => undefined,
+    )
+    const deps = { ...buildDeps(), scheduleRetry }
+    redisMock.eval.mockResolvedValueOnce([0, 1200])
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.rateLimited).toBe(true)
+    expect(res.retryScheduled).toBe(true)
+    expect(res.retryAfterMs).toBe(1200)
+    expect(res.blocksSent).toBe(0)
+    // Nada enviado, nada persistido, nada na dead-letter.
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
+    expect(deps._messageCreateMock).not.toHaveBeenCalled()
+    expect(redisMock.lpush).not.toHaveBeenCalled()
+    // Agendou exatamente 1 retry, com attempt incrementado (0 → 1) e o delay.
+    expect(scheduleRetry).toHaveBeenCalledOnce()
+    const [payload, delayMs] = scheduleRetry.mock.calls[0]
+    expect(payload.attempt).toBe(1)
+    expect(payload.agentText).toBe('oi')
+    expect(payload.connectionId).toBe(CONNECTION_ID)
+    expect(delayMs).toBe(1200)
+  })
+
+  it('clampa retryAfterMs pequeno para o piso de 1000ms', async () => {
+    const scheduleRetry = vi.fn(
+      async (_payload: OutboundRequest & { attempt: number }, _delayMs: number) => undefined,
+    )
+    const deps = { ...buildDeps(), scheduleRetry }
+    redisMock.eval.mockResolvedValueOnce([0, 50]) // < piso
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.retryAfterMs).toBe(1000)
+    expect(scheduleRetry.mock.calls[0][1]).toBe(1000)
+  })
+
+  it('vai para dead-letter (não agenda) ao atingir o cap de tentativas', async () => {
+    const scheduleRetry = vi.fn(
+      async (_payload: OutboundRequest & { attempt: number }, _delayMs: number) => undefined,
+    )
+    const deps = { ...buildDeps(), scheduleRetry }
+    redisMock.eval.mockResolvedValueOnce([0, 1200])
+
+    // attempt=5 === MAX_RETRY_ATTEMPTS → não reenfileira.
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi', attempt: 5 }), deps)
+
+    expect(res.rateLimited).toBe(true)
+    expect(res.retryScheduled).toBe(false)
+    expect(scheduleRetry).not.toHaveBeenCalled()
+    expect(redisMock.lpush).toHaveBeenCalledOnce()
+    const dl = JSON.parse(deadLetterPushes[0]) as Record<string, unknown>
+    expect(dl.organizationId).toBe(ORG_ID)
+    expect(dl.text).toBe('oi')
+    expect(String(dl.error)).toMatch(/rate_limited_instance/)
+  })
+
+  it('sem scheduler injetado: vai direto para dead-letter (não perde silenciosamente)', async () => {
+    const deps = buildDeps() // sem scheduleRetry
+    redisMock.eval.mockResolvedValueOnce([0, 1200])
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.rateLimited).toBe(true)
+    expect(res.retryScheduled).toBe(false)
+    expect(redisMock.lpush).toHaveBeenCalledOnce()
+  })
+
+  it('falha ao agendar o retry → cai para dead-letter (fail-safe, não lança)', async () => {
+    const scheduleRetry = vi.fn(async () => {
+      throw new Error('bullmq indisponível')
+    })
+    const deps = { ...buildDeps(), scheduleRetry }
+    redisMock.eval.mockResolvedValueOnce([0, 1200])
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.retryScheduled).toBe(false)
+    expect(scheduleRetry).toHaveBeenCalledOnce()
+    expect(redisMock.lpush).toHaveBeenCalledOnce()
+    expect(res.errors.join('|')).toMatch(/schedule retry failed/)
+  })
+
+  it('retry (attempt>0) NÃO re-consome cota de contato/org — só revalida a instância', async () => {
+    const deps = buildDeps() // sender retorna sucesso por default
+    // Sem override de eval → o gate de INSTÂNCIA faz fail-open (allowed) e envia.
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi', attempt: 1 }), deps)
+
+    // Enviou normalmente (não barrado).
+    expect(res.blocksSent).toBe(1)
+    expect(res.rateLimited).toBeUndefined()
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    // O gate de contato/org (INCR) é PULADO no retry — só o envio original consome.
+    expect(redisMock.incr).not.toHaveBeenCalled()
+  })
+
+  it('retry ainda barrado pela instância reenfileira (attempt 1→2) sem tocar cota de contato/org', async () => {
+    const scheduleRetry = vi.fn(
+      async (_payload: OutboundRequest & { attempt: number }, _delayMs: number) => undefined,
+    )
+    const deps = { ...buildDeps(), scheduleRetry }
+    redisMock.eval.mockResolvedValueOnce([0, 1200])
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi', attempt: 1 }), deps)
+
+    expect(res.retryScheduled).toBe(true)
+    expect(scheduleRetry.mock.calls[0][0].attempt).toBe(2)
+    expect(redisMock.incr).not.toHaveBeenCalled()
   })
 })

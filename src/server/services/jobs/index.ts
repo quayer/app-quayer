@@ -37,6 +37,11 @@ import {
   SOURCE_ENRICH_QUEUE,
   SOURCE_ENRICH_JOB_NAME,
 } from './source-enrich.queue'
+import {
+  registerOutboundRetryWorker,
+  OUTBOUND_RETRY_QUEUE,
+  OUTBOUND_RETRY_JOB_NAME,
+} from '@/server/communication/services/outbound-retry.queue'
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -66,6 +71,14 @@ export const REGISTERED_JOBS = {
     // Worker em ./source-enrich.queue p/ não puxar as deps do job no runtime
     // Next que importa este registry. Boot registra via registerWorker abaixo.
     registerWorker: registerSourceEnrichWorker,
+  },
+  outboundRetry: {
+    queue: OUTBOUND_RETRY_QUEUE,
+    jobName: OUTBOUND_RETRY_JOB_NAME,
+    // QH-02: on-demand (enfileirado por sendAgentResponse ao estourar o limite
+    // de instância). O Worker lazy-importa o caminho de envio. Boot via
+    // registerWorker abaixo.
+    registerWorker: registerOutboundRetryWorker,
   },
 } as const
 
@@ -147,6 +160,9 @@ export function registerAllWorkers(redisUrl: string): Worker[] {
     registerSessionCloseWorker(redisUrl),
     // source-enrich: on-demand (enfileirado pelo Builder), worker-only.
     registerSourceEnrichWorker(redisUrl),
+    // outbound-retry (QH-02): on-demand (enfileirado pelo outbound ao estourar
+    // o limite de instância), worker-only.
+    registerOutboundRetryWorker(redisUrl),
   ]
 }
 
@@ -164,3 +180,13 @@ export {
   type SourceEnrichJobPayload,
   type SourceEnrichResult,
 } from './source-enrich.queue'
+
+// QH-02: re-exporta a camada de fila do outbound-retry (producer + worker
+// registrar + constantes) para o boot importar de um só lugar.
+export {
+  registerOutboundRetryWorker,
+  enqueueOutboundRetry,
+  OUTBOUND_RETRY_QUEUE,
+  OUTBOUND_RETRY_JOB_NAME,
+  type OutboundRetryJobPayload,
+} from '@/server/communication/services/outbound-retry.queue'

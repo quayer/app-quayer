@@ -37,7 +37,7 @@ import type {
 } from './uazapi-sender.service'
 import { synthesizeTtsToMediaUrl } from './tts.service'
 import { checkOutboundRateLimit } from './outbound-rate-limit'
-import { sendWithRetry } from './outbound-deadletter'
+import { sendWithRetry, pushDeadLetter } from './outbound-deadletter'
 import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
 import { checkRateLimit } from '@/server/ai-module/ai-agents/infra/rate-limit.service'
 
@@ -52,6 +52,13 @@ export interface OutboundRequest {
   contactPhone: string
   agentText: string
   tts?: AgentRuntimeSettings['tts']
+  /**
+   * QH-02: nº da tentativa de retry deste envio. 0/ausente = envio original.
+   * Incrementado a cada reenfileiramento pelo worker de retry; ao atingir
+   * MAX_RETRY_ATTEMPTS, o turno barrado por rate-limit de instância vai para a
+   * dead-letter em vez de reenfileirar de novo.
+   */
+  attempt?: number
   /**
    * Per-turn AI attribution (cost/tokens/model). Persisted on the OUTBOUND
    * Message so spend and latency are queryable per reply. Optional — operator
@@ -79,6 +86,14 @@ export interface OutboundResult {
    * foi enviado. O caller isola isso como uma não-falha de infra.
    */
   rateLimited?: boolean
+  /**
+   * QH-02: `true` quando o turno foi barrado pelo limite de INSTÂNCIA e um retry
+   * com delay foi agendado (a resposta NÃO foi perdida — será reenviada). Quando
+   * `false` com `rateLimited:true`, o retry esgotou e foi para a dead-letter.
+   */
+  retryScheduled?: boolean
+  /** QH-02: delay (ms) com que o retry foi agendado, para observabilidade. */
+  retryAfterMs?: number
 }
 
 /**
@@ -178,6 +193,15 @@ export interface OutboundDeps {
   database: OutboundDatabase
   sender: OutboundSender
   markBotMessage: (organizationId: string, externalMessageId: string) => Promise<boolean>
+  /**
+   * QH-02: agenda um retry deste envio com `delayMs` (injetado para não acoplar
+   * o service à fila BullMQ — testes injetam um spy). Quando ausente, um turno
+   * barrado pelo limite de instância vai direto para a dead-letter.
+   */
+  scheduleRetry?: (
+    payload: OutboundRequest & { attempt: number },
+    delayMs: number,
+  ) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +211,20 @@ export interface OutboundDeps {
 const MAX_BLOCK_CHARS = 800
 /** Fallback de baseUrl quando a Connection não traz um. */
 const FALLBACK_BASE_URL = process.env.UAZAPI_BASE_URL ?? 'https://api.uazapi.com'
+
+/**
+ * QH-02: máximo de tentativas de retry para um envio barrado pelo limite de
+ * INSTÂNCIA. Ao atingir, vai para a dead-letter em vez de reenfileirar.
+ */
+const MAX_RETRY_ATTEMPTS = 5
+/** Piso/teto do delay do retry (ms). Protege contra retryAfterMs=0 ou absurdo. */
+const RETRY_DELAY_MIN_MS = 1_000
+const RETRY_DELAY_MAX_MS = 60_000
+
+function clampRetryDelayMs(retryAfterMs: number): number {
+  if (!Number.isFinite(retryAfterMs) || retryAfterMs <= 0) return RETRY_DELAY_MIN_MS
+  return Math.min(RETRY_DELAY_MAX_MS, Math.max(RETRY_DELAY_MIN_MS, Math.ceil(retryAfterMs)))
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -215,26 +253,53 @@ export async function sendAgentResponse(
 
   // 2. Rate-limit (Orayon token bucket: por contato + por org). Consome cota
   //    UMA vez por turno — não dentro do loop de blocos. Fail-open por dentro.
-  const rl = await checkOutboundRateLimit(req.organizationId, req.contactPhone)
-  if (!rl.allowed) {
-    const msg = `rate_limited scope=${rl.scope} current=${rl.current} limit=${rl.limit} org=${req.organizationId}`
-    console.warn(`[outbound] ${msg}`)
-    errors.push(msg)
-    return { blocksSent: 0, persisted: false, errors, rateLimited: true }
+  //    QH-02: só no envio ORIGINAL (attempt 0). Num RETRY (attempt>0) a cota de
+  //    contato/org já foi consumida no turno original; re-consumir empurraria o
+  //    contato sobre o limite por engano. Só o limite de INSTÂNCIA é retentado —
+  //    o gate de instância abaixo SEMPRE roda (inclusive nos retries).
+  if ((req.attempt ?? 0) === 0) {
+    const rl = await checkOutboundRateLimit(req.organizationId, req.contactPhone)
+    if (!rl.allowed) {
+      const msg = `rate_limited scope=${rl.scope} current=${rl.current} limit=${rl.limit} org=${req.organizationId}`
+      console.warn(`[outbound] ${msg}`)
+      errors.push(msg)
+      return { blocksSent: 0, persisted: false, errors, rateLimited: true }
+    }
   }
 
   // QH-02: Rate limit por instância (60 msgs/min por connectionId) — token bucket
   // Redis Lua. Fail-open: Redis down → allowed=true, retryAfterMs=0.
-  // Quando excedido, o turno é barrado com rateLimited=true (mesma semântica do
-  // checkOutboundRateLimit acima). O caller (webhook route) já trata rateLimited
-  // como não-erro de infra — o lead é preservado no histórico via Message INBOUND
-  // já persistida antes do envio.
+  // Quando excedido, NÃO descartamos mais a resposta: agendamos um retry com
+  // delay=retryAfterMs (o bucket refila ~1 token/s, então em ~1s o envio passa).
+  // Cap em MAX_RETRY_ATTEMPTS — ao esgotar (ou sem scheduler injetado), vai para
+  // a dead-letter (visibilidade de ops) em vez de reenfileirar pra sempre.
   const instanceRl = await checkRateLimit({ scope: 'instance', key: req.connectionId })
   if (!instanceRl.allowed) {
-    const msg = `rate_limited scope=instance key=${req.connectionId} retryAfterMs=${instanceRl.retryAfterMs}`
+    const attempt = req.attempt ?? 0
+    const msg = `rate_limited scope=instance key=${req.connectionId} retryAfterMs=${instanceRl.retryAfterMs} attempt=${attempt}`
     console.warn(`[outbound] QH-02: ${msg}`)
     errors.push(msg)
-    return { blocksSent: 0, persisted: false, errors, rateLimited: true }
+
+    if (deps.scheduleRetry && attempt < MAX_RETRY_ATTEMPTS) {
+      const delayMs = clampRetryDelayMs(instanceRl.retryAfterMs)
+      try {
+        await deps.scheduleRetry({ ...req, attempt: attempt + 1 }, delayMs)
+        return { blocksSent: 0, persisted: false, errors, rateLimited: true, retryScheduled: true, retryAfterMs: delayMs }
+      } catch (err) {
+        // Falha ao agendar não pode derrubar o turno — cai para dead-letter.
+        errors.push(`schedule retry failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    // Esgotou retries OU sem scheduler OU falha ao agendar → dead-letter.
+    await pushDeadLetter({
+      organizationId: req.organizationId,
+      phone: req.contactPhone,
+      text: req.agentText,
+      error: `rate_limited_instance attempt=${attempt} (max=${MAX_RETRY_ATTEMPTS}, scheduler=${deps.scheduleRetry ? 'present' : 'absent'})`,
+      timestamp: new Date().toISOString(),
+    })
+    return { blocksSent: 0, persisted: false, errors, rateLimited: true, retryScheduled: false }
   }
 
   // 3. Parse tags ricas + split de texto puro

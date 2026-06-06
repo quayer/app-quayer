@@ -1,6 +1,6 @@
 ---
 Criado: 2026-06-04
-Atualizado: 2026-06-04
+Atualizado: 2026-06-05
 Revisar em: ao concluir cada fase (P0→P3)
 Relacionados:
   - src/server/ai-module/ai-agents/
@@ -155,4 +155,5 @@ Backlog de melhorias derivado da análise comparativa **Quayer (orquestrador Bui
 - Integração: webhook `uazapi/route.ts` (dedup 2ª camada por `connectionId:waMessageId`), `outbound.service.ts` (rate limit por instância 60/min), `agent-runtime.service.ts` (hard cap gate antes do LLM + acúmulo de custo no Redis).
 - **Validação local:** `npx tsc --noEmit` exit 0 · `npm run lint` ok · Vitest **46/46** (idempotency 13, rate-limit 15, hard-caps 18).
 - **Bônus/scope-creep:** `src/lib/webhook/operator-commands.ts` (comandos `@fechar`/`@ia`/`@blacklist`/`@whitelist` por WhatsApp) foi adiantado — é um pedaço do **QH-07**. Hoje está **órfão** (parser não chamado no webhook). A integrar+testar no P2/QH-07.
-- **Limitação conhecida (QH-02):** ao estourar o rate limit de instância, a resposta retorna `rateLimited=true` sem reenfileiramento (não há fila outbound BullMQ). TODO: dead-letter/retry com `delay=retryAfterMs`.
+- **Limitação conhecida (QH-02):** ~~ao estourar o rate limit de instância, a resposta retorna `rateLimited=true` sem reenfileiramento~~ — **resolvido (2026-06-05).** Ao estourar o limite de **instância**, `sendAgentResponse` agenda um retry com `delay=retryAfterMs` (`outbound-retry.queue.ts`, fila BullMQ `quayer:outbound-retry`, piso 1s/teto 60s), com contador `attempt` e cap `MAX_RETRY_ATTEMPTS=5`; ao esgotar (ou sem scheduler injetado, ou falha ao agendar) cai na dead-letter existente (`outbound:deadletter`). Só o escopo **instância** é retentado — os limites de **contato/org** são throttles de produto deliberados (drop-by-design). Worker registrado em `registerAllWorkers`.
+  - **Pré-requisito de ativação (gap pré-existente, não introduzido aqui):** nenhum worker BullMQ é bootado hoje — `registerAllWorkers` nunca é chamado e `scripts/start-workers.ts` não existe (mesmo gap de `source-enrich`/`session-close`). Até o entrypoint dedicado subir, retries enfileiram mas não processam (em dev use `OUTBOUND_RETRY_SYNC=1`). **TODO de infra:** criar `scripts/start-workers.ts` + serviço de worker no compose prod.

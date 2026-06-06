@@ -40,6 +40,7 @@ import {
 } from '@/server/ai-module/ai-agents/agent-runtime.service'
 import { processInboundMessage } from '@/server/communication/services/inbound-pipeline.service'
 import { sendAgentResponse } from '@/server/communication/services/outbound.service'
+import { enqueueOutboundRetry } from '@/server/communication/services/outbound-retry.queue'
 import { sendTypingIndicator } from '@/server/communication/services/typing-indicator.service'
 import { loadAgentRuntimeSettingsForAgent } from '@/server/communication/services/agent-runtime-settings.service'
 import {
@@ -731,6 +732,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               database: database as never,
               sender: uazapiSender,
               markBotMessage,
+              // QH-02: ao estourar o limite de instância, agenda retry com delay
+              // (em vez de descartar a resposta). Worker dedicado reprocessa.
+              scheduleRetry: (payload, delayMs) =>
+                enqueueOutboundRetry(payload, { delayMs }),
             },
           )
           outbound = {
