@@ -23,6 +23,7 @@ import {
 } from './calendar'
 import { createGetPricingTool } from './pricing'
 import { createEnrichInstagramTool } from './instagram'
+import { createSearchKnowledgeTool } from './knowledge-search.tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -50,6 +51,11 @@ export interface ToolExecutionContext {
   systemUserId?: string
   /** Optional: AIAgentConfig.id — needed by create_followup */
   agentConfigId?: string
+  /**
+   * Optional: knowledge collection id (AIAgentConfig.ragCollectionId quando
+   * useRAG). Habilita a tool search_knowledge a reconsultar a base sob demanda.
+   */
+  ragCollectionId?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +565,11 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     // posts) p/ enriquecer o lead. Degrada se APIFY_TOKEN ausente.
     enrich_instagram: createEnrichInstagramTool(ctx),
 
+    // -----------------------------------------------------------------------
+    // search_knowledge — RAG sob demanda (complementa a injeção automática)
+    // -----------------------------------------------------------------------
+    search_knowledge: createSearchKnowledgeTool(ctx),
+
   }
 }
 
@@ -610,4 +621,5 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'cancel_event',
   'get_pricing',
   'enrich_instagram',
+  'search_knowledge',
 ]

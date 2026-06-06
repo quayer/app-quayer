@@ -69,6 +69,7 @@ import {
   renderActiveSkills,
   type SkillManifest,
 } from './services/skill-activator.service'
+import { renderWhatsAppMediaGuide } from './services/whatsapp-media-guide'
 import {
   computeDynamicWindow,
   applyWindow,
@@ -453,6 +454,11 @@ async function prepareAgentCall(
   let systemPrompt =
     promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
+  // 2·media: ativa o envio de mídia (foto/vídeo/áudio/doc) ensinando as tags que o
+  // pipeline outbound já converte. Conteúdo estático → fica cedo no prompt p/ ser
+  // prefixo estável do prompt cache. Sem tool nova, sem bypassar a resiliência.
+  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide()}`
+
   // Observabilidade: coleta as decisões de setup conforme cada bloco roda.
   const decisionMeta: RuntimeDecisionMeta = {
     ...EMPTY_DECISION_META,
@@ -616,6 +622,7 @@ async function prepareAgentCall(
     connectionId: params.connectionId,
     organizationId: params.organizationId,
     agentConfigId: agentConfig.id,
+    ragCollectionId: agentConfig.useRAG ? agentConfig.ragCollectionId : null,
   }
   const tools: ToolSet = {
     ...Object.fromEntries(
@@ -1562,6 +1569,10 @@ export async function* processPlaygroundStream(
   const promptVersion = await getActivePrompt(agentConfig.id)
   let systemPrompt = promptVersion?.systemPrompt || agentConfig.systemPrompt || ''
 
+  // 2·media: paridade com o runtime real (ver função sendAgentResponse acima) —
+  // o preview tem que refletir o mesmo system prompt, incluindo o guia de mídia.
+  systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide()}`
+
   // 3. Use caller-supplied history directly (no DB round-trip)
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> =
     params.history
@@ -1573,6 +1584,7 @@ export async function* processPlaygroundStream(
     connectionId: 'playground',
     organizationId: params.organizationId,
     agentConfigId: agentConfig.id,
+    ragCollectionId: agentConfig.useRAG ? agentConfig.ragCollectionId : null,
   }
   const tools: import('ai').ToolSet = {
     ...Object.fromEntries(
