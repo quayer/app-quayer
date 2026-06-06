@@ -160,6 +160,31 @@ describe('recordRuntimeDecision — idempotência', () => {
     expect(database.agentRuntimeDecision.upsert).not.toHaveBeenCalled()
   })
 
+  it('persiste extServiceCosts (JSONB) quando fornecido', async () => {
+    database.agentRuntimeDecision.create.mockResolvedValue({ id: 'd1' })
+
+    await recordRuntimeDecision({
+      ...baseRecord,
+      status: 'success',
+      extServiceCosts: { stt: 0.0086 },
+    })
+
+    expect(database.agentRuntimeDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ extServiceCosts: { stt: 0.0086 } }),
+      }),
+    )
+  })
+
+  it('omite extServiceCosts quando ausente (coluna fica NULL)', async () => {
+    database.agentRuntimeDecision.create.mockResolvedValue({ id: 'd1' })
+
+    await recordRuntimeDecision({ ...baseRecord, status: 'success' })
+
+    const data = database.agentRuntimeDecision.create.mock.calls[0][0].data
+    expect('extServiceCosts' in data).toBe(false)
+  })
+
   it('nunca lança (fire-and-forget) mesmo se o upsert falhar', async () => {
     database.agentRuntimeDecision.upsert.mockRejectedValue(new Error('boom'))
 

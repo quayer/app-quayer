@@ -48,6 +48,8 @@ export interface InboundPipelineResult {
   bufferConcatenated: boolean
   reason?: string
   processingSteps: string[]
+  /** Custo USD do STT inbound (áudio/vídeo), quando houve transcrição. */
+  sttCostUsd?: number
 }
 
 const BINARY_GARBAGE_SENTINEL = '[mensagem ilegivel]'
@@ -116,6 +118,7 @@ export async function processInboundMessage(
 
   let detectedLanguage: string | undefined
   let mediaProcessed = false
+  let sttCostUsd: number | undefined
 
   // 4. STT para áudio E vídeo. Deepgram (BYOK por org) é o STT principal; Whisper
   // (openaiApiKey) é o fallback. Para vídeo, o STT transcreve a faixa de áudio
@@ -163,6 +166,7 @@ export async function processInboundMessage(
           enrichedContent = transcription.text
           detectedLanguage = transcription.detectedLanguage
           mediaProcessed = true
+          sttCostUsd = transcription.costUsd
         }
       } catch (err) {
         // Fail-safe: mantém enrichedContent anterior.
@@ -230,6 +234,7 @@ export async function processInboundMessage(
         bufferConcatenated: false,
         reason: bufferResult.reason ?? 'WAITING',
         processingSteps,
+        sttCostUsd,
       }
     }
 
@@ -249,5 +254,6 @@ export async function processInboundMessage(
     mediaProcessed,
     bufferConcatenated,
     processingSteps,
+    sttCostUsd,
   }
 }

@@ -94,6 +94,11 @@ export interface RuntimeDecisionInput extends Partial<RuntimeDecisionMeta> {
    * `claimRuntimeTurn`); ausente → create (comportamento legado).
    */
   decisionIdempotencyKey?: string | null
+  /**
+   * Custo de serviços EXTERNOS do turno (STT/TTS/embedding) em USD, ex.:
+   * `{ stt: 0.0086 }`. Separado do `totalCost` (LLM). Persistido como JSONB.
+   */
+  extServiceCosts?: Record<string, number> | null
 }
 
 /**
@@ -244,6 +249,10 @@ export async function recordRuntimeDecision(
       status: input.status ?? 'success',
       errorMessage: input.errorMessage ?? null,
       configHash: input.configHash ?? null,
+      // Json? — só inclui quando há custo externo; ausente fica NULL.
+      ...(input.extServiceCosts
+        ? { extServiceCosts: input.extServiceCosts }
+        : {}),
     }
 
     const key = input.decisionIdempotencyKey ?? null

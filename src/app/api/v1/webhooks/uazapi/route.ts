@@ -693,6 +693,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         traceId: webhookTraceId,
         // Idempotência durável de turno: o id da msg inbound do uazapi.
         inboundMessageId: externalMessageId,
+        // Custo de serviço externo do turno (STT do áudio inbound, se houve).
+        extServiceCosts: pipelineResult?.sttCostUsd
+          ? { stt: pipelineResult.sttCostUsd }
+          : undefined,
       })
 
       const typedResult = result as AgentRuntimeResponse | null

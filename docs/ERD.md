@@ -380,6 +380,7 @@ erDiagram
 | **2026-06-04** | **`add_pricing_catalog`** | **`price_lists` + `price_items` (catálogo DB-first da tool get_pricing) + `AIAgentConfig.priceListId` FK. Google Sheets sync = fase 2 — Wave Orayon** |
 | **2026-06-05** | **`add_config_hash`** | **`agent_runtime_decisions`: + `config_hash TEXT` nullable (SHA-256 da config efetiva do agente por turno — QH-11)** |
 | **2026-06-06** | **`add_decision_idempotency_key`** | **`agent_runtime_decisions`: + `decisionIdempotencyKey TEXT` nullable + índice ÚNICO (sha256 sessionId:inboundMessageId:configHash — idempotência durável de turno; claim 'pending' pré-LLM short-circuita dispatch duplicado)** |
+| **2026-06-06** | **`add_ext_service_costs`** | **`agent_runtime_decisions`: + `extServiceCosts JSONB` nullable (custo de serviços externos do turno — STT/TTS/embedding, ex.: `{"stt":0.0086}` — separado do `totalCost` do LLM)** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 
@@ -436,6 +437,7 @@ erDiagram
         string_array toolsCalled
         int totalTokens
         float totalCost
+        json extServiceCosts "nullable, custo STT/TTS/embedding do turno"
         int latencyMs
         string status "success|error"
         datetime createdAt

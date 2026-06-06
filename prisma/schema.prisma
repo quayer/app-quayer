@@ -1590,6 +1590,9 @@ model AgentRuntimeDecision {
   cachedTokens Int   @default(0)
   totalTokens  Int   @default(0)
   totalCost    Float @default(0)
+  // Custo de serviços EXTERNOS do turno (STT/TTS/embedding), ex.: {"stt":0.0086}.
+  // Separado de totalCost (LLM) — o custo real de um turno com áudio era subestimado.
+  extServiceCosts Json?
 
   // Latência & status
   latencyMs    Int     @default(0)

@@ -136,6 +136,11 @@ export interface ProcessAgentMessageParams {
    * short-circuitado. Ausente em playground/builder (sem retry de webhook).
    */
   inboundMessageId?: string
+  /**
+   * Custo de serviços externos já incorridos ANTES do turno (ex.: STT do áudio
+   * inbound: `{ stt: 0.0086 }`). Persistido em AgentRuntimeDecision.extServiceCosts.
+   */
+  extServiceCosts?: Record<string, number>
 }
 
 // ── Tool Result Truncation Wrapper ──────────────────────────────────────────
@@ -1166,6 +1171,7 @@ export async function processAgentMessage(
       latencyMs,
       status: 'success',
       decisionIdempotencyKey: decisionKey,
+      extServiceCosts: params.extServiceCosts,
     })
 
     return {
@@ -1204,6 +1210,7 @@ export async function processAgentMessage(
       status: 'error',
       errorMessage: message,
       decisionIdempotencyKey: decisionKey,
+      extServiceCosts: params.extServiceCosts,
     })
     throw error
   }
