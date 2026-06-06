@@ -170,7 +170,7 @@ src/
 | `BuilderProject`, `BuilderProjectConversation`, `BuilderProjectMessage`, `BuilderPromptVersion`, `BuilderDeployment`, `BuilderToolCall`, `BuilderContextSnapshot` | ai-module/builder | `builder_*` |
 | `KnowledgeCollection`, `KnowledgeSource`, `KnowledgeChunk`, `KnowledgeImage` (pgvector) | ai-module (RAG/base de conhecimento + catálogo visual Onda D) | `knowledge_*` (`knowledge_images`) |
 | `AgentRuntimeDecision` (observabilidade por turno, sem FK) | ai-module/ai-agents | `agent_runtime_decisions` |
-| `PriceList`, `PriceItem` (catálogo da tool get_pricing) | ai-module (pricing) | `price_lists`, `price_items` |
+| `PriceList`, `PriceItem` (catálogo da tool get_pricing; M2: PriceList.disclosureStyle/minTicketCents, PriceItem.priceMaxCents/imageUrl) | ai-module (pricing) | `price_lists`, `price_items` |
 | `CalendarConnection`, `Department`, `DepartmentMember` | builder/communication (calendário + roleta) | `calendar_connections`, `departments` |
 | `Organization`, `OrganizationProvider` | core (sem módulo dedicado) | `organizations`, `organization_providers` |
 | `Invitation`, `Notification`, `NotificationRead`, `NotificationPreferences` | (modelos preservados, sem controllers) | — |

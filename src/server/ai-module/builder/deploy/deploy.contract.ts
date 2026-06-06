@@ -21,6 +21,7 @@ export type DeployStatus =
 
 export type DeployStepName =
   | 'publish_version'
+  | 'materialize_pricing'
   | 'create_instance'
   | 'attach_connection'
 
@@ -52,6 +53,13 @@ export interface DeployContext {
     versionNumber?: number
     instanceId?: string
     connectionId?: string
+    /**
+     * Light bookkeeping written by `materialize_pricing`. NOT persisted on the
+     * BuilderDeployment row, so the rollback handler (which reconstructs the
+     * context from that row) cannot rely on it — the compensation is therefore
+     * self-contained (re-derives the list by `pricing:${projectId}` if needed).
+     */
+    pricing?: { listId: string }
   }
 }
 
