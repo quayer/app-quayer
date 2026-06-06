@@ -19,12 +19,14 @@
  *     `@@unique([departmentId, userId])` SÓ cobre membros-usuário; NULLs são distintos
  *     no Postgres, então membros nome+whatsapp NÃO têm unique e exigem reconcile
  *     manual — exatamente o motivo do read-modify-reconcile do pricing);
- *   - injeta um bloco DETERMINÍSTICO de roleta no `AIAgentConfig.systemPrompt` entre
- *     marcadores (idempotente — regex substitui o bloco; se não houver, append). É o
- *     equivalente ao `AIAgentConfig.priceListId = list.id` do pricing, mas como
- *     AIAgentConfig NÃO tem coluna `departmentId` (e prisma/ é intocável), o vínculo
- *     vai pelo prompt — o runtime já concatena `AIAgentConfig.systemPrompt`, então o
- *     departmentId chega ao LLM da tool `dispatch_to_agent` sem tocar o pipeline.
+ *   - grava o vínculo ESTRUTURADO na coluna `AIAgentConfig.departmentId` (fonte
+ *     AUTORITATIVA do id, análogo ao `AIAgentConfig.priceListId = list.id` do pricing)
+ *     E injeta um bloco DETERMINÍSTICO de roleta no `AIAgentConfig.systemPrompt` entre
+ *     marcadores (idempotente — regex substitui o bloco; se não houver, append) como
+ *     HINT redundante (ensina o LLM o nome do dept + que PODE dispatchar). O dispatch
+ *     `dispatch_to_agent` lê a coluna via `ctx.agentDepartmentId` como FALLBACK quando
+ *     o LLM não passa um departmentId — robusto a qual prompt vence (o bloco pode ser
+ *     sombreado por um AgentPromptVersion ACTIVE).
  *
  * Folha da saga (sem editar nada existente além dos couplings do orchestrator/
  * contract/rollback, feitos em outra fatia). Carrega o builderState LAZY (fail-open:
@@ -40,7 +42,8 @@
  * Toca tabelas:
  *   - Department        (UPSERT por @@unique([organizationId, slug]))
  *   - department_members (reconciliação: findMany + create/update/deactivate)
- *   - AIAgentConfig     (UPDATE systemPrompt — bloco de roleta entre marcadores)
+ *   - AIAgentConfig     (UPDATE departmentId — vínculo estruturado autoritativo —
+ *                        + systemPrompt — bloco de roleta entre marcadores como hint)
  *
  * REGRAS: TS strict, zero `any`; tudo org-scoped por `ctx.organizationId`;
  * idempotente (rodar 2x converge ao mesmo estado).
@@ -314,16 +317,16 @@ export async function materializeTeam(
   //    determinístico de roleta no systemPrompt entre marcadores — idempotente
   //    (substitui o bloco; se não houver, append). Org-scoped: o agente já foi
   //    validado como da org via o project no orchestrator; reconfirmamos no findFirst.
-  //    LIMITAÇÃO CONHECIDA (follow-up): o runtime prefere AgentPromptVersion.systemPrompt
-  //    quando há uma versão ACTIVE; nesse caso este bloco no AIAgentConfig.systemPrompt
-  //    é sombreado e o departmentId não chega ao LLM. No fluxo PURO do Builder
-  //    (publishVersion só carimba BuilderPromptVersion, sem AgentPromptVersion ACTIVE)
-  //    funciona. Robustez total pede um vínculo estruturado agente↔departamento
-  //    (ex.: coluna AIAgentConfig.departmentId que o dispatch leria direto).
+  //    VÍNCULO ESTRUTURADO (passo seguinte, neste mesmo `if`): o bloco no prompt é
+  //    apenas um HINT redundante — pode ser sombreado por um AgentPromptVersion ACTIVE
+  //    e nesse caso o departmentId não chega ao LLM. A fonte AUTORITATIVA do id passou
+  //    a ser a coluna `AIAgentConfig.departmentId` (gravada logo abaixo), que o
+  //    dispatch_to_agent lê via `ctx.agentDepartmentId` como FALLBACK — robusto a qual
+  //    tabela de prompt vence.
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
-      select: { systemPrompt: true },
+      select: { systemPrompt: true, departmentId: true },
     })
     if (agent) {
       const block = buildRouletteBlock(department.id, name)
@@ -333,6 +336,18 @@ export async function materializeTeam(
         await database.aIAgentConfig.update({
           where: { id: ctx.aiAgentId },
           data: { systemPrompt: nextPrompt },
+        })
+      }
+
+      // Vínculo ESTRUTURADO (fonte AUTORITATIVA do id): grava o departamento na
+      // coluna AIAgentConfig.departmentId. O dispatch_to_agent lê esta coluna como
+      // FALLBACK quando o LLM não passa um departmentId válido — robusto a qual
+      // tabela de prompt vence (o bloco acima pode ser sombreado por AgentPromptVersion
+      // ACTIVE). Idempotente: só escreve quando muda.
+      if (agent.departmentId !== department.id) {
+        await database.aIAgentConfig.update({
+          where: { id: ctx.aiAgentId },
+          data: { departmentId: department.id },
         })
       }
     }

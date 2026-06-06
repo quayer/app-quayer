@@ -352,14 +352,18 @@ describe('materializeTeam — M1 step', () => {
         mockAgentUpdate.mock.calls[0]?.[0] as { data: { systemPrompt: string } }
       ).data.systemPrompt
 
-      // 2ª run com o prompt já igual → não deve chamar update de novo.
+      // 2ª run com o prompt já igual E o vínculo estruturado já gravado
+      // (departmentId === DEPT_ID) → nenhum dos dois caminhos de update deve disparar.
       vi.clearAllMocks()
       mockDepartmentUpsert.mockResolvedValue({ id: DEPT_ID })
       mockMemberFindMany.mockResolvedValue([])
       mockReadBuilderStateByProject.mockResolvedValue(
         stateWithTeam({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
       )
-      mockAgentFindFirst.mockResolvedValue({ systemPrompt: written })
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: written,
+        departmentId: DEPT_ID,
+      })
       await materializeTeam(baseContext())
       expect(mockAgentUpdate).not.toHaveBeenCalled()
     })
