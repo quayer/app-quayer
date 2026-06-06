@@ -37,6 +37,7 @@ import { runLLMSubAgent } from '../sub-agents/base'
 import type { SubAgentContext } from '../sub-agents/types'
 import type { SourceProposal } from '../cards/builder-state'
 import { patchSourceIngestionAtomic } from './builder-state-db'
+import { extractImagesForSource } from './image-pipeline'
 import {
   SOURCE_SYNTHESIS_SYSTEM,
   SOURCE_TEXT_MIN_CHARS,
@@ -129,6 +130,38 @@ export async function enrichSource(
     return { sourceId, status: 'error', error: ingest.error }
   }
 
+  // Resolve source metadata ONCE (org-scoped) — reused by the image hook below
+  // and the synthesis copy further down (single query for both).
+  const meta = await resolveSourceMeta(sourceId, organizationId)
+
+  // ── Onda D — extração de imagens (website-first; FAIL-OPEN ABSOLUTO) ─────────
+  // Roda APÓS a ingestão OK e NÃO depende do texto (imagens != texto). Gate:
+  // só sites (`type==='url'`; NÃO instagram) e `imagesEnabled`. O pipeline já é
+  // fail-open e short-circuita sem storage/imagesEnabled, mas envolvemos em
+  // try/catch que SÓ loga para que nenhuma falha de imagem mude o status da
+  // fonte, derrube o job, ou bloqueie a síntese/RAG/texto. `await` (em vez de
+  // void) evita promise órfã no worker; a síntese de texto NÃO espera por isso
+  // do ponto de vista de resultado — o retorno `EnrichSourceResult` é intocado.
+  if (ingest.extractedHtml && meta.type === 'url' && meta.imagesEnabled) {
+    try {
+      await extractImagesForSource({
+        sourceId,
+        collectionId: meta.collectionId,
+        organizationId,
+        userId,
+        projectId,
+        html: ingest.extractedHtml,
+        baseUrl: meta.value,
+      })
+    } catch (err) {
+      console.warn(
+        '[source-enrich.job] image extraction failed (fail-open)',
+        sourceId,
+        errorMessage(err),
+      )
+    }
+  }
+
   // 2. Synthesize a proposal from the SAME extracted text (no re-fetch).
   const text = ingest.extractedText ?? ''
   if (text.replace(/\s/g, '').length < SOURCE_TEXT_MIN_CHARS) {
@@ -136,10 +169,9 @@ export async function enrichSource(
     return { sourceId, status: 'ready' }
   }
 
-  const sourceValue = await resolveSourceValue(sourceId, organizationId)
   const synthInput: SourceSynthesisInput = {
-    value: sourceValue,
-    type: instagramHostFromValue(sourceValue) ? 'instagram' : 'url',
+    value: meta.value,
+    type: instagramHostFromValue(meta.value) ? 'instagram' : 'url',
     text,
   }
 
@@ -362,20 +394,46 @@ async function patchSourceIngestion(
 // Source value resolution (org-scoped)
 // ---------------------------------------------------------------------------
 
+/** Org-scoped metadata of a source, resolved in ONE query for both the synthesis
+ *  copy (value/type) and the Onda D image hook (collectionId/type/imagesEnabled). */
+interface SourceMeta {
+  /** `KnowledgeSource.source` — URL/handle, '' when missing. */
+  value: string
+  /** Collection the source belongs to (image rows carry it; '' when missing). */
+  collectionId: string
+  /** Source kind — 'url' gates the website-first image extraction. */
+  type: string
+  /** Per-source visual-catalog toggle (Onda D). Defaults true when unreadable. */
+  imagesEnabled: boolean
+}
+
 /**
- * Resolve the source's URL/handle (`KnowledgeSource.source`) for synthesis copy.
- * Org-scoped — never reads a source from another tenant. Returns '' if missing
- * (the synthesis still runs on the text; only the label is generic).
+ * Resolve the source's metadata (`source`/`collectionId`/`type`/`imagesEnabled`)
+ * in a single org-scoped query. Used by BOTH the synthesis copy and the Onda D
+ * image hook. Org-scoped — never reads a source from another tenant. Returns a
+ * generic/empty shape (with `imagesEnabled:false`) when the row is missing for
+ * the org, so a missing source never triggers image extraction.
  */
-async function resolveSourceValue(
+async function resolveSourceMeta(
   sourceId: string,
   organizationId: string,
-): Promise<string> {
+): Promise<SourceMeta> {
   const row = await database.knowledgeSource.findFirst({
     where: { id: sourceId, organizationId },
-    select: { source: true },
+    select: {
+      source: true,
+      collectionId: true,
+      type: true,
+      imagesEnabled: true,
+    },
   })
-  return row?.source ?? ''
+  return {
+    value: row?.source ?? '',
+    collectionId: row?.collectionId ?? '',
+    type: row?.type ?? '',
+    // Missing row → false (no row to enable); present row → its flag.
+    imagesEnabled: row?.imagesEnabled ?? false,
+  }
 }
 
 /** True when a source value points at an Instagram host (best-effort parse). */

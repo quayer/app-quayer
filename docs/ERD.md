@@ -1,6 +1,6 @@
 # ERD — Quayer Database Schema
 
-> Updated: 2026-06-04 | Engine: PostgreSQL (Supabase + pgvector 0.8)
+> Updated: 2026-06-06 | Engine: PostgreSQL (Supabase + pgvector 0.8)
 > Rendered automatically by GitHub (Mermaid)
 >
 > **Mudanças desde 2026-03-14:** CRM/Inbox nukados (Abr/13) — `Contact`, `GroupChat`, `KanbanBoard`, `QuickReply`, `SessionNote` e ~15 tabelas removidas; Builder IA adicionado (`BuilderProject` família, Abr/9 + Abr/12); `UserIdentity` para login federado (Mai/10); role normalizado lowercase (Mai/10); `OTP disabled flags` em UserPreferences (Abr/30). `IpRule`, `ScimToken` foram removidos junto com admin surface.
@@ -381,6 +381,7 @@ erDiagram
 | **2026-06-05** | **`add_config_hash`** | **`agent_runtime_decisions`: + `config_hash TEXT` nullable (SHA-256 da config efetiva do agente por turno — QH-11)** |
 | **2026-06-06** | **`add_decision_idempotency_key`** | **`agent_runtime_decisions`: + `decisionIdempotencyKey TEXT` nullable + índice ÚNICO (sha256 sessionId:inboundMessageId:configHash — idempotência durável de turno; claim 'pending' pré-LLM short-circuita dispatch duplicado)** |
 | **2026-06-06** | **`add_ext_service_costs`** | **`agent_runtime_decisions`: + `extServiceCosts JSONB` nullable (custo de serviços externos do turno — STT/TTS/embedding, ex.: `{"stt":0.0086}` — separado do `totalCost` do LLM)** |
+| **2026-06-06** | **`add_knowledge_images`** | **Novo `knowledge_images` (catálogo visual extraído das fontes — Onda D/G2: `storageKey` content-addressed, `caption` vision-LLM, `captionEmbedding vector(1536)` NULLABLE/NULL no MVP via raw, `@@unique(sourceId,sha256)` dedup, `confirmedAt`/`deletedAt` curadoria) + `knowledge_sources.imagesEnabled Boolean @default(true)` (toggle por fonte) — Onda D1** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 
@@ -392,7 +393,9 @@ erDiagram
 erDiagram
     KnowledgeCollection ||--o{ KnowledgeSource : "tem"
     KnowledgeCollection ||--o{ KnowledgeChunk : "tem"
+    KnowledgeCollection ||--o{ KnowledgeImage : "tem"
     KnowledgeSource ||--o{ KnowledgeChunk : "gera"
+    KnowledgeSource ||--o{ KnowledgeImage : "extrai"
     AIAgentConfig }o--o| KnowledgeCollection : "ragCollectionId (SetNull)"
 
     KnowledgeCollection {
@@ -411,6 +414,7 @@ erDiagram
         string source "filename|url"
         string status "pending|processing|ready|error"
         int chunkCount
+        bool imagesEnabled "Onda D — toggle catálogo visual por fonte"
     }
     KnowledgeChunk {
         uuid id PK
@@ -420,6 +424,23 @@ erDiagram
         vector embedding "vector(1536), HNSW cosine — raw SQL"
         json metadata
         int ordinal
+    }
+    KnowledgeImage {
+        uuid id PK
+        string organizationId "indexed"
+        string collectionId FK
+        string sourceId FK
+        text originalUrl
+        string storageKey "path no BUCKETS.MEDIA — signed on-read"
+        text caption "nullable, vision-LLM PT-BR"
+        vector captionEmbedding "vector(1536) NULLABLE — NULL no MVP, raw SQL"
+        int width
+        int height
+        int sizeBytes
+        string sha256 "dedup, UK(sourceId,sha256)"
+        string mimeType
+        datetime confirmedAt "nullable, opt-out"
+        datetime deletedAt "nullable, soft-delete"
     }
     AgentRuntimeDecision {
         uuid id PK
@@ -444,4 +465,4 @@ erDiagram
     }
 ```
 
-> `AgentRuntimeDecision` é **tabela de log sem FK** (desacoplada, alta escrita; limpeza por retenção). `KnowledgeChunk.embedding` nunca é lida/escrita via Prisma tipado — sempre raw SQL (`::vector`).
+> `AgentRuntimeDecision` é **tabela de log sem FK** (desacoplada, alta escrita; limpeza por retenção). `KnowledgeChunk.embedding` nunca é lida/escrita via Prisma tipado — sempre raw SQL (`::vector`). `KnowledgeImage.captionEmbedding` segue a MESMA regra do `KnowledgeChunk.embedding` (sempre raw `::vector`); no MVP da Onda D fica **NULL** (não embeda — popula só na fase E de runtime). O resto de `KnowledgeImage` é CRUD tipado normal (`database.knowledgeImage`); persiste-se o `storageKey` (path content-addressed `knowledge/{org}/{sourceId}/{sha256}.{ext}` no BUCKETS.MEDIA), **nunca** a signed URL (assina on-read).

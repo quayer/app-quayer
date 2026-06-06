@@ -24,7 +24,7 @@ import { Prisma } from '@prisma/client'
 import { database } from '@/server/services/database'
 import { chunkText } from './chunking'
 import { embedTexts, toVectorLiteral } from './embedding.service'
-import { extractText } from './text-extraction'
+import { extractText, extractUrlTextWithHtml } from './text-extraction'
 
 export interface IngestOptions {
   /** Buffer do PDF (quando type='pdf' e a fonte veio de upload). */
@@ -55,6 +55,14 @@ export interface IngestResult {
    * text or the ingestion errored. Not persisted; lives only in the return value.
    */
   extractedText?: string
+  /**
+   * Raw HTML for image extraction (Onda D). Populated only for `type='url'`
+   * success (and only when the URL served HTML, not a PDF) so the Builder
+   * `quayer:source-enrich` job can extract `<img>`/`url()` refs from the SAME
+   * fetch — no second network round-trip, no re-entry into the SSRF guard.
+   * Undefined for pdf/text sources and on error. Not persisted; return-only.
+   */
+  extractedHtml?: string
 }
 
 interface SourceRow {
@@ -131,7 +139,18 @@ export async function ingestSource(
   })
 
   try {
-    const text = await extractText(source, opts)
+    // Onda D — para fontes do tipo 'url' capturamos o HTML cru do MESMO fetch
+    // (sem 2º round-trip nem reentrada no guard SSRF) para o image-pipeline.
+    // pdf/text não têm HTML → `extractedHtml` fica undefined.
+    let text: string
+    let extractedHtml: string | undefined
+    if (source.type === 'url') {
+      const extracted = await extractUrlTextWithHtml(source.source)
+      text = extracted.text
+      extractedHtml = extracted.html.length > 0 ? extracted.html : undefined
+    } else {
+      text = await extractText(source, opts)
+    }
     const chunks = chunkText(text, { size: opts.chunkSize, overlap: opts.chunkOverlap })
 
     if (chunks.length === 0) {
@@ -152,7 +171,13 @@ export async function ingestSource(
       where: { id: sourceId },
       data: { status: 'ready', chunkCount: chunks.length, error: null, updatedAt: new Date() },
     })
-    return { sourceId, status: 'ready', chunkCount: chunks.length, extractedText: text }
+    return {
+      sourceId,
+      status: 'ready',
+      chunkCount: chunks.length,
+      extractedText: text,
+      extractedHtml,
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[KnowledgeIngestion] falha ao ingerir', sourceId, message)
