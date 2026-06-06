@@ -40,6 +40,7 @@ import {
   CircleCheck,
   Clock,
   Globe,
+  Images,
   Instagram,
   Loader2,
   Pencil,
@@ -49,12 +50,17 @@ import {
 
 import { Input } from "@/client/components/ui/input"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import { api } from "@/igniter.client"
 import type {
   SourceIngestionItem,
   SourceProposal,
 } from "@/server/ai-module/builder/cards/builder-state"
 
 import { CardShell, type CardShellAction } from "./card-shell"
+import {
+  ImagesPreviewPanel,
+  type CuratedImage,
+} from "./sources/images-preview-panel"
 import type { CardComponentProps } from "./types"
 
 /**
@@ -155,16 +161,25 @@ const PHASE_PILL: Record<
 // Status polling hook
 // ──────────────────────────────────────────────────────────────────────────
 
+/** Image-catalog mirror status per source (Onda D, vision/G2). */
+type SourceImagesPhase = "pending" | "running" | "ready" | "error"
+
 /**
  * Structural shape of one source row returned by the status endpoint. Kept
  * permissive (mirrors `SourceIngestionItem`) so a slightly-richer payload from
- * the route doesn't break parsing; we read only `value`/`type`/`status`/`sourceId`.
+ * the route doesn't break parsing; we read `value`/`type`/`status`/`sourceId`
+ * plus the LEAN image-catalog mirror (`imagesStatus`/`imagesCount`) — the latter
+ * two gate the SEPARATE images poll (D3), never the text/proposed poll.
  */
 interface StatusEndpointSource {
   value: string
   type: "url" | "instagram"
   status: string
   sourceId?: string
+  /** Per-source image-extraction phase; the images poll stops at ready|error. */
+  imagesStatus?: SourceImagesPhase
+  /** Count of extracted images for this source (informational). */
+  imagesCount?: number
 }
 
 /** Status endpoint envelope: `{ sources: [...] }` (and optionally a proposal). */
@@ -176,6 +191,19 @@ interface StatusEndpointResponse {
 /** Type-guard: is `v` a non-null record we can index. */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+
+/** Coerce an unknown value into a `SourceImagesPhase` (undefined when absent). */
+function coerceImagesPhase(v: unknown): SourceImagesPhase | undefined {
+  if (
+    v === "pending" ||
+    v === "running" ||
+    v === "ready" ||
+    v === "error"
+  ) {
+    return v
+  }
+  return undefined
 }
 
 /** Coerce an unknown JSON body into `StatusEndpointSource[]` (never throws). */
@@ -196,6 +224,10 @@ function parseStatusSources(body: unknown): StatusEndpointSource[] {
       type,
       status: typeof status === "string" ? status : "pending",
       sourceId: typeof entry.sourceId === "string" ? entry.sourceId : undefined,
+      // LEAN image-catalog mirror — additive, optional; absent on legacy rows.
+      imagesStatus: coerceImagesPhase(entry.imagesStatus),
+      imagesCount:
+        typeof entry.imagesCount === "number" ? entry.imagesCount : undefined,
     })
   }
   return out
@@ -226,11 +258,104 @@ function parseStatusProposed(body: unknown): SourceProposal | undefined {
   return Object.keys(proposal).length > 0 ? proposal : undefined
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Image catalog (D3) — tolerant parse of the listSourceImages payload
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Coerce an unknown JSON value into `string | null` (anything else → null). */
+function asNullableString(v: unknown): string | null {
+  return typeof v === "string" ? v : null
+}
+
+/** Coerce an unknown JSON value into `number | null` (anything else → null). */
+function asNullableNumber(v: unknown): number | null {
+  return typeof v === "number" ? v : null
+}
+
+/**
+ * Coerce ONE unknown entry into a `CuratedImage`, or `null` when it lacks the
+ * required identity fields. `imageUrl` is the signed URL on-read (https) and is
+ * NULLABLE by design (fail-safe per item on the route) — we only ever render
+ * `<img src>` when it is non-null (the leaf components enforce that).
+ */
+function asCuratedImage(entry: unknown): CuratedImage | null {
+  if (!isRecord(entry)) return null
+  const { id, sourceId, collectionId, originalUrl, createdAt } = entry
+  if (
+    typeof id !== "string" ||
+    typeof sourceId !== "string" ||
+    typeof collectionId !== "string" ||
+    typeof originalUrl !== "string" ||
+    typeof createdAt !== "string"
+  ) {
+    return null
+  }
+  return {
+    id,
+    sourceId,
+    collectionId,
+    originalUrl,
+    imageUrl: asNullableString(entry.imageUrl),
+    caption: asNullableString(entry.caption),
+    width: asNullableNumber(entry.width),
+    height: asNullableNumber(entry.height),
+    sizeBytes: asNullableNumber(entry.sizeBytes),
+    mimeType: asNullableString(entry.mimeType),
+    confirmedAt: asNullableString(entry.confirmedAt),
+    createdAt,
+  }
+}
+
+/**
+ * Tolerant unwrap of the `listSourceImages` response into `CuratedImage[]`.
+ * Igniter may hand back the `response.success({ images })` payload DIRECTLY
+ * (`{ images }`) or array-wrapped (`[{ images }]`) depending on the caller path —
+ * we accept both and never throw, returning `[]` for any unexpected shape.
+ */
+function parseCuratedImages(data: unknown): CuratedImage[] {
+  const root: unknown = Array.isArray(data) ? data[0] : data
+  if (!isRecord(root)) return []
+  const raw = root.images
+  if (!Array.isArray(raw)) return []
+  const out: CuratedImage[] = []
+  for (const entry of raw) {
+    const img = asCuratedImage(entry)
+    if (img) out.push(img)
+  }
+  return out
+}
+
 interface PollResult {
   /** Live sources merged from the poll (falls back to seed when not polled yet). */
   sources: SourceIngestionItem[]
   /** Live proposal from the poll, when the endpoint includes it. */
   proposed: SourceProposal | undefined
+  /**
+   * `true` once every source's image-catalog mirror has SETTLED (`ready`|`error`),
+   * OR the mirror is simply absent on all of them (legacy / no-vision path).
+   * It is the STOP condition for the SEPARATE images poll (D3) — distinct from the
+   * text/`status` settle that governs the proposal poll above. Defaults to `true`
+   * when there are no sources, so the images query never spins on an empty list.
+   */
+  imagesAllReady: boolean
+}
+
+/**
+ * Derive whether the image catalog has finished for ALL sources. A source counts
+ * as settled when its `imagesStatus` is `ready`/`error`, or when the mirror is
+ * absent (`undefined`) — the latter so legacy states (no vision pipeline) never
+ * keep the images query polling forever.
+ */
+function deriveImagesAllReady(
+  sources: Array<{ imagesStatus?: SourceImagesPhase }>,
+): boolean {
+  if (sources.length === 0) return true
+  return sources.every(
+    (s) =>
+      s.imagesStatus == null ||
+      s.imagesStatus === "ready" ||
+      s.imagesStatus === "error",
+  )
 }
 
 /**
@@ -250,9 +375,14 @@ function useSourceStatusPoll(
   // Whether all KNOWN sources have settled — derived from the freshest data
   // (polled if present, else the seed). Drives whether the interval keeps going.
   const liveSources = polled?.sources ?? seedSources
-  const allSettled =
+  const textSettled =
     liveSources.length > 0 &&
     liveSources.every((s) => isSettled(resolvePhase(s.status)))
+  // The image-catalog mirror can lag behind the text settle, so the status poll
+  // must keep running while EITHER text OR images are still in flight — this is
+  // what keeps `imagesStatus` fresh for the separate images query (D3).
+  const imagesAllReady = deriveImagesAllReady(liveSources)
+  const allSettled = textSettled && imagesAllReady
 
   React.useEffect(() => {
     // Nothing to track, or everything already settled: no poll loop.
@@ -275,15 +405,19 @@ function useSourceStatusPoll(
           const sources = parseStatusSources(body)
           const proposed = parseStatusProposed(body)
           if (sources.length > 0 || proposed) {
+            const nextSources = sources.length > 0 ? sources : liveSources
             setPolled({
-              sources: sources.length > 0 ? sources : liveSources,
+              sources: nextSources,
               proposed: proposed ?? polled?.proposed,
+              imagesAllReady: deriveImagesAllReady(nextSources),
             })
           }
-          // Stop the loop once the freshest poll shows everything settled.
+          // Stop the loop once the freshest poll shows BOTH the text status and
+          // the image-catalog mirror settled for every source.
           const settled =
             sources.length > 0 &&
-            sources.every((s) => isSettled(resolvePhase(s.status)))
+            sources.every((s) => isSettled(resolvePhase(s.status))) &&
+            deriveImagesAllReady(sources)
           if (settled) return
         }
       } catch {
@@ -306,6 +440,9 @@ function useSourceStatusPoll(
   return {
     sources: polled?.sources ?? seedSources,
     proposed: polled?.proposed ?? seedProposed,
+    // `imagesAllReady` is derived above from the freshest data (polled ?? seed),
+    // so the images query (D3) can gate its own `refetchInterval` on it.
+    imagesAllReady,
   }
 }
 
@@ -528,12 +665,44 @@ export function SourceProgressCard({
   const alreadyConfirmed = value.confirmations.source
 
   // Live poll: merges fresh per-source status (and a fresher proposal, if the
-  // endpoint returns one) over the canonical seed.
-  const { sources, proposed } = useSourceStatusPoll(
+  // endpoint returns one) over the canonical seed. `imagesAllReady` is the lean
+  // image-catalog mirror's settle flag — it gates the SEPARATE images query (D3).
+  const { sources, proposed, imagesAllReady } = useSourceStatusPoll(
     projectId,
     seedSources,
     seedProposed,
   )
+
+  // ── Catálogo de fotos (Onda D3) — galeria de curadoria visual ─────────────
+  // O card é dono do useQuery; o panel é dono da curadoria. NÃO usamos o
+  // `refetchInterval` do client porque o intervalo dele é montado uma vez (lê
+  // `refetchInterval` de um ref e re-arma só quando `execute`/`enabled` mudam),
+  // o que NÃO reage à virada de `imagesAllReady`. Em vez disso, o card é dono de
+  // um setInterval determinístico que chama `refetch()` enquanto o espelho
+  // `imagesStatus` de alguma fonte NÃO estiver settled — para sozinho quando
+  // `imagesAllReady`, mesma cadência (~2s) do status poll. SEM SSE (padrão W4).
+  const imagesQuery = api.builder.listSourceImages.useQuery({
+    params: { id: projectId },
+  })
+  const images = parseCuratedImages(imagesQuery.data)
+  const imagesLoading = imagesQuery.isLoading
+  const refetchImages = imagesQuery.refetch
+
+  React.useEffect(() => {
+    if (imagesAllReady) return
+    const timer = setInterval(() => {
+      refetchImages()
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [imagesAllReady, refetchImages])
+  // Estados da zona: enquanto o espelho não settla OU o 1º fetch está em voo, e a
+  // lista está vazia → loading; settled + fetch resolvido + lista vazia → empty;
+  // lista com itens → galeria (mesmo durante poll). Incluir `imagesLoading` evita
+  // piscar o empty antes da query resolver quando o espelho já está settled.
+  const imagesCatalogLoading =
+    (!imagesAllReady || imagesLoading) && images.length === 0
+  const imagesCatalogEmpty =
+    imagesAllReady && !imagesLoading && images.length === 0
 
   const hasProposal =
     proposed != null &&
@@ -789,6 +958,53 @@ export function SourceProgressCard({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Catálogo de fotos (Onda D3) — só quando há ao menos uma fonte ── */}
+        {sources.length > 0 && (
+          <div className="flex flex-col gap-2">
+          <span
+            className="text-[11px] font-medium uppercase tracking-wide"
+            style={{ color: tokens.textTertiary }}
+          >
+            Catálogo de fotos
+          </span>
+
+          {imagesCatalogLoading ? (
+            <div
+              className="flex items-center gap-2 rounded-md border px-3 py-3 text-[12px]"
+              style={{
+                backgroundColor: tokens.bgBase,
+                borderColor: tokens.divider,
+                color: tokens.textTertiary,
+              }}
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <span>Lendo as fotos…</span>
+            </div>
+          ) : imagesCatalogEmpty ? (
+            <div
+              className="flex items-center gap-2 rounded-md border px-3 py-3 text-[12px]"
+              style={{
+                backgroundColor: tokens.bgBase,
+                borderColor: tokens.divider,
+                color: tokens.textTertiary,
+              }}
+            >
+              <Images className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Não consegui ler as fotos desta fonte.</span>
+            </div>
+          ) : (
+            <ImagesPreviewPanel
+              projectId={projectId}
+              images={images}
+              loading={imagesLoading}
+              tokens={tokens}
+              disabled={disabled}
+              onRefetch={refetchImages}
+            />
+          )}
           </div>
         )}
       </div>
