@@ -134,12 +134,24 @@ export const pricingItemPayloadSchema = z.object({
   name: z.string().min(1).max(200),
   priceCents: z.number().int().nonnegative(),
   category: z.string().min(1).max(120).optional(),
+  // G4 — teto OPCIONAL da faixa (priceCents é o piso). Só significativo quando o
+  // `disclosureStyle` global for 'average'; o handler descarta caso contrário.
+  priceMaxCents: z.number().int().nonnegative().optional(),
+  // G5b — URL https da foto do serviço (catálogo visual). Vem do uploader (signed
+  // URL do Storage) OU de uma URL colada — ambas chegam como string https.
+  imageUrl: z.string().url().max(2000).optional(),
 })
 
 export const pricingPayloadSchema = z.object({
   cardKey: z.literal('pricing'),
   items: z.array(pricingItemPayloadSchema).default([]),
   currency: z.string().min(3).max(3).default('BRL'),
+  // G4 — estilo de divulgação: como o AGENTE fala o preço. Global ao card.
+  disclosureStyle: z
+    .enum(['exact', 'from', 'average', 'none'])
+    .default('exact'),
+  // G5a — valor mínimo (min ticket) global, em centavos. Omitido quando não há.
+  minTicketCents: z.number().int().nonnegative().optional(),
 })
 
 /**

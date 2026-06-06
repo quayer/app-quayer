@@ -54,17 +54,42 @@ export const hoursStateSchema = z.object({
   timezone: z.string().optional(),
 })
 
-/** A single pricing line item (BRL stored in cents). */
+/**
+ * A single pricing line item (BRL stored in cents).
+ *
+ * Onda B additions:
+ *  - `priceMaxCents` (G4) — OPTIONAL ceiling of a range. `priceCents` is the FLOOR
+ *    (min); when the global `disclosureStyle === 'average'` the agent says
+ *    "entre R$ {priceCents} e R$ {priceMaxCents}". Only meaningful for 'average';
+ *    the handler drops it otherwise so the JSONB never holds a stray ceiling.
+ *  - `imageUrl` (G5b) — OPTIONAL https URL of the service photo (visual catalog).
+ *    Resolved by EITHER the multipart uploader (Supabase signed URL) OR a pasted
+ *    URL; both land here as a validated https string.
+ */
 export const pricingItemSchema = z.object({
   name: z.string(),
   priceCents: z.number().int().nonnegative(),
   category: z.string().optional(),
+  priceMaxCents: z.number().int().nonnegative().optional(),
+  imageUrl: z.string().url().max(2000).optional(),
 })
 
-/** pricing card → PriceList + PriceItem. */
+/**
+ * pricing card → PriceList + PriceItem.
+ *
+ * Onda B additions:
+ *  - `disclosureStyle` (G4) — how the AGENT speaks the price: exact / from /
+ *    average (range) / none. Global to the card (not per item). Default 'exact'.
+ *  - `minTicketCents` (G5a) — OPTIONAL global minimum ticket ("tem valor mínimo?")
+ *    in cents; omitted when there is none.
+ */
 export const pricingStateSchema = z.object({
   items: z.array(pricingItemSchema).default([]),
   currency: z.string().default('BRL'),
+  disclosureStyle: z
+    .enum(['exact', 'from', 'average', 'none'])
+    .default('exact'),
+  minTicketCents: z.number().int().nonnegative().optional(),
 })
 
 /** qualification_action card → deploy gate; qualification_steps → prompt. */
@@ -189,7 +214,11 @@ export const builderStateSchema = z.object({
   persona: personaStateSchema.default({}),
   services: servicesStateSchema.default({ offered: [], notOffered: [] }),
   hours: hoursStateSchema.default({}),
-  pricing: pricingStateSchema.default({ items: [], currency: 'BRL' }),
+  pricing: pricingStateSchema.default({
+    items: [],
+    currency: 'BRL',
+    disclosureStyle: 'exact',
+  }),
   qualification: qualificationStateSchema.default({ steps: [] }),
   team: teamStateSchema.default({ members: [] }),
   calendar: calendarStateSchema.default({}),
