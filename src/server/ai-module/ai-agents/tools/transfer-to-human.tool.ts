@@ -1,0 +1,464 @@
+/**
+ * transfer_to_human — tool UNIFICADA de handoff para humano.
+ *
+ * Consolida o que antes eram 3 tools:
+ *   - transfer_to_human  → routing:'queue'  + pauseAI:true   (fila geral, painel)
+ *   - notify_team        → routing:'queue'  + pauseAI:false  (avisa SEM pausar)
+ *   - dispatch_to_agent  → routing:'department'               (roleta por setor)
+ * E adiciona um modo novo:
+ *   - routing:'self'     → pinga o WhatsApp do próprio número conectado
+ *                          (Connection.phoneNumber) — o "self-chat" do dono.
+ *
+ * Reaproveita executores existentes (não duplica lógica): routing:'department'
+ * delega ao executeDispatchToAgent maduro (roleta + fallbacks + aviso 6A).
+ *
+ * Compatibilidade: notify_team e dispatch_to_agent continuam existindo como
+ * ALIASES deprecated (ver createNotifyTeamTool / o tool dispatch original) — a
+ * remoção deles + migração de enabledTools é a Fase 2 (gated). Nada quebra agora.
+ *
+ * Convenção de todas as rotas: a tool NÃO manda mensagem ao cliente — o agente
+ * confirma por texto. O modo 'self' é a exceção parcial: ele envia um AVISO ao
+ * dono (não ao cliente).
+ */
+
+import { tool } from 'ai'
+import { Prisma, type SessionStatus } from '@prisma/client'
+import { z } from 'zod'
+import { database } from '@/server/services/database'
+import type { ToolExecutionContext } from './builtin-tools'
+import {
+  executeDispatchToAgent,
+  rouletteNotifyRateLimiter,
+} from './department-dispatch'
+import {
+  sendText,
+  normalizePhone,
+} from '@/server/communication/services/uazapi-sender.service'
+
+// ---------------------------------------------------------------------------
+// Input schema
+// ---------------------------------------------------------------------------
+
+export const transferToHumanInputSchema = z.object({
+  routing: z
+    .enum(['queue', 'department', 'self'])
+    .default('queue')
+    .describe(
+      "Como encaminhar: 'queue' = fila geral (painel da org); 'department' = " +
+        "roleta de um setor (passe departmentId ou use o setor do agente); " +
+        "'self' = avisa o WhatsApp do próprio número conectado (o dono). Padrão 'queue'.",
+    ),
+  pauseAI: z
+    .boolean()
+    .default(true)
+    .describe(
+      'true (padrão) pausa a IA e transfere. false apenas AVISA a equipe sem ' +
+        'pausar (use para alertas informativos — antigo notify_team).',
+    ),
+  reason: z
+    .string()
+    .min(10)
+    .max(500)
+    .describe('Motivo do encaminhamento/aviso (ex: "cliente quer falar de contrato").'),
+  urgency: z
+    .enum(['low', 'medium', 'high'])
+    .default('medium')
+    .describe('Urgência: low, medium ou high.'),
+  summary: z
+    .string()
+    .max(800)
+    .optional()
+    .describe('Resumo da conversa para o humano assumir rápido.'),
+  departmentId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Só para routing='department': Department.id de destino. Se omitir, usa o " +
+        'departamento configurado do agente.',
+    ),
+})
+
+export type TransferToHumanInput = z.infer<typeof transferToHumanInputSchema>
+
+export interface TransferToHumanResult {
+  success: boolean
+  message: string
+  routing?: 'queue' | 'department' | 'self'
+  paused?: boolean
+  /** routing:'self' — se o aviso ao dono saiu por WhatsApp (auditoria). */
+  whatsappNotified?: boolean | null
+  /** routing:'department' — repassa os campos do dispatch. */
+  departmentId?: string
+  assignedAgentId?: string | null
+  assignedAgentName?: string | null
+  dispatchedVia?: 'roulette' | 'queue'
+}
+
+const URGENCY_LABEL: Record<'low' | 'medium' | 'high', string> = {
+  low: 'baixa',
+  medium: 'média',
+  high: 'ALTA',
+}
+
+// ---------------------------------------------------------------------------
+// routing:'queue' — fila geral (com ou sem pausa)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encaminha para a fila geral da org. Com pauseAI=true reproduz o antigo
+ * transfer_to_human (pausa + handoff + notifica). Com pauseAI=false reproduz o
+ * antigo notify_team (apenas notifica, sem pausar nem marcar handoff).
+ */
+export async function executeQueueHandoff(
+  ctx: ToolExecutionContext,
+  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI'>,
+): Promise<TransferToHumanResult> {
+  const { reason, urgency, summary, pauseAI } = input
+
+  try {
+    const session = await database.chatSession.findUnique({
+      where: { id: ctx.sessionId },
+      select: { customFields: true, contactPhone: true, status: true },
+    })
+    if (!session) {
+      return { success: false, message: 'Sessão não encontrada.', routing: 'queue' }
+    }
+
+    const existing =
+      (session.customFields as Record<string, unknown> | null) ?? {}
+
+    if (pauseAI) {
+      // ── pausa + handoff (transfer_to_human clássico) ──
+      await database.chatSession.update({
+        where: { id: ctx.sessionId },
+        data: {
+          aiEnabled: false,
+          aiBlockReason: reason,
+          pausedBy: 'agent',
+          status: session.status === 'CLOSED' ? session.status : 'PAUSED',
+          customFields: {
+            ...existing,
+            handoff: {
+              reason,
+              urgency,
+              summary: summary ?? null,
+              transferredAt: new Date().toISOString(),
+              dispatchedVia: 'queue',
+            },
+          } as Prisma.InputJsonValue,
+          tags: { push: 'human_handoff' },
+        },
+      })
+
+      await database.notification.create({
+        data: {
+          organizationId: ctx.organizationId,
+          type: urgency === 'high' ? 'ERROR' : 'WARNING',
+          title:
+            urgency === 'high'
+              ? 'Transferência urgente para humano'
+              : 'Transferência para humano',
+          description: `${session.contactPhone}: ${reason}`,
+          source: 'ai-agent',
+          sourceId: ctx.sessionId,
+          actionUrl: `/conversations/${ctx.sessionId}`,
+          actionLabel: 'Assumir conversa',
+          metadata: {
+            sessionId: ctx.sessionId,
+            urgency,
+            summary: summary ?? null,
+            routing: 'queue',
+            triggeredBy: 'transfer_to_human_tool',
+          },
+        },
+      })
+
+      return {
+        success: true,
+        routing: 'queue',
+        paused: true,
+        message: `Transferido para humano (${urgency}).`,
+      }
+    }
+
+    // ── notifica sem pausar (notify_team clássico) ──
+    await database.notification.create({
+      data: {
+        organizationId: ctx.organizationId,
+        type: urgency === 'high' ? 'WARNING' : 'INFO',
+        title:
+          urgency === 'high'
+            ? 'Alerta do Agente IA (alta prioridade)'
+            : 'Notificação do Agente IA',
+        description: reason,
+        source: 'ai-agent',
+        sourceId: ctx.sessionId,
+        actionUrl: `/conversations/${ctx.sessionId}`,
+        actionLabel: 'Ver conversa',
+        metadata: {
+          sessionId: ctx.sessionId,
+          contactId: ctx.contactId,
+          urgency,
+          routing: 'queue',
+          triggeredBy: 'transfer_to_human_tool(notify)',
+        },
+      },
+    })
+
+    return {
+      success: true,
+      routing: 'queue',
+      paused: false,
+      message: `Equipe notificada (sem pausar a IA): "${reason}".`,
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Erro desconhecido'
+    console.error('[transfer_to_human:queue] Failed:', msg)
+    return { success: false, message: `Erro ao encaminhar: ${msg}`, routing: 'queue' }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// routing:'self' — avisa o WhatsApp do próprio número conectado (dono)
+// ---------------------------------------------------------------------------
+
+/** Subset estrutural do delegate connection (lê uazapiBaseUrl/phoneNumber sem acoplar ao tipo gerado). */
+interface ConnSelfDelegate {
+  findFirst: (args: {
+    where: { id: string; organizationId: string }
+    select: { uazapiToken: true; uazapiBaseUrl: true; phoneNumber: true }
+  }) => Promise<{
+    uazapiToken?: string | null
+    uazapiBaseUrl?: string | null
+    phoneNumber?: string | null
+  } | null>
+}
+
+function getConnSelfDelegate(): ConnSelfDelegate {
+  return (database as unknown as { connection: ConnSelfDelegate }).connection
+}
+
+const FALLBACK_BASE_URL = process.env.UAZAPI_BASE_URL ?? 'https://api.uazapi.com'
+
+/** Texto do aviso enviado ao próprio número conectado (dono). Determinístico. */
+export function buildSelfHandoffText(args: {
+  contactPhone: string
+  reason: string
+  summary: string | null
+  urgency: 'low' | 'medium' | 'high'
+}): string {
+  const lines = [
+    '🔔 Um lead precisa de você.',
+    '',
+    `Cliente: ${args.contactPhone}`,
+    `Urgência: ${URGENCY_LABEL[args.urgency]}`,
+    `Motivo: ${args.reason}`,
+  ]
+  const summary = args.summary?.trim()
+  if (summary) lines.push('', `Resumo: ${summary}`)
+  lines.push('', 'Abra a conversa para assumir o atendimento.')
+  return lines.join('\n')
+}
+
+/**
+ * Avisa o dono no próprio número conectado (self-chat) e, por padrão, pausa a IA.
+ * Fail-safe no envio: se não houver instância/número ou o envio falhar, ainda
+ * cria a Notification in-app (piso de auditoria) e — quando pauseAI — pausa a
+ * sessão; o retorno marca whatsappNotified para auditoria.
+ */
+export async function executeSelfHandoff(
+  ctx: ToolExecutionContext,
+  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI'>,
+): Promise<TransferToHumanResult> {
+  const { reason, urgency, summary, pauseAI } = input
+
+  try {
+    const session = await database.chatSession.findUnique({
+      where: { id: ctx.sessionId },
+      select: { customFields: true, contactPhone: true, status: true },
+    })
+    if (!session) {
+      return { success: false, message: 'Sessão não encontrada.', routing: 'self' }
+    }
+
+    // 1. Tenta avisar o número conectado (best-effort, nunca derruba o turno).
+    let whatsappNotified = false
+    try {
+      const connection = await getConnSelfDelegate().findFirst({
+        where: { id: ctx.connectionId, organizationId: ctx.organizationId },
+        select: { uazapiToken: true, uazapiBaseUrl: true, phoneNumber: true },
+      })
+      const token = connection?.uazapiToken
+      const phone = connection?.phoneNumber?.trim()
+
+      if (token && phone) {
+        const limitKey = `${ctx.organizationId}:${normalizePhone(phone)}`
+        const limit = await rouletteNotifyRateLimiter.check(limitKey)
+        if (limit.success) {
+          const baseUrl = connection!.uazapiBaseUrl ?? FALLBACK_BASE_URL
+          const text = buildSelfHandoffText({
+            contactPhone: session.contactPhone,
+            reason,
+            summary: summary ?? null,
+            urgency,
+          })
+          const sent = await sendText(token, baseUrl, phone, text)
+          whatsappNotified = sent.success === true
+        }
+      }
+    } catch (sendErr) {
+      const m = sendErr instanceof Error ? sendErr.message : String(sendErr)
+      console.warn('[transfer_to_human:self] aviso WhatsApp falhou (ignored):', m)
+    }
+
+    const existing =
+      (session.customFields as Record<string, unknown> | null) ?? {}
+
+    // 2. Pausa + handoff (quando pauseAI).
+    if (pauseAI) {
+      await database.chatSession.update({
+        where: { id: ctx.sessionId },
+        data: {
+          aiEnabled: false,
+          aiBlockReason: reason,
+          pausedBy: 'agent',
+          status: session.status === 'CLOSED' ? session.status : 'PAUSED',
+          customFields: {
+            ...existing,
+            handoff: {
+              reason,
+              urgency,
+              summary: summary ?? null,
+              transferredAt: new Date().toISOString(),
+              dispatchedVia: 'self',
+              whatsappNotified,
+            },
+          } as Prisma.InputJsonValue,
+          tags: { push: 'human_handoff' },
+        },
+      })
+    }
+
+    // 3. Notification in-app = piso de auditoria (sempre).
+    await database.notification.create({
+      data: {
+        organizationId: ctx.organizationId,
+        type: urgency === 'high' ? 'ERROR' : 'WARNING',
+        title:
+          urgency === 'high'
+            ? 'Lead urgente para o dono'
+            : 'Lead encaminhado para o dono',
+        description: `${session.contactPhone}: ${reason}`,
+        source: 'ai-agent',
+        sourceId: ctx.sessionId,
+        actionUrl: `/conversations/${ctx.sessionId}`,
+        actionLabel: 'Assumir conversa',
+        metadata: {
+          sessionId: ctx.sessionId,
+          urgency,
+          summary: summary ?? null,
+          routing: 'self',
+          whatsappNotified,
+          triggeredBy: 'transfer_to_human_tool(self)',
+        },
+      },
+    })
+
+    const waNote = whatsappNotified
+      ? ' Aviso enviado ao seu WhatsApp.'
+      : ' (não foi possível avisar por WhatsApp — veja no painel.)'
+    return {
+      success: true,
+      routing: 'self',
+      paused: pauseAI,
+      whatsappNotified,
+      message: `Lead encaminhado para o dono (${urgency}).${waNote}`,
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Erro desconhecido'
+    console.error('[transfer_to_human:self] Failed:', msg)
+    return { success: false, message: `Erro ao encaminhar: ${msg}`, routing: 'self' }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Executor unificado
+// ---------------------------------------------------------------------------
+
+export async function executeTransferToHuman(
+  ctx: ToolExecutionContext,
+  input: TransferToHumanInput,
+): Promise<TransferToHumanResult> {
+  if (input.routing === 'department') {
+    const r = await executeDispatchToAgent(ctx, {
+      departmentId: input.departmentId,
+      reason: input.reason,
+      summary: input.summary,
+      urgency: input.urgency,
+    })
+    return {
+      success: r.success,
+      message: r.message,
+      routing: 'department',
+      paused: r.success,
+      departmentId: r.departmentId,
+      assignedAgentId: r.assignedAgentId,
+      assignedAgentName: r.assignedAgentName,
+      dispatchedVia: r.dispatchedVia,
+    }
+  }
+
+  if (input.routing === 'self') {
+    return executeSelfHandoff(ctx, input)
+  }
+
+  return executeQueueHandoff(ctx, input)
+}
+
+// ---------------------------------------------------------------------------
+// Tool factory (spread into createBuiltinTools())
+// ---------------------------------------------------------------------------
+
+export function createTransferToHumanTool(ctx: ToolExecutionContext) {
+  return tool({
+    description:
+      'Encaminha a conversa para um humano (ou apenas avisa a equipe). Escolha o ' +
+      "destino com routing: 'queue' (fila/painel da org), 'department' (roleta de " +
+      "um setor) ou 'self' (avisa o WhatsApp do próprio dono). Use pauseAI:false " +
+      'para apenas alertar sem pausar a IA. Use quando o cliente pedir uma pessoa, ' +
+      'reclamar, ou a situação exigir julgamento humano. O agente confirma por texto.',
+    inputSchema: transferToHumanInputSchema,
+    execute: async (input) => executeTransferToHuman(ctx, input),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Alias DEPRECATED: notify_team → routing:'queue' + pauseAI:false
+// Preserva o schema antigo (message/priority) para não quebrar agentes que já
+// têm 'notify_team' no enabledTools e foram treinados com esse formato.
+// ---------------------------------------------------------------------------
+
+export const notifyTeamInputSchema = z.object({
+  message: z.string().min(1).max(500).describe('Mensagem da notificação'),
+  priority: z
+    .enum(['low', 'medium', 'high'])
+    .default('medium')
+    .describe('Prioridade: low, medium ou high'),
+})
+
+export function createNotifyTeamTool(ctx: ToolExecutionContext) {
+  return tool({
+    description:
+      '[DEPRECATED — use transfer_to_human com routing:queue e pauseAI:false] ' +
+      'Notifica a equipe sobre lead qualificado ou situação importante, sem pausar a IA.',
+    inputSchema: notifyTeamInputSchema,
+    execute: async ({ message, priority }) =>
+      executeQueueHandoff(ctx, {
+        reason: message,
+        urgency: priority,
+        summary: undefined,
+        pauseAI: false,
+      }),
+  })
+}

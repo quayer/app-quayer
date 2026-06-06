@@ -50,13 +50,6 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     type: 'builtin',
     status: 'available',
   },
-  {
-    name: 'get_session_history',
-    description: 'Historico da sessao atual',
-    phase: 'v1',
-    type: 'builtin',
-    status: 'available',
-  },
   // v1.5 — Google Calendar (Wave 4b — available; conecta via link de agenda)
   {
     name: 'check_availability',
@@ -90,6 +83,27 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     name: 'dispatch_to_agent',
     description: 'Distribui conversa para atendente via roleta',
     phase: 'v1.5',
+    type: 'builtin',
+    status: 'available',
+  },
+  {
+    name: 'calendar_list_slots',
+    description: 'Lista horarios livres dos proximos dias no expediente',
+    phase: 'v1.5',
+    type: 'official',
+    status: 'available',
+  },
+  {
+    name: 'calculator',
+    description: 'Calculadora para contas exatas (parcelas, descontos, %)',
+    phase: 'v1',
+    type: 'builtin',
+    status: 'available',
+  },
+  {
+    name: 'think',
+    description: 'Raciocinio interno (scratchpad) antes de responder',
+    phase: 'v1',
     type: 'builtin',
     status: 'available',
   },

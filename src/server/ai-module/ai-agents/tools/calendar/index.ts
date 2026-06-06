@@ -49,6 +49,14 @@ export {
 export type { CancelEventInput, CancelEventResult } from './cancel-event'
 
 export {
+  createListSlotsTool,
+  executeListSlots,
+  buildWorkingWindows,
+  listSlotsInputSchema,
+} from './list-slots'
+export type { ListSlotsInput, ListSlotsResult, DailyWindow } from './list-slots'
+
+export {
   queryFreeBusy,
   insertEvent,
   deleteEvent,
