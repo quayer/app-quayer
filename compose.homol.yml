@@ -145,6 +145,95 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # ==================================
+  # BULLMQ WORKER (filas: outbound-retry / source-enrich / session-close)
+  # ==================================
+  # Mesma imagem do app (quayer-app:homol) — só sobrescreve o command para rodar
+  # o bundle esbuild do entrypoint dos workers (workers/start-workers.js,
+  # produzido por `npm run build:workers` no Dockerfile). Sem este serviço, as
+  # filas enfileiram em prod mas NINGUÉM consome (workers inertes). Espelha o
+  # env/networks/depends_on do app — precisa de REDIS_URL (filas) + DATABASE_URL
+  # (handlers que tocam o DB) + UAZAPI_* (caminho de envio do outbound-retry) +
+  # ENCRYPTION_KEY/OPENAI (source-enrich). NÃO é HTTP server → healthcheck por
+  # processo (PID 1 vivo), não por porta.
+  worker:
+    image: quayer-app:homol
+    container_name: homol-quayer-worker
+    restart: unless-stopped
+    # Roda o bundle dos workers em vez do server.js (bypassa o docker-entrypoint
+    # do app, que rodaria migrations + next server). Migrations ficam a cargo do
+    # serviço `app` — o worker só consome filas.
+    command: ["node", "workers/start-workers.js"]
+    environment:
+      - NODE_ENV=production
+
+      # Database (rede interna) — handlers de job tocam o DB
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@homol-quayer-postgres:5432/${DB_NAME}?schema=public
+      - DIRECT_DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@homol-quayer-postgres:5432/${DB_NAME}?schema=public
+
+      # Redis (rede interna) — conexão das filas BullMQ
+      - REDIS_URL=redis://homol-quayer-redis:6379
+      - REDIS_HOST=homol-quayer-redis
+      - REDIS_PORT=6379
+
+      - NEXT_PUBLIC_APP_ENV=homol
+
+      # Auth/crypto — calendar token encryption (AES-GCM) usa ENCRYPTION_KEY
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_MAGIC_LINK_SECRET=${JWT_MAGIC_LINK_SECRET}
+      - JWT_2FA_CHALLENGE_SECRET=${JWT_2FA_CHALLENGE_SECRET}
+      - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+      # Igniter — mesmo prefixo de fila do app (senão consome filas diferentes)
+      - IGNITER_APP_NAME=quayer-homol
+      - IGNITER_JOBS_QUEUE_PREFIX=quayer-homol
+      - IGNITER_LOG_LEVEL=debug
+
+      # WhatsApp — outbound-retry reenvia a resposta barrada por rate-limit
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_BASE_URL=${UAZAPI_BASE_URL}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_INSTANCE_TOKEN=${UAZAPI_INSTANCE_TOKEN}
+      - UAZAPI_WEBHOOK_URL=${UAZAPI_WEBHOOK_URL}
+
+      # OpenAI — source-enrich (embed/síntese)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # Observability (Sentry)
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
+
+      # Storage — source-enrich pode persistir mídia/chunks
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-homol-media-whatsapp}
+      - SUPABASE_STORAGE_BUCKET_PROFILES=${SUPABASE_STORAGE_BUCKET_PROFILES:-homol-profile-pictures}
+      - SUPABASE_STORAGE_BUCKET_ATTACHMENTS=${SUPABASE_STORAGE_BUCKET_ATTACHMENTS:-homol-attachments}
+    depends_on:
+      homol-quayer-postgres:
+        condition: service_healthy
+      homol-quayer-redis:
+        condition: service_healthy
+    networks:
+      - homol-quayer-internal
+    # Healthcheck por processo: o worker não expõe HTTP. Confirma que o PID 1
+    # (node) está vivo — graceful shutdown (SIGTERM/SIGINT) já é tratado pelo
+    # start-workers.ts. Se o processo morrer, restart: unless-stopped o sobe.
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o pid= -p 1 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   homol-quayer-postgres:
     # pgvector/pgvector:pg15 = Postgres 15 + extensão pgvector (necessária p/ RAG:
     # CREATE EXTENSION vector + coluna vector(1536)). Mesmo major (15) → volume de

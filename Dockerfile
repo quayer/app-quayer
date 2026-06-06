@@ -94,6 +94,15 @@ ENV SENTRY_RELEASE=${SENTRY_RELEASE}
 # `next build $NEXT_BUILD_FLAGS` permite opt-out de Turbopack via --webpack.
 RUN npx next build ${NEXT_BUILD_FLAGS}
 
+# Bundle do entrypoint dos workers BullMQ (outbound-retry / source-enrich /
+# session-close) via esbuild. O runner standalone NÃO tem src/ nem tsx, então
+# `tsx scripts/start-workers.ts` é impossível em prod. esbuild empacota tudo num
+# único CJS em .next/standalone/workers/start-workers.js (ao lado do server.js),
+# com @prisma/client, bullmq, ioredis, pg, @igniter-js/* externalizados (já
+# presentes no node_modules do runner). Roda DEPOIS do next build pois o output
+# cai dentro de .next/standalone (que o next build acabou de criar).
+RUN npm run build:workers
+
 # ==================================
 # STAGE 3: Runner (Production)
 # ==================================
@@ -123,6 +132,15 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # Copy standalone output (optimized by Next.js)
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy bundled BullMQ worker entrypoint (produced by `npm run build:workers`).
+# Roda no serviço `worker` do compose com `node workers/start-workers.js`
+# (mesma imagem do app, command sobrescrito). Sem isto, as filas enfileiram mas
+# ninguém consome em prod. NOTA: o `COPY .next/standalone ./` acima JÁ traz a
+# pasta workers/ (esbuild a escreveu dentro de standalone); este COPY explícito
+# é defensivo/idempotente e documenta a dependência — pode ser removido se o
+# diretório standalone passar a ser filtrado.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone/workers ./workers
 
 # Copy Prisma client runtime (prisma CLI removed — migrate.js uses pg directly)
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma

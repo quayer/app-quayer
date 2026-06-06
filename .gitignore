@@ -47,6 +47,11 @@ out/
 /.next/
 /out/
 
+# Bundle dos workers BullMQ (esbuild → npm run build:workers). Gerado em
+# build-time dentro de .next/standalone/workers/ — já coberto por /.next/ acima,
+# listado aqui explicitamente para documentar que é artefato, nunca versionado.
+.next/standalone/workers/
+
 # Fumadocs MDX generated source
 .source/
 
