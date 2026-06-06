@@ -47,6 +47,7 @@ export async function getReadiness(
       builderState: true,
       project: {
         select: {
+          name: true,
           aiAgentId: true,
           aiAgent: {
             select: {
@@ -106,6 +107,19 @@ export async function getReadiness(
 
   // 3. parseBuilderState never throws — null/garbage/partial backfills to DEFAULT.
   const state = parseBuilderState(conversation.builderState)
+
+  // 3b. Seed project.name from the DB BuilderProject.name when the builderState
+  //     hasn't captured one yet. The name is derived from the brief at creation
+  //     and lives on the project row, NOT in builderState — without this the
+  //     step-engine's first step asks "Qual o nome do projeto?" for a project
+  //     that already has a name. Accept-source can later overwrite it with the
+  //     synthesized businessName (apply-card-submit maps businessName→project.name).
+  if (!state.project.name || state.project.name.trim().length === 0) {
+    const dbName = conversation.project.name?.trim()
+    if (dbName) {
+      state.project = { ...state.project, name: dbName }
+    }
+  }
 
   // 4. Pure decision + attach the resolved state so the FE active-step card
   //    pre-fills with already-confirmed values (the pure engine omits it).

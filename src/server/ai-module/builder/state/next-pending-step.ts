@@ -103,6 +103,48 @@ function isValidChannelKey(value: string | undefined | null): boolean {
   return hasText(value) && CHANNEL_KEY_SET.has(value as string)
 }
 
+/** Does the source synthesis carry at least one grounded field? Pure. */
+function hasSourceProposal(state: BuilderState): boolean {
+  const p = state.sourceIngestion.proposed
+  if (!p) return false
+  return Boolean(
+    p.businessName ||
+      p.audience ||
+      p.tone ||
+      (p.services && p.services.length > 0) ||
+      (p.differentiators && p.differentiators.length > 0),
+  )
+}
+
+/**
+ * An in-flight "cole seu site/IG" source TAKES OVER the active-step slot so the
+ * `source_progress` card surfaces (and the agent acknowledges the scan) the
+ * moment a link is pasted — even though `source_ingestion` is an OPTIONAL step
+ * that is otherwise skipped from surfacing.
+ *
+ * Active while NOT yet accepted (`confirmations.source`) AND there is either a
+ * source still settling (pending/processing) OR a proposal ready to accept. Once
+ * every source settles with NO proposal (synthesis produced nothing), it stops
+ * being active so the journey is NEVER stuck on a card whose only action
+ * (Aceitar) is disabled — the source stays in RAG and the journey moves on.
+ */
+function sourceIngestionActive(state: BuilderState): boolean {
+  if (confirmed(state, 'source')) return false
+  const sources = state.sourceIngestion.sources
+  if (sources.length === 0) return false
+  if (hasSourceProposal(state)) return true
+  return sources.some((s) => {
+    const st = (s.status ?? '').trim().toLowerCase()
+    return (
+      st !== 'ready' &&
+      st !== 'error' &&
+      st !== 'done' &&
+      st !== 'completed' &&
+      st !== 'ok'
+    )
+  })
+}
+
 /**
  * Ordered journey lifted from the 8-stage flow + card catalog. Each entry is a
  * deterministic gate. Order matters: `nextPendingStep` returns the FIRST not-done.
@@ -453,15 +495,30 @@ export function nextPendingStep(
   const allStepsDone = REQUIRED_STEPS.every((def) => def.isDone(state, ctx))
   const isDeployReady = allStepsDone && blockers.length === 0
 
+  // Orayon Uplift: an in-flight pasted source ("cole seu site/IG") takes over the
+  // active-step slot (over the normal next required step) so the source_progress
+  // card surfaces and the agent acknowledges the scan instead of marching on to
+  // the next manual question. Once accepted/exhausted, normal flow resumes.
+  const sourceStep =
+    sourceIngestionActive(state)
+      ? QUAYER_STEPS.find((def) => def.id === 'source_ingestion') ?? null
+      : null
+
   // When everything is done, surface the summary step as the terminal "ask".
-  const chosen = surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
-  const requiredMissing = surfaced ? surfaced.missing(state, ctx) : []
+  const chosen = sourceStep ?? surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
+  const ask = sourceStep
+    ? hasSourceProposal(state)
+      ? 'Terminei de ler o site/Instagram que você enviou. Revise os campos detectados no card "Fontes do negócio" e clique em Aceitar para aplicar ao agente (pode editar antes).'
+      : 'Recebi o link e já estou lendo o seu site/Instagram para entender o negócio. Acompanhe no card "Fontes do negócio" — em instantes mostro o que entendi.'
+    : chosen.ask
+  // Optional source step has no required fields; otherwise the surfaced step's.
+  const requiredMissing = sourceStep ? [] : surfaced ? surfaced.missing(state, ctx) : []
 
   return {
     step: {
       id: chosen.id,
       title: chosen.title,
-      ask: chosen.ask,
+      ask,
     },
     requiredMissing,
     completenessPct,

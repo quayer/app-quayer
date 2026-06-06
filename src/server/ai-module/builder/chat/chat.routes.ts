@@ -55,8 +55,9 @@ function getUser(context: unknown): AuthedUser | null {
 // actual extraction/synthesis runs on the WORKER (or the dev sync-fallback),
 // NEVER inline in this SSE turn.
 //
-// This helper is invoked FIRE-AND-FORGET from sendMessage (`void kickoff…`) so a
-// slow/failed seed can never block or break the response stream.
+// sendMessage AWAITS this hook (in a try/catch) before computing readiness so the
+// seeded source is visible to the step-engine on the SAME turn. Only the
+// lightweight seed/enqueue is awaited; the heavy enrich stays on the worker.
 
 /** Cap how many refs we auto-ingest from a single chat turn (DoS guard). */
 const MAX_SOURCE_REFS_PER_TURN = 10
@@ -64,8 +65,10 @@ const MAX_SOURCE_REFS_PER_TURN = 10
 /**
  * Detect pasted site/IG refs in the user message and, if any, kick off the
  * shared source-ingestion pipeline. Org-scoped on EVERY query (inside the
- * helper). Never blocks the caller — designed to be fired with `void` and an
- * attached `.catch`.
+ * helper). Returns once the source rows + builderState seed are persisted and
+ * the async enrich job is enqueued — the caller AWAITS it so the seed is visible
+ * to the same-turn readiness snapshot. A no-op (resolves immediately) when the
+ * message contains no link.
  */
 async function kickoffSourceIngestion(args: {
   project: ProjectRow
@@ -137,22 +140,31 @@ const sendMessage = igniter.mutation({
 
     // Source-ingestion hook ("cole seu site/IG"). If this turn pasted a link,
     // auto-create the KnowledgeSource rows, seed builderState.sourceIngestion,
-    // and enqueue the async quayer:source-enrich job — FIRE-AND-FORGET so the
-    // ingestion seed/enqueue NEVER blocks (or breaks) the SSE stream. The actual
-    // extract→chunk→embed→synthesize work runs on the worker, never inline here.
-    void kickoffSourceIngestion({
-      project: {
-        id: conversation.project.id,
-        aiAgentId: conversation.project.aiAgentId,
-        metadata: conversation.project.metadata,
-      },
-      conversationId: conversation.id,
-      organizationId: user.currentOrgId,
-      userId: user.id,
-      content,
-    }).catch((err) => {
+    // and enqueue the async quayer-source-enrich job.
+    //
+    // AWAITED (not fire-and-forget) ON PURPOSE: getReadiness below reads the
+    // builderState this hook seeds, so the source MUST be persisted BEFORE the
+    // snapshot — otherwise the step-engine races the seed and the source_progress
+    // card (+ the agent's "estou lendo o site" acknowledgment) only appear on the
+    // NEXT turn (the "não apareceu nada" symptom). Non-fatal: a failure here must
+    // NEVER break the chat stream, so we swallow it. The heavy extract→chunk→
+    // embed→synthesize work still runs on the WORKER (enqueued inside the hook),
+    // never inline in this SSE turn — only the lightweight seed/enqueue is awaited.
+    try {
+      await kickoffSourceIngestion({
+        project: {
+          id: conversation.project.id,
+          aiAgentId: conversation.project.aiAgentId,
+          metadata: conversation.project.metadata,
+        },
+        conversationId: conversation.id,
+        organizationId: user.currentOrgId,
+        userId: user.id,
+        content,
+      })
+    } catch (err) {
       console.warn('[chatRoutes.sendMessage] source-ingestion hook failed:', err)
-    })
+    }
 
     // Deterministic step-engine snapshot for the per-turn journey banner.
     // Tolerant: a readiness failure must NEVER break the chat stream — fall

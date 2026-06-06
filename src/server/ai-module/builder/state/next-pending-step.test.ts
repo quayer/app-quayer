@@ -201,6 +201,61 @@ describe('nextPendingStep — sequential gating', () => {
 })
 
 // ---------------------------------------------------------------------------
+// In-flight source ingestion takes over the active-step slot
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStep — in-flight source ingestion', () => {
+  it('surfaces source_ingestion while a pasted source is still settling (no proposal)', () => {
+    const s = patchBuilderState(freshState(), {
+      sourceIngestion: {
+        sources: [{ value: 'https://acme.com', type: 'url', status: 'pending' }],
+      },
+    })
+    const r = nextPendingStep(s, READY_CTX)
+    // Even though project_identity is the first required step, the in-flight
+    // source takes over so the source_progress card surfaces immediately.
+    expect(r.step.id).toBe<StepId>('source_ingestion')
+    expect(r.requiredMissing).toEqual([])
+  })
+
+  it('keeps source_ingestion surfaced once a proposal is ready to accept', () => {
+    const s = patchBuilderState(freshState(), {
+      sourceIngestion: {
+        sources: [{ value: 'https://acme.com', type: 'url', status: 'ready' }],
+        proposed: { businessName: 'Acme' },
+      },
+    })
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('source_ingestion')
+  })
+
+  it('stops surfacing source_ingestion once accepted (confirmations.source)', () => {
+    let s = patchBuilderState(freshState(), {
+      project: { name: 'X', objective: 'Y' },
+      sourceIngestion: {
+        sources: [{ value: 'https://acme.com', type: 'url', status: 'ready' }],
+        proposed: { businessName: 'Acme' },
+      },
+    })
+    s = confirm(s, 'source')
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('persona')
+  })
+
+  it('does NOT surface source_ingestion when all sources settled with no proposal (no dead-end)', () => {
+    const s = patchBuilderState(freshState(), {
+      project: { name: 'X', objective: 'Y' },
+      sourceIngestion: {
+        sources: [{ value: 'https://acme.com', type: 'url', status: 'error' }],
+      },
+    })
+    const r = nextPendingStep(s, READY_CTX)
+    // Settled (error) + no proposal → not active → normal flow surfaces persona.
+    expect(r.step.id).toBe<StepId>('persona')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Completeness monotonicity
 // ---------------------------------------------------------------------------
 
