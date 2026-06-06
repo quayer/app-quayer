@@ -10,7 +10,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import { getServerConfig } from './server-config'
 
-const KEYS = ['APIFY_TOKEN', 'TAVILY_API_KEY', 'APIFY_INSTAGRAM_ACTOR_ID'] as const
+const KEYS = [
+  'APIFY_TOKEN',
+  'TAVILY_API_KEY',
+  'APIFY_INSTAGRAM_ACTOR_ID',
+  'RAG_TOP_K',
+  'RAG_THRESHOLD',
+  'RAG_OVER_FETCH',
+] as const
 
 describe('getServerConfig', () => {
   const saved: Record<string, string | undefined> = {}
@@ -39,6 +46,23 @@ describe('getServerConfig', () => {
     expect(getServerConfig().APIFY_INSTAGRAM_ACTOR_ID).toBe(
       'apify~instagram-profile-scraper',
     )
+  })
+
+  it('aplica os defaults de RAG quando as envs estão ausentes', () => {
+    const cfg = getServerConfig()
+    expect(cfg.RAG_TOP_K).toBe(5)
+    expect(cfg.RAG_THRESHOLD).toBe(0.75)
+    expect(cfg.RAG_OVER_FETCH).toBe(12)
+  })
+
+  it('coerce os hiperparâmetros de RAG vindos como string da env', () => {
+    process.env.RAG_TOP_K = '8'
+    process.env.RAG_THRESHOLD = '0.6'
+    process.env.RAG_OVER_FETCH = '40'
+    const cfg = getServerConfig()
+    expect(cfg.RAG_TOP_K).toBe(8)
+    expect(cfg.RAG_THRESHOLD).toBe(0.6)
+    expect(cfg.RAG_OVER_FETCH).toBe(40)
   })
 
   it('lê os valores de process.env e reflete mudanças em runtime (sem memoizar)', () => {

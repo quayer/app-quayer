@@ -110,6 +110,7 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 
 - `APIFY_TOKEN` — token da plataforma Apify, usado pela tool `enrich_instagram` do agente runtime (scrape de perfil IG público, cache Redis 24h namespaced por actor). Sem ele, a tool degrada (`não configurado`) sem quebrar o agente. **MVP:** token único de plataforma. **Fase 2:** BYOK por org via `OrganizationProvider` (category AUXILIARY, provider `apify`), molde do Google Calendar. Rotacionar a cada incidente.
 - `APIFY_INSTAGRAM_ACTOR_ID` — **opcional**, default `apify~instagram-profile-scraper`. Permite trocar o actor sem deploy de código. **Não é segredo** (identificador público de actor) — sem rotação. Validado em `src/server/services/server-config.ts` junto de `APIFY_TOKEN`/`TAVILY_API_KEY`.
+- `RAG_TOP_K` / `RAG_THRESHOLD` / `RAG_OVER_FETCH` — **opcionais**, tuning do retrieval pgvector (defaults 5 / 0.75 / 12). **Não são segredos** — sem rotação. Validados/coercidos em `server-config.ts`. Permitem tunar recall/latência do RAG sem deploy.
 
 ## Google Calendar (connect-link — Wave 4b)
 

@@ -17,6 +17,7 @@
 import { Prisma } from '@prisma/client'
 
 import { database } from '@/server/services/database'
+import { getServerConfig } from '@/server/services/server-config'
 import { embedQuery, toVectorLiteral } from './embedding.service'
 
 export interface RetrievedChunk {
@@ -38,10 +39,6 @@ export interface RetrieveParams {
   overFetch?: number
 }
 
-const DEFAULT_TOP_K = 5
-const DEFAULT_THRESHOLD = 0.75
-const DEFAULT_OVER_FETCH = 12
-
 interface RawRow {
   id: string
   content: string
@@ -56,13 +53,17 @@ interface RawRow {
 export async function retrieveRelevantChunks(
   params: RetrieveParams,
 ): Promise<RetrievedChunk[]> {
+  // Defaults vêm do server-config (env-overridable: RAG_TOP_K/RAG_THRESHOLD/
+  // RAG_OVER_FETCH) — permite tunar recall/latência sem deploy. Override explícito
+  // por chamada continua tendo precedência.
+  const cfg = getServerConfig()
   const {
     collectionId,
     query,
     organizationId,
-    topK = DEFAULT_TOP_K,
-    threshold = DEFAULT_THRESHOLD,
-    overFetch = DEFAULT_OVER_FETCH,
+    topK = cfg.RAG_TOP_K,
+    threshold = cfg.RAG_THRESHOLD,
+    overFetch = cfg.RAG_OVER_FETCH,
   } = params
 
   const trimmed = query?.trim()

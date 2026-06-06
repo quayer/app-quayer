@@ -26,6 +26,12 @@ const serverConfigSchema = z.object({
   TAVILY_API_KEY: z.string().optional(),
   /** Actor do Apify p/ perfil de IG — configurável (antes hardcoded no tool). */
   APIFY_INSTAGRAM_ACTOR_ID: z.string().min(1).default(DEFAULT_INSTAGRAM_ACTOR),
+  /** RAG: nº de chunks retornados ao agente (antes hardcoded em 5). */
+  RAG_TOP_K: z.coerce.number().int().min(1).max(50).default(5),
+  /** RAG: score mínimo de cosseno (0..1) p/ um chunk ser relevante (antes 0.75). */
+  RAG_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
+  /** RAG: candidatos buscados antes do filtro de threshold (antes 12). */
+  RAG_OVER_FETCH: z.coerce.number().int().min(1).max(200).default(12),
 })
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>
@@ -40,5 +46,8 @@ export function getServerConfig(): ServerConfig {
     APIFY_TOKEN: process.env.APIFY_TOKEN,
     TAVILY_API_KEY: process.env.TAVILY_API_KEY,
     APIFY_INSTAGRAM_ACTOR_ID: process.env.APIFY_INSTAGRAM_ACTOR_ID,
+    RAG_TOP_K: process.env.RAG_TOP_K,
+    RAG_THRESHOLD: process.env.RAG_THRESHOLD,
+    RAG_OVER_FETCH: process.env.RAG_OVER_FETCH,
   })
 }
