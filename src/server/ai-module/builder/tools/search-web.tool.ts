@@ -21,13 +21,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { buildBuilderTool } from './build-tool'
-import { getServerConfig } from '@/server/services/server-config'
-import { getRedis } from '@/server/services/redis'
-import {
-  readTavilyCache,
-  writeTavilyCache,
-  tavilyCacheKey,
-} from '@/server/ai-module/builder/services/tavily-cache'
+import { searchTavily } from '@/server/ai-module/builder/sub-agents/niche-researcher/tavily-client'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other Builder tools in this directory)
@@ -55,28 +49,6 @@ interface SearchResultItem {
 type SearchWebResult =
   | { success: true; results: SearchResultItem[] }
   | { success: false; message: string; results?: SearchResultItem[] }
-
-interface TavilyApiResult {
-  title?: string
-  url?: string
-  content?: string
-}
-
-interface TavilyApiResponse {
-  results?: TavilyApiResult[]
-}
-
-const SNIPPET_MAX_LENGTH = 300
-const REQUEST_TIMEOUT_MS = 15_000
-const TAVILY_ENDPOINT = 'https://api.tavily.com/search'
-const SEARCH_DEPTH = 'basic'
-
-function truncateSnippet(text: string | undefined): string {
-  if (!text) return ''
-  const trimmed = text.trim()
-  if (trimmed.length <= SNIPPET_MAX_LENGTH) return trimmed
-  return `${trimmed.slice(0, SNIPPET_MAX_LENGTH - 1).trimEnd()}…`
-}
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -110,65 +82,25 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
         .describe('Maximum number of results to return (1-10, default 3).'),
     }),
     execute: async (input): Promise<SearchWebResult> => {
-      const apiKey = getServerConfig().TAVILY_API_KEY
-      if (!apiKey) {
+      // Single shared Tavily caller — handles API-key check, 1h Redis cache,
+      // per-attempt timeout, 429 distinction and 5xx/network retry. This tool
+      // only maps the tagged result onto its own success/message shape.
+      const result = await searchTavily(input.query, {
+        maxResults: input.maxResults,
+      })
+
+      if (result.ok) {
+        return { success: true, results: result.results }
+      }
+      // 429 distinto: mensagem clara para o meta-agente recuar e tentar mais
+      // tarde, não tratar como erro de query.
+      if (result.reason === 'RATE_LIMITED') {
         return {
           success: false,
-          message: 'TAVILY_API_KEY not configured',
+          message: 'Tavily rate limit atingido (429) — tente novamente em instantes.',
         }
       }
-
-      // Cache 1h (fail-open) — o meta-agente repete buscas na mesma sessão.
-      const cacheKey = tavilyCacheKey(input.query, input.maxResults, SEARCH_DEPTH)
-      const cached = await readTavilyCache(getRedis(), cacheKey)
-      if (cached) return { success: true, results: cached }
-
-      try {
-        const response = await fetch(TAVILY_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            api_key: apiKey,
-            query: input.query,
-            max_results: input.maxResults,
-            search_depth: SEARCH_DEPTH,
-          }),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        })
-
-        if (!response.ok) {
-          const text = await response.text().catch(() => '')
-          // 429 distinto: rate-limit/quota é transitório — mensagem clara para o
-          // meta-agente recuar e tentar mais tarde, não tratar como erro de query.
-          if (response.status === 429) {
-            return {
-              success: false,
-              message: `Tavily rate limit atingido (429) — tente novamente em instantes.`,
-            }
-          }
-          return {
-            success: false,
-            message: `Tavily search failed (${response.status}): ${text.slice(0, 200)}`,
-          }
-        }
-
-        const data = (await response.json()) as TavilyApiResponse
-        const results: SearchResultItem[] = (data.results ?? [])
-          .slice(0, input.maxResults)
-          .map((r) => ({
-            title: (r.title ?? '').trim() || r.url || 'Untitled',
-            url: r.url ?? '',
-            snippet: truncateSnippet(r.content),
-          }))
-          .filter((r) => r.url)
-
-        await writeTavilyCache(getRedis(), cacheKey, results)
-        return { success: true, results }
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to execute web search'
-        return { success: false, message }
-      }
+      return { success: false, message: result.message }
     },
   }),
   })
