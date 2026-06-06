@@ -6,6 +6,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
+    "start:workers": "tsx scripts/start-workers.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
