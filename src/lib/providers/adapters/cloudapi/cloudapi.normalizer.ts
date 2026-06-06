@@ -3,7 +3,7 @@
  * @description Normalizes Cloud API webhook payloads to internal format
  */
 
-import type { NormalizedWebhook, WebhookEvent, MediaMessage } from '../../core/provider.types';
+import type { NormalizedWebhook, WebhookEvent, MediaMessage, MessageDeliveryStatus } from '../../core/provider.types';
 import type {
   CloudAPIWebhookPayload,
   CloudAPIIncomingMessage,
@@ -70,7 +70,7 @@ function normalizeStatusUpdate(
         content: '',
         timestamp,
       },
-      status: mapMessageStatus(status.status),
+      messageStatus: mapMessageStatus(status.status),
     },
     rawPayload,
   };
@@ -256,10 +256,10 @@ function mapMessageType(type: string): 'text' | 'image' | 'video' | 'audio' | 'v
 }
 
 /**
- * Map Cloud API status to internal status
+ * Map Cloud API status to internal message delivery status
  */
-function mapMessageStatus(status: string): any {
-  const mapping: Record<string, string> = {
+function mapMessageStatus(status: string): MessageDeliveryStatus {
+  const mapping: Record<string, MessageDeliveryStatus> = {
     sent: 'sent',
     delivered: 'delivered',
     read: 'read',

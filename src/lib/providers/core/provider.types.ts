@@ -96,6 +96,17 @@ export type InstanceStatus =
   | 'connected'
   | 'error';
 
+/**
+ * Per-message delivery status reported by the provider (Meta Cloud API `statuses[]`).
+ * Mirrors the Prisma `MessageStatus` enum so it maps 1:1 onto Message.status.
+ */
+export type MessageDeliveryStatus =
+  | 'pending'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'failed';
+
 export interface QRCodeResult {
   qrCode: string;
   pairingCode?: string;
@@ -234,6 +245,8 @@ export interface WebhookData {
     locationAddress?: string;
   };
   status?: InstanceStatus;
+  /** Per-message delivery status, set on `message.updated` events (NOT the instance status above). */
+  messageStatus?: MessageDeliveryStatus;
   qrCode?: string;
 }
 

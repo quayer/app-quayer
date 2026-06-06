@@ -175,3 +175,82 @@ describe('webhook processor CloudAPI agent dispatch', () => {
     expect(markBotMessage).not.toHaveBeenCalled();
   });
 });
+
+function makeStatusWebhook(
+  status: 'sent' | 'delivered' | 'read' | 'failed'
+): NormalizedWebhook {
+  return {
+    event: 'message.updated',
+    instanceId: 'phone_number_1',
+    timestamp: new Date('2026-05-15T12:00:05.000Z'),
+    data: {
+      message: {
+        id: 'wamid.outbound_1',
+        type: 'text',
+        content: '',
+        timestamp: new Date('2026-05-15T12:00:05.000Z'),
+      },
+      messageStatus: status,
+    },
+  };
+}
+
+describe('webhook processor CloudAPI delivery status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    database.message.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it('marks delivered with deliveredAt, advancing only from pending/sent', async () => {
+    const { processWebhookEvent } = await import('@/lib/webhook/processor');
+
+    await processWebhookEvent(makeStatusWebhook('delivered'), 'cloudapi');
+
+    expect(database.message.updateMany).toHaveBeenCalledWith({
+      where: {
+        waMessageId: 'wamid.outbound_1',
+        status: { in: ['pending', 'sent'] },
+      },
+      data: {
+        status: 'delivered',
+        deliveredAt: new Date('2026-05-15T12:00:05.000Z'),
+      },
+    });
+  });
+
+  it('marks read with readAt, allowed to advance from delivered', async () => {
+    const { processWebhookEvent } = await import('@/lib/webhook/processor');
+
+    await processWebhookEvent(makeStatusWebhook('read'), 'cloudapi');
+
+    expect(database.message.updateMany).toHaveBeenCalledWith({
+      where: {
+        waMessageId: 'wamid.outbound_1',
+        status: { in: ['pending', 'sent', 'delivered'] },
+      },
+      data: {
+        status: 'read',
+        readAt: new Date('2026-05-15T12:00:05.000Z'),
+      },
+    });
+  });
+
+  it('never downgrades: a late delivered cannot overwrite a read row (guard excludes read/delivered)', async () => {
+    const { processWebhookEvent } = await import('@/lib/webhook/processor');
+
+    await processWebhookEvent(makeStatusWebhook('delivered'), 'cloudapi');
+
+    const where = database.message.updateMany.mock.calls[0][0].where;
+    expect(where.status.in).not.toContain('read');
+    expect(where.status.in).not.toContain('delivered');
+  });
+
+  it('is fail-open: a DB error during status update does not throw', async () => {
+    const { processWebhookEvent } = await import('@/lib/webhook/processor');
+    database.message.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(
+      processWebhookEvent(makeStatusWebhook('delivered'), 'cloudapi')
+    ).resolves.toBeUndefined();
+  });
+});

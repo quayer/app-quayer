@@ -5,7 +5,11 @@
  * This allows the per-instance webhook route to share logic with the main route.
  */
 
-import type { BrokerType, NormalizedWebhook } from '@/lib/providers/core/provider.types';
+import type {
+  BrokerType,
+  MessageDeliveryStatus,
+  NormalizedWebhook,
+} from '@/lib/providers/core/provider.types';
 import type { TraceContext } from './tracing';
 
 /**
@@ -49,12 +53,19 @@ export async function processWebhookEvent(
       await processOutgoingMessageSimple(normalized);
       break;
 
-    case 'message.updated':
+    case 'message.updated': {
+      const messageId = normalized.data.message?.id;
+      const messageStatus = normalized.data.messageStatus;
       logger.info(`${logPrefix} Message status update`, {
         instanceId: normalized.instanceId,
-        messageId: normalized.data.message?.id,
+        messageId,
+        status: messageStatus,
       });
+      if (messageId && messageStatus) {
+        await markMessageDeliveryStatus(messageId, messageStatus, normalized.timestamp);
+      }
       break;
+    }
 
     case 'instance.connected':
       await updateInstanceStatus(normalized.instanceId, 'connected');
@@ -223,6 +234,55 @@ async function processOutgoingMessageSimple(webhook: NormalizedWebhook): Promise
   });
 
   console.log(`[Webhook] Outgoing message ${messageId} marked as sent`);
+}
+
+/**
+ * Advance an outbound Message to its provider-reported delivery status.
+ *
+ * Monotonic by design: each status may only advance FROM an earlier state, so a
+ * late `delivered` arriving after `read` (providers don't guarantee order) is a
+ * no-op instead of a downgrade. Fail-open: a DB error is swallowed so a status
+ * blip never breaks webhook ingestion. Only OUTBOUND rows carry these
+ * waMessageIds, so inbound messages are never touched.
+ */
+async function markMessageDeliveryStatus(
+  messageId: string,
+  status: MessageDeliveryStatus,
+  at: Date
+): Promise<void> {
+  // States a given status is allowed to advance FROM (empty = never applied directly).
+  const allowedFrom: Record<MessageDeliveryStatus, MessageDeliveryStatus[]> = {
+    pending: [],
+    sent: ['pending'],
+    delivered: ['pending', 'sent'],
+    read: ['pending', 'sent', 'delivered'],
+    failed: ['pending', 'sent'],
+  };
+  const from = allowedFrom[status];
+  if (!from.length) return;
+
+  const data: {
+    status: MessageDeliveryStatus;
+    sentAt?: Date;
+    deliveredAt?: Date;
+    readAt?: Date;
+  } = { status };
+  if (status === 'sent') data.sentAt = at;
+  else if (status === 'delivered') data.deliveredAt = at;
+  else if (status === 'read') data.readAt = at;
+
+  try {
+    const { database } = await import('@/server/services/database');
+    await database.message.updateMany({
+      where: { waMessageId: messageId, status: { in: from } },
+      data,
+    });
+  } catch (err) {
+    const { logger } = await import('@/server/services/logger');
+    logger.debug?.(`[Webhook] delivery-status update failed for ${messageId}`, {
+      err: String(err),
+    });
+  }
 }
 
 async function getOrCreateSession(
