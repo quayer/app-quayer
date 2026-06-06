@@ -1,14 +1,22 @@
 "use client"
 
 /**
- * Builder Cards — business_hours (Orayon Uplift, W3)
+ * Builder Cards — business_hours (Orayon Uplift W3 · G11 Onda C)
  *
  * Presentational card for the `business_hours` key. Lets the user pick a preset
  * (24/7, comercial seg-sex 09-18, or custom). "Custom" reveals a per-weekday
- * time-range editor with an optional lunch break per day. Serializes a clean
- * `WeeklySchedule` into `payload.schedule` and submits
+ * time-range editor where each open day can carve out MULTIPLE breaks (G11 —
+ * the single optional lunch became a `breaks[]` list, e.g. lunch + a recurring
+ * meeting). A mini-phone summary (SchedulePreviewPhone) shows each day's
+ * effective window live, and the day row hovered/focused is highlighted in it.
+ *
+ * Serializes a clean `WeeklySchedule` into `payload.schedule` and submits
  * `{ preset, schedule, timezone }` UP via props.onSubmit — it NEVER fetches
- * (chat-panel owns POST + SSE).
+ * (chat-panel owns POST + SSE). The submit payload SHAPE is unchanged; only the
+ * opaque `schedule` now carries `breaks[]` instead of `lunch`.
+ *
+ * Backward-compat: a pre-G11 day saved as `{ lunch }` is coerced into `breaks[0]`
+ * by `coerceDay` (schedule-shape.ts), so old saves render unchanged.
  *
  * Styling matches the existing chat-panel cards via CardShell + useAppTokens.
  *
@@ -19,98 +27,37 @@
  */
 
 import * as React from "react"
-import { Clock } from "lucide-react"
+import { Clock, Plus, X } from "lucide-react"
 
 import { Switch } from "@/client/components/ui/switch"
-import type { CardComponentProps } from "./types"
+
 import { CardShell } from "./card-shell"
-
-// ==========================================
-// Local serialized schedule shape (card-owned)
-// ==========================================
-
-/** Day-of-week keys in display order (Mon → Sun). */
-const WEEKDAYS = [
-  "mon",
-  "tue",
-  "wed",
-  "thu",
-  "fri",
-  "sat",
-  "sun",
-] as const
-
-type WeekdayKey = (typeof WEEKDAYS)[number]
-
-const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
-  mon: "Segunda",
-  tue: "Terça",
-  wed: "Quarta",
-  thu: "Quinta",
-  fri: "Sexta",
-  sat: "Sábado",
-  sun: "Domingo",
-}
-
-/** One serialized day in the schedule. `open: false` ⇒ closed (no ranges). */
-interface DaySchedule {
-  open: boolean
-  /** Working window. */
-  start: string
-  end: string
-  /** Optional lunch break (carved out of [start,end]). */
-  lunch?: { start: string; end: string }
-}
-
-/** The full week, keyed by weekday. This is what goes into `payload.schedule`. */
-type WeeklySchedule = Record<WeekdayKey, DaySchedule>
-
-type HoursPreset = "24_7" | "commercial" | "custom"
+import type { CardComponentProps } from "./types"
+import { SchedulePreviewPhone } from "./business-hours/SchedulePreviewPhone"
+import {
+  DEFAULT_BREAK_END,
+  DEFAULT_BREAK_START,
+  DEFAULT_TIMEZONE,
+  MAX_BREAKS_PER_DAY,
+  WEEKDAYS,
+  WEEKDAY_LABELS,
+  build24x7,
+  buildCommercial,
+  coerceSchedule,
+  normalizePreset,
+  openDay,
+  type BreakInterval,
+  type DaySchedule,
+  type HoursPreset,
+  type WeekdayKey,
+  type WeeklySchedule,
+} from "./business-hours/schedule-shape"
 
 /** EXACT submit payload for cardKey 'business_hours'. */
 export interface BusinessHoursPayload {
   preset: HoursPreset
   schedule: WeeklySchedule
   timezone: string
-}
-
-// ==========================================
-// Defaults / presets
-// ==========================================
-
-const DEFAULT_TIMEZONE = "America/Sao_Paulo"
-const DEFAULT_OPEN = "09:00"
-const DEFAULT_CLOSE = "18:00"
-const DEFAULT_LUNCH_START = "12:00"
-const DEFAULT_LUNCH_END = "13:00"
-
-function closedDay(): DaySchedule {
-  return { open: false, start: DEFAULT_OPEN, end: DEFAULT_CLOSE }
-}
-
-function openDay(
-  start = DEFAULT_OPEN,
-  end = DEFAULT_CLOSE,
-  lunch?: { start: string; end: string },
-): DaySchedule {
-  return lunch ? { open: true, start, end, lunch } : { open: true, start, end }
-}
-
-/** 24/7: every day open all day, no lunch. */
-function build24x7(): WeeklySchedule {
-  return WEEKDAYS.reduce((acc, day) => {
-    acc[day] = openDay("00:00", "23:59")
-    return acc
-  }, {} as WeeklySchedule)
-}
-
-/** Comercial: Mon-Fri 09-18, weekend closed. */
-function buildCommercial(): WeeklySchedule {
-  return WEEKDAYS.reduce((acc, day) => {
-    const weekend = day === "sat" || day === "sun"
-    acc[day] = weekend ? closedDay() : openDay(DEFAULT_OPEN, DEFAULT_CLOSE)
-    return acc
-  }, {} as WeeklySchedule)
 }
 
 const PRESET_OPTIONS: ReadonlyArray<{
@@ -130,55 +77,6 @@ const PRESET_OPTIONS: ReadonlyArray<{
     hint: "Defina cada dia manualmente",
   },
 ]
-
-// ==========================================
-// Pre-fill from BuilderState (best-effort, non-throwing)
-// ==========================================
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v)
-}
-
-function asTime(v: unknown, fallback: string): string {
-  return typeof v === "string" && /^\d{2}:\d{2}$/.test(v) ? v : fallback
-}
-
-/** Coerce one persisted day (opaque JSON) into a DaySchedule. */
-function coerceDay(raw: unknown): DaySchedule {
-  if (!isObject(raw)) return closedDay()
-  const open = raw.open !== false // default open unless explicitly closed
-  const start = asTime(raw.start, DEFAULT_OPEN)
-  const end = asTime(raw.end, DEFAULT_CLOSE)
-  let lunch: { start: string; end: string } | undefined
-  if (isObject(raw.lunch)) {
-    lunch = {
-      start: asTime(raw.lunch.start, DEFAULT_LUNCH_START),
-      end: asTime(raw.lunch.end, DEFAULT_LUNCH_END),
-    }
-  }
-  return open ? openDay(start, end, lunch) : closedDay()
-}
-
-/** Coerce the opaque persisted `hours.schedule` into a full WeeklySchedule. */
-function coerceSchedule(raw: unknown): WeeklySchedule | null {
-  if (!isObject(raw)) return null
-  let sawAny = false
-  const out = WEEKDAYS.reduce((acc, day) => {
-    if (day in raw) {
-      sawAny = true
-      acc[day] = coerceDay(raw[day])
-    } else {
-      acc[day] = closedDay()
-    }
-    return acc
-  }, {} as WeeklySchedule)
-  return sawAny ? out : null
-}
-
-function normalizePreset(raw: string | undefined): HoursPreset {
-  if (raw === "24_7" || raw === "commercial" || raw === "custom") return raw
-  return "commercial"
-}
 
 // ==========================================
 // Component
@@ -214,6 +112,15 @@ export function BusinessHoursCard({
   // but kept seeded so toggling to custom shows sensible defaults).
   const [schedule, setSchedule] =
     React.useState<WeeklySchedule>(initialSchedule)
+  // Which day row the cursor/focus is on — drives the preview highlight.
+  const [highlightDay, setHighlightDay] = React.useState<WeekdayKey | null>(
+    null,
+  )
+
+  const agentName =
+    typeof value.persona?.name === "string" && value.persona.name.trim()
+      ? value.persona.name.trim()
+      : "Seu agente"
 
   const selectPreset = React.useCallback((next: HoursPreset) => {
     setPreset(next)
@@ -232,30 +139,67 @@ export function BusinessHoursCard({
     [],
   )
 
-  const toggleLunch = React.useCallback((day: WeekdayKey, enabled: boolean) => {
-    setSchedule((current) => {
-      const prev = current[day]
-      const next: DaySchedule = enabled
-        ? {
-            ...prev,
-            lunch: prev.lunch ?? {
-              start: DEFAULT_LUNCH_START,
-              end: DEFAULT_LUNCH_END,
-            },
-          }
-        : { open: prev.open, start: prev.start, end: prev.end }
-      return { ...current, [day]: next }
-    })
-  }, [])
-
-  const patchLunch = React.useCallback(
-    (day: WeekdayKey, patch: Partial<{ start: string; end: string }>) => {
+  /** Replace the whole breaks[] array for a day (capped). */
+  const setDayBreaks = React.useCallback(
+    (day: WeekdayKey, breaks: BreakInterval[]) => {
       setSchedule((current) => {
         const prev = current[day]
-        if (!prev.lunch) return current
         return {
           ...current,
-          [day]: { ...prev, lunch: { ...prev.lunch, ...patch } },
+          // Re-run openDay so an empty list drops the `breaks` key entirely.
+          [day]: openDay(prev.start, prev.end, breaks),
+        }
+      })
+    },
+    [],
+  )
+
+  const addBreak = React.useCallback(
+    (day: WeekdayKey) => {
+      setSchedule((current) => {
+        const prev = current[day]
+        const existing = prev.breaks ?? []
+        if (existing.length >= MAX_BREAKS_PER_DAY) return current
+        const next = [
+          ...existing,
+          { start: DEFAULT_BREAK_START, end: DEFAULT_BREAK_END },
+        ]
+        return {
+          ...current,
+          [day]: openDay(prev.start, prev.end, next),
+        }
+      })
+    },
+    [],
+  )
+
+  const removeBreak = React.useCallback(
+    (day: WeekdayKey, index: number) => {
+      setSchedule((current) => {
+        const prev = current[day]
+        const existing = prev.breaks ?? []
+        const next = existing.filter((_, i) => i !== index)
+        return {
+          ...current,
+          [day]: openDay(prev.start, prev.end, next),
+        }
+      })
+    },
+    [],
+  )
+
+  const patchBreak = React.useCallback(
+    (day: WeekdayKey, index: number, patch: Partial<BreakInterval>) => {
+      setSchedule((current) => {
+        const prev = current[day]
+        const existing = prev.breaks ?? []
+        if (index < 0 || index >= existing.length) return current
+        const next = existing.map((b, i) =>
+          i === index ? { ...b, ...patch } : b,
+        )
+        return {
+          ...current,
+          [day]: openDay(prev.start, prev.end, next),
         }
       })
     },
@@ -264,6 +208,13 @@ export function BusinessHoursCard({
 
   /** Serialize the final clean schedule for submission. */
   const buildSubmitSchedule = React.useCallback((): WeeklySchedule => {
+    if (preset === "24_7") return build24x7()
+    if (preset === "commercial") return buildCommercial()
+    return schedule
+  }, [preset, schedule])
+
+  /** The schedule the preview reflects (preset-derived or live custom). */
+  const previewSchedule = React.useMemo<WeeklySchedule>(() => {
     if (preset === "24_7") return build24x7()
     if (preset === "commercial") return buildCommercial()
     return schedule
@@ -340,97 +291,56 @@ export function BusinessHoursCard({
 
       {/* Per-weekday editor (custom only) */}
       {preset === "custom" && (
-        <div className="mt-4 flex flex-col gap-2">
-          {WEEKDAYS.map((day) => {
-            const cfg = schedule[day]
-            const hasLunch = Boolean(cfg.lunch)
-            return (
-              <div
-                key={day}
-                className="rounded-md border p-3"
-                style={{
-                  backgroundColor: tokens.bgBase,
-                  borderColor: tokens.divider,
-                }}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex w-28 shrink-0 items-center gap-2">
-                    <Switch
-                      checked={cfg.open}
-                      disabled={disabled}
-                      onCheckedChange={(checked) =>
-                        patchDay(day, { open: checked })
-                      }
-                      aria-label={`Atender ${WEEKDAY_LABELS[day]}`}
-                    />
-                    <span
-                      className="text-[13px] font-medium"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {WEEKDAY_LABELS[day]}
-                    </span>
-                  </label>
-
-                  {cfg.open ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <TimeField
-                        tokens={tokens}
-                        value={cfg.start}
-                        disabled={disabled}
-                        ariaLabel={`Abertura ${WEEKDAY_LABELS[day]}`}
-                        onChange={(v) => patchDay(day, { start: v })}
-                      />
-                      <span
-                        className="text-[12px]"
-                        style={{ color: tokens.textTertiary }}
-                      >
-                        às
-                      </span>
-                      <TimeField
-                        tokens={tokens}
-                        value={cfg.end}
-                        disabled={disabled}
-                        ariaLabel={`Fechamento ${WEEKDAY_LABELS[day]}`}
-                        onChange={(v) => patchDay(day, { end: v })}
-                      />
-                    </div>
-                  ) : (
-                    <span
-                      className="text-[12px]"
-                      style={{ color: tokens.textTertiary }}
-                    >
-                      Fechado
-                    </span>
-                  )}
-                </div>
-
-                {/* Lunch break (only for open days) */}
-                {cfg.open && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 pl-1">
-                    <label className="flex items-center gap-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_minmax(220px,280px)]">
+          <div className="flex flex-col gap-2">
+            {WEEKDAYS.map((day) => {
+              const cfg = schedule[day]
+              const dayBreaks = cfg.breaks ?? []
+              const canAdd = dayBreaks.length < MAX_BREAKS_PER_DAY
+              return (
+                <div
+                  key={day}
+                  className="rounded-md border p-3 transition-colors"
+                  style={{
+                    backgroundColor: tokens.bgBase,
+                    borderColor:
+                      highlightDay === day ? tokens.brand : tokens.divider,
+                  }}
+                  onMouseEnter={() => setHighlightDay(day)}
+                  onMouseLeave={() =>
+                    setHighlightDay((cur) => (cur === day ? null : cur))
+                  }
+                  onFocusCapture={() => setHighlightDay(day)}
+                  onBlurCapture={() =>
+                    setHighlightDay((cur) => (cur === day ? null : cur))
+                  }
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex w-28 shrink-0 items-center gap-2">
                       <Switch
-                        checked={hasLunch}
+                        checked={cfg.open}
                         disabled={disabled}
                         onCheckedChange={(checked) =>
-                          toggleLunch(day, checked)
+                          patchDay(day, { open: checked })
                         }
-                        aria-label={`Pausa de almoço ${WEEKDAY_LABELS[day]}`}
+                        aria-label={`Atender ${WEEKDAY_LABELS[day]}`}
                       />
                       <span
-                        className="text-[12px]"
-                        style={{ color: tokens.textSecondary }}
+                        className="text-[13px] font-medium"
+                        style={{ color: tokens.textPrimary }}
                       >
-                        Pausa de almoço
+                        {WEEKDAY_LABELS[day]}
                       </span>
                     </label>
-                    {hasLunch && cfg.lunch && (
+
+                    {cfg.open ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <TimeField
                           tokens={tokens}
-                          value={cfg.lunch.start}
+                          value={cfg.start}
                           disabled={disabled}
-                          ariaLabel={`Início do almoço ${WEEKDAY_LABELS[day]}`}
-                          onChange={(v) => patchLunch(day, { start: v })}
+                          ariaLabel={`Abertura ${WEEKDAY_LABELS[day]}`}
+                          onChange={(v) => patchDay(day, { start: v })}
                         />
                         <span
                           className="text-[12px]"
@@ -440,18 +350,120 @@ export function BusinessHoursCard({
                         </span>
                         <TimeField
                           tokens={tokens}
-                          value={cfg.lunch.end}
+                          value={cfg.end}
                           disabled={disabled}
-                          ariaLabel={`Fim do almoço ${WEEKDAY_LABELS[day]}`}
-                          onChange={(v) => patchLunch(day, { end: v })}
+                          ariaLabel={`Fechamento ${WEEKDAY_LABELS[day]}`}
+                          onChange={(v) => patchDay(day, { end: v })}
                         />
                       </div>
+                    ) : (
+                      <span
+                        className="text-[12px]"
+                        style={{ color: tokens.textTertiary }}
+                      >
+                        Fechado
+                      </span>
                     )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+
+                  {/* Breaks (only for open days) */}
+                  {cfg.open && (
+                    <div className="mt-2 flex flex-col gap-2 pl-1">
+                      {dayBreaks.map((brk, index) => (
+                        <div
+                          key={index}
+                          className="flex flex-wrap items-center gap-2"
+                        >
+                          <span
+                            className="w-14 shrink-0 text-[12px]"
+                            style={{ color: tokens.textSecondary }}
+                          >
+                            Pausa
+                          </span>
+                          <TimeField
+                            tokens={tokens}
+                            value={brk.start}
+                            disabled={disabled}
+                            ariaLabel={`Início da pausa ${index + 1} ${WEEKDAY_LABELS[day]}`}
+                            onChange={(v) =>
+                              patchBreak(day, index, { start: v })
+                            }
+                          />
+                          <span
+                            className="text-[12px]"
+                            style={{ color: tokens.textTertiary }}
+                          >
+                            às
+                          </span>
+                          <TimeField
+                            tokens={tokens}
+                            value={brk.end}
+                            disabled={disabled}
+                            ariaLabel={`Fim da pausa ${index + 1} ${WEEKDAY_LABELS[day]}`}
+                            onChange={(v) => patchBreak(day, index, { end: v })}
+                          />
+                          <button
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => removeBreak(day, index)}
+                            aria-label={`Remover pausa ${index + 1} ${WEEKDAY_LABELS[day]}`}
+                            className="flex h-8 w-8 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                            style={{
+                              borderColor: tokens.divider,
+                              color: tokens.textTertiary,
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {canAdd && (
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => addBreak(day)}
+                          className="flex w-fit items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                          style={{
+                            borderColor: tokens.divider,
+                            color: tokens.brandText,
+                            backgroundColor: tokens.bgSurface,
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Adicionar intervalo
+                        </button>
+                      )}
+                      {!canAdd && (
+                        <span
+                          className="text-[11px]"
+                          style={{ color: tokens.textTertiary }}
+                        >
+                          Máximo de {MAX_BREAKS_PER_DAY} intervalos por dia.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Live mini-phone summary (open window minus every break). */}
+          <div className="flex flex-col gap-2">
+            <span
+              className="text-[11px] font-medium uppercase tracking-wide"
+              style={{ color: tokens.textTertiary }}
+            >
+              Prévia da semana
+            </span>
+            <SchedulePreviewPhone
+              schedule={previewSchedule}
+              agentName={agentName}
+              highlightDay={highlightDay}
+              tokens={tokens}
+            />
+          </div>
         </div>
       )}
 

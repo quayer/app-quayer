@@ -90,6 +90,10 @@ export const channelPayloadSchema = z.object({
  * agent_persona — user dials in the agent's voice (name/tone/style/greeting).
  * Every field optional so the card can submit a partial; owned fields land in
  * `builderState.persona.*`. → confirmation `persona`.
+ *
+ * Onda C (G7): `speechMode` (OPCIONAL) é o estilo de voz do passo A do wizard
+ * (assistant | first_person | secretary). Espelha `personaStateSchema.speechMode`
+ * 1:1; é additivo e não-bloqueante — o card pode submeter sem ele.
  */
 export const agentPersonaPayloadSchema = z.object({
   cardKey: z.literal('agent_persona'),
@@ -99,6 +103,7 @@ export const agentPersonaPayloadSchema = z.object({
       tone: z.string().min(1).max(120).optional(),
       style: z.string().min(1).max(120).optional(),
       greeting: z.string().min(1).max(2000).optional(),
+      speechMode: z.enum(['assistant', 'first_person', 'secretary']).optional(),
     })
     .default({}),
 })

@@ -19,10 +19,24 @@
  */
 
 import * as React from "react"
-import { ArrowDown, ArrowUp, Check, ListChecks, Plus, X } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  GripVertical,
+  ListChecks,
+  Plus,
+  X,
+} from "lucide-react"
 
+import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { CardComponentProps } from "./types"
 import { CardShell } from "./card-shell"
+import {
+  classifyStep,
+  PROVENANCE_BADGE,
+  type StepProvenance,
+} from "./qualification/step-provenance"
 
 /** Exact submit payload for cardKey 'qualification_steps'. */
 export interface QualificationStepsPayload {
@@ -42,6 +56,33 @@ let rowSeq = 0
 function makeRow(text: string): StepRow {
   rowSeq += 1
   return { id: `step-${rowSeq}`, text }
+}
+
+/**
+ * Token colors for the DISPLAY-ONLY provenance pill. Strictly token-driven (no
+ * hard-coded hex). Recomputed per-keystroke at render; NEVER serialized — the
+ * submit payload stays exactly `{ steps: string[] }`.
+ */
+function badgeStyle(
+  provenance: StepProvenance,
+  tokens: AppTokens,
+): { backgroundColor: string; color: string } {
+  switch (provenance) {
+    case "bant":
+      return { backgroundColor: tokens.brandSubtle, color: tokens.brand }
+    case "playbook":
+      return {
+        backgroundColor: tokens.successSubtle,
+        color: tokens.successText,
+      }
+    case "state":
+      return {
+        backgroundColor: tokens.warningSubtle,
+        color: tokens.warningText,
+      }
+    case "custom":
+      return { backgroundColor: tokens.hoverBg, color: tokens.textTertiary }
+  }
 }
 
 /**
@@ -96,6 +137,24 @@ export function QualificationStepsCard({
     })
   }, [])
 
+  // Native HTML5 drag-to-reorder. COMPLEMENTS the arrow buttons (kept for
+  // keyboard a11y) — both mutate only the local StepRow[] order; the submit
+  // payload is unchanged (array order is already the meaningful contract).
+  const [dragId, setDragId] = React.useState<string | null>(null)
+
+  const reorderRow = React.useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return
+    setRows((current) => {
+      const from = current.findIndex((row) => row.id === fromId)
+      const to = current.findIndex((row) => row.id === toId)
+      if (from < 0 || to < 0) return current
+      const next = [...current]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }, [])
+
   // Trim + drop blanks only at submit time so intermediate typing is untouched.
   const cleanedSteps = React.useMemo(
     () =>
@@ -126,7 +185,7 @@ export function QualificationStepsCard({
     <CardShell
       icon={<ListChecks className="h-4 w-4" />}
       title="Perguntas de qualificação"
-      reason="Defina, em ordem, o que o agente pergunta antes de executar a ação de qualificação. Arraste a prioridade com as setas."
+      reason="Defina, em ordem, o que o agente pergunta antes de executar a ação de qualificação. Arraste pela alça ou use as setas para reordenar. A etiqueta indica a origem de cada pergunta."
       tokens={tokens}
       actions={[
         {
@@ -149,76 +208,119 @@ export function QualificationStepsCard({
       ]}
     >
       <div className="flex flex-col gap-2">
-        {rows.map((row, index) => (
-          <div key={row.id} className="flex items-center gap-2">
-            <span
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[12px] font-semibold"
-              style={{
-                backgroundColor: tokens.brandSubtle,
-                color: tokens.brand,
+        {rows.map((row, index) => {
+          // DISPLAY-ONLY: recomputed every render (live as the user types).
+          // NEVER serialized — purely the provenance pill's label/color.
+          const provenance = classifyStep(row.text)
+          const badge = PROVENANCE_BADGE[provenance]
+          const isDragging = dragId === row.id
+          return (
+            <div
+              key={row.id}
+              className="flex items-center gap-2 rounded-md transition-opacity"
+              style={{ opacity: isDragging ? 0.5 : 1 }}
+              onDragOver={(event) => {
+                if (dragId && dragId !== row.id) event.preventDefault()
               }}
-              aria-hidden="true"
+              onDrop={(event) => {
+                event.preventDefault()
+                if (dragId) reorderRow(dragId, row.id)
+                setDragId(null)
+              }}
             >
-              {index + 1}
-            </span>
-
-            <input
-              type="text"
-              value={row.text}
-              disabled={disabled}
-              onChange={(event) => updateRow(row.id, event.target.value)}
-              placeholder={`Pergunta ${index + 1} (ex.: "Qual o tamanho da sua empresa?")`}
-              aria-label={`Pergunta de qualificação ${index + 1}`}
-              className="h-9 min-w-0 flex-1 rounded-md border px-3 text-[13px] outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              style={inputStyle}
-            />
-
-            <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                disabled={disabled || index === 0}
-                onClick={() => moveRow(index, -1)}
-                aria-label={`Subir pergunta ${index + 1}`}
-                className={iconBtnBase}
-                style={{
-                  backgroundColor: tokens.bgBase,
-                  borderColor: tokens.divider,
-                  color: tokens.textSecondary,
-                }}
-              >
-                <ArrowUp className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                disabled={disabled || index === rows.length - 1}
-                onClick={() => moveRow(index, 1)}
-                aria-label={`Descer pergunta ${index + 1}`}
-                className={iconBtnBase}
-                style={{
-                  backgroundColor: tokens.bgBase,
-                  borderColor: tokens.divider,
-                  color: tokens.textSecondary,
-                }}
-              >
-                <ArrowDown className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
+                draggable={!disabled}
+                onDragStart={() => setDragId(row.id)}
+                onDragEnd={() => setDragId(null)}
                 disabled={disabled}
-                onClick={() => removeRow(row.id)}
-                aria-label={`Remover pergunta ${index + 1}`}
-                className={iconBtnBase}
-                style={{
-                  backgroundColor: tokens.bgBase,
-                  borderColor: tokens.divider,
-                  color: tokens.textTertiary,
-                }}
+                aria-label={`Arrastar para reordenar pergunta ${index + 1}`}
+                className="flex h-7 w-5 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ color: tokens.textTertiary }}
               >
-                <X className="h-3.5 w-3.5" />
+                <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
+
+              <span
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[12px] font-semibold"
+                style={{
+                  backgroundColor: tokens.brandSubtle,
+                  color: tokens.brand,
+                }}
+                aria-hidden="true"
+              >
+                {index + 1}
+              </span>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <input
+                  type="text"
+                  value={row.text}
+                  disabled={disabled}
+                  onChange={(event) => updateRow(row.id, event.target.value)}
+                  placeholder={`Pergunta ${index + 1} (ex.: "Qual o tamanho da sua empresa?")`}
+                  aria-label={`Pergunta de qualificação ${index + 1}`}
+                  className="h-9 w-full min-w-0 rounded-md border px-3 text-[13px] outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  style={inputStyle}
+                />
+                {row.text.trim().length > 0 && (
+                  <span
+                    className="w-fit rounded-full px-2 py-0.5 text-[10px] font-medium"
+                    style={badgeStyle(provenance, tokens)}
+                    title={badge.hint}
+                  >
+                    {badge.label}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  disabled={disabled || index === 0}
+                  onClick={() => moveRow(index, -1)}
+                  aria-label={`Subir pergunta ${index + 1}`}
+                  className={iconBtnBase}
+                  style={{
+                    backgroundColor: tokens.bgBase,
+                    borderColor: tokens.divider,
+                    color: tokens.textSecondary,
+                  }}
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled || index === rows.length - 1}
+                  onClick={() => moveRow(index, 1)}
+                  aria-label={`Descer pergunta ${index + 1}`}
+                  className={iconBtnBase}
+                  style={{
+                    backgroundColor: tokens.bgBase,
+                    borderColor: tokens.divider,
+                    color: tokens.textSecondary,
+                  }}
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => removeRow(row.id)}
+                  aria-label={`Remover pergunta ${index + 1}`}
+                  className={iconBtnBase}
+                  style={{
+                    backgroundColor: tokens.bgBase,
+                    borderColor: tokens.divider,
+                    color: tokens.textTertiary,
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2">

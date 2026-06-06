@@ -23,6 +23,7 @@ import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
 import { provisionWhatsAppRoutes } from './channel/provision-whatsapp.routes'
 import { identityRoutes } from './identity/identity.routes'
 import { calendarRoutes } from './calendar/calendar.routes'
+import { calendarEventsPreviewRoutes } from './calendar/calendar-events-preview.routes'
 import { knowledgeRoutes } from './knowledge/knowledge.routes'
 import { knowledgeSourceRoutes } from './knowledge/knowledge-source.routes'
 import { pricingRoutes } from './pricing/pricing.routes'
@@ -43,6 +44,7 @@ export const builderController = igniter.controller({
     ...provisionWhatsAppRoutes,
     ...identityRoutes,
     ...calendarRoutes,
+    ...calendarEventsPreviewRoutes,
     ...knowledgeRoutes,
     ...knowledgeSourceRoutes,
     ...pricingRoutes,

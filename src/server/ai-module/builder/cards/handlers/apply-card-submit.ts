@@ -328,12 +328,15 @@ function applyAgentPersona(
   persona: AgentPersonaPayload['persona'],
 ): CardApplication {
   // Only carry fields the user actually supplied (deepMerge ignores undefined).
+  // G7 — `speechMode` (estilo de voz) é OPCIONAL e additivo: persiste verbatim
+  // quando vier, e o deepMerge descarta `undefined` quando não vier.
   const patch: DeepPartial<BuilderState> = {
     persona: {
       name: persona.name,
       tone: persona.tone,
       style: persona.style,
       greeting: persona.greeting,
+      speechMode: persona.speechMode,
     },
   }
   const next = applyConfirmation(patchBuilderState(state, patch), 'persona')
@@ -561,18 +564,47 @@ function applyTeamStructure(
   }
 }
 
+/**
+ * G10 — valores de `status` que significam "o usuário optou por seguir SEM agenda"
+ * (escape hatch "Continuar sem agenda" após N tentativas de conexão falharem). O
+ * schema mantém `status` como string opcional (≤120), então 'skipped' já cabe sem
+ * mudança de contrato — aqui só ramificamos a COPY do ACK.
+ */
+const CALENDAR_SKIPPED_STATUSES: ReadonlySet<string> = new Set([
+  'skipped',
+  'skip',
+  'none',
+])
+
 function applyCalendarConnect(
   state: BuilderState,
   payload: Pick<CalendarConnectPayload, 'connectionId' | 'status'>,
 ): CardApplication {
   // builderState only — the deploy saga owns the real CalendarConnection.
+  // `status` é persistido verbatim (inclui 'skipped' do escape hatch).
   const patch: DeepPartial<BuilderState> = {
     calendar: {
       connectionId: payload.connectionId,
       status: payload.status,
     },
   }
+  // O flip de `confirmations.calendar` acontece SEMPRE (inclusive no skip): é esse
+  // sentinel que destrava o passo `calendar` em nextPendingStep, então o escape
+  // hatch nunca prende o usuário — a jornada avança.
   const next = applyConfirmation(patchBuilderState(state, patch), 'calendar')
+
+  // G10 — escape hatch: o usuário seguiu sem conectar a agenda. O agente deve
+  // qualificar + avisar a equipe, NUNCA prometer agendamento.
+  const normalizedStatus = (payload.status ?? '').trim().toLowerCase()
+  if (CALENDAR_SKIPPED_STATUSES.has(normalizedStatus)) {
+    return {
+      next,
+      cardInstruction:
+        'O usuário optou por CONTINUAR SEM AGENDA (não conectou um calendário). ' +
+        'NÃO prometa marcar horários nem confirme agendamentos: qualifique o lead e avise a equipe responsável para o contato humano dar sequência. ' +
+        'Siga para o próximo passo da jornada. Não reabra o card de conexão de agenda (o usuário pode reconectar depois se quiser).',
+    }
+  }
 
   const statusLabel = payload.status ? `status "${payload.status}"` : 'conectado'
   return {

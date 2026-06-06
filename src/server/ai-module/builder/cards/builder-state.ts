@@ -31,12 +31,19 @@ export const proposalStateSchema = z.object({
   description: z.string().optional(),
 })
 
-/** agent_persona card → AIAgentConfig. */
+/** agent_persona card → AIAgentConfig.
+ *
+ * Onda C (G7): `speechMode` (OPCIONAL) é o estilo de voz escolhido no passo A do
+ * wizard de persona (assistant | first_person | secretary). Dirige o template
+ * DETERMINÍSTICO de "Sugerir nova" saudação no frontend e dá contexto à copy.
+ * É opcional em todo lugar e NUNCA gateia o passo `persona` (o sentinel já o faz).
+ */
 export const personaStateSchema = z.object({
   name: z.string().optional(),
   tone: z.string().optional(),
   style: z.string().optional(),
   greeting: z.string().optional(),
+  speechMode: z.enum(['assistant', 'first_person', 'secretary']).optional(),
 })
 
 /** services_oferece_nao card → prompt. */
