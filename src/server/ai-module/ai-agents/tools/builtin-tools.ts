@@ -24,6 +24,7 @@ import {
 import { createGetPricingTool } from './pricing'
 import { createEnrichInstagramTool } from './instagram'
 import { createSearchKnowledgeTool } from './knowledge-search.tool'
+import { createSearchMediaTool } from './media-search.tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -570,6 +571,14 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     // -----------------------------------------------------------------------
     search_knowledge: createSearchKnowledgeTool(ctx),
 
+    // -----------------------------------------------------------------------
+    // buscar_media — RETRIEVAL do catálogo de mídia (foto/vídeo/PDF). Devolve
+    // URLs REAIS ao LLM para emitir a tag de mídia no outbound. NUNCA envia
+    // (quem envia é o pipeline outbound). Degrada ("catálogo não configurado")
+    // quando o agente não tem ragCollectionId.
+    // -----------------------------------------------------------------------
+    buscar_media: createSearchMediaTool(ctx),
+
   }
 }
 
@@ -622,4 +631,5 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'get_pricing',
   'enrich_instagram',
   'search_knowledge',
+  'buscar_media',
 ]

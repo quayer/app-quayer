@@ -23,9 +23,15 @@
  * Retorna o bloco markdown (estático) com as instruções de envio de mídia.
  * Pensado para ser concatenado cedo no system prompt (prefixo estável =
  * amigável ao prompt cache).
+ *
+ * @param hasMediaTool quando `true`, inclui a instrução de chamar a tool
+ *   `buscar_media` ANTES de emitir a tag (a tool é a fonte da URL REAL). Só passe
+ *   true quando `buscar_media` ESTÁ no enabledTools do agente — senão o guia
+ *   mandaria chamar uma tool inexistente. Default `false` (compat / agentes sem
+ *   catálogo continuam usando URLs vindas de RAG/teach_agent).
  */
-export function renderWhatsAppMediaGuide(): string {
-  return [
+export function renderWhatsAppMediaGuide(hasMediaTool = false): string {
+  const lines = [
     '## Envio de mídia no WhatsApp',
     '',
     'Você pode enviar mídia inserindo TAGS no meio da sua resposta — o sistema as',
@@ -34,11 +40,23 @@ export function renderWhatsAppMediaGuide(): string {
     'REGRA ABSOLUTA: só use uma tag de mídia quando tiver uma URL REAL (vinda de uma',
     'tool, do catálogo ou da base de conhecimento). NUNCA invente URLs — se não tiver',
     'a URL, apenas descreva em texto.',
+  ]
+  if (hasMediaTool) {
+    lines.push(
+      '',
+      'ANTES de emitir qualquer tag de mídia, chame a tool `buscar_media` (com',
+      '`query`/`mediaType`) para obter a URL REAL — use exatamente o campo `url`',
+      'retornado por ela na tag. Se `buscar_media` não retornar nada, não emita a tag:',
+      'descreva em texto. NUNCA invente URLs.',
+    )
+  }
+  lines.push(
     '',
     '- Foto: `[url da imagem:"https://.../foto.jpg"|"legenda opcional"]`',
     '- Galeria (várias fotos): repita a tag de foto, uma por imagem.',
     '- Vídeo: `[video:https://.../video.mp4|legenda opcional]`',
     '- Áudio: `[audio:"https://.../audio.ogg"]`',
     '- Documento/PDF: `[document:https://.../arquivo.pdf|legenda opcional]`',
-  ].join('\n')
+  )
+  return lines.join('\n')
 }

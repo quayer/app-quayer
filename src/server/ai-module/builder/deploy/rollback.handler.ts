@@ -20,6 +20,7 @@ import { deleteDeployInstance } from './create-instance.handler'
 import { unpublishVersion } from './publish-version.handler'
 import { compensateMaterializePricing } from './materialize-pricing.handler'
 import { compensateMaterializeTeam } from './materialize-team.handler'
+import { compensateMaterializeMedia } from './materialize-media.handler'
 
 // Matches the real BuilderDeployment columns (schema.prisma): no organizationId
 // / userId / updatedAt / publishedAt exist. Org is derived via the `project`
@@ -118,14 +119,16 @@ export async function rollbackDeployment(
     },
   }
 
-  // Reverse execution order (attach → instance → materialize_team →
-  // materialize_pricing → publish). Both materialize compensations are
-  // self-contained no-ops: ctx.state.{pricing,team} is NOT reconstructed from the
-  // BuilderDeploymentRow, and the materialized catalog/department are the user's
-  // source of truth (not deploy garbage), so neither is undone.
+  // Reverse execution order (attach → instance → materialize_media →
+  // materialize_team → materialize_pricing → publish). All three materialize
+  // compensations are self-contained no-ops: ctx.state.{pricing,team,media} is NOT
+  // reconstructed from the BuilderDeploymentRow, and the materialized
+  // catalog/department/media are the user's source of truth (not deploy garbage),
+  // so none is undone.
   const steps: Array<{ name: DeployStepName; fn: () => Promise<void> }> = [
     { name: 'attach_connection', fn: () => detachConnection(context) },
     { name: 'create_instance', fn: () => deleteDeployInstance(context) },
+    { name: 'materialize_media', fn: () => compensateMaterializeMedia(context) },
     { name: 'materialize_team', fn: () => compensateMaterializeTeam(context) },
     { name: 'materialize_pricing', fn: () => compensateMaterializePricing(context) },
     { name: 'publish_version', fn: () => unpublishVersion(context) },

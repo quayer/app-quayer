@@ -23,6 +23,7 @@ export type DeployStepName =
   | 'publish_version'
   | 'materialize_pricing'
   | 'materialize_team'
+  | 'materialize_media'
   | 'create_instance'
   | 'attach_connection'
 
@@ -69,6 +70,14 @@ export interface DeployContext {
      * `team:${projectId}` on the next deploy, never undone).
      */
     team?: { departmentId: string }
+    /**
+     * Light bookkeeping written by `materialize_media`. Same semantics as
+     * `pricing`/`team`: NOT persisted on the BuilderDeployment row, so the
+     * rollback handler cannot rely on it — the compensation is a self-contained
+     * no-op (the media catalog is the user's source of truth, re-derived from the
+     * gallery/pricing on the next deploy, never undone).
+     */
+    media?: { collectionId: string | null }
   }
 }
 

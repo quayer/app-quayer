@@ -8,6 +8,8 @@
 > **Jun/04 (Wave Orayon):** RAG/base de conhecimento — `KnowledgeCollection` / `KnowledgeSource` / `KnowledgeChunk` (coluna `embedding vector(1536)` + índice HNSW `vector_cosine_ops`, escrita/leitura via raw SQL); observabilidade `AgentRuntimeDecision` (1 registro por turno, **sem FK** — tabela de log de alta escrita); canais Cloud API/Instagram (colunas novas em `Connection`); `CalendarConnection` (connect-link Google Calendar, refresh_token encriptado em `OrganizationProvider`); `Department` + `DepartmentMember` (roleta/round-robin). Modelos novos abaixo no Domain "RAG & Observability".
 >
 > **Jun/06 (M1 — roleta 6A):** `department_members` ganhou `userId` NULLABLE (FK SetNull — membro pode ser "nome + WhatsApp", não-usuário) + `name` + `whatsapp`. A saga de deploy materializa o `builderState.team` (Onda A) em Department/DepartmentMember (`materialize_team`) e a roleta — re-chaveada por `memberId` — notifica o atendente sorteado por WhatsApp (decisão 6A) com fallback in-app. Domain dedicado "Roleta / Departamentos" no fim.
+>
+> **Jun/06 (Fase E — catálogo de mídia):** novo `media_assets` — catálogo de mídia ENVIÁVEL pelo agente (foto/vídeo/PDF; áudio fora). FK→`KnowledgeCollection` (`collectionId = ragCollectionId = kb:projectId`). Origens: `upload` (dono sobe), `gallery` (espelha `KnowledgeImage`), `pricing` (espelha `PriceItem.imageUrl`) — as duas últimas materializadas pelo passo de saga `materialize_media`. A tool de RETRIEVAL `buscar_media` devolve URLs reais ao LLM; o envio é do pipeline outbound (tag de mídia). Modelo no Domain "RAG & Observability".
 
 ---
 
@@ -386,6 +388,7 @@ erDiagram
 | **2026-06-06** | **`add_knowledge_images`** | **Novo `knowledge_images` (catálogo visual extraído das fontes — Onda D/G2: `storageKey` content-addressed, `caption` vision-LLM, `captionEmbedding vector(1536)` NULLABLE/NULL no MVP via raw, `@@unique(sourceId,sha256)` dedup, `confirmedAt`/`deletedAt` curadoria) + `knowledge_sources.imagesEnabled Boolean @default(true)` (toggle por fonte) — Onda D1** |
 | **2026-06-06** | **`pricing_runtime_fields`** | **price_lists += `disclosureStyle TEXT NOT NULL DEFAULT 'exact'` (como o agente FALA o preço: exact/from/average/none) + `minTicketCents INTEGER?` (ticket mínimo). price_items += `priceMaxCents INTEGER?` (teto da faixa quando average) + `imageUrl TEXT?` (foto do catálogo visual). Materialização M2: a saga de deploy grava o que o card de preço (Onda B) coletou; get_pricing formata por disclosureStyle. Aditivo, sem data-loss.** |
 | **2026-06-06** | **`20260606040000_department_member_whatsapp`** | **department_members: `userId` agora NULLABLE (FK→User SetNull — membro pode ser "nome + WhatsApp", não-usuário) + `name TEXT?` (nome de exibição do não-usuário) + `whatsapp TEXT?` (número da roleta). Materialização M1: a saga de deploy (`materialize_team`) espelha o `builderState.team` (Onda A) em Department/DepartmentMember; a ROLETA (round-robin) re-chaveada por `memberId` notifica o atendente sorteado por WhatsApp (decisão 6A) com fallback in-app. Aditivo, sem data-loss.** |
+| **2026-06-06** | **`20260606050000_add_media_assets`** | **Novo `media_assets` (Fase E — catálogo de mídia ENVIÁVEL pelo agente: foto/vídeo/PDF, NÃO áudio). FK→`knowledge_collections` (NOT NULL, Cascade); `source ∈ {upload,gallery,pricing}` com `@@unique(source,sourceRef)` (upload tem sourceRef NULL → N permitido); `storageKey?` (assina on-read em BUCKETS.MEDIA) OU `externalUrl?` (direto); `confirmedAt`/`deletedAt` (runtime só envia confirmedAt IS NOT NULL AND deletedAt IS NULL). Materialização Fase E: `materialize_media` espelha `KnowledgeImage` confirmadas (gallery) + `PriceItem.imageUrl` (pricing); upload via `POST /api/v1/builder/media/upload`. Tool RETRIEVAL `buscar_media` devolve URLs reais ao LLM (NUNCA envia — outbound envia via tag). Aditivo, sem data-loss.** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 
@@ -398,6 +401,7 @@ erDiagram
     KnowledgeCollection ||--o{ KnowledgeSource : "tem"
     KnowledgeCollection ||--o{ KnowledgeChunk : "tem"
     KnowledgeCollection ||--o{ KnowledgeImage : "tem"
+    KnowledgeCollection ||--o{ MediaAsset : "tem (catálogo enviável)"
     KnowledgeSource ||--o{ KnowledgeChunk : "gera"
     KnowledgeSource ||--o{ KnowledgeImage : "extrai"
     AIAgentConfig }o--o| KnowledgeCollection : "ragCollectionId (SetNull)"
@@ -446,6 +450,26 @@ erDiagram
         datetime confirmedAt "nullable, opt-out"
         datetime deletedAt "nullable, soft-delete"
     }
+    MediaAsset {
+        uuid id PK
+        string organizationId "indexed (carimbo tenant)"
+        string collectionId FK "= ragCollectionId do agente (kb:projectId)"
+        string mediaType "image|video|document"
+        string storageKey "nullable — path BUCKETS.MEDIA (signed on-read), uploads+gallery"
+        string externalUrl "nullable — URL pública direta (ex: foto de preço)"
+        string mimeType "nullable"
+        text caption "nullable — legenda usada na tag de mídia"
+        string_array tags "filtro simples (sem vetor)"
+        string category "nullable"
+        string source "upload|gallery|pricing — UK(source,sourceRef)"
+        string sourceRef "nullable — KnowledgeImage.id / PriceItem.id (NULL p/ upload)"
+        int sizeBytes "nullable"
+        int position
+        datetime confirmedAt "nullable — runtime só envia confirmedAt IS NOT NULL"
+        datetime deletedAt "nullable — soft-delete (runtime filtra deletedAt IS NULL)"
+        datetime createdAt
+        datetime updatedAt
+    }
     AgentRuntimeDecision {
         uuid id PK
         string organizationId "indexed, sem FK"
@@ -470,6 +494,8 @@ erDiagram
 ```
 
 > `AgentRuntimeDecision` é **tabela de log sem FK** (desacoplada, alta escrita; limpeza por retenção). `KnowledgeChunk.embedding` nunca é lida/escrita via Prisma tipado — sempre raw SQL (`::vector`). `KnowledgeImage.captionEmbedding` segue a MESMA regra do `KnowledgeChunk.embedding` (sempre raw `::vector`); no MVP da Onda D fica **NULL** (não embeda — popula só na fase E de runtime). O resto de `KnowledgeImage` é CRUD tipado normal (`database.knowledgeImage`); persiste-se o `storageKey` (path content-addressed `knowledge/{org}/{sourceId}/{sha256}.{ext}` no BUCKETS.MEDIA), **nunca** a signed URL (assina on-read).
+>
+> `MediaAsset` (`media_assets`, Fase E) é o **catálogo de mídia ENVIÁVEL pelo agente** (foto/vídeo/PDF — NÃO áudio, que é TTS dinâmico no outbound). FK → `KnowledgeCollection` (NOT NULL, Cascade): `collectionId = ragCollectionId` do agente (`kb:projectId`). Três `source`s: `upload` (dono sobe via `POST /api/v1/builder/media/upload`, `sourceRef` NULL), `gallery` (espelha `KnowledgeImage` confirmadas) e `pricing` (espelha `PriceItem.imageUrl`); estes dois últimos são materializados pelo passo de saga `materialize_media` (upsert idempotente por `@@unique(source,sourceRef)` + soft-deactivate reconciliado; `upload` nunca é tocado). `storageKey` assina on-read (BUCKETS.MEDIA); `externalUrl` usa direto — **nunca** persiste signed URL. O runtime só envia `confirmedAt IS NOT NULL AND deletedAt IS NULL`; a tool de RETRIEVAL `buscar_media` devolve `{ url, mediaType, caption }` ao LLM (NUNCA envia — quem envia é o pipeline outbound via tag).
 
 ---
 
