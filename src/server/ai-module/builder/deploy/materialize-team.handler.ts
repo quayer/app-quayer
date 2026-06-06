@@ -80,7 +80,9 @@ const ROULETTE_BLOCK_END = '<!--ROLETA:end-->'
 
 /**
  * Constrói o bloco DETERMINÍSTICO de roleta que ensina o LLM do agente deployado a
- * chamar a tool `dispatch_to_agent` com o `departmentId` certo. Estável (mesmo input
+ * encaminhar para o setor via a tool UNIFICADA `transfer_to_human` com
+ * `routing='department'` + o `departmentId` certo. (O antigo `dispatch_to_agent`
+ * segue funcionando como alias deprecated → mesmo executor.) Estável (mesmo input
  * => mesmo texto) para idempotência da reconciliação do prompt.
  */
 function buildRouletteBlock(departmentId: string, departmentName: string): string {
@@ -88,7 +90,8 @@ function buildRouletteBlock(departmentId: string, departmentName: string): strin
     ROULETTE_BLOCK_START,
     '## Roleta de atendimento',
     `Quando precisar encaminhar para um atendente humano deste setor, chame a tool ` +
-      `dispatch_to_agent com departmentId='${departmentId}' (departamento '${departmentName}').`,
+      `transfer_to_human com routing='department' e departmentId='${departmentId}' ` +
+      `(departamento '${departmentName}').`,
     ROULETTE_BLOCK_END,
   ].join('\n')
 }
