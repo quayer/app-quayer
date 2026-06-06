@@ -16,9 +16,36 @@ export interface RunActorOptions {
 }
 
 /**
+ * Erro HTTP do Apify que CARREGA o `status` — assim o classificador genérico
+ * isRetriableError (retry-with-fallback) consegue distinguir 429/5xx (retriable)
+ * de 4xx (propaga). Sem isso, um `new Error('HTTP 429')` era opaco e nunca
+ * retentava nem dava p/ tratar rate-limit distinto.
+ */
+export class ApifyHttpError extends Error {
+  readonly status: number
+  /** Quando o Apify manda Retry-After (s), expomos em ms para backoff externo. */
+  readonly retryAfterMs?: number
+  constructor(actorId: string, status: number, retryAfterMs?: number) {
+    super(`Apify ${actorId} → HTTP ${status}`)
+    this.name = 'ApifyHttpError'
+    this.status = status
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
+/** Parseia o header Retry-After (segundos) para ms. undefined se ausente/inválido. */
+function parseRetryAfterMs(res: Response): number | undefined {
+  const raw = res.headers.get('retry-after')
+  if (!raw) return undefined
+  const seconds = Number(raw)
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : undefined
+}
+
+/**
  * Roda `actorId` (formato `owner~actor`, ex: `apify~instagram-profile-scraper`)
- * com `input` e retorna os itens do dataset. Lança em HTTP != 2xx ou timeout —
- * o caller (tool) captura e degrada.
+ * com `input` e retorna os itens do dataset. Lança `ApifyHttpError` (com status)
+ * em HTTP != 2xx, ou AbortError em timeout — o caller captura, retenta (429/5xx)
+ * ou degrada.
  */
 export async function runActorSync<T = unknown>(
   actorId: string,
@@ -43,7 +70,7 @@ export async function runActorSync<T = unknown>(
       },
     )
     if (!res.ok) {
-      throw new Error(`Apify ${actorId} → HTTP ${res.status}`)
+      throw new ApifyHttpError(actorId, res.status, parseRetryAfterMs(res))
     }
     const data = (await res.json()) as T[]
     return Array.isArray(data) ? data : []

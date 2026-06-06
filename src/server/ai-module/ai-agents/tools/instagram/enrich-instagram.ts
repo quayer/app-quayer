@@ -16,6 +16,10 @@ import { getRedis } from '@/server/services/redis'
 import { getServerConfig } from '@/server/services/server-config'
 import { runActorSync } from '@/lib/providers/apify/apify-runner'
 import {
+  retryWithFallback,
+  isRetriableError,
+} from '@/server/ai-module/ai-agents/services/retry-with-fallback.service'
+import {
   normalizeInstagramProfile,
   type InstagramProfile,
 } from '@/lib/providers/apify/instagram-normalizer'
@@ -83,26 +87,39 @@ export function createEnrichInstagramTool(_ctx: ToolExecutionContext) {
       const cached = await readCache(actor, username)
       if (cached) return { success: true, profile: cached, cached: true }
 
-      try {
-        const items = await runActorSync(
-          actor,
-          { usernames: [username], resultsLimit: max_posts ?? 5 },
-          token,
-          { timeoutMs: 20_000 },
-        )
-        const profile = normalizeInstagramProfile(items, max_posts ?? 5)
-        if (!profile) {
-          return { success: false, error: 'Perfil não encontrado ou privado.' }
-        }
-        await writeCache(actor, username, profile)
-        return { success: true, profile }
-      } catch (err) {
+      // Retry bounded p/ falhas transitórias (429/5xx/network). 4xx propaga sem
+      // retry. maxAttempts:2 mantém o turno rápido — um 429 volta rápido, então o
+      // custo do retry é baixo; só o run real consome o timeout de 20s.
+      const run = await retryWithFallback(
+        () =>
+          runActorSync(
+            actor,
+            { usernames: [username], resultsLimit: max_posts ?? 5 },
+            token,
+            { timeoutMs: 20_000 },
+          ),
+        null,
+        { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 2_000, isRetriable: isRetriableError },
+      )
+
+      if (run.error) {
+        const status = (run.error as { status?: number }).status
         console.error(
           '[enrich_instagram] falhou:',
-          err instanceof Error ? err.message : String(err),
+          run.error instanceof Error ? run.error.message : String(run.error),
         )
+        if (status === 429) {
+          return { success: false, error: 'Limite de requisições atingido — tente em instantes.' }
+        }
         return { success: false, error: 'Não consegui carregar o perfil agora.' }
       }
+
+      const profile = normalizeInstagramProfile(run.data ?? [], max_posts ?? 5)
+      if (!profile) {
+        return { success: false, error: 'Perfil não encontrado ou privado.' }
+      }
+      await writeCache(actor, username, profile)
+      return { success: true, profile }
     },
   })
 }

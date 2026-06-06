@@ -53,6 +53,7 @@ export default defineConfig({
           setupFiles: ['./test/setup.ts'],
           include: [
             'test/unit/**/*.test.ts',
+            'src/lib/**/*.test.ts',
             'src/**/sub-agents/**/*.test.ts',
             'src/server/ai-module/builder/state/**/*.test.ts',
             'src/server/ai-module/builder/sources/**/*.test.ts',

@@ -38,7 +38,7 @@ export type TavilyResult =
   | { ok: true; results: TavilySearchItem[] }
   | {
       ok: false
-      reason: 'NO_API_KEY' | 'HTTP_ERROR' | 'NETWORK'
+      reason: 'NO_API_KEY' | 'RATE_LIMITED' | 'HTTP_ERROR' | 'NETWORK'
       message: string
     }
 
@@ -123,6 +123,15 @@ export async function searchTavily(
 
     if (!response.ok) {
       const text = await response.text().catch(() => '')
+      // 429 distinto de erro genérico: quota/rate-limit é transitório e o caller
+      // pode logar/alertar diferente (não é uma falha de query).
+      if (response.status === 429) {
+        return {
+          ok: false,
+          reason: 'RATE_LIMITED',
+          message: `Tavily rate limit (429): ${text.slice(0, 200)}`,
+        }
+      }
       return {
         ok: false,
         reason: 'HTTP_ERROR',

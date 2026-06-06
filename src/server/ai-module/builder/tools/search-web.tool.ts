@@ -138,6 +138,14 @@ export function searchWebTool(_ctx: BuilderToolExecutionContext) {
 
         if (!response.ok) {
           const text = await response.text().catch(() => '')
+          // 429 distinto: rate-limit/quota é transitório — mensagem clara para o
+          // meta-agente recuar e tentar mais tarde, não tratar como erro de query.
+          if (response.status === 429) {
+            return {
+              success: false,
+              message: `Tavily rate limit atingido (429) — tente novamente em instantes.`,
+            }
+          }
           return {
             success: false,
             message: `Tavily search failed (${response.status}): ${text.slice(0, 200)}`,
