@@ -135,12 +135,20 @@ export const activationStateSchema = z.object({
   keywords: z.array(z.string()).default([]),
 })
 
-/** A single "paste your site/IG" source being ingested. */
+/** A single "paste your site/IG" source being ingested.
+ *
+ * Onda D (G2 visão/imagens): `imagesStatus`/`imagesCount` são um ESPELHO LEVE do
+ * catálogo visual extraído da fonte. Ambos OPCIONAIS (default undefined): D1 só
+ * estende o schema (mudança 100% aditiva — não quebra states legados nem o
+ * DEFAULT_BUILDER_STATE); a ESCRITA fica em D2 (patchSourceIngestionAtomic
+ * estendido). As imagens em si vivem na tabela `knowledge_images`, não aqui. */
 export const sourceIngestionItemSchema = z.object({
   value: z.string(),
   type: z.enum(['url', 'instagram']),
   status: z.string(),
   sourceId: z.string().optional(),
+  imagesStatus: z.enum(['pending', 'running', 'ready', 'error']).optional(),
+  imagesCount: z.number().int().nonnegative().optional(),
 })
 
 /** Proposed synthesis written by the source-enrich pipeline (anti-hallucination:

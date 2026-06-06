@@ -120,7 +120,7 @@ function isBlockedIpv6(ipRaw: string): boolean {
   return false
 }
 
-function assertPublicHttpUrl(raw: string): URL {
+export function assertPublicHttpUrl(raw: string): URL {
   let url: URL
   try {
     url = new URL(raw)
@@ -155,8 +155,14 @@ function assertPublicHttpUrl(raw: string): URL {
 const FETCH_TIMEOUT_MS = 10_000
 const MAX_REDIRECTS = 3
 
-/** fetch seguro: valida cada hop, timeout, segue até MAX_REDIRECTS manualmente. */
-async function safeFetch(rawUrl: string): Promise<Response> {
+/**
+ * fetch seguro: valida cada hop, timeout, segue até MAX_REDIRECTS manualmente.
+ *
+ * Exportado (Onda D1) para o image-pipeline reusar o MESMO guard anti-SSRF (com
+ * revalidação por hop de redirect) ao baixar imagens das fontes. NÃO limita o
+ * corpo da resposta — o caller aplica o cap de bytes lendo o stream/arrayBuffer.
+ */
+export async function safeFetch(rawUrl: string): Promise<Response> {
   let current = assertPublicHttpUrl(rawUrl).toString()
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const controller = new AbortController()
@@ -192,6 +198,29 @@ export async function extractUrlText(url: string): Promise<string> {
     return extractPdfText(buf)
   }
   return stripHtml(await res.text())
+}
+
+/**
+ * Onda D1 — variante de `extractUrlText` que ALÉM do texto limpo devolve o HTML
+ * CRU do MESMO fetch, para o image-pipeline extrair `<img>`/`url()` sem um 2º
+ * round-trip nem reentrar no guard SSRF.
+ *
+ * Para URLs que servem PDF não há HTML (`html: ''`) — o caller (ingestSource)
+ * só usa `html` quando a fonte é um site. `text` é idêntico ao de `extractUrlText`
+ * (mesmo stripHtml), preservando o comportamento do RAG.
+ */
+export async function extractUrlTextWithHtml(
+  url: string,
+): Promise<{ text: string; html: string }> {
+  const res = await safeFetch(url)
+  if (!res.ok) throw new Error(`fetch → HTTP ${res.status}`)
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/pdf')) {
+    const buf = Buffer.from(await res.arrayBuffer())
+    return { text: await extractPdfText(buf), html: '' }
+  }
+  const html = await res.text()
+  return { text: stripHtml(html), html }
 }
 
 /** Dispatcher por tipo de fonte. Lança em tipo desconhecido / dados ausentes. */

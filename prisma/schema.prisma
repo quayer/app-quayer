@@ -1489,6 +1489,7 @@ model KnowledgeCollection {
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sources      KnowledgeSource[]
   chunks       KnowledgeChunk[]
+  images       KnowledgeImage[]
   agents       AIAgentConfig[] // agentes que apontam ragCollectionId pra cá
 
   @@unique([organizationId, name])
@@ -1506,12 +1507,14 @@ model KnowledgeSource {
   status         String  @default("pending") // pending|processing|ready|error
   error          String? @db.Text
   chunkCount     Int     @default(0)
+  imagesEnabled  Boolean @default(true) // Onda D (G2) — toggle do catálogo visual por fonte
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   chunks     KnowledgeChunk[]
+  images     KnowledgeImage[]
 
   @@index([collectionId])
   @@index([organizationId])
@@ -1537,6 +1540,42 @@ model KnowledgeChunk {
   @@index([collectionId])
   @@index([sourceId])
   @@map("knowledge_chunks")
+}
+
+// ── Catálogo Visual das Fontes (Onda D / G2 — visão/imagens) ─────────────────
+// Fotos extraídas do site/Instagram colado. Persiste o storageKey (path no bucket
+// MEDIA), NÃO a signed URL (que expira) — assina on-read. captionEmbedding é
+// NULLABLE e só é populado na fase de runtime (busca vetorial da galeria); como o
+// KnowledgeChunk, INSERT/SELECT do vetor SEMPRE via raw. As imagens vivem nesta
+// tabela (nunca no builderState JSONB, que recebe só um flag leve).
+model KnowledgeImage {
+  id               String                       @id @default(uuid())
+  organizationId   String // tenant boundary explícito (carimbo, igual KnowledgeSource)
+  collectionId     String // = kb:${projectId}
+  sourceId         String // FK KnowledgeSource (a fonte colada)
+  originalUrl      String                       @db.Text // URL de origem no site/IG
+  storageKey       String // path no BUCKETS.MEDIA — assina on-read (não persiste URL)
+  caption          String?                      @db.Text // legenda vision-LLM, editável
+  captionEmbedding Unsupported("vector(1536)")? // NULL no MVP; lida/escrita SOMENTE via raw
+  width            Int?
+  height           Int?
+  sizeBytes        Int?
+  sha256           String // dedup content-addressed
+  mimeType         String?
+  confirmedAt      DateTime? // curadoria: NULL = pendente (aprovada em D2/D3); runtime filtra confirmedAt IS NOT NULL
+  deletedAt        DateTime? // soft-delete (GET/runtime filtram deletedAt IS NULL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  collection KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  source     KnowledgeSource     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, sha256]) // dedup por fonte
+  @@index([collectionId])
+  @@index([organizationId])
+  @@index([sourceId])
+  @@map("knowledge_images")
 }
 
 // ── Agent Runtime Decisions (observabilidade — Wave Orayon) ──────────────────
