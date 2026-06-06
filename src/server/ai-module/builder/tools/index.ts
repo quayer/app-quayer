@@ -34,6 +34,7 @@ import { proposePlanUpgradeTool } from './propose-plan-upgrade.tool'
 import { agentInsightsTool } from './agent-insights.tool'
 import { teachAgentTool } from './teach-agent.tool'
 import { editPromptSectionTool } from './edit-prompt-section.tool'
+import { revertPromptTool } from './revert-prompt.tool'
 
 export type { BuilderToolExecutionContext }
 
@@ -66,6 +67,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     agent_insights: agentInsightsTool(ctx),
     teach_agent: teachAgentTool(ctx),
     edit_prompt_section: editPromptSectionTool(ctx),
+    revert_prompt: revertPromptTool(ctx),
     // Instagram agora é configurado pelo card de credenciais (deploy tab), não
     // por um wizard no chat — o wizard antigo foi removido (dead UI).
   }

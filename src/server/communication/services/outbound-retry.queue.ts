@@ -30,6 +30,11 @@
 
 import type { ConnectionOptions } from 'bullmq'
 import { Queue, Worker } from 'bullmq'
+import {
+  withTrace,
+  getTraceId,
+  newTraceId,
+} from '@/server/ai-module/ai-agents/infra/trace-context.service'
 import type { OutboundRequest } from './outbound.service'
 
 // ---------------------------------------------------------------------------
@@ -92,7 +97,7 @@ function parseRedisUrl(url: string): ConnectionOptions {
  */
 async function runOutboundRetry(
   payload: OutboundRetryJobPayload,
-  opts: { redisUrl?: string } = {},
+  opts: { redisUrl?: string; traceId?: string } = {},
 ): Promise<void> {
   const [{ sendAgentResponse }, { database }, senderMod, { markBotMessage }] =
     await Promise.all([
@@ -106,11 +111,14 @@ async function runOutboundRetry(
     database: database as never,
     sender: senderMod,
     markBotMessage,
+    // QH-13: propaga o traceId no re-enqueue para manter a correlação ao longo
+    // de toda a cadeia retry → retry → ... → dead-letter.
     scheduleRetry: (p, delayMs) =>
-      enqueueOutboundRetry(p, { delayMs, redisUrl: opts.redisUrl }),
+      enqueueOutboundRetry(p, { delayMs, redisUrl: opts.redisUrl, traceId: opts.traceId }),
   })
 
   console.info('[outbound-retry] processado', {
+    traceId: opts.traceId,
     attempt: payload.attempt,
     blocksSent: result.blocksSent,
     rateLimited: result.rateLimited ?? false,
@@ -139,14 +147,28 @@ async function runOutboundRetry(
  */
 export async function enqueueOutboundRetry(
   payload: OutboundRetryJobPayload,
-  options: { delayMs: number; redisUrl?: string },
+  options: { delayMs: number; redisUrl?: string; traceId?: string },
 ): Promise<void> {
   const delayMs = Math.max(0, Math.floor(options.delayMs))
+
+  // QH-13: anexa o traceId ao payload via withTrace (fail-open: gera um novo se
+  // ausente). Mantém a correlação cross-worker no hop do BullMQ — mesmo padrão
+  // de source-enrich.queue.
+  const traceId = options.traceId ?? newTraceId()
+  const tracedPayload = withTrace(
+    traceId,
+    {
+      organizationId: payload.organizationId,
+      connectionId: payload.connectionId,
+      attempt: payload.attempt,
+    },
+    payload as unknown as Record<string, unknown>,
+  ) as unknown as OutboundRetryJobPayload
 
   if (syncFallbackEnabled()) {
     // DEV: reagenda no próprio processo (fire-and-forget). Erros só logam.
     setTimeout(() => {
-      void runOutboundRetry(payload).catch((err) => {
+      void runOutboundRetry(payload, { traceId }).catch((err) => {
         console.error(
           '[outbound-retry] sync fallback falhou:',
           err instanceof Error ? err.message : String(err),
@@ -173,7 +195,7 @@ export async function enqueueOutboundRetry(
   try {
     const connection = parseRedisUrl(redisUrl)
     queue = new Queue<OutboundRetryJobPayload>(OUTBOUND_RETRY_QUEUE, { connection })
-    await queue.add(OUTBOUND_RETRY_JOB_NAME, payload, {
+    await queue.add(OUTBOUND_RETRY_JOB_NAME, tracedPayload, {
       delay: delayMs,
       // Mesma política de retenção das demais filas do registry.
       removeOnComplete: { age: 3600, count: 100 },
@@ -201,12 +223,15 @@ export function registerOutboundRetryWorker(
   return new Worker<OutboundRetryJobPayload, void>(
     OUTBOUND_RETRY_QUEUE,
     async (job) => {
+      // QH-13: extrai traceId do carrier _trace para correlação de logs.
+      const traceId = getTraceId(job.data as unknown as Record<string, unknown>)
       console.info('[outbound-retry.worker] job iniciado', {
         jobId: job.id,
+        traceId,
         attempt: job.data.attempt,
         organizationId: job.data.organizationId,
       })
-      await runOutboundRetry(job.data, { redisUrl })
+      await runOutboundRetry(job.data, { redisUrl, traceId })
     },
     { connection },
   )

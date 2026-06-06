@@ -734,8 +734,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
               markBotMessage,
               // QH-02: ao estourar o limite de instância, agenda retry com delay
               // (em vez de descartar a resposta). Worker dedicado reprocessa.
+              // QH-13: propaga o webhookTraceId no hop do BullMQ para correlação
+              // cross-worker (mesmo padrão de source-enrich).
               scheduleRetry: (payload, delayMs) =>
-                enqueueOutboundRetry(payload, { delayMs }),
+                enqueueOutboundRetry(payload, { delayMs, traceId: webhookTraceId }),
             },
           )
           outbound = {

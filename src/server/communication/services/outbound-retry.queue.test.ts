@@ -22,7 +22,7 @@ const { queueAdd, queueClose, queueCtor, QueueMock, WorkerMock } = vi.hoisted(()
   const queueAdd = vi.fn(
     async (
       _name: string,
-      _data: { attempt: number; agentText: string },
+      _data: { attempt: number; agentText: string; _trace?: { id: string } },
       _opts: { delay: number },
     ) => ({ id: 'job-1' }),
   )
@@ -103,6 +103,18 @@ describe('enqueueOutboundRetry — caminho BullMQ', () => {
   it('clampa delay negativo/NaN para 0 (não quebra o add)', async () => {
     await enqueueOutboundRetry(buildPayload(), { delayMs: -50 })
     expect(queueAdd.mock.calls[0][2].delay).toBe(0)
+  })
+
+  it('QH-13: anexa o carrier _trace com o traceId fornecido (correlação cross-worker)', async () => {
+    await enqueueOutboundRetry(buildPayload(), {
+      delayMs: 1000,
+      traceId: '11111111-1111-4111-8111-111111111111',
+    })
+
+    const [, data] = queueAdd.mock.calls[0]
+    expect(data._trace?.id).toBe('11111111-1111-4111-8111-111111111111')
+    // O payload de negócio é preservado lado a lado com o carrier.
+    expect(data.agentText).toBe('resposta do agente')
   })
 
   it('LANÇA quando queue.add rejeita (caller roteia à dead-letter) — e ainda fecha a conexão', async () => {

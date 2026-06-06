@@ -27,6 +27,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // inicializadas quando o factory roda.
 // ---------------------------------------------------------------------------
 
+// QH-09: a wrapper TTS (synthesizeTtsToMediaUrl) é mockada para controlar o
+// resultado da síntese por teste (URL de áudio, null ou throw) sem tocar em
+// storage/credential-resolver/provider. vi.hoisted garante que o spy exista
+// quando o factory de vi.mock (içado ao topo) roda.
+const { ttsSynthesizeMock } = vi.hoisted(() => ({
+  ttsSynthesizeMock: vi.fn<(input: unknown) => Promise<string | null>>(),
+}))
+
+vi.mock('./tts.service', () => ({
+  synthesizeTtsToMediaUrl: ttsSynthesizeMock,
+}))
+
 const { redisStore, deadLetterPushes, redisMock } = vi.hoisted(() => {
   const redisStore = new Map<string, number>()
   const deadLetterPushes: string[] = []
@@ -177,7 +189,24 @@ beforeEach(() => {
   vi.clearAllMocks()
   redisStore.clear()
   deadLetterPushes.length = 0
+  // QH-09: default neutro — síntese retorna null (fallback p/ texto). Testes do
+  // caminho TTS sobrescrevem com mockResolvedValueOnce/mockRejectedValueOnce.
+  ttsSynthesizeMock.mockResolvedValue(null)
 })
+
+/** Fixture de settings TTS habilitado (shape de AgentRuntimeSettings['tts']). */
+function buildTtsSettings(
+  overrides: Partial<OutboundRequest['tts']> = {},
+): OutboundRequest['tts'] {
+  return {
+    enabled: true,
+    provider: 'elevenlabs',
+    voiceId: 'voice-abc',
+    model: 'eleven_turbo_v2',
+    speechRate: 1,
+    ...overrides,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -707,5 +736,116 @@ describe('sendAgentResponse — QH-02 retry no limite de INSTÂNCIA', () => {
     expect(res.retryScheduled).toBe(true)
     expect(scheduleRetry.mock.calls[0][0].attempt).toBe(2)
     expect(redisMock.incr).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendAgentResponse — QH-09 TTS outbound (text → áudio)', () => {
+  it('tts.enabled + síntese retorna URL → sendAudio (NÃO sendText) e marca bot-echo', async () => {
+    const deps = buildDeps()
+    deps._sendAudioMock.mockResolvedValueOnce({ success: true, messageId: 'wa-audio-1' })
+    ttsSynthesizeMock.mockResolvedValueOnce('https://cdn.example.com/tts/abc.mp3')
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi tudo bem?', tts: buildTtsSettings() }),
+      deps,
+    )
+
+    // Enviou 1 bloco como ÁUDIO — texto não foi usado.
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendAudioMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
+
+    // A URL sintetizada foi repassada ao sender.sendAudio (4º arg = audioUrl).
+    expect(deps._sendAudioMock.mock.calls[0][3]).toBe('https://cdn.example.com/tts/abc.mp3')
+
+    // bot-echo marcado com o messageId do envio de áudio.
+    expect(deps._markBotMessageMock).toHaveBeenCalledTimes(1)
+    expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'wa-audio-1')
+  })
+
+  it('passa text/settings/org corretos para a síntese (BYOK por org)', async () => {
+    const deps = buildDeps()
+    deps._sendAudioMock.mockResolvedValueOnce({ success: true, messageId: 'wa-audio-2' })
+    const tts = buildTtsSettings({ provider: 'deepgram', voiceId: 'aura-2-luna-en' })
+    ttsSynthesizeMock.mockResolvedValueOnce('https://cdn.example.com/tts/dg.mp3')
+
+    await sendAgentResponse(
+      buildRequest({ agentText: 'mensagem para sintetizar', tts }),
+      deps,
+    )
+
+    expect(ttsSynthesizeMock).toHaveBeenCalledTimes(1)
+    const input = ttsSynthesizeMock.mock.calls[0][0] as {
+      organizationId: string
+      text: string
+      settings: typeof tts
+    }
+    expect(input.organizationId).toBe(ORG_ID)
+    expect(input.text).toBe('mensagem para sintetizar')
+    expect(input.settings).toEqual(tts)
+  })
+
+  it('síntese retorna null → fallback gracioso para sendText (sem áudio)', async () => {
+    const deps = buildDeps()
+    ttsSynthesizeMock.mockResolvedValueOnce(null)
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi tudo bem?', tts: buildTtsSettings() }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendTextMock.mock.calls[0][3]).toBe('oi tudo bem?')
+    expect(deps._sendAudioMock).not.toHaveBeenCalled()
+    expect(deps._markBotMessageMock).toHaveBeenCalledWith(ORG_ID, 'wa-1')
+  })
+
+  it('síntese lança (rede/provider) → fallback gracioso para sendText (não derruba o turno)', async () => {
+    const deps = buildDeps()
+    ttsSynthesizeMock.mockRejectedValueOnce(new Error('provider 503'))
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi tudo bem?', tts: buildTtsSettings() }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(res.persisted).toBe(true)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendAudioMock).not.toHaveBeenCalled()
+  })
+
+  it('tts.enabled=false → NÃO sintetiza, envia texto direto', async () => {
+    const deps = buildDeps()
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi', tts: buildTtsSettings({ enabled: false }) }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(ttsSynthesizeMock).not.toHaveBeenCalled()
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._sendAudioMock).not.toHaveBeenCalled()
+  })
+
+  it('persiste 1 Message OUTBOUND mesmo quando o bloco saiu como áudio', async () => {
+    const deps = buildDeps()
+    deps._sendAudioMock.mockResolvedValueOnce({ success: true, messageId: 'wa-audio-3' })
+    ttsSynthesizeMock.mockResolvedValueOnce('https://cdn.example.com/tts/xyz.mp3')
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'texto que vira áudio', tts: buildTtsSettings() }),
+      deps,
+    )
+
+    expect(res.persisted).toBe(true)
+    expect(deps._messageCreateMock).toHaveBeenCalledTimes(1)
+    const arg = deps._messageCreateMock.mock.calls[0][0] as { data: Record<string, unknown> }
+    // content persiste o texto original (não a URL do áudio); waMessageId = áudio.
+    expect(arg.data.content).toBe('texto que vira áudio')
+    expect(arg.data.direction).toBe('OUTBOUND')
+    expect(arg.data.waMessageId).toBe('wa-audio-3')
   })
 })
