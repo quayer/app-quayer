@@ -122,6 +122,71 @@ services:
         max-file: "3"
 
   # ==================================
+  # WORKER (BullMQ — outbound-retry / source-enrich / session-close)
+  # ==================================
+  # Mesma imagem do app. Entrypoint PRÓPRIO (tini direto) para BYPASSAR o
+  # docker-entrypoint.sh — que rodaria migrations + `exec node server.js`
+  # IGNORANDO o command (subiria um 2º Next server = workers inertes + race de
+  # migration). Com tini direto, roda DE FATO os workers e NÃO toca migrations
+  # (estas ficam a cargo do passo one-off do deploy + do app). Validado em homol.
+  worker:
+    image: quayer-app:latest
+    container_name: quayer-worker
+    restart: always
+    entrypoint: ["/sbin/tini", "--"]
+    command: ["node", "workers/start-workers.js"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@quayer-postgres:5432/${DB_NAME}?schema=public
+      - DIRECT_DATABASE_URL=${DIRECT_DATABASE_URL:-postgresql://${DB_USER}:${DB_PASSWORD}@quayer-postgres:5432/${DB_NAME}?schema=public}
+      - REDIS_URL=redis://quayer-redis:6379
+      - REDIS_HOST=quayer-redis
+      - REDIS_PORT=6379
+      # Mesmo prefixo de fila do app (senão consome filas diferentes)
+      - IGNITER_APP_NAME=quayer
+      - IGNITER_JOBS_QUEUE_PREFIX=quayer
+      - IGNITER_LOG_LEVEL=info
+      - JWT_SECRET=${JWT_SECRET}
+      - IGNITER_APP_SECRET=${IGNITER_APP_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      # WhatsApp — outbound-retry reenvia a resposta barrada por rate-limit
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_BASE_URL=${UAZAPI_BASE_URL:-${UAZAPI_URL}}
+      - UAZAPI_ADMIN_TOKEN=${UAZAPI_ADMIN_TOKEN}
+      - UAZAPI_INSTANCE_TOKEN=${UAZAPI_INSTANCE_TOKEN:-}
+      - UAZAPI_WEBHOOK_URL=${UAZAPI_WEBHOOK_URL}
+      # OpenAI — source-enrich (embed/síntese)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      # Supabase — source-enrich persiste mídia/chunks
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-media-whatsapp}
+      - SUPABASE_STORAGE_BUCKET_PROFILES=${SUPABASE_STORAGE_BUCKET_PROFILES:-profile-pictures}
+      - SUPABASE_STORAGE_BUCKET_ATTACHMENTS=${SUPABASE_STORAGE_BUCKET_ATTACHMENTS:-attachments}
+    depends_on:
+      quayer-postgres:
+        condition: service_healthy
+      quayer-redis:
+        condition: service_healthy
+    networks:
+      - quayer-internal
+      - supabase_default
+    # Healthcheck por processo: o worker não expõe HTTP (PID 1 = node via tini).
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o pid= -p 1 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==================================
   # POSTGRESQL (Porta 5433 externa)
   # ==================================
   quayer-postgres:
