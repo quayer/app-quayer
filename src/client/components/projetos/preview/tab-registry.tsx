@@ -29,6 +29,7 @@ import type {
 import { OverviewTab } from "./tabs/overview/overview-tab"
 import { PromptTab } from "./tabs/prompt/prompt-tab"
 import { KnowledgeTab } from "./tabs/knowledge/knowledge-tab"
+import { MediaTab } from "./tabs/media/media-tab"
 import { DeployTab } from "./tabs/deploy/deploy-tab"
 import { PlaygroundTab } from "./tabs/agent/playground/playground-tab"
 import { CredentialsTab } from "./tabs/credentials/credentials-tab"
@@ -108,6 +109,12 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Conhecimento",
     visibleFor: ["ai_agent"],
     render: ({ project }) => <KnowledgeTab project={project} />,
+  },
+  {
+    value: "media",
+    label: "Mídias",
+    visibleFor: ["ai_agent"],
+    render: ({ project }) => <MediaTab project={project} />,
   },
   {
     value: "playground",

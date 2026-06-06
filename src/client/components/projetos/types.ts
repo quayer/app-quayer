@@ -18,6 +18,7 @@ export type PreviewTab =
   | 'overview'
   | 'prompt'
   | 'knowledge'
+  | 'media'
   | 'playground'
   | 'activity'
   | 'deploy'

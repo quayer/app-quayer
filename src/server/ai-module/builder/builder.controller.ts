@@ -6,6 +6,7 @@
  *  - chat.routes:        chat conversacional com o meta-agente (+ getReadiness, Orayon Uplift)
  *  - card-submit.routes: protocolo de card-action determinístico (Orayon Uplift W2)
  *  - sources.routes:     ingestão de fontes "cole seu site/IG" (Orayon Uplift W4)
+ *  - media-curation.routes: list/patch do catálogo de mídia enviável (Fase E / E4)
  *  - deploy.routes:      saga de publicação cross-module
  *
  * Regra: este arquivo só COMPÕE rotas — qualquer lógica vive nos handlers.
@@ -19,6 +20,7 @@ import { cardSubmitRoutes } from './cards/card-submit.routes'
 import { sheetParseRoutes } from './cards/sheet-parse.routes'
 import { sourcesRoutes }  from './sources/sources.routes'
 import { sourceImagesRoutes } from './sources/source-images.routes'
+import { mediaCurationRoutes } from './media/media-curation.routes'
 import { deployRoutes }   from './deploy/deploy.routes'
 import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
 import { provisionWhatsAppRoutes } from './channel/provision-whatsapp.routes'
@@ -41,6 +43,7 @@ export const builderController = igniter.controller({
     ...sheetParseRoutes,
     ...sourcesRoutes,
     ...sourceImagesRoutes,
+    ...mediaCurationRoutes,
     ...deployRoutes,
     ...channelCredentialsRoutes,
     ...provisionWhatsAppRoutes,
