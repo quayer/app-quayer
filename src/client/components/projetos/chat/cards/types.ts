@@ -47,6 +47,7 @@ export type CardKey =
   | "qualification_action"
   | "qualification_steps"
   | "team_structure"
+  | "handoff_pairing"
   | "calendar_connect"
   | "activation_mode"
   | "preview_summary"
