@@ -63,6 +63,7 @@ function input(over: Partial<TransferToHumanInput> = {}): TransferToHumanInput {
     urgency: 'medium',
     summary: undefined,
     departmentId: undefined,
+    razao: undefined,
     ...over,
   }
 }
@@ -185,5 +186,55 @@ describe('routing: queue notify-only (ex notify_team), alta urgência', () => {
     expect(mockNotify).toHaveBeenCalledTimes(1)
     // urgency high no caminho notify-only → WARNING
     expect(mockNotify.mock.calls[0]![0].data.type).toBe('WARNING')
+  })
+})
+
+describe('idempotência (#1)', () => {
+  it('handoff recente → 2ª chamada (pauseAI) é no-op (sem update/notify)', async () => {
+    mockSession.mockResolvedValue({
+      customFields: { handoff: { transferredAt: new Date().toISOString() } },
+      contactPhone: '+5511999999999',
+      status: 'PAUSED',
+    } as never)
+
+    const res = await executeTransferToHuman(ctx(), input({ routing: 'queue', pauseAI: true }))
+
+    expect(res.success).toBe(true)
+    expect(res.message).toMatch(/já transferido/i)
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockNotify).not.toHaveBeenCalled()
+  })
+
+  it('handoff ANTIGO (fora da janela) → não bloqueia novo handoff', async () => {
+    const old = new Date(Date.now() - 5 * 60_000).toISOString() // 5 min atrás
+    mockSession.mockResolvedValue({
+      customFields: { handoff: { transferredAt: old } },
+      contactPhone: '+5511999999999',
+      status: 'ACTIVE',
+    } as never)
+
+    const res = await executeTransferToHuman(ctx(), input({ routing: 'queue', pauseAI: true }))
+
+    expect(res.success).toBe(true)
+    expect(mockUpdate).toHaveBeenCalledTimes(1) // reabriu/encaminhou de novo
+  })
+})
+
+describe('razao estruturado', () => {
+  it('grava razao no handoff e na metadata da notificação (queue)', async () => {
+    await executeTransferToHuman(
+      ctx(),
+      input({ routing: 'queue', pauseAI: true, razao: 'lead_qualificado' }),
+    )
+
+    const updateData = mockUpdate.mock.calls[0]![0].data as {
+      customFields: { handoff: { razao: string } }
+    }
+    expect(updateData.customFields.handoff.razao).toBe('lead_qualificado')
+    const notifMeta = (mockNotify.mock.calls[0]![0].data.metadata ?? {}) as Record<
+      string,
+      unknown
+    >
+    expect(notifMeta.razao).toBe('lead_qualificado')
   })
 })

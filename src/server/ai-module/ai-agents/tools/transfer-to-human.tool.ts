@@ -60,6 +60,18 @@ export const transferToHumanInputSchema = z.object({
     .min(10)
     .max(500)
     .describe('Motivo do encaminhamento/aviso (ex: "cliente quer falar de contrato").'),
+  razao: z
+    .enum([
+      'lead_qualificado',
+      'lead_pediu_humano',
+      'fora_escopo_critico',
+      'fluxo_complexo',
+    ])
+    .optional()
+    .describe(
+      'Categoria estruturada do handoff (para analytics/auditoria). Opcional — ' +
+        'complementa `reason` (texto livre).',
+    ),
   urgency: z
     .enum(['low', 'medium', 'high'])
     .default('medium')
@@ -112,9 +124,9 @@ const URGENCY_LABEL: Record<'low' | 'medium' | 'high', string> = {
  */
 export async function executeQueueHandoff(
   ctx: ToolExecutionContext,
-  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI'>,
+  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI' | 'razao'>,
 ): Promise<TransferToHumanResult> {
-  const { reason, urgency, summary, pauseAI } = input
+  const { reason, urgency, summary, pauseAI, razao } = input
 
   try {
     const session = await database.chatSession.findUnique({
@@ -141,6 +153,7 @@ export async function executeQueueHandoff(
             ...existing,
             handoff: {
               reason,
+              razao: razao ?? null,
               urgency,
               summary: summary ?? null,
               transferredAt: new Date().toISOString(),
@@ -167,6 +180,7 @@ export async function executeQueueHandoff(
           metadata: {
             sessionId: ctx.sessionId,
             urgency,
+            razao: razao ?? null,
             summary: summary ?? null,
             routing: 'queue',
             triggeredBy: 'transfer_to_human_tool',
@@ -200,6 +214,7 @@ export async function executeQueueHandoff(
           sessionId: ctx.sessionId,
           contactId: ctx.contactId,
           urgency,
+          razao: razao ?? null,
           routing: 'queue',
           triggeredBy: 'transfer_to_human_tool(notify)',
         },
@@ -269,9 +284,9 @@ export function buildSelfHandoffText(args: {
  */
 export async function executeSelfHandoff(
   ctx: ToolExecutionContext,
-  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI'>,
+  input: Pick<TransferToHumanInput, 'reason' | 'urgency' | 'summary' | 'pauseAI' | 'razao'>,
 ): Promise<TransferToHumanResult> {
-  const { reason, urgency, summary, pauseAI } = input
+  const { reason, urgency, summary, pauseAI, razao } = input
 
   try {
     const session = await database.chatSession.findUnique({
@@ -328,6 +343,7 @@ export async function executeSelfHandoff(
             ...existing,
             handoff: {
               reason,
+              razao: razao ?? null,
               urgency,
               summary: summary ?? null,
               transferredAt: new Date().toISOString(),
@@ -357,6 +373,7 @@ export async function executeSelfHandoff(
         metadata: {
           sessionId: ctx.sessionId,
           urgency,
+          razao: razao ?? null,
           summary: summary ?? null,
           routing: 'self',
           whatsappNotified,
@@ -383,6 +400,42 @@ export async function executeSelfHandoff(
 }
 
 // ---------------------------------------------------------------------------
+// Idempotência (#1) — dedupe de handoff por recência
+// ---------------------------------------------------------------------------
+
+/**
+ * Janela de dedupe: se um handoff foi marcado há menos que isto, uma 2ª chamada
+ * de transfer_to_human (retry/loop do LLM no mesmo turno) é tratada como no-op —
+ * evita 2ª Notification + 2ª pausa. Curta o suficiente para permitir um
+ * re-handoff LEGÍTIMO depois (ex.: conversa reaberta e encaminhada de novo).
+ */
+export const HANDOFF_DEDUPE_WINDOW_MS = 60_000
+
+/**
+ * true se a sessão já tem um `customFields.handoff` recente (dentro da janela).
+ * Lê só customFields. FAIL-OPEN: qualquer erro de leitura → false (nunca bloquear
+ * um handoff legítimo por causa do guard).
+ */
+export async function hasRecentHandoff(
+  sessionId: string,
+  nowMs: number = Date.now(),
+  windowMs: number = HANDOFF_DEDUPE_WINDOW_MS,
+): Promise<boolean> {
+  try {
+    const session = await database.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { customFields: true },
+    })
+    const cf = (session?.customFields as Record<string, unknown> | null) ?? {}
+    const handoff = cf.handoff as { transferredAt?: string } | undefined
+    const ts = handoff?.transferredAt ? Date.parse(handoff.transferredAt) : NaN
+    return Number.isFinite(ts) && nowMs - ts < windowMs
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Executor unificado
 // ---------------------------------------------------------------------------
 
@@ -390,6 +443,18 @@ export async function executeTransferToHuman(
   ctx: ToolExecutionContext,
   input: TransferToHumanInput,
 ): Promise<TransferToHumanResult> {
+  // Idempotência: short-circuit se já houve handoff há instantes (mesmo turno).
+  // Só dedupe quando ESTE pedido também pausa (pauseAI) — um aviso informativo
+  // (pauseAI:false) pode legitimamente repetir e não escreve handoff de qualquer forma.
+  if (input.pauseAI && (await hasRecentHandoff(ctx.sessionId))) {
+    return {
+      success: true,
+      routing: input.routing,
+      paused: true,
+      message: 'Já transferido há instantes — ignorado para não duplicar.',
+    }
+  }
+
   if (input.routing === 'department') {
     const r = await executeDispatchToAgent(ctx, {
       departmentId: input.departmentId,
