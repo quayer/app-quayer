@@ -12,6 +12,7 @@ vi.mock('@/server/services/database', () => ({
     chatSession: { findUnique: vi.fn(), update: vi.fn() },
     notification: { create: vi.fn() },
     connection: { findFirst: vi.fn() },
+    aIAgentConfig: { findUnique: vi.fn() },
   },
 }))
 vi.mock('./department-dispatch', () => ({
@@ -45,6 +46,10 @@ const mockConn = vi.mocked(
 const mockDispatch = vi.mocked(executeDispatchToAgent)
 const mockRate = vi.mocked(rouletteNotifyRateLimiter.check)
 const mockSend = vi.mocked(sendText)
+const mockAgentCfg = vi.mocked(
+  (database as unknown as { aIAgentConfig: { findUnique: ReturnType<typeof vi.fn> } })
+    .aIAgentConfig.findUnique,
+)
 
 function ctx(): ToolExecutionContext {
   return {
@@ -52,6 +57,7 @@ function ctx(): ToolExecutionContext {
     contactId: 'c-1',
     connectionId: 'conn-1',
     organizationId: 'org-1',
+    agentConfigId: 'agent-1',
   }
 }
 
@@ -77,6 +83,8 @@ beforeEach(() => {
   } as never)
   mockUpdate.mockResolvedValue({} as never)
   mockNotify.mockResolvedValue({ id: 'notif-1' } as never)
+  // Default: agente sem horário configurado → atendimento ausente.
+  mockAgentCfg.mockResolvedValue({ businessHours: null } as never)
 })
 
 describe('routing: queue', () => {
@@ -217,6 +225,36 @@ describe('idempotência (#1)', () => {
 
     expect(res.success).toBe(true)
     expect(mockUpdate).toHaveBeenCalledTimes(1) // reabriu/encaminhou de novo
+  })
+})
+
+describe('atendimento / horário comercial (#2)', () => {
+  const COMMERCIAL = {
+    mon: { open: true, start: '09:00', end: '18:00' },
+    tue: { open: true, start: '09:00', end: '18:00' },
+    wed: { open: true, start: '09:00', end: '18:00' },
+    thu: { open: true, start: '09:00', end: '18:00' },
+    fri: { open: true, start: '09:00', end: '18:00' },
+    sat: { open: false, start: '09:00', end: '18:00' },
+    sun: { open: false, start: '09:00', end: '18:00' },
+  }
+
+  it('inclui `atendimento` (status + orientacao_resposta) quando há horário', async () => {
+    mockAgentCfg.mockResolvedValue({
+      businessHours: { schedule: COMMERCIAL, timezone: 'America/Sao_Paulo' },
+    } as never)
+
+    const res = await executeTransferToHuman(ctx(), input({ routing: 'queue', pauseAI: true }))
+
+    expect(res.atendimento).toBeDefined()
+    expect(typeof res.atendimento!.status).toBe('string')
+    expect(typeof res.atendimento!.orientacao_resposta).toBe('string')
+  })
+
+  it('NÃO inclui `atendimento` quando o agente não tem horário', async () => {
+    // default do beforeEach: businessHours null
+    const res = await executeTransferToHuman(ctx(), input({ routing: 'queue', pauseAI: true }))
+    expect(res.atendimento).toBeUndefined()
   })
 })
 

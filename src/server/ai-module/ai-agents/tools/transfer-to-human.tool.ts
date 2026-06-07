@@ -34,6 +34,10 @@ import {
   sendText,
   normalizePhone,
 } from '@/server/communication/services/uazapi-sender.service'
+import {
+  computeBusinessState,
+  businessStateToDict,
+} from '@/server/ai-module/ai-agents/services/business-hours.service'
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -105,6 +109,12 @@ export interface TransferToHumanResult {
   assignedAgentId?: string | null
   assignedAgentName?: string | null
   dispatchedVia?: 'roulette' | 'queue'
+  /**
+   * Melhoria #2 — contexto de horário comercial (status + orientacao_resposta),
+   * presente quando o agente tem businessHours configurado. O LLM usa a
+   * `orientacao_resposta` para dizer ao lead QUANDO a equipe responde.
+   */
+  atendimento?: Record<string, unknown>
 }
 
 const URGENCY_LABEL: Record<'low' | 'medium' | 'high', string> = {
@@ -436,6 +446,43 @@ export async function hasRecentHandoff(
 }
 
 // ---------------------------------------------------------------------------
+// Melhoria #2 — resolve o contexto de horário comercial do agente
+// ---------------------------------------------------------------------------
+
+interface StoredBusinessHours {
+  schedule?: unknown
+  timezone?: string | null
+  holidays?: string[]
+}
+
+/**
+ * Lê AIAgentConfig.businessHours (materializado do builderState) e computa o
+ * estado do atendimento AGORA. Retorna `undefined` quando não há agente/horário
+ * configurado (a tool simplesmente não inclui `atendimento`). FAIL-OPEN.
+ */
+export async function resolveAtendimento(
+  ctx: ToolExecutionContext,
+): Promise<Record<string, unknown> | undefined> {
+  if (!ctx.agentConfigId) return undefined
+  try {
+    const cfg = await database.aIAgentConfig.findUnique({
+      where: { id: ctx.agentConfigId },
+      select: { businessHours: true },
+    })
+    const bh = (cfg?.businessHours ?? null) as StoredBusinessHours | null
+    if (!bh || bh.schedule === undefined || bh.schedule === null) return undefined
+    const state = computeBusinessState(
+      bh.schedule,
+      bh.timezone ?? undefined,
+      Array.isArray(bh.holidays) ? bh.holidays : [],
+    )
+    return businessStateToDict(state)
+  } catch {
+    return undefined
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Executor unificado
 // ---------------------------------------------------------------------------
 
@@ -443,6 +490,9 @@ export async function executeTransferToHuman(
   ctx: ToolExecutionContext,
   input: TransferToHumanInput,
 ): Promise<TransferToHumanResult> {
+  // Contexto de horário comercial (#2): anexado a todos os retornos quando houver.
+  const atendimento = await resolveAtendimento(ctx)
+
   // Idempotência: short-circuit se já houve handoff há instantes (mesmo turno).
   // Só dedupe quando ESTE pedido também pausa (pauseAI) — um aviso informativo
   // (pauseAI:false) pode legitimamente repetir e não escreve handoff de qualquer forma.
@@ -452,6 +502,7 @@ export async function executeTransferToHuman(
       routing: input.routing,
       paused: true,
       message: 'Já transferido há instantes — ignorado para não duplicar.',
+      atendimento,
     }
   }
 
@@ -471,14 +522,15 @@ export async function executeTransferToHuman(
       assignedAgentId: r.assignedAgentId,
       assignedAgentName: r.assignedAgentName,
       dispatchedVia: r.dispatchedVia,
+      atendimento,
     }
   }
 
   if (input.routing === 'self') {
-    return executeSelfHandoff(ctx, input)
+    return { ...(await executeSelfHandoff(ctx, input)), atendimento }
   }
 
-  return executeQueueHandoff(ctx, input)
+  return { ...(await executeQueueHandoff(ctx, input)), atendimento }
 }
 
 // ---------------------------------------------------------------------------
@@ -492,7 +544,10 @@ export function createTransferToHumanTool(ctx: ToolExecutionContext) {
       "destino com routing: 'queue' (fila/painel da org), 'department' (roleta de " +
       "um setor) ou 'self' (avisa o WhatsApp do próprio dono). Use pauseAI:false " +
       'para apenas alertar sem pausar a IA. Use quando o cliente pedir uma pessoa, ' +
-      'reclamar, ou a situação exigir julgamento humano. O agente confirma por texto.',
+      'reclamar, ou a situação exigir julgamento humano. O agente confirma por texto. ' +
+      'O resultado pode trazer `atendimento` (status do horário comercial + ' +
+      '`orientacao_resposta`): use a orientacao para dizer ao lead QUANDO a equipe ' +
+      'responde. NUNCA invente horários — use só o que vier em `atendimento`.',
     inputSchema: transferToHumanInputSchema,
     execute: async (input) => executeTransferToHuman(ctx, input),
   })

@@ -329,7 +329,7 @@ export async function materializeTeam(
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
-      select: { systemPrompt: true, departmentId: true },
+      select: { systemPrompt: true, departmentId: true, businessHours: true },
     })
     if (agent) {
       const block = buildRouletteBlock(department.id, name)
@@ -352,6 +352,25 @@ export async function materializeTeam(
           where: { id: ctx.aiAgentId },
           data: { departmentId: department.id },
         })
+      }
+
+      // Melhoria #2 — materializa o HORÁRIO COMERCIAL (agent-level) do builderState
+      // para o runtime usá-lo no transfer_to_human (computeBusinessState → atendimento).
+      // Só quando há `schedule` configurado; idempotente (compara JSON).
+      if (state.hours?.schedule !== undefined) {
+        const nextHours = {
+          schedule: state.hours.schedule ?? null,
+          timezone: state.hours.timezone ?? null,
+          preset: state.hours.preset ?? null,
+        }
+        const currentHours =
+          (agent as { businessHours?: unknown }).businessHours ?? null
+        if (JSON.stringify(currentHours) !== JSON.stringify(nextHours)) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { businessHours: nextHours as Prisma.InputJsonValue },
+          })
+        }
       }
     }
   }
