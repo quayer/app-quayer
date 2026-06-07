@@ -410,6 +410,29 @@ describe('nextPendingStep — team/calendar gated by qualification.action', () =
     expect(r2.isDeployReady).toBe(true)
   })
 
+  it('B2 — handoff_pairing (opcional) surge após o team COM membros, sem bloquear deploy', () => {
+    let s = stateUpToActivation('notify_team')
+    s = confirm(s, 'team')
+    s = patchBuilderState(s, { team: { members: [{ name: 'João', position: 0 }] } })
+    const r = nextPendingStep(s, READY_CTX)
+    // o card opcional toma o active-step slot (override)…
+    expect(r.step.id).toBe<StepId>('handoff_pairing')
+    // …mas é OPCIONAL → deploy-ready mesmo sem confirmar o pareamento.
+    expect(r.isDeployReady).toBe(true)
+    // confirmar (parear OU pular) limpa o override.
+    const r2 = nextPendingStep(confirm(s, 'handoffPairing'), READY_CTX)
+    expect(r2.step.id).not.toBe('handoff_pairing')
+    expect(r2.isDeployReady).toBe(true)
+  })
+
+  it('B2 — handoff_pairing NÃO aplica sem membros (roleta vazia)', () => {
+    const s = confirm(stateUpToActivation('notify_team'), 'team') // team confirmado, 0 membros
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).not.toBe('handoff_pairing')
+    expect(r.steps.find((st) => st.id === 'handoff_pairing')?.done).toBe(true)
+    expect(r.isDeployReady).toBe(true)
+  })
+
   it('book_appointment: calendar is required (surfaced) but team is non-applicable', () => {
     const s = stateUpToActivation('book_appointment')
     const r = nextPendingStep(s, READY_CTX)

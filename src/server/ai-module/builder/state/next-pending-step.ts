@@ -93,6 +93,25 @@ function needsTeam(state: BuilderState): boolean {
   return state.qualification.action === 'notify_team'
 }
 
+/**
+ * O passo de pareamento (warm transfer) só aplica quando há roleta (notify_team)
+ * E pelo menos 1 membro cadastrado — sem membros não há a quem parear. Passo
+ * OPCIONAL: nunca bloqueia o deploy (isDone retorna true quando não aplicável).
+ */
+function needsHandoffPairing(state: BuilderState): boolean {
+  return needsTeam(state) && state.team.members.length > 0
+}
+
+/**
+ * B2 — o card OPCIONAL de pareamento (warm transfer) toma o active-step slot
+ * (mesma mecânica do silenced_contacts) quando há roleta com membros e o dono
+ * ainda NÃO confirmou o pareamento. Some assim que ele submete (pareando OU
+ * pulando) — `confirmations.handoffPairing` flippa. Optional → nunca gateia deploy.
+ */
+function handoffPairingActive(state: BuilderState): boolean {
+  return needsHandoffPairing(state) && !confirmed(state, 'handoffPairing')
+}
+
 /** The calendar step only applies when the agent books an appointment on qualify. */
 function needsCalendar(state: BuilderState): boolean {
   return state.qualification.action === 'book_appointment'
@@ -260,6 +279,21 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
     isDone: (s) => !needsTeam(s) || confirmed(s, 'team'),
     missing: (s) =>
       !needsTeam(s) || confirmed(s, 'team') ? [] : ['confirmations.team'],
+  },
+  {
+    id: 'handoff_pairing',
+    title: 'WhatsApp dos atendentes (warm transfer)',
+    ask: 'Quer que cada atendente atenda direto no WhatsApp dele? Pareie a instância de cada um no card — é opcional, pode pular.',
+    requiredPaths: ['confirmations.handoffPairing'],
+    // OPCIONAL — nunca gateia o deploy (fora de REQUIRED_STEPS). Surge via override
+    // (handoffPairingActive) só p/ agentes de roleta com membros; clears ao submeter.
+    optional: true,
+    applies: needsHandoffPairing,
+    isDone: (s) => !needsHandoffPairing(s) || confirmed(s, 'handoffPairing'),
+    missing: (s) =>
+      !needsHandoffPairing(s) || confirmed(s, 'handoffPairing')
+        ? []
+        : ['confirmations.handoffPairing'],
   },
   {
     id: 'calendar',
@@ -546,7 +580,16 @@ export function nextPendingStep(
       ? QUAYER_STEPS.find((def) => def.id === 'silenced_contacts') ?? null
       : null
 
-  const overrideStep = sourceStep ?? silencedStep
+  // B2 — o card opcional de pareamento (warm transfer) toma o slot após a equipe
+  // (prioridade abaixo de source/silenced), só p/ roleta com membros; clears ao submeter.
+  const handoffStep =
+    sourceStep === null &&
+    silencedStep === null &&
+    handoffPairingActive(state)
+      ? QUAYER_STEPS.find((def) => def.id === 'handoff_pairing') ?? null
+      : null
+
+  const overrideStep = sourceStep ?? silencedStep ?? handoffStep
 
   // When everything is done, surface the summary step as the terminal "ask".
   const chosen = overrideStep ?? surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]
