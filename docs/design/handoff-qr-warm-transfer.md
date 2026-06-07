@@ -160,6 +160,67 @@ espelhamento no MVP (F-opcional depois).
 - Custo/limites UAZapi por número (N instâncias).
 - LGPD: número do cliente vai pro WhatsApp pessoal do atendente (consentir/configurar).
 
+## 10. Design da UX no Chat Builder (RECOMENDADO) — pareamento + warm transfer
+
+> Premissa do produto (confirmada pelo dono 2026-06-07): **não há painel de
+> operador**. O atendente vive **100% no WhatsApp**. Logo o warm transfer NÃO é
+> um extra — é COMO o handoff funciona pra eles (sem ele, o vendedor recebe um
+> resumo mas não tem como responder). O **dono** configura tudo pelo **Chat
+> Builder**; o atendente só usa o WhatsApp dele.
+
+### 10.1 Decisão de arquitetura: card+step DEDICADO (não inflar o team_structure)
+O `team_structure` é um card SÍNCRONO (formulário de roster → submit). O pareamento
+é ASSÍNCRONO (QR + polling até `CONNECTED`). Misturar quebra o modelo simples de
+submit. ⇒ **novo card + step `handoff_pairing`**, exibido DEPOIS do `team` quando
+houver ≥1 membro. Mantém o roster simples e o pareamento opt-in, por membro.
+
+Encaixe nos padrões existentes (ver investigação):
+- **Card protocol**: novo `cardKey: 'handoff_pairing'` no enum (`card-submit.schemas.ts`),
+  no `CARD_REGISTRY` (`card-registry.tsx`) e um componente React novo.
+- **Step-engine**: novo `stepId: 'handoff_pairing'`, `applicable` só quando
+  `team.members.length > 0` (segue o padrão dos action-gated steps).
+- **QR**: REUSA o fluxo do `create_whatsapp_instance` (QR base64 + shareLink +
+  polling de status que o card de canal já faz) — por membro.
+
+### 10.2 Fluxo conversacional (o meta-agente conduz)
+1. Time confirmado (card `team_structure`) → step-engine surfa `handoff_pairing`.
+2. Meta-agente introduz: *"Quer que cada atendente atenda direto no WhatsApp dele?
+   Gero um QR pra cada um conectar. ⚠️ O cliente passará a receber mensagem do
+   número do atendente — garanta base legal (LGPD)."* (aviso = decisão A do dono).
+3. Card `handoff_pairing`: lista os membros com status (**não conectado** /
+   **conectado: +55…**). Botão **"Conectar"** por membro → gera QR (reusa
+   create-instance, `name = nome do membro`, broker uazapi) → polling até CONNECTED
+   → grava `connectionId` daquele membro. Botão **"Pular"** (warm transfer off →
+   cai no comportamento atual de resumo).
+4. Campo **"Mensagem de abertura"** (editável; default
+   *"Olá! Aqui é {nome}, vou continuar seu atendimento por aqui 👋"*) — decisão do dono.
+5. Submit → grava `connectionId` por membro + a mensagem no builderState.
+
+### 10.3 Dados (100% aditivo)
+- `card-submit.schemas.ts`: `teamMemberPayloadSchema += connectionId?: string`; novo
+  `handoffPairingPayloadSchema` (`{ members:[{position/index, connectionId}], openingMessage? }`).
+- `builder-state.ts`: `teamMemberSchema += connectionId?`; `team += openingMessage?`.
+- `apply-card-submit.ts`: valida `connectionId` (lookup `database.connection.findUnique`
+  tenant-scoped — nunca confiar no client) + grava openingMessage.
+- **Materialização** (`materialize-team.handler.ts`): ao espelhar `team.members` em
+  `DepartmentMember`, copiar `connectionId` (a coluna do F0 já existe) + materializar
+  `openingMessage` (em `Department` ou `AIAgentConfig` — nova coluna pequena).
+- **Warm transfer**: `tryWarmTransferToClient` passa a aceitar `openingMessage`
+  (override do default) — threading do Department/AIAgentConfig → dispatch → helper.
+
+### 10.4 Reuso máximo (pouco código novo)
+- Pareamento QR + polling: do card de canal (`create_whatsapp_instance` + `WhatsAppQrCard`).
+- Roster: já existe no `team_structure`.
+- Backend do warm transfer: **já feito (F0)** — só falta alimentar `connectionId`.
+
+### 10.5 Fases de implementação
+- **B1 (backend)** — schemas + builderState + handler (connectionId + openingMessage)
+  + materialização (connectionId→DepartmentMember, openingMessage→Department/Config)
+  + threading do openingMessage no warm transfer. Testável sem UI.
+- **B2 (frontend)** — componente `HandoffPairingCard` (lista + QR por membro +
+  polling + campo de mensagem + aviso LGPD) + registry + step.
+- **B3 (prompt)** — ensinar o meta-agente o step `handoff_pairing` (quando/como).
+
 ### 9.7 Fases revisadas
 - **F0 (backend) — ✅ FEITO (2026-06-07):** `DepartmentMember.connectionId` (migration `20260606100000`) + roleta carrega o `connectionId` + dispatch faz o warm transfer quando o membro tem conexão própria (`warm-transfer.ts` `tryWarmTransferToClient`, fail-open) — a conexão do membro manda a 1ª mensagem ao cliente + carimbo `handoff.warmTransfer`. Testado (5 testes).
 - **F0 (UI) — PENDENTE:** ação no Builder "parear WhatsApp deste atendente" (QR) que cria a Connection e grava `DepartmentMember.connectionId`. Sem isso a feature fica inerte (nenhum membro tem conexão própria). É o próximo passo para a feature funcionar de ponta a ponta.
