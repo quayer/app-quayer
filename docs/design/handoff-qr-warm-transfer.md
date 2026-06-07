@@ -161,6 +161,6 @@ espelhamento no MVP (F-opcional depois).
 - LGPD: número do cliente vai pro WhatsApp pessoal do atendente (consentir/configurar).
 
 ### 9.7 Fases revisadas
-- **F0** — `DepartmentMember.connectionId` (migration) + ação de pareamento no Builder + a roleta/dispatch resolvendo a conexão do membro (fail-open). Sem warm transfer ainda.
-- **F2** — mensagem de abertura ao cliente pela conexão de M (warm transfer real).
+- **F0 (backend) — ✅ FEITO (2026-06-07):** `DepartmentMember.connectionId` (migration `20260606100000`) + roleta carrega o `connectionId` + dispatch faz o warm transfer quando o membro tem conexão própria (`warm-transfer.ts` `tryWarmTransferToClient`, fail-open) — a conexão do membro manda a 1ª mensagem ao cliente + carimbo `handoff.warmTransfer`. Testado (5 testes).
+- **F0 (UI) — PENDENTE:** ação no Builder "parear WhatsApp deste atendente" (QR) que cria a Connection e grava `DepartmentMember.connectionId`. Sem isso a feature fica inerte (nenhum membro tem conexão própria). É o próximo passo para a feature funcionar de ponta a ponta.
 - **F-opcional** — espelho/persistência do inbound de C_m no painel + `Department.connectionId` (número de depto sem roleta) + política avançada de 2-conversas.

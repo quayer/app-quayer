@@ -69,6 +69,8 @@ export interface RouletteCandidate {
   displayName: string
   /** Member WhatsApp (E.164-BR), or null when absent — drives the 6A send. */
   whatsapp: string | null
+  /** F0 — Connection.id da instância PRÓPRIA do membro (warm transfer), ou null. */
+  connectionId: string | null
   /** Ordering key — DepartmentMember.position */
   position: number
 }
@@ -114,6 +116,8 @@ interface DepartmentMemberRow {
   name: string | null
   /** M1 — member WhatsApp (E.164-BR); drives the 6A notification. */
   whatsapp: string | null
+  /** F0 — Connection.id da instância própria do membro (warm transfer). */
+  connectionId: string | null
   position: number
   createdAt: Date
   user?: { name?: string | null } | null
@@ -224,6 +228,7 @@ export async function loadActivePool(
       userId: true,
       name: true,
       whatsapp: true,
+      connectionId: true,
       position: true,
       user: { select: { name: true } },
     },
@@ -238,6 +243,7 @@ export async function loadActivePool(
       userName: displayName,
       displayName,
       whatsapp: m.whatsapp ?? null,
+      connectionId: m.connectionId ?? null,
       position: m.position,
     }
   })

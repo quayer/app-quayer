@@ -25,6 +25,7 @@ import { database } from '@/server/services/database'
 import type { ToolExecutionContext } from '@/server/ai-module/ai-agents/tools/builtin-tools'
 import { selectNextMember } from './round-robin.service'
 import { trySendRouletteWhatsApp } from './notify-member-whatsapp'
+import { tryWarmTransferToClient } from './warm-transfer'
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -369,6 +370,26 @@ export async function executeDispatchToAgent(
       )
     }
 
+    // F0 — WARM TRANSFER: se o membro tem instância PRÓPRIA (chosen.connectionId),
+    // a conexão DELE manda a 1ª mensagem AO CLIENTE → o atendimento segue no
+    // WhatsApp do humano (que responde no app dele; a conexão dele não tem agente,
+    // então o bot não processa o inbound). Best-effort, fail-open quando ausente.
+    let warmTransferSent = false
+    try {
+      const wt = await tryWarmTransferToClient({
+        organizationId: ctx.organizationId,
+        memberConnectionId: chosen.connectionId,
+        contactPhone: session.contactPhone,
+        memberDisplayName: chosen.displayName,
+      })
+      warmTransferSent = wt.sent
+    } catch (wtErr) {
+      console.warn(
+        '[warm-transfer] envio falhou (ignored):',
+        wtErr instanceof Error ? wtErr.message : String(wtErr),
+      )
+    }
+
     // Stamp the 6A audit flag into the handoff record (single targeted re-write of
     // customFields.handoff — same shape as applyHandoffMutation plus the flag).
     try {
@@ -386,6 +407,7 @@ export async function executeDispatchToAgent(
               assignedAgentId,
               dispatchedVia: 'roulette',
               whatsappNotified,
+              warmTransfer: warmTransferSent,
             },
           } as Prisma.InputJsonValue,
         },
@@ -404,7 +426,9 @@ export async function executeDispatchToAgent(
       assignedAgentId,
       assignedAgentName: chosen.displayName,
       dispatchedVia: 'roulette',
-      message: `Conversa atribuída a ${chosen.displayName} via roleta (urgência ${urgency}).`,
+      message: warmTransferSent
+        ? `Conversa atribuída a ${chosen.displayName} via roleta (urgência ${urgency}). ${chosen.displayName} já iniciou o atendimento no WhatsApp dele(a).`
+        : `Conversa atribuída a ${chosen.displayName} via roleta (urgência ${urgency}).`,
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Erro desconhecido'

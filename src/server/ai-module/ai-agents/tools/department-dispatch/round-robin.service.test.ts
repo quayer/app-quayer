@@ -32,6 +32,7 @@ function cand(
     userName: 'Atendente',
     displayName: 'Atendente',
     whatsapp: null,
+    connectionId: null,
     position: 0,
     ...overrides,
   }

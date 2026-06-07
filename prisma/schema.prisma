@@ -494,6 +494,11 @@ model DepartmentMember {
   userId         String? // M1 — nullable: membro "nome + WhatsApp" não é usuário da plataforma
   name           String? // M1 — nome de exibição do membro (não-usuário)
   whatsapp       String? // M1 — WhatsApp do membro; a roleta roteia a notificação pra cá
+  // F0 (épico QR/warm-transfer): Connection.id da instância WhatsApp PRÓPRIA do membro
+  // (pareada por QR). Quando setado, o handoff faz warm transfer (a conexão do membro
+  // manda a 1ª mensagem ao cliente). Scalar SEM FK (espelha lastAssignedMemberId) —
+  // resolvido por findUnique no runtime; fail-open quando ausente/inválido.
+  connectionId   String?
   position       Int      @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
