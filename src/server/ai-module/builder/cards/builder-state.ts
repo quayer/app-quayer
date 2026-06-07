@@ -113,6 +113,10 @@ export const teamMemberSchema = z.object({
   // É por esse número que o agente notifica a pessoa quando o lead cai no rodízio
   // dela. Coexiste com userId/name; uma linha só-nome (legado) continua válida.
   whatsapp: z.string().optional(),
+  // F0 (warm transfer) — Connection.id da instância WhatsApp PRÓPRIA do membro
+  // (pareada por QR). Quando presente, o handoff faz warm transfer: a conexão do
+  // membro manda a 1ª mensagem ao cliente. Validado no runtime (tenant-scoped, fail-open).
+  connectionId: z.string().optional(),
   position: z.number().int().nonnegative(),
 })
 

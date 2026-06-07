@@ -231,11 +231,14 @@ function sanitizeTeamMembers(
     const userId = m.userId?.trim()
     const name = m.name?.trim()
     const whatsapp = normalizeWhatsappBr(m.whatsapp)
+    const connectionId = m.connectionId?.trim()
     return {
       position: Math.max(0, Math.trunc(m.position)),
       ...(userId && userId.length > 0 ? { userId } : {}),
       ...(name && name.length > 0 ? { name } : {}),
       ...(whatsapp ? { whatsapp } : {}),
+      // F0 — só transita; o runtime valida tenant-scoped (fail-open).
+      ...(connectionId && connectionId.length > 0 ? { connectionId } : {}),
     }
   })
 }

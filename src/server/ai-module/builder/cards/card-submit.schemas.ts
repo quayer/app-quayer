@@ -190,6 +190,9 @@ export const teamMemberPayloadSchema = z.object({
   // G6 — WhatsApp do membro (OPCIONAL). Limite curto: um telefone formatado/E.164
   // nunca passa de ~20 chars; 40 dá folga. RE-normalizado server-side no handler.
   whatsapp: z.string().min(1).max(40).optional(),
+  // F0 (warm transfer) — Connection.id da instância própria do membro. Validado no
+  // runtime (tenant-scoped, fail-open); aqui só transita como string.
+  connectionId: z.string().min(1).max(80).optional(),
   position: z.number().int().nonnegative(),
 })
 

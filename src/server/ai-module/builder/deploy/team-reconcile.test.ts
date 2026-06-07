@@ -96,6 +96,21 @@ describe('sanitizeTeamMembersForRuntime', () => {
     expect(out[0].whatsapp).toBeNull()
     expect(out[0].name).toBe('Bia')
   })
+
+  it('F0 — connectionId flui (string) e vira null quando ausente/em branco', () => {
+    const withConn = sanitizeTeamMembersForRuntime([
+      member({ name: 'João', connectionId: 'conn-123' }),
+    ])
+    expect(withConn[0].connectionId).toBe('conn-123')
+
+    const without = sanitizeTeamMembersForRuntime([member({ name: 'Ana' })])
+    expect(without[0].connectionId).toBeNull()
+
+    const blank = sanitizeTeamMembersForRuntime([
+      member({ name: 'Bia', connectionId: '   ' }),
+    ])
+    expect(blank[0].connectionId).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -105,7 +120,7 @@ describe('sanitizeTeamMembersForRuntime', () => {
 describe('reconcileTeamMembers', () => {
   it('CREATE quando o membro está no desired e ausente no DB', () => {
     const desired: NormalizedMember[] = [
-      { userId: 'u-1', name: 'Ana', whatsapp: null, position: 0 },
+      { userId: 'u-1', name: 'Ana', whatsapp: null, connectionId: null, position: 0 },
     ]
     const plan = reconcileTeamMembers([], desired)
     expect(plan.toCreate).toHaveLength(1)
@@ -116,7 +131,7 @@ describe('reconcileTeamMembers', () => {
   it('UPDATE (não CREATE) quando casa por userId', () => {
     const plan = reconcileTeamMembers(
       [existing({ id: 'm-1', userId: 'u-1', name: 'Velho' })],
-      [{ userId: 'u-1', name: 'Novo', whatsapp: null, position: 0 }],
+      [{ userId: 'u-1', name: 'Novo', whatsapp: null, connectionId: null, position: 0 }],
     )
     expect(plan.toCreate).toHaveLength(0)
     expect(plan.toUpdate).toHaveLength(1)
@@ -127,7 +142,7 @@ describe('reconcileTeamMembers', () => {
   it('casa por whatsapp quando não há userId (nível 2)', () => {
     const plan = reconcileTeamMembers(
       [existing({ id: 'm-2', whatsapp: '+5511988887777', name: 'Bia' })],
-      [{ userId: null, name: 'Bia', whatsapp: '+5511988887777', position: 0 }],
+      [{ userId: null, name: 'Bia', whatsapp: '+5511988887777', connectionId: null, position: 0 }],
     )
     expect(plan.toUpdate).toHaveLength(1)
     expect(plan.toUpdate[0].id).toBe('m-2')
@@ -136,7 +151,7 @@ describe('reconcileTeamMembers', () => {
   it('casa o whatsapp do DB mesmo em formato diferente (normaliza ambos os lados)', () => {
     const plan = reconcileTeamMembers(
       [existing({ id: 'm-2', whatsapp: '11988887777' })], // sem +55
-      [{ userId: null, name: null, whatsapp: '+5511988887777', position: 0 }],
+      [{ userId: null, name: null, whatsapp: '+5511988887777', connectionId: null, position: 0 }],
     )
     expect(plan.toUpdate).toHaveLength(1)
     expect(plan.toUpdate[0].id).toBe('m-2')
@@ -146,7 +161,7 @@ describe('reconcileTeamMembers', () => {
   it('casa por nome quando não há userId nem whatsapp (nível 3, case-insensitive)', () => {
     const plan = reconcileTeamMembers(
       [existing({ id: 'm-3', name: 'CARLOS' })],
-      [{ userId: null, name: 'carlos', whatsapp: null, position: 0 }],
+      [{ userId: null, name: 'carlos', whatsapp: null, connectionId: null, position: 0 }],
     )
     expect(plan.toUpdate).toHaveLength(1)
     expect(plan.toUpdate[0].id).toBe('m-3')
@@ -158,7 +173,7 @@ describe('reconcileTeamMembers', () => {
         existing({ id: 'm-fica', userId: 'u-1' }),
         existing({ id: 'm-some', userId: 'u-2' }),
       ],
-      [{ userId: 'u-1', name: 'Ana', whatsapp: null, position: 0 }],
+      [{ userId: 'u-1', name: 'Ana', whatsapp: null, connectionId: null, position: 0 }],
     )
     expect(plan.toUpdate.map((u) => u.id)).toEqual(['m-fica'])
     expect(plan.toDeactivate).toContain('m-some')
@@ -170,7 +185,7 @@ describe('reconcileTeamMembers', () => {
         existing({ id: 'm-a', userId: 'u-1' }),
         existing({ id: 'm-b', userId: 'u-1' }), // duplicata
       ],
-      [{ userId: 'u-1', name: 'Ana', whatsapp: null, position: 0 }],
+      [{ userId: 'u-1', name: 'Ana', whatsapp: null, connectionId: null, position: 0 }],
     )
     expect(plan.toUpdate).toHaveLength(1)
     expect(plan.toUpdate[0].id).toBe('m-a')
@@ -187,7 +202,7 @@ describe('reconcileTeamMembers', () => {
 
   it('idempotência: rodar 2x com o MESMO DB resultante não cria duplicata', () => {
     const desired: NormalizedMember[] = [
-      { userId: 'u-1', name: 'Ana', whatsapp: null, position: 0 },
+      { userId: 'u-1', name: 'Ana', whatsapp: null, connectionId: null, position: 0 },
     ]
     // 1ª run — DB vazio → create.
     const first = reconcileTeamMembers([], desired)
