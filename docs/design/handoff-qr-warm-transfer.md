@@ -27,6 +27,20 @@ assume **pelo painel**. A visão do dono é mais forte:
 Ou seja: **warm transfer** — a conversa migra para o **WhatsApp próprio do
 humano** (não o número do bot), e o humano continua dali, no app de WhatsApp dele.
 
+## 1b. Achado da investigação (2026-06-07) — a infra JÁ é multi-conexão
+
+Mapeamento read-only do código confirmou que **quase tudo já suporta N conexões por org**:
+- `Connection` é **1:N** com Organization (`organizationId` nullable, sem unique). `prisma/schema.prisma:535-622`.
+- **Webhook inbound** resolve a Connection por **`uazapiInstanceId`/`uazapiToken`** (NÃO por org) — já multi-safe. `webhooks/uazapi/route.ts:407-424`.
+- **Dispatch** passa `connectionId` EXPLÍCITO ao runtime. `route.ts:686` → `processAgentMessage`.
+- **Outbound** recebe `connectionId` explícito e resolve token/baseUrl por ele. `outbound.service.ts:240-242`; `uazapi-sender` é stateless (token+baseUrl por arg).
+- `ChatSession`/`Message` já chaveados por `connectionId`.
+- Criação/pareamento QR já cria N Connections. `builder/tools/create-instance.tool.ts` / `deploy/create-instance.handler.ts`.
+
+**Gap real (pequeno):** (a) NÃO há vínculo `Connection ↔ Department/DepartmentMember` (só `assignedCustomerId`→User); (b) o inbound resolve a connection mas o **roteamento por dono/depto** para warm transfer não existe.
+
+> **Re-priorização:** como o membro **já recebe o resumo** (via número do bot, `trySendRouletteWhatsApp`), a fatia "receber resumo na conexão própria" tem **valor marginal**. O valor REAL está no **warm transfer (F2)** — o lead continuar no WhatsApp do humano — que depende do **roteamento de inbound multi-instância (F1)**. F1/F2 são as partes que tocam o **caminho ao vivo** → exigem design + testes de roteamento + gate de prod. Não fazer "às cegas".
+
 ## 2. O que JÁ existe (não reconstruir)
 
 | Capacidade | Onde |
@@ -98,8 +112,55 @@ cada humano uma **conexão WhatsApp própria** e fazer o **warm transfer**.
 - **F2** — Warm transfer (mensagem de abertura ao cliente pela conexão do humano).
 - **F3** — Política de número-do-cliente-em-2-conversas + observabilidade.
 
-## 8. Recomendação
+## 8. Recomendação (revisada — ver §9)
 
-Começar por **F0** (multi-instância + QR por departamento, recebendo o resumo na
-conexão própria) — entrega valor sem tocar o caminho de inbound ao vivo. F1/F2
-(warm transfer real) só depois, com testes de roteamento e gate de prod.
+A investigação (§1b) mostrou que a infra já é multi-conexão. E a análise de §9
+mostra que o **warm transfer NÃO exige reescrever o roteamento de inbound** — o
+épico é bem menor do que parecia. Recomendação: **F0 (vínculo + pareamento) → F2
+(warm transfer)**; F1 vira opcional (espelho/persistência), não um pré-requisito.
+
+## 9. Design técnico detalhado (pós-investigação) — IMPLEMENTÁVEL
+
+### 9.1 Insight que encolhe o épico
+"Warm transfer" = a conexão do humano (C_m) manda a 1ª mensagem ao CLIENTE; daí o
+humano responde **no próprio app de WhatsApp**. Como **C_m não tem agente**
+deployado, o inbound de C_m chega ao webhook, resolve a org, mas
+`resolveAgentIdForConnection(C_m)` retorna nada → **o bot não processa** (caminho
+já existente para conexão sem agente). **Logo NÃO há reescrita de inbound routing.**
+O risco do "F1" original (roteamento ao vivo) praticamente some.
+
+### 9.2 Modelo de dados (decisão)
+`DepartmentMember.connectionId String?` (FK nullable → Connection, `onDelete: SetNull`).
+- `null` (padrão) → comportamento atual (resumo via número do bot a `member.whatsapp`).
+- setado → o membro tem instância própria pareada (número dele).
+- (Opcional dept-level: `Department.connectionId` p/ "número do financeiro" sem roleta — fase posterior.)
+
+### 9.3 Pareamento (reusa o que existe)
+A criação/QR de instância já existe (`create-instance.tool.ts`). F0 = uma ação no
+Builder "parear WhatsApp deste atendente" que cria uma Connection e grava o id em
+`DepartmentMember.connectionId`. Sem motor novo de pareamento.
+
+### 9.4 Fluxo do warm transfer (F2)
+No handoff `routing:'department'` (roleta escolhe o membro M):
+1. Resolve `M.connectionId`. Se `null` → comportamento atual (resumo via bot). Fail-open.
+2. Com C_m: usa o token/baseUrl de C_m para enviar **ao CLIENTE** uma mensagem de
+   abertura ("Oi, aqui é {M.name} da {empresa}, vou continuar seu atendimento por
+   aqui 👋") + (opcional) um resumo ao próprio M.
+3. Pausa a IA na sessão do bot (JÁ existe). O cliente passa a falar com o número de M.
+4. O bot **não** processa o inbound de C_m (M não é agente) → M atende no app dele.
+
+### 9.5 Política "cliente em 2 conversas"
+O cliente fica com 2 contatos: número do bot (pausado) + número de M. Mitigação: a
+mensagem de abertura deixa claro que o atendimento segue no novo número. Se o
+cliente responder no número do bot, a IA está pausada (operador vê no painel). Sem
+espelhamento no MVP (F-opcional depois).
+
+### 9.6 Riscos remanescentes (menores que o previsto)
+- Pareamento/expiração de QR por atendente (operacional).
+- Custo/limites UAZapi por número (N instâncias).
+- LGPD: número do cliente vai pro WhatsApp pessoal do atendente (consentir/configurar).
+
+### 9.7 Fases revisadas
+- **F0** — `DepartmentMember.connectionId` (migration) + ação de pareamento no Builder + a roleta/dispatch resolvendo a conexão do membro (fail-open). Sem warm transfer ainda.
+- **F2** — mensagem de abertura ao cliente pela conexão de M (warm transfer real).
+- **F-opcional** — espelho/persistência do inbound de C_m no painel + `Department.connectionId` (número de depto sem roleta) + política avançada de 2-conversas.
