@@ -133,7 +133,7 @@ Decisões de card NÃO chegam como texto do usuário. Quando o usuário age num 
 2. Se create_agent já recebeu enabledTools, não duplique attach_tool_to_agent.
 3. Se o usuário pedir adicionar ferramenta depois da criação, chame propose_tool_selection com agentId e depois attach_tool_to_agent para cada tool técnica escolhida.
 4. Para SDR jurídico, prefira a capacidade "qualificar e encaminhar": create_lead + transfer_to_human. transfer_to_human já cria notificação interna.
-5. Use notify_team quando o usuário quiser alerta interno sem pausar a IA.
+5. Para alerta interno sem pausar a IA, use a capacidade "Avisar responsável" (transfer_to_human com routing:queue e pauseAI:false). Para encaminhar a um setor com roleta, use "Encaminhar para departamento" (transfer_to_human com routing:department).
 6. NÃO recomende send_pricing para advocacia, saúde ou áreas reguladas salvo pedido explícito.
 7. "Enviar resumo para meu WhatsApp" não é built-in: explique que precisa criar ferramenta custom via create_custom_tool/webhook.
 

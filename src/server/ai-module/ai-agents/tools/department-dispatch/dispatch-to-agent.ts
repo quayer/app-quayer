@@ -1,35 +1,24 @@
 /**
- * dispatch_to_agent — execution helper (builtin tool)
+ * department dispatch — execution helper (roleta).
  *
  * Routes a conversation to a specific DEPARTMENT and distributes it to the next
  * available human agent via round-robin (roleta), then pauses the AI and
  * notifies that specific agent.
  *
- * Relationship to `transfer_to_human` (builtin-tools.ts:441):
- *   - transfer_to_human → generic queue: pauses AI, notifies the WHOLE org,
- *     does NOT set assignedAgentId/assignedDepartmentId. Next online operator
- *     grabs it from the panel.
- *   - dispatch_to_agent → directed routing: picks a department, picks ONE
- *     person via round-robin, sets assignedDepartmentId + assignedAgentId, and
- *     notifies ONLY that person (Notification.userId). It IS transfer_to_human
- *     + department routing + individual assignment.
- *
- * Both pause the AI identically (aiEnabled=false, pausedBy='agent',
- * status=PAUSED) and write customFields.handoff in the SAME shape so the
- * inbox/panel renders handoffs uniformly regardless of which tool fired.
+ * Exposto ao runtime pela tool UNIFICADA `transfer_to_human` com
+ * routing:'department' (ver transfer-to-human.tool.ts), que chama
+ * executeDispatchToAgent. NÃO há mais um tool `dispatch_to_agent` próprio
+ * (consolidado na Fase 2). Comparado à rota routing:'queue' do transfer_to_human
+ * (fila geral, sem atribuição), esta rota escolhe UMA pessoa via round-robin e
+ * grava assignedDepartmentId + assignedAgentId. Ambas pausam a IA e escrevem
+ * customFields.handoff no MESMO formato (painel uniforme).
  *
  * This module exports:
- *   - `dispatchToAgentInputSchema` — Zod schema for the tool input.
- *   - `executeDispatchToAgent(ctx, input)` — the execute() body.
- *   - `createDispatchToAgentTool(ctx)` — the AI SDK tool() definition, ready to
- *     be spread into createBuiltinTools() in builtin-tools.ts.
- *
- * It deliberately does NOT register itself in BUILTIN_TOOL_NAMES nor edit
- * builtin-tools.ts — that wiring is done by the owner of that file (see the
- * wiring instructions returned to the orchestrator).
+ *   - `dispatchToAgentInputSchema` — Zod schema for the input.
+ *   - `executeDispatchToAgent(ctx, input)` — the execute() body (chamado pela
+ *     rota routing:'department' de transfer_to_human).
  */
 
-import { tool } from 'ai'
 import { Prisma, type SessionStatus } from '@prisma/client'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
@@ -422,30 +411,4 @@ export async function executeDispatchToAgent(
     console.error('[dispatch_to_agent] Failed:', msg)
     return { success: false, message: `Erro ao encaminhar: ${msg}` }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Tool factory (spread into createBuiltinTools())
-// ---------------------------------------------------------------------------
-
-/**
- * Builds the dispatch_to_agent AI SDK tool bound to a session context.
- *
- * Wire it in builtin-tools.ts by spreading inside the createBuiltinTools()
- * return object:
- *
- *   import { createDispatchToAgentTool } from './department-dispatch/dispatch-to-agent'
- *   ...
- *   return {
- *     ...
- *     dispatch_to_agent: createDispatchToAgentTool(ctx),
- *   }
- */
-export function createDispatchToAgentTool(ctx: ToolExecutionContext) {
-  return tool({
-    description:
-      'Encaminha a conversa para um departamento específico e distribui automaticamente para o próximo atendente disponível via roleta (rodízio justo). Pausa a IA e atribui a conversa à pessoa sorteada. Use quando o cliente precisar de um setor específico (vendas, suporte). O departmentId é OPCIONAL: se você omitir, usa o departamento configurado do agente. Passe um Department.id explícito só para sobrescrever o setor padrão. Se não houver departamento adequado, use transfer_to_human.',
-    inputSchema: dispatchToAgentInputSchema,
-    execute: async (input) => executeDispatchToAgent(ctx, input),
-  })
 }

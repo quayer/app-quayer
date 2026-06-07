@@ -12,9 +12,9 @@
  * Reaproveita executores existentes (não duplica lógica): routing:'department'
  * delega ao executeDispatchToAgent maduro (roleta + fallbacks + aviso 6A).
  *
- * Compatibilidade: notify_team e dispatch_to_agent continuam existindo como
- * ALIASES deprecated (ver createNotifyTeamTool / o tool dispatch original) — a
- * remoção deles + migração de enabledTools é a Fase 2 (gated). Nada quebra agora.
+ * Os antigos tools notify_team e dispatch_to_agent foram REMOVIDOS (Fase 2): as
+ * capacidades viraram rotas desta tool. A migração de enabledTools
+ * (20260606070000) garantiu que todo agente que os usava ganhasse transfer_to_human.
  *
  * Convenção de todas as rotas: a tool NÃO manda mensagem ao cliente — o agente
  * confirma por texto. O modo 'self' é a exceção parcial: ele envia um AVISO ao
@@ -430,35 +430,5 @@ export function createTransferToHumanTool(ctx: ToolExecutionContext) {
       'reclamar, ou a situação exigir julgamento humano. O agente confirma por texto.',
     inputSchema: transferToHumanInputSchema,
     execute: async (input) => executeTransferToHuman(ctx, input),
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Alias DEPRECATED: notify_team → routing:'queue' + pauseAI:false
-// Preserva o schema antigo (message/priority) para não quebrar agentes que já
-// têm 'notify_team' no enabledTools e foram treinados com esse formato.
-// ---------------------------------------------------------------------------
-
-export const notifyTeamInputSchema = z.object({
-  message: z.string().min(1).max(500).describe('Mensagem da notificação'),
-  priority: z
-    .enum(['low', 'medium', 'high'])
-    .default('medium')
-    .describe('Prioridade: low, medium ou high'),
-})
-
-export function createNotifyTeamTool(ctx: ToolExecutionContext) {
-  return tool({
-    description:
-      '[DEPRECATED — use transfer_to_human com routing:queue e pauseAI:false] ' +
-      'Notifica a equipe sobre lead qualificado ou situação importante, sem pausar a IA.',
-    inputSchema: notifyTeamInputSchema,
-    execute: async ({ message, priority }) =>
-      executeQueueHandoff(ctx, {
-        reason: message,
-        urgency: priority,
-        summary: undefined,
-        pauseAI: false,
-      }),
   })
 }

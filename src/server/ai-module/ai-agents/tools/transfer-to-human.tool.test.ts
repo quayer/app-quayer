@@ -31,7 +31,6 @@ import {
 import { sendText } from '@/server/communication/services/uazapi-sender.service'
 import {
   executeTransferToHuman,
-  createNotifyTeamTool,
   type TransferToHumanInput,
 } from './transfer-to-human.tool'
 import type { ToolExecutionContext } from './builtin-tools'
@@ -173,21 +172,18 @@ describe('routing: self', () => {
   })
 })
 
-describe('alias notify_team', () => {
-  it('mapeia message/priority → queue notify-only (sem pausar)', async () => {
-    const execute = createNotifyTeamTool(ctx()).execute
-    if (!execute) throw new Error('tool sem execute')
-
-    const res = (await execute(
-      { message: 'lead quente aguardando', priority: 'high' },
-      {} as never,
-    )) as { success: boolean; paused?: boolean }
+describe('routing: queue notify-only (ex notify_team), alta urgência', () => {
+  it('pauseAI:false + urgency:high → notifica WARNING, sem pausar', async () => {
+    const res = await executeTransferToHuman(
+      ctx(),
+      input({ routing: 'queue', pauseAI: false, urgency: 'high' }),
+    )
 
     expect(res.success).toBe(true)
     expect(res.paused).toBe(false)
     expect(mockUpdate).not.toHaveBeenCalled()
     expect(mockNotify).toHaveBeenCalledTimes(1)
-    // priority high no caminho notify-only → WARNING
+    // urgency high no caminho notify-only → WARNING
     expect(mockNotify.mock.calls[0]![0].data.type).toBe('WARNING')
   })
 })

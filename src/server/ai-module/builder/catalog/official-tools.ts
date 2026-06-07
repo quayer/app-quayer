@@ -23,13 +23,6 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     status: 'available',
   },
   {
-    name: 'notify_team',
-    description: 'Notifica equipe sem pausar IA',
-    phase: 'v1',
-    type: 'builtin',
-    status: 'available',
-  },
-  {
     name: 'detect_talking_to_ai',
     description: 'Detecta se contato percebeu IA ou se e bot/spam',
     phase: 'v1',
@@ -78,13 +71,6 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     phase: 'v1.5',
     type: 'builtin',
     status: 'backlog',
-  },
-  {
-    name: 'dispatch_to_agent',
-    description: 'Distribui conversa para atendente via roleta',
-    phase: 'v1.5',
-    type: 'builtin',
-    status: 'available',
   },
   {
     name: 'calendar_list_slots',

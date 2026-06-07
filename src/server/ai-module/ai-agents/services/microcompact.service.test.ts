@@ -273,7 +273,7 @@ describe('cachedMicrocompact', () => {
       ...makeToolPair({ toolUseId: 'b', toolName: 'send_pricing' }),
       ...makeToolPair({ toolUseId: 'c', toolName: 'schedule_appointment' }),
       ...makeToolPair({ toolUseId: 'd', toolName: 'get_session_history' }),
-      ...makeToolPair({ toolUseId: 'e', toolName: 'notify_team' }),
+      ...makeToolPair({ toolUseId: 'e', toolName: 'send_pricing' }),
     ]
     const result = cachedMicrocompact(messages, { keepLast: 2 })
     // keepLast=2 → mantém d,e. Deleta a,b,c na ordem.
@@ -393,8 +393,7 @@ describe('COMPACTABLE_TOOLS', () => {
     expect(COMPACTABLE_TOOLS.has('search_contacts')).toBe(true)
     expect(COMPACTABLE_TOOLS.has('send_pricing')).toBe(true)
     expect(COMPACTABLE_TOOLS.has('schedule_appointment')).toBe(true)
-    expect(COMPACTABLE_TOOLS.has('notify_team')).toBe(true)
-    // Excluídas (auditoria obrigatória)
+    // Excluídas (auditoria obrigatória) — transfer_to_human absorveu o notify_team
     expect(COMPACTABLE_TOOLS.has('transfer_to_human')).toBe(false)
     expect(COMPACTABLE_TOOLS.has('create_lead')).toBe(false)
   })

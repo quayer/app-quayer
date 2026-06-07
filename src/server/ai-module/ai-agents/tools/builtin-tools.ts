@@ -15,7 +15,6 @@ import { tool } from 'ai'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
-import { createDispatchToAgentTool } from './department-dispatch'
 import {
   createCheckAvailabilityTool,
   createCreateEventTool,
@@ -28,10 +27,7 @@ import { createSearchKnowledgeTool } from './knowledge-search.tool'
 import { createSearchMediaTool } from './media-search.tool'
 import { createCalculatorTool } from './calculator.tool'
 import { createThinkTool } from './think.tool'
-import {
-  createTransferToHumanTool,
-  createNotifyTeamTool,
-} from './transfer-to-human.tool'
+import { createTransferToHumanTool } from './transfer-to-human.tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -82,12 +78,6 @@ export interface ToolExecutionContext {
  */
 export function createBuiltinTools(ctx: ToolExecutionContext) {
   return {
-    // -----------------------------------------------------------------------
-    // notify_team — DEPRECATED alias → transfer_to_human(routing:queue,pauseAI:false)
-    // Mantido para não quebrar agentes que já têm 'notify_team' no enabledTools.
-    // -----------------------------------------------------------------------
-    notify_team: createNotifyTeamTool(ctx),
-
     // -----------------------------------------------------------------------
     // schedule_appointment — captura intenção de agendamento na sessão
     // -----------------------------------------------------------------------
@@ -369,15 +359,11 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
 
     // -----------------------------------------------------------------------
     // transfer_to_human — UNIFICADA: routing queue|department|self + pauseAI.
-    // Consolida transfer_to_human + notify_team + dispatch_to_agent (ver
-    // transfer-to-human.tool.ts). routing:'department' delega à roleta madura.
+    // Consolidou os antigos notify_team (routing:queue,pauseAI:false) e
+    // dispatch_to_agent (routing:department → delega à roleta madura via
+    // executeDispatchToAgent). Ver transfer-to-human.tool.ts.
     // -----------------------------------------------------------------------
     transfer_to_human: createTransferToHumanTool(ctx),
-
-    // dispatch_to_agent — DEPRECATED alias → transfer_to_human(routing:department).
-    // Mantido enquanto agentes existentes ainda o referenciam no enabledTools
-    // (remoção + migração = Fase 2). É o mesmo executor da rota 'department'.
-    dispatch_to_agent: createDispatchToAgentTool(ctx),
 
     // Google Calendar (Wave 4b) — degradam ("agenda não conectada") até o
     // profissional conectar a agenda pelo link.
@@ -457,12 +443,10 @@ export type BuiltinToolName = keyof ReturnType<typeof createBuiltinTools>
 
 /** Ordered list of all available built-in tool names */
 export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
-  'notify_team',
   'schedule_appointment',
   'send_pricing',
   'create_lead',
   'transfer_to_human',
-  'dispatch_to_agent',
   'check_availability',
   'create_event',
   'cancel_event',
