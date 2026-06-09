@@ -7,9 +7,9 @@
  * Data model (added in migration `add_department_round_robin`, gated by
  * approval — see prisma/schema.prisma DESIGN block):
  *
- *   - Department.lastAssignedUserId / lastAssignedAt
- *       Persisted CURSOR: the User.id of the LAST member the roleta picked.
- *       NULL = the roleta never ran (start from the first member).
+ *   - Department.lastAssignedMemberId / lastAssignedAt
+ *       Persisted CURSOR: the DepartmentMember.id of the LAST member the roleta
+ *       picked. NULL = the roleta never ran (start from the first member).
  *
  *   - DepartmentMember (table `department_members`)
  *       Junction User<->Department. The pool of candidates.
@@ -160,8 +160,8 @@ function getDepartmentMemberDelegate(db: Db): DepartmentMemberDelegate | null {
  * distinguish them and serve as the persisted cursor.
  *
  * @param orderedPool   candidates sorted by (position, createdAt) ascending
- * @param lastMemberId  Department.lastAssignedUserId reinterpreted as the last
- *                      assigned DepartmentMember.id (cursor), or null
+ * @param lastMemberId  Department.lastAssignedMemberId — the last assigned
+ *                      DepartmentMember.id (cursor), or null
  * @returns the next candidate, or null if the pool is empty
  */
 export function pickNextInOrder(
@@ -261,7 +261,7 @@ export async function loadActivePool(
  *   1. Validate the department exists, belongs to `organizationId`, is active.
  *   2. Load the active, ordered member pool.
  *   3. Pick the next member after the cursor (circular).
- *   4. Advance the cursor: lastAssignedUserId = chosen.memberId, lastAssignedAt = now().
+ *   4. Advance the cursor: lastAssignedMemberId = chosen.memberId, lastAssignedAt = now().
  *
  * CURSOR semantics (M1): the cursor is keyed by `DepartmentMember.id` (userId is
  * nullable now — a member can be a non-user). It is persisted in the DEDICATED

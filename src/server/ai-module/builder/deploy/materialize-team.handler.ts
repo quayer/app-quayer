@@ -81,9 +81,9 @@ const ROULETTE_BLOCK_END = '<!--ROLETA:end-->'
 /**
  * Constrói o bloco DETERMINÍSTICO de roleta que ensina o LLM do agente deployado a
  * encaminhar para o setor via a tool UNIFICADA `transfer_to_human` com
- * `routing='department'` + o `departmentId` certo. (O antigo `dispatch_to_agent`
- * segue funcionando como alias deprecated → mesmo executor.) Estável (mesmo input
- * => mesmo texto) para idempotência da reconciliação do prompt.
+ * `routing='department'` + o `departmentId` certo. (Internamente, essa rota delega
+ * ao `executeDispatchToAgent`; o antigo alias `dispatch_to_agent` foi REMOVIDO.)
+ * Estável (mesmo input => mesmo texto) para idempotência da reconciliação do prompt.
  */
 function buildRouletteBlock(departmentId: string, departmentName: string): string {
   return [

@@ -96,6 +96,34 @@ function connectionLabel(c: ConnectionRow): string {
   return phone ? `${name} (${phone})` : name
 }
 
+/**
+ * Status em que a instância consegue ENVIAR (pré-requisito do warm transfer).
+ * Espelha o gate do deploy (`CONNECTED_CHANNEL_STATUSES` em deploy-tab.tsx) para
+ * o dono não atribuir uma instância caída — o que faria o warm transfer cair em
+ * send_failed silencioso (o cliente nunca receberia a abertura).
+ */
+const CONNECTABLE_STATUSES = new Set(["CONNECTED", "ACTIVE", "READY"])
+
+function isConnectable(status: string | null): boolean {
+  return !!status && CONNECTABLE_STATUSES.has(status.toUpperCase())
+}
+
+/** Dica curta de status (pt-BR) para instâncias não-conectáveis no `<select>`. */
+function statusHint(status: string | null): string {
+  switch ((status ?? "").toUpperCase()) {
+    case "DISCONNECTED":
+      return "desconectado"
+    case "CONNECTING":
+    case "QR_PENDING":
+    case "PENDING":
+      return "conectando"
+    case "ERROR":
+      return "com erro"
+    default:
+      return "indisponível"
+  }
+}
+
 export function HandoffPairingCard({
   value,
   disabled = false,
@@ -195,11 +223,15 @@ export function HandoffPairingCard({
                     style={fieldStyle}
                   >
                     <option value={NONE_VALUE}>Sem WhatsApp próprio (usa o número do bot)</option>
-                    {connections.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {connectionLabel(c)}
-                      </option>
-                    ))}
+                    {connections.map((c) => {
+                      const connectable = isConnectable(c.status)
+                      return (
+                        <option key={c.id} value={c.id} disabled={!connectable}>
+                          {connectionLabel(c)}
+                          {connectable ? "" : ` — ${statusHint(c.status)}`}
+                        </option>
+                      )
+                    })}
                   </select>
                 </div>
               )
