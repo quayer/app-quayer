@@ -30,7 +30,7 @@ Criados **na mesma transação** via `builderProjectRepository.createWithInitial
 - Histórico de mensagens (`BuilderProjectMessage`)
 - `stateSummary` (resumo do estado do projeto, injetado no prompt)
 
-Se precisar deletar projeto, cascatear a conversa antes (ou usar `onDelete: Cascade` no Prisma — verificar).
+O hard delete (`deleteProject` → `repository.hardDelete`) confia no `onDelete: Cascade` do Prisma: conversa, mensagens, deployments da saga e providers/calendar com `builderProjectId` somem juntos. O `AIAgentConfig` (FK `SetNull`) sobrevive — preserva ChatSession/Message de runtime — mas é desativado na mesma transação.
 
 ---
 
@@ -49,15 +49,17 @@ Phase 2 adicionará `EMAIL_AGENT`, `VOICE_AGENT`, etc. O campo é **não-nullabl
 ## Lifecycle
 
 ```
-DRAFT ──(publishProject)──▶ ACTIVE ──(manual)──▶ ARCHIVED
-  │                             │
-  │                             └─ publishedVersionId setado
-  └─ aiAgentId pode ser null   └─ aiAgentId obrigatório
+DRAFT ──(publishProject)──▶ ACTIVE ──(archiveProject)──▶ ARCHIVED
+  ▲                            │                            │
+  │                            └─ publishedVersionId setado │
+  └─ aiAgentId pode ser null   └─ aiAgentId obrigatório     │
+  └──────────────(unarchiveProject)───────────────────────┘
 ```
 
 - **DRAFT:** conversa em andamento, tool `create_agent` pode ou não ter rodado
 - **ACTIVE:** já foi publicado ao menos uma vez — consumindo mensagens reais via `ai-agents`
-- **ARCHIVED:** congelado, não recebe mensagens, mantido para auditoria
+- **ARCHIVED:** congelado, não recebe mensagens, mantido para auditoria. `unarchiveProject` traz de volta para DRAFT
+- **(excluído):** `deleteProject` é hard delete — sai do banco, não é um status
 
 ---
 
@@ -82,9 +84,10 @@ Nunca consultar `database.builderProject.findUnique({ where: { id } })` diretame
 | `listProjects` | GET | `/builder/projects` | `routes/crud.routes.ts` | Paginação + filtro por `type`/`status` |
 | `getProject` | GET | `/builder/projects/:id` | `routes/crud.routes.ts` | Retorna projeto + conversa + agente vinculado |
 | `createProject` | POST | `/builder/projects/create` | `routes/crud.routes.ts` | Cria DRAFT + conversa + 1ª mensagem |
-| `deleteProject` | DELETE | `/builder/projects/:id` | `routes/crud.routes.ts` | Soft delete (status → archived) |
+| `deleteProject` | DELETE | `/builder/projects/:id` | `routes/crud.routes.ts` | **Hard delete PERMANENTE** (cascata: conversa, mensagens, deployments, providers/calendar do projeto). Agente de runtime preservado mas desativado. Irreversível |
 | `renameProject` | PATCH | `/builder/projects/:id/rename` | `routes/crud.routes.ts` | Renomeia projeto |
 | `archiveProject` | PATCH | `/builder/projects/:id/archive` | `routes/crud.routes.ts` | Arquiva projeto (status → archived) |
+| `unarchiveProject` | PATCH | `/builder/projects/:id/unarchive` | `routes/crud.routes.ts` | Restaura projeto arquivado (status → draft, limpa archivedAt) |
 | `duplicateProject` | POST | `/builder/projects/:id/duplicate` | `routes/crud.routes.ts` | Clona projeto + agente + última versão de prompt |
 | `updatePrompt` | PATCH | `/builder/projects/:id/prompt` | `routes/prompt.routes.ts` | Auto-save do system prompt |
 | `listVersions` | GET | `/builder/projects/:id/versions` | `routes/prompt.routes.ts` | Histórico de versões do prompt |
@@ -106,7 +109,7 @@ src/server/ai-module/builder/projects/
 ├── projects.repository.ts      # Queries Prisma do subdomínio
 ├── projects.skill.md           # Este arquivo
 └── routes/
-    ├── crud.routes.ts          # listProjects, getProject, createProject, deleteProject, renameProject, archiveProject, duplicateProject
+    ├── crud.routes.ts          # listProjects, getProject, createProject, deleteProject, renameProject, archiveProject, unarchiveProject, duplicateProject, updateAgentSettings
     ├── prompt.routes.ts        # updatePrompt, listVersions, rollbackPrompt
     ├── metrics.routes.ts       # getSidebar, getMetrics
     ├── channel.routes.ts       # getProjectChannel, attachChannel, detachChannel

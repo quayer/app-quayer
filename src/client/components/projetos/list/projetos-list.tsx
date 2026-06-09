@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
+  ArchiveRestore,
   Filter,
   MoreHorizontal,
   Plus,
   Search,
   SlidersHorizontal,
 } from "lucide-react"
+import { toast } from "sonner"
 import {
   Table,
   TableBody,
@@ -19,12 +21,23 @@ import {
 } from "@/client/components/ui/table"
 import { Input } from "@/client/components/ui/input"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/client/components/ui/alert-dialog"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/client/components/ui/dropdown-menu"
+import { api } from "@/igniter.client"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import {
   PROJECT_STATUS_LABEL,
@@ -54,6 +67,14 @@ const FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "drafts", label: "Rascunhos" },
   { key: "arquivados", label: "Arquivados" },
 ]
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "error" in error) {
+    return String((error as { error: unknown }).error)
+  }
+  return fallback
+}
 
 function formatRelative(value: Date | string): string {
   const date = value instanceof Date ? value : new Date(value)
@@ -95,13 +116,68 @@ function matchesFilter(status: ProjectStatus, filter: FilterKey): boolean {
  *  - Table: Nome | Tipo | Status | Atualizado | Ações
  *  - Empty state centralizado
  *
- * Centralizado em max-w-5xl, tema reativo, linhas clicáveis com hover.
+ * Ações por linha (menu ⋯) consomem as mutations do builder controller:
+ *  renameProject / duplicateProject / archiveProject / unarchiveProject /
+ *  deleteProject. Após cada sucesso, `router.refresh()` re-busca os dados do
+ *  Server Component pai (page.tsx é force-dynamic).
  */
 export function ProjetosList({ projects }: ProjetosListProps) {
   const router = useRouter()
   const { tokens } = useAppTokens()
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("todos")
+
+  // ── Dialog targets ─────────────────────────────────────────────────────────
+  const [renameTarget, setRenameTarget] = useState<ProjetoItem | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [archiveTarget, setArchiveTarget] = useState<ProjetoItem | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ProjetoItem | null>(null)
+
+  // ── Lifecycle mutations ──────────────────────────────────────────────────────
+  const renameMutation = api.builder.renameProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto renomeado")
+      router.refresh()
+    },
+    onError: (error: unknown) =>
+      toast.error(errorMessage(error, "Erro ao renomear projeto")),
+  })
+
+  const duplicateMutation = api.builder.duplicateProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto duplicado")
+      router.refresh()
+    },
+    onError: (error: unknown) =>
+      toast.error(errorMessage(error, "Erro ao duplicar projeto")),
+  })
+
+  const archiveMutation = api.builder.archiveProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto arquivado")
+      router.refresh()
+    },
+    onError: (error: unknown) =>
+      toast.error(errorMessage(error, "Erro ao arquivar projeto")),
+  })
+
+  const unarchiveMutation = api.builder.unarchiveProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto restaurado")
+      router.refresh()
+    },
+    onError: (error: unknown) =>
+      toast.error(errorMessage(error, "Erro ao restaurar projeto")),
+  })
+
+  const deleteMutation = api.builder.deleteProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto excluído permanentemente")
+      router.refresh()
+    },
+    onError: (error: unknown) =>
+      toast.error(errorMessage(error, "Erro ao excluir projeto")),
+  })
 
   const filtered = useMemo(() => {
     return projects
@@ -115,6 +191,24 @@ export function ProjetosList({ projects }: ProjetosListProps) {
 
   const countLabel =
     filtered.length === 1 ? "1 projeto" : `${filtered.length} projetos`
+
+  // ── Action handlers ──────────────────────────────────────────────────────────
+  const openRename = (project: ProjetoItem) => {
+    setRenameValue(project.name)
+    setRenameTarget(project)
+  }
+  const submitRename = () => {
+    const trimmed = renameValue.trim()
+    if (!renameTarget || trimmed === "" || trimmed === renameTarget.name) {
+      setRenameTarget(null)
+      return
+    }
+    renameMutation.mutate({
+      params: { id: renameTarget.id },
+      body: { name: trimmed },
+    })
+    setRenameTarget(null)
+  }
 
   return (
     <div
@@ -285,6 +379,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                 const typeMeta = getProjectTypeMeta(project.type)
                 const statusStyle = getProjectStatusStyle(project.status)
                 const TypeIcon = typeMeta.icon
+                const isArchived = project.status === "archived"
                 return (
                   <TableRow
                     key={project.id}
@@ -373,17 +468,53 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem
                             onClick={() => router.push(`/projetos/${project.id}`)}
                           >
                             Abrir
                           </DropdownMenuItem>
-                          <DropdownMenuItem disabled>Renomear</DropdownMenuItem>
-                          <DropdownMenuItem disabled>Duplicar</DropdownMenuItem>
+                          {isArchived ? (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                unarchiveMutation.mutate({
+                                  params: { id: project.id },
+                                  body: {},
+                                })
+                              }
+                            >
+                              <ArchiveRestore className="mr-2 h-3.5 w-3.5" />
+                              Restaurar
+                            </DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem onClick={() => openRename(project)}>
+                                Renomear
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  duplicateMutation.mutate({
+                                    params: { id: project.id },
+                                    body: {},
+                                  })
+                                }
+                              >
+                                Duplicar
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setArchiveTarget(project)}
+                              >
+                                Arquivar
+                              </DropdownMenuItem>
+                            </>
+                          )}
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem disabled className="text-destructive">
-                            Arquivar
+                          <DropdownMenuItem
+                            onClick={() => setDeleteTarget(project)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            Excluir permanentemente
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -395,6 +526,102 @@ export function ProjetosList({ projects }: ProjetosListProps) {
           </Table>
         </div>
       )}
+
+      {/* ── Rename dialog ─────────────────────────────────────────────────── */}
+      <AlertDialog
+        open={renameTarget !== null}
+        onOpenChange={(open) => !open && setRenameTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Renomear projeto</AlertDialogTitle>
+            <AlertDialogDescription>
+              Escolha um novo nome para o projeto.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            autoFocus
+            value={renameValue}
+            maxLength={100}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                submitRename()
+              }
+            }}
+            aria-label="Novo nome do projeto"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={submitRename}>Salvar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Archive confirm ───────────────────────────────────────────────── */}
+      <AlertDialog
+        open={archiveTarget !== null}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Arquivar projeto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O projeto <strong>{archiveTarget?.name}</strong> sai da lista
+              principal e vai para o filtro Arquivados. Você pode restaurá-lo
+              depois.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (archiveTarget) {
+                  archiveMutation.mutate({
+                    params: { id: archiveTarget.id },
+                    body: {},
+                  })
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Arquivar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Delete confirm (PERMANENT) ────────────────────────────────────── */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir permanentemente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação é <strong>irreversível</strong>. O projeto{" "}
+              <strong>{deleteTarget?.name}</strong>, sua conversa com o Builder e
+              o histórico de mensagens do projeto serão apagados. O agente já
+              publicado é desativado para parar de responder no WhatsApp.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteTarget) {
+                  deleteMutation.mutate({ params: { id: deleteTarget.id } })
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

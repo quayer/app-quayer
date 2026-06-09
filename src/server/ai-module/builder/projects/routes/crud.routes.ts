@@ -1,7 +1,8 @@
 /**
  * Builder Projects — CRUD routes
  * Actions: listProjects, getProject, createProject, deleteProject,
- *          renameProject, archiveProject, duplicateProject
+ *          renameProject, archiveProject, unarchiveProject, duplicateProject,
+ *          updateAgentSettings
  */
 
 import { z } from 'zod'
@@ -47,6 +48,11 @@ export const archiveProjectParamsSchema = z.object({
   id: z.string().uuid('ID de projeto inválido'),
 })
 export const archiveProjectBodySchema = z.object({})
+
+export const unarchiveProjectParamsSchema = z.object({
+  id: z.string().uuid('ID de projeto inválido'),
+})
+export const unarchiveProjectBodySchema = z.object({})
 
 export const duplicateProjectParamsSchema = z.object({
   id: z.string().uuid('ID de projeto inválido'),
@@ -208,12 +214,12 @@ export const crudRoutes = {
   }),
 
   // ==========================================
-  // DELETE PROJECT (soft delete)
+  // DELETE PROJECT (hard delete — PERMANENTE)
   // ==========================================
   deleteProject: igniter.mutation({
     name: 'Delete Builder Project',
     description:
-      'Soft delete de um BuilderProject: marca status = archived e carimba archivedAt. Não remove o registro fisicamente.',
+      'Exclui PERMANENTEMENTE um BuilderProject e tudo que cascateia dele (conversa, mensagens, deployments da saga, providers/calendar do projeto). O agente de runtime vinculado é preservado mas desativado. Irreversível.',
     path: '/projects/:id',
     method: 'DELETE',
     use: [authOrApiKeyProcedure({ required: true })],
@@ -233,32 +239,28 @@ export const crudRoutes = {
       const { id } = parseResult.data
 
       try {
-        const archived = await builderProjectRepository.softDelete(
+        const deleted = await builderProjectRepository.hardDelete(
           id,
           user.currentOrgId,
         )
 
-        if (!archived) {
+        if (!deleted) {
           return response.notFound('Projeto não encontrado')
         }
 
         return response.json({
           success: true,
-          data: {
-            id: archived.id,
-            status: archived.status,
-            archivedAt: archived.archivedAt,
-          },
-          message: 'Projeto arquivado',
+          data: { id: deleted.id },
+          message: 'Projeto excluído permanentemente',
         })
       } catch (error: unknown) {
         console.error(
-          '[projectsRoutes.deleteProject] Erro ao arquivar projeto:',
+          '[projectsRoutes.deleteProject] Erro ao excluir projeto:',
           error,
         )
         const message =
           error instanceof Error ? error.message : 'Erro desconhecido'
-        return response.badRequest(`Erro ao arquivar projeto: ${message}`)
+        return response.badRequest(`Erro ao excluir projeto: ${message}`)
       }
     },
   }),
@@ -337,6 +339,46 @@ export const crudRoutes = {
         console.error('[projectsRoutes.archiveProject] Erro:', error)
         const message = error instanceof Error ? error.message : 'Erro desconhecido'
         return response.badRequest(`Erro ao arquivar projeto: ${message}`)
+      }
+    },
+  }),
+
+  // ==========================================
+  // UNARCHIVE PROJECT — PATCH /projects/:id/unarchive
+  // ==========================================
+  unarchiveProject: igniter.mutation({
+    name: 'Unarchive Builder Project',
+    description: 'Restaura um BuilderProject arquivado (status → draft, limpa archivedAt). Verifica posse por org.',
+    path: '/projects/:id/unarchive',
+    method: 'PATCH',
+    use: [authOrApiKeyProcedure({ required: true })],
+    body: unarchiveProjectBodySchema,
+    handler: async ({ request, context, response }) => {
+      const user = context.auth?.session?.user as AuthedUser | undefined
+      if (!user) return response.unauthorized('Não autenticado')
+      if (!user.currentOrgId) return response.badRequest('Organização não selecionada')
+
+      const parseResult = unarchiveProjectParamsSchema.safeParse(request.params)
+      if (!parseResult.success) return response.badRequest('ID de projeto inválido')
+      const { id } = parseResult.data
+
+      try {
+        const updated = await builderProjectRepository.unarchive(id, user.currentOrgId)
+        if (!updated) return response.notFound('Projeto não encontrado')
+
+        return response.json({
+          success: true,
+          data: {
+            id: updated.id,
+            status: updated.status,
+            archivedAt: updated.archivedAt,
+          },
+          message: 'Projeto restaurado',
+        })
+      } catch (error: unknown) {
+        console.error('[projectsRoutes.unarchiveProject] Erro:', error)
+        const message = error instanceof Error ? error.message : 'Erro desconhecido'
+        return response.badRequest(`Erro ao restaurar projeto: ${message}`)
       }
     },
   }),

@@ -3,7 +3,7 @@
  * Compõe os route files em projectsRoutes (consumido por builder.controller.ts).
  *
  * Route files:
- *   routes/crud.routes.ts       → listProjects, getProject, createProject, deleteProject, renameProject, archiveProject, duplicateProject
+ *   routes/crud.routes.ts       → listProjects, getProject, createProject, deleteProject, renameProject, archiveProject, unarchiveProject, duplicateProject, updateAgentSettings
  *   routes/prompt.routes.ts     → updatePrompt, listVersions, rollbackPrompt
  *   routes/metrics.routes.ts    → getSidebar, getMetrics
  *   routes/channel.routes.ts    → getProjectChannel, attachChannel, detachChannel

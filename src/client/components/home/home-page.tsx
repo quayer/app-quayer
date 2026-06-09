@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Bot, ChevronDown, Paperclip, Sparkles, X } from "lucide-react"
+import { Bot, Sparkles } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { MessageInput } from "@/client/components/ds/message-input"
-import { ClaudeIcon, CodexIcon } from "@/client/components/ds/model-icons"
 import { EmptyState } from "@/client/components/custom/empty-state"
 import {
   PROJECT_STATUS_LABEL,
@@ -27,31 +26,8 @@ interface HomePageProps {
   recentProjects: Project[]
 }
 
-type Tab = "my-projects" | "team-projects"
-
-interface ModelOption {
-  id: string
-  label: string
-  icon: typeof ClaudeIcon
-}
-
-const MODELS: ModelOption[] = [
-  { id: "claude", label: "Claude", icon: ClaudeIcon },
-  { id: "codex", label: "Codex", icon: CodexIcon },
-]
-
 const INPUT_PLACEHOLDER =
   "Crie um agente de captação de leads para advocacia tributária"
-
-/** Tipos de arquivo aceitos para anexar ao prompt do agente. */
-const ACCEPTED_FILE_TYPES =
-  "image/*,application/pdf,text/plain,text/markdown,.md,.csv"
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 export function HomePage({
   recentProjects,
@@ -59,30 +35,10 @@ export function HomePage({
   const router = useRouter()
   const { tokens } = useAppTokens()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [prompt, setPrompt] = useState("")
-  const [attachedFile, setAttachedFile] = useState<File | null>(null)
-  const [selectedModel, setSelectedModel] = useState<ModelOption>(MODELS[0]!)
-  const [modelOpen, setModelOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<Tab>("my-projects")
   const createProject = api.builder.createProject as any
-
-  const pickFile = () => fileInputRef.current?.click()
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null
-    if (file && file.size > 10 * 1024 * 1024) {
-      setError("Arquivo acima de 10 MB. Escolha um menor.")
-      return
-    }
-    setAttachedFile(file)
-    if (error) setError(null)
-  }
-  const removeFile = () => {
-    setAttachedFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
 
   // Auto-focus no mount — cobre navegação via ⌘K e clique em "Nova conversa"
   useEffect(() => {
@@ -178,16 +134,6 @@ export function HomePage({
             </h1>
           </div>
 
-          {/* Input — hidden file trigger fora do MessageInput */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPTED_FILE_TYPES}
-            onChange={handleFileChange}
-            className="hidden"
-            aria-hidden
-          />
-
           <MessageInput
             value={prompt}
             onChange={(v) => { setPrompt(v); if (error) setError(null) }}
@@ -203,110 +149,6 @@ export function HomePage({
             textareaProps={{ id: "builder-home-input" }}
             voiceEnabled
             voiceLang="pt-BR"
-            aboveTextarea={attachedFile ? (
-              <div
-                className="flex items-center justify-between gap-3 border-b px-4 py-2.5"
-                style={{ borderColor: tokens.divider }}
-              >
-                <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <div
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
-                    style={{ backgroundColor: "rgba(255,214,10,0.1)", color: tokens.brand }}
-                  >
-                    <Paperclip className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium" style={{ color: tokens.textPrimary }}>
-                      {attachedFile.name}
-                    </p>
-                    <p className="text-[11px]" style={{ color: tokens.textTertiary }}>
-                      {formatFileSize(attachedFile.size)}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={removeFile}
-                  className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/5"
-                  style={{ color: tokens.textTertiary }}
-                  aria-label="Remover anexo"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : undefined}
-            leftSlot={
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={pickFile}
-                  disabled={isPending}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border transition-colors hover:bg-white/5 disabled:opacity-50"
-                  style={{
-                    borderColor: attachedFile ? tokens.brandBorder : tokens.border,
-                    backgroundColor: attachedFile ? "rgba(255,214,10,0.08)" : "transparent",
-                    color: attachedFile ? tokens.brand : tokens.textSecondary,
-                  }}
-                  aria-label="Anexar arquivo"
-                  title="Anexar imagem, PDF ou texto (até 10 MB)"
-                >
-                  <Paperclip className="h-4 w-4" />
-                </button>
-
-                <div className="relative">
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => setModelOpen((v) => !v)}
-                    aria-haspopup="listbox"
-                    aria-expanded={modelOpen}
-                    className="flex h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors hover:bg-white/5 disabled:opacity-50"
-                    style={{ borderColor: tokens.border, color: tokens.textPrimary }}
-                  >
-                    <selectedModel.icon size={14} />
-                    {selectedModel.label}
-                    <ChevronDown className="h-3 w-3 opacity-70" />
-                  </button>
-
-                  {modelOpen && (
-                    <>
-                      <div aria-hidden className="fixed inset-0 z-10" onClick={() => setModelOpen(false)} />
-                      <div
-                        role="listbox"
-                        className="absolute bottom-11 left-0 z-20 min-w-[160px] overflow-hidden rounded-xl border p-1 shadow-xl"
-                        style={{
-                          backgroundColor: tokens.bgElevated,
-                          borderColor: tokens.border,
-                          boxShadow: "0 12px 40px -12px rgba(0,0,0,0.8)",
-                        }}
-                      >
-                        {MODELS.map((model) => {
-                          const selected = model.id === selectedModel.id
-                          const Icon = model.icon
-                          return (
-                            <button
-                              key={model.id}
-                              type="button"
-                              role="option"
-                              aria-selected={selected}
-                              onClick={() => { setSelectedModel(model); setModelOpen(false) }}
-                              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-white/5"
-                              style={{
-                                backgroundColor: selected ? "rgba(255,214,10,0.08)" : "transparent",
-                                color: selected ? tokens.brand : tokens.textPrimary,
-                              }}
-                            >
-                              <Icon size={14} />
-                              {model.label}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            }
           />
 
           {error && (
@@ -332,26 +174,16 @@ export function HomePage({
               }}
             >
               <TabButton
-                active={activeTab === "my-projects"}
-                onClick={() => setActiveTab("my-projects")}
+                active
                 label="Meus Projetos"
                 badge={recentProjects.length}
-              />
-              <TabButton
-                active={activeTab === "team-projects"}
-                onClick={() => setActiveTab("team-projects")}
-                label="Do Time"
-                badge={0}
               />
             </div>
           </div>
 
           {/* Tab content */}
           <div className="min-h-[200px]">
-            {activeTab === "my-projects" && (
-              <MyProjectsTab projects={recentProjects} />
-            )}
-            {activeTab === "team-projects" && <TeamTab />}
+            <MyProjectsTab projects={recentProjects} />
           </div>
         </div>
       </div>
@@ -368,7 +200,7 @@ function TabButton({
   badge,
 }: {
   active: boolean
-  onClick: () => void
+  onClick?: () => void
   label: string
   badge: number
 }) {
@@ -476,15 +308,5 @@ function MyProjectsTab({ projects }: { projects: Project[] }) {
         Ver todos os projetos →
       </Link>
     </div>
-  )
-}
-
-function TeamTab() {
-  return (
-    <EmptyState
-      icon={<Bot className="h-5 w-5" />}
-      title="Projetos do time em breve"
-      description="Veja o que outras pessoas da sua organização estão construindo."
-    />
   )
 }

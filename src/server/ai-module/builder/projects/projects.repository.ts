@@ -5,7 +5,7 @@
  * BuilderProjectMessage / BuilderPromptVersion. Todos os métodos são escopados
  * por organização no chamador — esta camada confia que o chamador já validou
  * a posse da organização, exceto quando o método explicitamente a impõe
- * (ver `findByIdForOrg`, `findProjectForOrg`, `softDelete`).
+ * (ver `findByIdForOrg`, `findProjectForOrg`, `hardDelete`).
  *
  * Nota: este arquivo é a nova casa canônica do repositório. O antigo
  * `../repositories/builder-project.repository.ts` permanece no lugar até que
@@ -191,26 +191,47 @@ export const builderProjectRepository = {
   },
 
   /**
-   * Soft delete: marca o projeto como `archived` e carimba `archivedAt` com
-   * o timestamp atual. Só arquiva se o projeto pertencer à org passada.
+   * Hard delete PERMANENTE de um BuilderProject. Remove fisicamente o registro
+   * e tudo que cascateia dele via FK `onDelete: Cascade`:
+   *   - BuilderProjectConversation → BuilderProjectMessage
+   *   - BuilderDeployment (saga de publicação)
+   *   - OrganizationProvider e CalendarConnection com `builderProjectId` setado
    *
-   * Retorna o registro atualizado, ou `null` caso o projeto não exista/não
-   * pertença à organização.
+   * O `AIAgentConfig` vinculado (FK `SetNull`) NÃO é apagado — preserva o
+   * histórico de runtime (ChatSession/Message com clientes reais) e analytics.
+   * Para não deixar um agente zumbi respondendo no WhatsApp após a exclusão do
+   * projeto, desativamos o agente (`isActive = false`) e pausamos seus
+   * AgentDeployment ACTIVE dentro da mesma transação.
+   *
+   * Retorna `{ id }` do projeto removido, ou `null` caso não exista/não pertença
+   * à organização.
    */
-  async softDelete(projectId: string, organizationId: string) {
+  async hardDelete(projectId: string, organizationId: string) {
     const database = getDatabase()
-    const existing = await database.builderProject.findFirst({
+    const project = await database.builderProject.findFirst({
       where: { id: projectId, organizationId },
-      select: { id: true },
+      select: { id: true, aiAgentId: true },
     })
-    if (!existing) return null
+    if (!project) return null
 
-    return database.builderProject.update({
-      where: { id: projectId },
-      data: {
-        status: 'archived',
-        archivedAt: new Date(),
-      },
+    return database.$transaction(async (tx) => {
+      // Stop the runtime agent so nothing keeps answering on WhatsApp.
+      if (project.aiAgentId) {
+        await tx.agentDeployment.updateMany({
+          where: { agentConfigId: project.aiAgentId, status: 'ACTIVE' },
+          data: { status: 'PAUSED', updatedAt: new Date() },
+        })
+        await tx.aIAgentConfig.update({
+          where: { id: project.aiAgentId },
+          data: { isActive: false },
+        })
+      }
+
+      // Physical delete — cascade handles conversation/messages/deployments and
+      // project-scoped providers/calendar connections.
+      await tx.builderProject.delete({ where: { id: project.id } })
+
+      return { id: project.id }
     })
   },
 
@@ -429,6 +450,27 @@ export const builderProjectRepository = {
     return database.builderProject.update({
       where: { id: projectId },
       data: { status: 'archived', archivedAt: new Date() },
+    })
+  },
+
+  /**
+   * Unarchive: brings an archived project back to `draft` and clears
+   * `archivedAt`. Verifies org ownership. Returns updated project or null.
+   *
+   * Reverte para `draft` (não `production`) de propósito: um projeto só volta a
+   * `production` republicando pela saga de deploy.
+   */
+  async unarchive(projectId: string, organizationId: string) {
+    const database = getDatabase()
+    const existing = await database.builderProject.findFirst({
+      where: { id: projectId, organizationId },
+      select: { id: true },
+    })
+    if (!existing) return null
+
+    return database.builderProject.update({
+      where: { id: projectId },
+      data: { status: 'draft', archivedAt: null },
     })
   },
 

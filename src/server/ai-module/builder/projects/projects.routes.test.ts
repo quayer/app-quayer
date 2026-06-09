@@ -93,8 +93,16 @@ describe('projectsRoutes.deleteProject', () => {
     expect(true).toBe(true)
   })
 
-  it('marca status=archived e carimba archivedAt (soft delete)', () => {
-    // TODO(US-xxx): validar que registro permanece no DB, só com flags novas.
+  it('hard delete: remove o registro do DB e cascateia conversa/mensagens/deployments', () => {
+    // TODO(US-xxx): validar que builderProject.findUnique retorna null pós-delete
+    // e que o AIAgentConfig vinculado é preservado porém desativado (isActive=false).
+    expect(true).toBe(true)
+  })
+})
+
+describe('projectsRoutes.unarchiveProject', () => {
+  it('restaura projeto arquivado (status → draft, limpa archivedAt)', () => {
+    // TODO(US-xxx)
     expect(true).toBe(true)
   })
 })

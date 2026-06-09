@@ -68,7 +68,7 @@ export function Workspace(props: WorkspaceProps) {
  *  - rename inline (shadcn Input)
  *  - status badge (paleta compartilhada via project-status.ts)
  *  - mobile toggle (shadcn ToggleGroup) entre chat / preview
- *  - menu ⋯ com ações (Renomear / Duplicar / Arquivar)
+ *  - menu ⋯ com ações (Renomear / Duplicar / Arquivar ou Restaurar / Excluir)
  *
  * Tema reativo via useAppTokens — mesmo padrão da home + sidebar.
  */
@@ -79,6 +79,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = React.useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [mobilePanel, setMobilePanel] = React.useState<"chat" | "preview">(
     "chat",
   )
@@ -155,6 +156,32 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
     },
   })
 
+  // Restore: archived → draft, refresh to update the status badge in place
+  const unarchiveMutation = api.builder.unarchiveProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto restaurado")
+      router.refresh()
+    },
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Erro ao restaurar projeto"
+      toast.error(message)
+    },
+  })
+
+  // Delete: PERMANENT — navigate back to /projetos on success
+  const deleteMutation = api.builder.deleteProject.useMutation({
+    onSuccess: () => {
+      toast.success("Projeto excluído permanentemente")
+      router.push("/projetos")
+    },
+    onError: (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message : "Erro ao excluir projeto"
+      toast.error(message)
+    },
+  })
+
   const handleTabChange = React.useCallback((tab: PreviewTab) => {
     setActiveTab(tab)
     if (typeof window !== "undefined") {
@@ -227,6 +254,31 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             Arquivar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir permanentemente?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta ação é <strong>irreversível</strong>. O projeto{" "}
+            <strong>{name}</strong>, sua conversa com o Builder e o histórico de
+            mensagens do projeto serão apagados. O agente já publicado é
+            desativado para parar de responder no WhatsApp.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() =>
+              deleteMutation.mutate({ params: { id: project.id } })
+            }
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Excluir
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -345,7 +397,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onClick={() => handleMenuAction("rename")}>
                 Renomear
               </DropdownMenuItem>
@@ -353,11 +405,30 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
                 Duplicar
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {project.status === "archived" ? (
+                <DropdownMenuItem
+                  onClick={() =>
+                    unarchiveMutation.mutate({
+                      params: { id: project.id },
+                      body: {},
+                    })
+                  }
+                >
+                  Restaurar
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => handleMenuAction("archive")}
+                  className="text-destructive focus:text-destructive"
+                >
+                  Arquivar
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
-                onClick={() => handleMenuAction("archive")}
+                onClick={() => setDeleteConfirmOpen(true)}
                 className="text-destructive focus:text-destructive"
               >
-                Arquivar
+                Excluir permanentemente
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
