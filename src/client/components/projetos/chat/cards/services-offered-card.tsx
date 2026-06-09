@@ -1,11 +1,13 @@
 "use client"
 
 /**
- * Builder Cards — Services offered / not offered (Orayon Uplift, W3)
+ * Builder Cards — Agent scope: does / does not (Orayon Uplift, W3)
  *
- * cardKey `services`. Two editable chip lists:
- *   - "Oferece"      → services.offered    (brand-subtle chips)
- *   - "NÃO oferece"  → services.notOffered (danger-subtle chips)
+ * cardKey `services`. Defines the agent's SCOPE — what it DOES and what it does
+ * NOT do — useful for any agent type (support, FAQ, etc.), not only services.
+ * Two editable chip lists:
+ *   - "Faz / oferece" → services.offered    (brand-subtle chips)
+ *   - "NÃO faz"       → services.notOffered (danger-subtle chips)
  *
  * PRESENTATIONAL: pre-fills from `props.value.services`, lets the user add
  * (Enter / "+" button) and remove (x) chips, trims + de-dupes input, caps each
@@ -202,8 +204,8 @@ export function ServicesOfferedCard({
   return (
     <CardShell
       icon={<Wrench className="h-4 w-4" />}
-      title="Serviços do agente"
-      reason="Liste o que o agente oferece e o que ele NÃO faz, para evitar promessas indevidas nas conversas."
+      title="O que o agente faz"
+      reason="Liste o que o agente FAZ e o que ele NÃO faz, para evitar promessas indevidas nas conversas."
       tokens={tokens}
       actions={[
         {
@@ -227,8 +229,8 @@ export function ServicesOfferedCard({
     >
       <div className="flex flex-col gap-4">
         <ChipList
-          heading="Oferece"
-          placeholder="Ex.: corte de cabelo, consultoria…"
+          heading="Faz / oferece"
+          placeholder="Ex.: tirar dúvidas, agendar, consultoria…"
           items={offered}
           onAdd={addOffered}
           onRemove={removeOffered}
@@ -237,8 +239,8 @@ export function ServicesOfferedCard({
           disabled={disabled}
         />
         <ChipList
-          heading="NÃO oferece"
-          placeholder="Ex.: atendimento domiciliar, parcelamento…"
+          heading="NÃO faz"
+          placeholder="Ex.: suporte técnico, parcelamento…"
           items={notOffered}
           onAdd={addNotOffered}
           onRemove={removeNotOffered}

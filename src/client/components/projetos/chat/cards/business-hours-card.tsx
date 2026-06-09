@@ -53,12 +53,35 @@ import {
   type WeeklySchedule,
 } from "./business-hours/schedule-shape"
 
+/** Comportamento do agente FORA do horário de atendimento (Onda 3d). */
+export type OutOfHoursBehavior = "reply_notice" | "silent"
+
 /** EXACT submit payload for cardKey 'business_hours'. */
 export interface BusinessHoursPayload {
   preset: HoursPreset
   schedule: WeeklySchedule
   timezone: string
+  // Onda 3d — fora do horário: responde avisando ('reply_notice') ou fica em
+  // silêncio ('silent'). Pré-preenchido de value.hours.outOfHours (default reply_notice).
+  outOfHours: OutOfHoursBehavior
 }
+
+const OUT_OF_HOURS_OPTIONS: ReadonlyArray<{
+  key: OutOfHoursBehavior
+  label: string
+  hint: string
+}> = [
+  {
+    key: "reply_notice",
+    label: "Responde avisando",
+    hint: "Fora do horário, avisa que está fora do expediente",
+  },
+  {
+    key: "silent",
+    label: "Fica em silêncio",
+    hint: "Fora do horário, não responde até reabrir",
+  },
+]
 
 const PRESET_OPTIONS: ReadonlyArray<{
   key: HoursPreset
@@ -115,6 +138,11 @@ export function BusinessHoursCard({
   // Which day row the cursor/focus is on — drives the preview highlight.
   const [highlightDay, setHighlightDay] = React.useState<WeekdayKey | null>(
     null,
+  )
+  // Onda 3d — comportamento fora do horário, pré-preenchido do state (default
+  // 'reply_notice' quando ausente). É additivo: states legados caem no default.
+  const [outOfHours, setOutOfHours] = React.useState<OutOfHoursBehavior>(
+    hours.outOfHours === "silent" ? "silent" : "reply_notice",
   )
 
   const agentName =
@@ -226,8 +254,9 @@ export function BusinessHoursCard({
       preset,
       schedule: buildSubmitSchedule(),
       timezone: timezone.trim() || DEFAULT_TIMEZONE,
+      outOfHours,
     })
-  }, [buildSubmitSchedule, disabled, onSubmit, preset, timezone])
+  }, [buildSubmitSchedule, disabled, onSubmit, outOfHours, preset, timezone])
 
   return (
     <CardShell
@@ -490,6 +519,53 @@ export function BusinessHoursCard({
             color: tokens.textPrimary,
           }}
         />
+      </div>
+
+      {/* Out-of-hours behavior (Onda 3d) */}
+      <div className="mt-4">
+        <span
+          className="mb-1 block text-[12px] font-medium"
+          style={{ color: tokens.textSecondary }}
+        >
+          Fora do horário
+        </span>
+        <div
+          className="grid gap-2 sm:grid-cols-2"
+          role="radiogroup"
+          aria-label="Comportamento fora do horário"
+        >
+          {OUT_OF_HOURS_OPTIONS.map((option) => {
+            const active = outOfHours === option.key
+            return (
+              <button
+                key={option.key}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={disabled}
+                onClick={() => setOutOfHours(option.key)}
+                className="rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                style={{
+                  backgroundColor: active ? tokens.brandSubtle : tokens.bgBase,
+                  borderColor: active ? tokens.brand : tokens.divider,
+                }}
+              >
+                <span
+                  className="block text-[13px] font-medium"
+                  style={{ color: tokens.textPrimary }}
+                >
+                  {option.label}
+                </span>
+                <span
+                  className="mt-1 block text-[11px] leading-relaxed"
+                  style={{ color: tokens.textSecondary }}
+                >
+                  {option.hint}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </CardShell>
   )

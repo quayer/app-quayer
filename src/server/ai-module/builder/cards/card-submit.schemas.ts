@@ -128,6 +128,9 @@ export const businessHoursPayloadSchema = z.object({
   preset: z.string().min(1).max(120).optional(),
   schedule: z.unknown(),
   timezone: z.string().min(1).max(120).optional(),
+  // Onda 3d — comportamento FORA do horário (OPCIONAL, additivo): 'reply_notice'
+  // (responde avisando) ou 'silent' (fica em silêncio). → builderState.hours.outOfHours.
+  outOfHours: z.enum(['reply_notice', 'silent']).optional(),
 })
 
 /**

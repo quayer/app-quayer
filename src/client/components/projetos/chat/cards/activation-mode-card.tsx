@@ -18,7 +18,7 @@
  */
 
 import * as React from "react"
-import { Check, KeyRound, Plus, X } from "lucide-react"
+import { Check, ChevronDown, KeyRound, Plus, X } from "lucide-react"
 
 import type {
   ActivationModePayload,
@@ -76,11 +76,34 @@ const ACTIVATION_MODE_OPTIONS: readonly ActivationModeOption[] = [
   },
 ]
 
+/**
+ * Onda 3d — anti visual-overload: os 2 modos COMUNS ficam sempre visíveis e os
+ * 2 AVANÇADOS colapsam atrás de um expander "Mostrar opções avançadas".
+ * Os 4 modos seguem 100% selecionáveis (em especial `all_except_blacklist`,
+ * que destrava o passo `silenced_contacts` no step-engine) — só mudou o LAYOUT.
+ */
+const COMMON_MODES: readonly ActivationModeValue[] = ["all", "keyword_trigger"]
+const ADVANCED_MODES: readonly ActivationModeValue[] = [
+  "all_except_blacklist",
+  "whitelist_only",
+]
+
+const COMMON_OPTIONS = ACTIVATION_MODE_OPTIONS.filter((option) =>
+  COMMON_MODES.includes(option.value),
+)
+const ADVANCED_OPTIONS = ACTIVATION_MODE_OPTIONS.filter((option) =>
+  ADVANCED_MODES.includes(option.value),
+)
+
 /** Default mode when the state carries no (or an unknown) activation mode. */
 const DEFAULT_MODE: ActivationModeValue = "all"
 
 function isActivationMode(value: string): value is ActivationModeValue {
   return (ACTIVATION_MODES as readonly string[]).includes(value)
+}
+
+function isAdvancedMode(value: ActivationModeValue): boolean {
+  return ADVANCED_MODES.includes(value)
 }
 
 /** Trim + drop empties + dedupe (case-insensitive) while preserving order. */
@@ -118,6 +141,12 @@ export function ActivationModeCard({
     normalizeKeywords(value.activation.keywords),
   )
   const [draft, setDraft] = React.useState("")
+
+  // Expander dos 2 modos avançados — já abre se o modo persistido for avançado,
+  // garantindo que o usuário enxergue a opção que já está selecionada.
+  const [advancedOpen, setAdvancedOpen] = React.useState<boolean>(() =>
+    isAdvancedMode(initialMode),
+  )
 
   const addKeyword = React.useCallback(() => {
     const trimmed = draft.trim()
@@ -178,6 +207,55 @@ export function ActivationModeCard({
   const confirmDisabled =
     disabled || (isKeywordMode && normalizeKeywords(keywords).length === 0)
 
+  // Render de um modo (radio) — compartilhado entre os comuns e os avançados
+  // para manter EXATAMENTE o mesmo visual/comportamento de seleção dos 4.
+  const renderOption = (option: ActivationModeOption) => {
+    const checked = mode === option.value
+    return (
+      <button
+        key={option.value}
+        type="button"
+        role="radio"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => setMode(option.value)}
+        className="group rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+        style={{
+          backgroundColor: checked ? tokens.brandSubtle : tokens.bgBase,
+          borderColor: checked ? tokens.brand : tokens.divider,
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <span
+              className="text-[13px] font-medium"
+              style={{ color: tokens.textPrimary }}
+            >
+              {option.title}
+            </span>
+            <p
+              className="mt-1 text-[12px] leading-relaxed"
+              style={{ color: tokens.textSecondary }}
+            >
+              {option.description}
+            </p>
+          </div>
+          <span
+            aria-hidden="true"
+            className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+            style={{
+              backgroundColor: checked ? tokens.brand : "transparent",
+              borderColor: checked ? tokens.brand : tokens.divider,
+              color: checked ? tokens.textInverse : "transparent",
+            }}
+          >
+            {checked && <Check className="h-3 w-3" strokeWidth={3} />}
+          </span>
+        </div>
+      </button>
+    )
+  }
+
   return (
     <CardShell
       icon={<KeyRound className="h-4 w-4" />}
@@ -195,52 +273,32 @@ export function ActivationModeCard({
       ]}
     >
       <div className="flex flex-col gap-2">
-        {ACTIVATION_MODE_OPTIONS.map((option) => {
-          const checked = mode === option.value
-          return (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              disabled={disabled}
-              onClick={() => setMode(option.value)}
-              className="group rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-              style={{
-                backgroundColor: checked ? tokens.brandSubtle : tokens.bgBase,
-                borderColor: checked ? tokens.brand : tokens.divider,
-              }}
-            >
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <span
-                    className="text-[13px] font-medium"
-                    style={{ color: tokens.textPrimary }}
-                  >
-                    {option.title}
-                  </span>
-                  <p
-                    className="mt-1 text-[12px] leading-relaxed"
-                    style={{ color: tokens.textSecondary }}
-                  >
-                    {option.description}
-                  </p>
-                </div>
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
-                  style={{
-                    backgroundColor: checked ? tokens.brand : "transparent",
-                    borderColor: checked ? tokens.brand : tokens.divider,
-                    color: checked ? tokens.textInverse : "transparent",
-                  }}
-                >
-                  {checked && <Check className="h-3 w-3" strokeWidth={3} />}
-                </span>
-              </div>
-            </button>
-          )
-        })}
+        {COMMON_OPTIONS.map(renderOption)}
+
+        <button
+          type="button"
+          aria-expanded={advancedOpen}
+          disabled={disabled}
+          onClick={() => setAdvancedOpen((open) => !open)}
+          className="mt-1 inline-flex items-center gap-1.5 self-start rounded-md px-1 py-1 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ color: tokens.textSecondary }}
+        >
+          <ChevronDown
+            className="h-3.5 w-3.5 transition-transform"
+            style={{
+              transform: advancedOpen ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          />
+          {advancedOpen
+            ? "Ocultar opções avançadas"
+            : "Mostrar opções avançadas"}
+        </button>
+
+        {advancedOpen && (
+          <div className="flex flex-col gap-2">
+            {ADVANCED_OPTIONS.map(renderOption)}
+          </div>
+        )}
       </div>
 
       {isKeywordMode && (

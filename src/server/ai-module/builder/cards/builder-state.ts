@@ -59,6 +59,11 @@ export const hoursStateSchema = z.object({
   // here so the card can evolve without churning the canonical type.
   schedule: z.unknown().optional(),
   timezone: z.string().optional(),
+  // Onda 3d — comportamento FORA do horário (OPCIONAL, additivo): `reply_notice`
+  // = o agente responde avisando que está fora do horário; `silent` = fica em
+  // silêncio até reabrir. Ausente = comportamento legado (default no frontend é
+  // 'reply_notice'). `parseBuilderState` já preenche defaults — additivo é seguro.
+  outOfHours: z.enum(['reply_notice', 'silent']).optional(),
 })
 
 /**
