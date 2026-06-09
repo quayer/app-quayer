@@ -1,6 +1,8 @@
 # Builder Agent — Arquitetura & Refinamento
 > Status: Design de referência (canônico) | Data original: 2026-04-10 | Última revisão: 2026-04-12 (v18)
 > Validado contra código em: 2026-05-10 — estrutura `src/server/ai-module/builder/` (catalog, chat, deploy, projects, prompts, services, skills, sub-agents, templates, tools, validators) confere com o doc.
+>
+> ⚠️ **SUPERSEDED (2026-06-08) — handoff consolidado:** as menções a `notify_team` e `dispatch_to_agent` neste doc são HISTÓRICAS (design v1/v1.5). No runtime atual essas capacidades foram unificadas na tool `transfer_to_human` (routing `queue`/`department`/`self` + `pauseAI`) e os aliases foram REMOVIDOS do código. Fonte canônica das tools = `BUILTIN_TOOL_NAMES` em `src/server/ai-module/ai-agents/tools/builtin-tools.ts`.
 
 ---
 

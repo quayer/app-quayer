@@ -42,6 +42,7 @@ import {
   Clock,
   KeyRound,
   ListChecks,
+  PhoneForwarded,
   ShieldOff,
   Sparkles,
   Tag,
@@ -61,6 +62,7 @@ import { PricingCard } from "./pricing-card"
 import { QualificationActionCard } from "./qualification-action-card"
 import { QualificationStepsCard } from "./qualification-steps-card"
 import { TeamStructureCard } from "./team-structure-card"
+import { HandoffPairingCard } from "./handoff-pairing-card"
 import { CalendarConnectCard } from "./calendar-connect-card"
 import { ActivationModeCard } from "./activation-mode-card"
 import { PreviewSummaryCard } from "./preview-summary-card"
@@ -80,6 +82,7 @@ export type RegisteredW3CardKey =
   | "qualification_action"
   | "qualification_steps"
   | "team_structure"
+  | "handoff_pairing"
   | "calendar_connect"
   | "activation_mode"
   | "preview_summary"
@@ -146,6 +149,13 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Estrutura da equipe",
     icon: <Users className="h-4 w-4" />,
     component: TeamStructureCard as ComponentType<CardComponentProps>,
+  },
+  handoff_pairing: {
+    cardKey: "handoff_pairing",
+    stepId: "handoff_pairing",
+    title: "WhatsApp dos atendentes",
+    icon: <PhoneForwarded className="h-4 w-4" />,
+    component: HandoffPairingCard as ComponentType<CardComponentProps>,
   },
   calendar_connect: {
     cardKey: "calendar_connect",

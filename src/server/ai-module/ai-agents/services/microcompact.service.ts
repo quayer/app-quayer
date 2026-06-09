@@ -45,7 +45,6 @@ export const COMPACTABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   'search_contacts',
   'send_pricing',
   'schedule_appointment',
-  'notify_team',
 ])
 
 /** Imagens contam ~2000 tokens cada (padrão Claude Code). */

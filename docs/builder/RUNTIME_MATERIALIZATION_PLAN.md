@@ -1,6 +1,6 @@
 ---
 Criado: 2026-06-06
-Atualizado: 2026-06-06
+Atualizado: 2026-06-08
 Revisar em: quando a Materialização no Runtime for aprovada para implementação
 Relacionados:
   - docs/builder/ORAYON_UPLIFT_SPEC.md
@@ -12,6 +12,8 @@ Relacionados:
 # Materialização no Runtime — PLANO
 
 > Plano de design (design-only, sem edição). Fecha a ponte entre a COLETA (cards das ondas A–D, no builderState JSONB) e o RUNTIME (modelos que o agente usa em produção). **Exige migration Prisma** → aprovação antes de implementar. Backlog em [[onda-a-builder-cards]].
+>
+> ✅ **IMPLEMENTADO (2026-06):** M2 (pricing) + M1 (team/roleta) materializados na saga de deploy. O `dispatch` para humano é hoje a rota `transfer_to_human routing='department'` (roleta envia WhatsApp via uazapi — 6A). O diagnóstico abaixo descreve o estado PRÉ-implementação.
 
 ## Diagnóstico
 
@@ -20,7 +22,7 @@ A **saga de deploy não carrega o `builderState`** — então `pricing` e `team`
 - `PriceList` — **sem** `disclosureStyle`, **sem** `minTicketCents`.
 - `PriceItem` — **sem** `priceMaxCents`, **sem** `imageUrl`.
 - `DepartmentMember` — **sem** `whatsapp`; `userId` é **FK obrigatória** (só aceita usuário da plataforma).
-- `dispatch` (notify_team) — hoje só cria `Notification` **in-app**; não envia WhatsApp.
+- `dispatch` (antes `notify_team`/`dispatch_to_agent`, hoje `transfer_to_human routing='department'`) — no estado pré-M1 só criava `Notification` **in-app**; não enviava WhatsApp.
 - `uazapi-sender` — **já tem** `sendText` e `sendImage` (a base de envio existe).
 
 ## Migration (aditiva)

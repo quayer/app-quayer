@@ -1,18 +1,13 @@
 /**
  * department-dispatch — barrel
  *
- * Round-robin (roleta) distribution of conversations to department members,
- * and the dispatch_to_agent builtin tool helper.
- *
- * Wiring (done by the owner of builtin-tools.ts):
- *   1. import { createDispatchToAgentTool } from './department-dispatch'
- *   2. spread `dispatch_to_agent: createDispatchToAgentTool(ctx)` into
- *      createBuiltinTools()'s return object.
- *   3. add 'dispatch_to_agent' to BUILTIN_TOOL_NAMES.
+ * Round-robin (roleta) distribution of conversations to department members.
+ * Exposto ao runtime via a tool UNIFICADA transfer_to_human (routing:'department'),
+ * que chama executeDispatchToAgent. Não há mais um tool `dispatch_to_agent`
+ * próprio (consolidado na Fase 2 — ver transfer-to-human.tool.ts).
  */
 
 export {
-  createDispatchToAgentTool,
   executeDispatchToAgent,
   dispatchToAgentInputSchema,
 } from './dispatch-to-agent'

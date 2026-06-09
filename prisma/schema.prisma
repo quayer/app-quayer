@@ -469,6 +469,11 @@ model Department {
   lastAssignedMemberId String? // M1 — cursor por DepartmentMember.id (SEM FK; membro pode ser não-usuário)
   lastAssignedAt       DateTime?
 
+  // B1b warm transfer — mensagem de abertura editável que a conexão do membro envia
+  // ao cliente no handoff (interpola {nome}). NULL = usa o texto default de
+  // warm-transfer.ts. Materializada por materialize_team de builderState.team.openingMessage.
+  warmTransferOpeningMessage String?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -494,6 +499,11 @@ model DepartmentMember {
   userId         String? // M1 — nullable: membro "nome + WhatsApp" não é usuário da plataforma
   name           String? // M1 — nome de exibição do membro (não-usuário)
   whatsapp       String? // M1 — WhatsApp do membro; a roleta roteia a notificação pra cá
+  // F0 (épico QR/warm-transfer): Connection.id da instância WhatsApp PRÓPRIA do membro
+  // (pareada por QR). Quando setado, o handoff faz warm transfer (a conexão do membro
+  // manda a 1ª mensagem ao cliente). Scalar SEM FK (espelha lastAssignedMemberId) —
+  // resolvido por findUnique no runtime; fail-open quando ausente/inválido.
+  connectionId   String?
   position       Int      @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
@@ -1422,6 +1432,11 @@ model AIAgentConfig {
   // usa este id como fallback quando o LLM não passa um departmentId válido — robusto a
   // qual tabela de prompt vence (o bloco no systemPrompt pode ser sombreado por AgentPromptVersion).
   departmentId String?
+
+  // Horário comercial materializado do builderState (card business_hours) p/ o runtime.
+  // Forma: { schedule: WeeklySchedule (opaco), timezone?: string, preset?: string }.
+  // Usado pelo transfer_to_human (computeBusinessState) para devolver `atendimento`.
+  businessHours Json?
 
   // BYOK por agente: qual chave (OrganizationProvider) este agente usa.
   // null = resolução por fallback (isPrimary → priority → primeira ativa).

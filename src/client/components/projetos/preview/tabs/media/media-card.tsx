@@ -89,6 +89,18 @@ function documentLabel(item: MediaAssetItem): string {
   return ext ? `Documento ${ext}` : "Documento"
 }
 
+/**
+ * Garante que o browser pinte o PRIMEIRO FRAME do vídeo como thumbnail estático.
+ * Com `preload="metadata"` alguns browsers só rasterizam o frame quando há um
+ * fragmento de tempo na URL; anexamos `#t=0.001` (início do vídeo) para forçar o
+ * primeiro frame sem autoplay. Só toca em URLs https assinadas (já validadas pelo
+ * chamador); se houver hash/fragmento, mantemos a URL intacta para não corromper
+ * uma signed URL com assinatura no fragmento.
+ */
+function videoThumbSrc(url: string): string {
+  return url.includes("#") ? url : `${url}#t=0.001`
+}
+
 /** Extrai uma extensão/rótulo curto em maiúsculas a partir do mimeType (ou null). */
 function extensionFromMime(mimeType: string | null): string | null {
   if (!mimeType) return null
@@ -264,9 +276,10 @@ function MediaThumb({
     )
   }
 
-  // ── Vídeo: <video> com placeholder + ícone Play overlay (só com url). ────
+  // ── Vídeo: thumbnail REAL (primeiro frame) + ícone Play overlay (só com url). ─
   if (item.mediaType === "video") {
-    if (!hasMedia) {
+    // Guarda em `item.url` direto (não em `hasMedia`) p/ o TS narrow string|null → string.
+    if (!hasMedia || item.url == null) {
       return (
         <Placeholder
           icon={<VideoOff className="h-5 w-5" aria-hidden="true" />}
@@ -276,31 +289,7 @@ function MediaThumb({
       )
     }
     return (
-      <>
-        <video
-          src={item.url ?? undefined}
-          preload="metadata"
-          muted
-          playsInline
-          aria-label={altText}
-          className="h-full w-full object-cover"
-        />
-        {/* Overlay com ícone Play (decorativo — o player real vive no runtime). */}
-        <span
-          className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          aria-hidden="true"
-        >
-          <span
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full shadow-sm"
-            style={{
-              backgroundColor: tokens.bgElevated,
-              color: tokens.textPrimary,
-            }}
-          >
-            <Play className="h-4 w-4" aria-hidden="true" />
-          </span>
-        </span>
-      </>
+      <VideoThumb url={videoThumbSrc(item.url)} altText={altText} tokens={tokens} />
     )
   }
 
@@ -323,6 +312,58 @@ function MediaThumb({
       decoding="async"
       className="h-full w-full object-cover"
     />
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// VideoThumb — primeiro frame do vídeo + overlay de play (interno, presentational)
+// ──────────────────────────────────────────────────────────────────────────
+
+interface VideoThumbProps {
+  /** Signed URL https já preparada com o fragmento `#t=` (via `videoThumbSrc`). */
+  url: string
+  altText: string
+  tokens: AppTokens
+}
+
+/**
+ * Thumbnail REAL de vídeo: renderiza o PRIMEIRO FRAME via `<video preload="metadata">`
+ * (estático — sem `autoplay`, sem `controls` na grade) com o ícone Play sobreposto.
+ * O player com controles vive no runtime/preview; aqui é só o frame estático (a
+ * grade é de curadoria — não abre player ao clicar).
+ *
+ * a11y: o `<video>` recebe `aria-label` (descreve que é a prévia do vídeo) e o
+ * overlay de play é decorativo (`aria-hidden`). `muted`/`playsInline` evitam som e
+ * fullscreen automático em iOS quando o card é tocado.
+ */
+function VideoThumb({ url, altText, tokens }: VideoThumbProps): React.JSX.Element {
+  return (
+    <>
+      <video
+        src={url}
+        preload="metadata"
+        muted
+        playsInline
+        // Sem autoplay/loop/controls: queremos só o frame inicial estático.
+        aria-label={`Prévia do vídeo ${altText}`}
+        className="h-full w-full object-cover"
+      />
+      {/* Overlay com ícone Play (decorativo — o player real vive no runtime). */}
+      <span
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        aria-hidden="true"
+      >
+        <span
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full shadow-sm"
+          style={{
+            backgroundColor: tokens.bgElevated,
+            color: tokens.textPrimary,
+          }}
+        >
+          <Play className="h-4 w-4" aria-hidden="true" />
+        </span>
+      </span>
+    </>
   )
 }
 

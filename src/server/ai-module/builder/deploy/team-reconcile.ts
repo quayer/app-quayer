@@ -61,6 +61,8 @@ export interface NormalizedMember {
   name: string | null
   /** WhatsApp E.164-BR (`+55DDDNNNNNNNN`); null quando ausente/inválido. */
   whatsapp: string | null
+  /** F0 — Connection.id da instância própria do membro (warm transfer); null quando ausente. */
+  connectionId: string | null
   /** Ordem 0..N no rodízio, reescrita pela posição no array do state. */
   position: number
 }
@@ -185,8 +187,13 @@ export function sanitizeTeamMembersForRuntime(
     // Linha sem identificador algum não vira membro (evita fantasma no rodízio).
     if (userId === null && whatsapp === null && name === null) continue
 
+    // F0 — connectionId só transita (string|null); o runtime valida tenant-scoped.
+    const trimmedConnId = member.connectionId?.trim()
+    const connectionId =
+      trimmedConnId && trimmedConnId.length > 0 ? trimmedConnId : null
+
     // `position` pela ORDEM dos sobreviventes (0..N), não pelo campo do JSONB.
-    out.push({ userId, name, whatsapp, position: out.length })
+    out.push({ userId, name, whatsapp, connectionId, position: out.length })
   }
   return out
 }

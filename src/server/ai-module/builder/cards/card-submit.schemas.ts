@@ -190,6 +190,9 @@ export const teamMemberPayloadSchema = z.object({
   // G6 — WhatsApp do membro (OPCIONAL). Limite curto: um telefone formatado/E.164
   // nunca passa de ~20 chars; 40 dá folga. RE-normalizado server-side no handler.
   whatsapp: z.string().min(1).max(40).optional(),
+  // F0 (warm transfer) — Connection.id da instância própria do membro. Validado no
+  // runtime (tenant-scoped, fail-open); aqui só transita como string.
+  connectionId: z.string().min(1).max(80).optional(),
   position: z.number().int().nonnegative(),
 })
 
@@ -198,6 +201,25 @@ export const teamStructurePayloadSchema = z.object({
   departmentName: z.string().min(1).max(200).optional(),
   departmentType: z.string().min(1).max(120).optional(),
   members: z.array(teamMemberPayloadSchema).default([]),
+})
+
+/**
+ * handoff_pairing — F0/B2 do warm transfer. Pareia a instância WhatsApp PRÓPRIA
+ * de cada membro da roleta (por `position`) + a mensagem de abertura editável.
+ * Quando o membro tem `connectionId`, o handoff faz warm transfer (a conexão dele
+ * manda a 1ª mensagem ao cliente). O `connectionId` transita; o runtime valida
+ * tenant-scoped (fail-open). → `builderState.team.members[].connectionId` +
+ * `team.openingMessage` / confirmation `handoffPairing`.
+ */
+export const handoffPairingMemberSchema = z.object({
+  position: z.number().int().nonnegative(),
+  connectionId: z.string().min(1).max(80).optional(),
+})
+
+export const handoffPairingPayloadSchema = z.object({
+  cardKey: z.literal('handoff_pairing'),
+  members: z.array(handoffPairingMemberSchema).default([]),
+  openingMessage: z.string().min(1).max(500).optional(),
 })
 
 /**
@@ -302,6 +324,7 @@ export const CARD_PAYLOAD_SCHEMAS = {
   qualification_action: qualificationActionPayloadSchema,
   qualification_steps: qualificationStepsPayloadSchema,
   team_structure: teamStructurePayloadSchema,
+  handoff_pairing: handoffPairingPayloadSchema,
   calendar_connect: calendarConnectPayloadSchema,
   activation_mode: activationModePayloadSchema,
   preview_summary: previewSummaryPayloadSchema,
@@ -349,6 +372,7 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   qualificationActionPayloadSchema,
   qualificationStepsPayloadSchema,
   teamStructurePayloadSchema,
+  handoffPairingPayloadSchema,
   calendarConnectPayloadSchema,
   activationModePayloadSchema,
   previewSummaryPayloadSchema,
@@ -378,6 +402,7 @@ export type QualificationStepsPayload = z.infer<
 >
 export type TeamMemberPayload = z.infer<typeof teamMemberPayloadSchema>
 export type TeamStructurePayload = z.infer<typeof teamStructurePayloadSchema>
+export type HandoffPairingPayload = z.infer<typeof handoffPairingPayloadSchema>
 export type CalendarConnectPayload = z.infer<typeof calendarConnectPayloadSchema>
 export type ActivationModePayload = z.infer<typeof activationModePayloadSchema>
 export type PreviewSummaryPayload = z.infer<typeof previewSummaryPayloadSchema>

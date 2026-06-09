@@ -61,7 +61,8 @@ const RAW_CATALOG: ToolCatalogEntry[] = [
     title: 'Encaminhar para departamento (roleta)',
     description:
       'Coloca a conversa na fila de um departamento e distribui automaticamente para o próximo atendente disponível (rodízio justo).',
-    toolKeys: ['dispatch_to_agent'],
+    // Capacidade servida pela tool unificada transfer_to_human (routing:'department').
+    toolKeys: ['transfer_to_human'],
     icon: 'headphones',
     recommended: false,
     note:
@@ -72,7 +73,8 @@ const RAW_CATALOG: ToolCatalogEntry[] = [
     title: 'Avisar responsável',
     description:
       'Cria um alerta interno com resumo do lead sem necessariamente pausar a IA.',
-    toolKeys: ['notify_team'],
+    // Capacidade servida pela tool unificada transfer_to_human (pauseAI:false).
+    toolKeys: ['transfer_to_human'],
     icon: 'bell',
     recommended: false,
     note:

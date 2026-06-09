@@ -318,6 +318,9 @@ describe('materializeTeam — M1 step', () => {
       expect(arg.data.systemPrompt).toContain('<!--ROLETA:start-->')
       expect(arg.data.systemPrompt).toContain(`departmentId='${DEPT_ID}'`)
       expect(arg.data.systemPrompt).toContain('<!--ROLETA:end-->')
+      // ensina a tool UNIFICADA (não mais o alias dispatch_to_agent)
+      expect(arg.data.systemPrompt).toContain('transfer_to_human')
+      expect(arg.data.systemPrompt).toContain("routing='department'")
     })
 
     it('resolve o agente org-scoped (findFirst com organizationId)', async () => {

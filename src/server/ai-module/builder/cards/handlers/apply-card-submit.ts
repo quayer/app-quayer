@@ -40,6 +40,7 @@ import {
   type QualificationActionPayload,
   type QualificationStepsPayload,
   type TeamStructurePayload,
+  type HandoffPairingPayload,
   type CalendarConnectPayload,
   type ActivationModePayload,
   type QuickReplyChipsPayload,
@@ -231,11 +232,14 @@ function sanitizeTeamMembers(
     const userId = m.userId?.trim()
     const name = m.name?.trim()
     const whatsapp = normalizeWhatsappBr(m.whatsapp)
+    const connectionId = m.connectionId?.trim()
     return {
       position: Math.max(0, Math.trunc(m.position)),
       ...(userId && userId.length > 0 ? { userId } : {}),
       ...(name && name.length > 0 ? { name } : {}),
       ...(whatsapp ? { whatsapp } : {}),
+      // F0 — só transita; o runtime valida tenant-scoped (fail-open).
+      ...(connectionId && connectionId.length > 0 ? { connectionId } : {}),
     }
   })
 }
@@ -565,6 +569,45 @@ function applyTeamStructure(
 }
 
 /**
+ * B2 (warm transfer) — pareia a instância WhatsApp PRÓPRIA de cada membro (por
+ * `position`) e grava a mensagem de abertura editável. O `connectionId` só transita;
+ * o runtime valida tenant-scoped (fail-open). Membros fora do payload ficam intactos.
+ */
+export function applyHandoffPairing(
+  state: BuilderState,
+  payload: Pick<HandoffPairingPayload, 'members' | 'openingMessage'>,
+): CardApplication {
+  const connByPosition = new Map<number, string | undefined>(
+    payload.members.map((m) => [m.position, m.connectionId?.trim() || undefined]),
+  )
+  const members = state.team.members.map((m) =>
+    connByPosition.has(m.position)
+      ? { ...m, connectionId: connByPosition.get(m.position) }
+      : m,
+  )
+
+  const openingMessage = payload.openingMessage?.trim()
+  const patch: DeepPartial<BuilderState> = {
+    team: {
+      members,
+      ...(openingMessage ? { openingMessage } : {}),
+    },
+  }
+  const next = applyConfirmation(patchBuilderState(state, patch), 'handoffPairing')
+
+  const pairedCount = members.filter((m) => Boolean(m.connectionId)).length
+  const label =
+    pairedCount === 1 ? '1 atendente' : `${pairedCount} atendentes`
+  return {
+    next,
+    cardInstruction:
+      `O usuário PAREOU o WhatsApp de ${label} para warm transfer. ` +
+      'Quando o lead cair na roleta de um atendente pareado, a conexão própria dele ' +
+      'inicia o atendimento direto no WhatsApp do cliente. Siga para o próximo passo; não reabra o card.',
+  }
+}
+
+/**
  * G10 — valores de `status` que significam "o usuário optou por seguir SEM agenda"
  * (escape hatch "Continuar sem agenda" após N tentativas de conexão falharem). O
  * schema mantém `status` como string opcional (≤120), então 'skipped' já cabe sem
@@ -860,6 +903,9 @@ export async function applyCardSubmit(
       break
     case 'team_structure':
       application = applyTeamStructure(current, body)
+      break
+    case 'handoff_pairing':
+      application = applyHandoffPairing(current, body)
       break
     case 'calendar_connect':
       application = applyCalendarConnect(current, body)

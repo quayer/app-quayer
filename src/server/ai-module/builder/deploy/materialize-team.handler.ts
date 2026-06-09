@@ -80,15 +80,18 @@ const ROULETTE_BLOCK_END = '<!--ROLETA:end-->'
 
 /**
  * Constrói o bloco DETERMINÍSTICO de roleta que ensina o LLM do agente deployado a
- * chamar a tool `dispatch_to_agent` com o `departmentId` certo. Estável (mesmo input
- * => mesmo texto) para idempotência da reconciliação do prompt.
+ * encaminhar para o setor via a tool UNIFICADA `transfer_to_human` com
+ * `routing='department'` + o `departmentId` certo. (Internamente, essa rota delega
+ * ao `executeDispatchToAgent`; o antigo alias `dispatch_to_agent` foi REMOVIDO.)
+ * Estável (mesmo input => mesmo texto) para idempotência da reconciliação do prompt.
  */
 function buildRouletteBlock(departmentId: string, departmentName: string): string {
   return [
     ROULETTE_BLOCK_START,
     '## Roleta de atendimento',
     `Quando precisar encaminhar para um atendente humano deste setor, chame a tool ` +
-      `dispatch_to_agent com departmentId='${departmentId}' (departamento '${departmentName}').`,
+      `transfer_to_human com routing='department' e departmentId='${departmentId}' ` +
+      `(departamento '${departmentName}').`,
     ROULETTE_BLOCK_END,
   ].join('\n')
 }
@@ -203,6 +206,10 @@ export async function materializeTeam(
       ? team.departmentType.trim()
       : 'support'
 
+  // B1b — mensagem de abertura do warm transfer (editável no card handoff_pairing).
+  // Trim + clear-on-empty: apagar no Builder zera a coluna (runtime volta ao default).
+  const warmTransferOpeningMessage = team.openingMessage?.trim() || null
+
   const department = await database.department.upsert({
     where: {
       organizationId_slug: { organizationId: ctx.organizationId, slug },
@@ -213,11 +220,13 @@ export async function materializeTeam(
       slug,
       type,
       isActive: true,
+      warmTransferOpeningMessage,
     },
     update: {
       name,
       type,
       isActive: true,
+      warmTransferOpeningMessage,
     },
     select: { id: true },
   })
@@ -283,6 +292,7 @@ export async function materializeTeam(
           userId: member.userId,
           name: member.name,
           whatsapp: member.whatsapp,
+          connectionId: member.connectionId,
           position: member.position,
           isActive: true,
         },
@@ -297,6 +307,7 @@ export async function materializeTeam(
           userId: member.userId,
           name: member.name,
           whatsapp: member.whatsapp,
+          connectionId: member.connectionId,
           position: member.position,
           isActive: true,
         },
@@ -326,7 +337,7 @@ export async function materializeTeam(
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
-      select: { systemPrompt: true, departmentId: true },
+      select: { systemPrompt: true, departmentId: true, businessHours: true },
     })
     if (agent) {
       const block = buildRouletteBlock(department.id, name)
@@ -349,6 +360,25 @@ export async function materializeTeam(
           where: { id: ctx.aiAgentId },
           data: { departmentId: department.id },
         })
+      }
+
+      // Melhoria #2 — materializa o HORÁRIO COMERCIAL (agent-level) do builderState
+      // para o runtime usá-lo no transfer_to_human (computeBusinessState → atendimento).
+      // Só quando há `schedule` configurado; idempotente (compara JSON).
+      if (state.hours?.schedule !== undefined) {
+        const nextHours = {
+          schedule: state.hours.schedule ?? null,
+          timezone: state.hours.timezone ?? null,
+          preset: state.hours.preset ?? null,
+        }
+        const currentHours =
+          (agent as { businessHours?: unknown }).businessHours ?? null
+        if (JSON.stringify(currentHours) !== JSON.stringify(nextHours)) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { businessHours: nextHours as Prisma.InputJsonValue },
+          })
+        }
       }
     }
   }

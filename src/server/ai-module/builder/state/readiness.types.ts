@@ -38,6 +38,7 @@ export type StepId =
   | 'qualification_action'
   | 'qualification_steps'
   | 'team'
+  | 'handoff_pairing'
   | 'calendar'
   | 'activation'
   | 'silenced_contacts'

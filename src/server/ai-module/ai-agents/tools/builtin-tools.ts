@@ -15,16 +15,19 @@ import { tool } from 'ai'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
-import { createDispatchToAgentTool } from './department-dispatch'
 import {
   createCheckAvailabilityTool,
   createCreateEventTool,
   createCancelEventTool,
+  createListSlotsTool,
 } from './calendar'
 import { createGetPricingTool } from './pricing'
 import { createEnrichInstagramTool } from './instagram'
 import { createSearchKnowledgeTool } from './knowledge-search.tool'
 import { createSearchMediaTool } from './media-search.tool'
+import { createCalculatorTool } from './calculator.tool'
+import { createThinkTool } from './think.tool'
+import { createTransferToHumanTool } from './transfer-to-human.tool'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -75,105 +78,6 @@ export interface ToolExecutionContext {
  */
 export function createBuiltinTools(ctx: ToolExecutionContext) {
   return {
-    // -----------------------------------------------------------------------
-    // get_session_history
-    // -----------------------------------------------------------------------
-    get_session_history: tool({
-      description:
-        'Recupera o histórico de mensagens da sessão atual para contexto adicional. Retorna as mensagens em ordem cronológica (mais antigas primeiro).',
-      inputSchema: z.object({
-        limit: z
-          .number()
-          .min(1)
-          .max(50)
-          .default(10)
-          .describe('Número de mensagens para recuperar (1–50, padrão 10)'),
-      }),
-      execute: async (input) => {
-        const { limit } = input
-
-        const messages = await database.message.findMany({
-          where: { sessionId: ctx.sessionId },
-          orderBy: { createdAt: 'desc' },
-          take: limit,
-          select: {
-            id: true,
-            content: true,
-            direction: true,
-            author: true,
-            type: true,
-            createdAt: true,
-          },
-        })
-
-        return {
-          success: true,
-          // Reverse to chronological order (oldest first) for easier reading
-          messages: messages.reverse(),
-          count: messages.length,
-        }
-      },
-    }),
-
-    // -----------------------------------------------------------------------
-    // notify_team (US-019) — create notification without pausing AI
-    // -----------------------------------------------------------------------
-    notify_team: tool({
-      description:
-        'Notifica equipe sobre lead qualificado ou situação importante, sem pausar IA',
-      inputSchema: z.object({
-        message: z.string().describe('Mensagem da notificação'),
-        priority: z
-          .enum(['low', 'medium', 'high'])
-          .default('medium')
-          .describe('Prioridade: low, medium ou high'),
-      }),
-      execute: async (input) => {
-        const { message, priority } = input
-
-        try {
-          const notificationType =
-            priority === 'high' ? 'WARNING' : 'INFO'
-
-          const notification = await database.notification.create({
-            data: {
-              organizationId: ctx.organizationId,
-              type: notificationType as 'WARNING' | 'INFO',
-              title:
-                priority === 'high'
-                  ? 'Alerta do Agente IA (alta prioridade)'
-                  : 'Notificação do Agente IA',
-              description: message,
-              source: 'ai-agent',
-              sourceId: ctx.sessionId,
-              actionUrl: `/conversations/${ctx.sessionId}`,
-              actionLabel: 'Ver conversa',
-              metadata: {
-                sessionId: ctx.sessionId,
-                contactId: ctx.contactId,
-                priority,
-                triggeredBy: 'notify_team_tool',
-              },
-            },
-          })
-
-          return {
-            success: true,
-            notificationId: notification.id,
-            message: `Equipe notificada: "${message}"`,
-          }
-        } catch (error) {
-          const msg =
-            error instanceof Error ? error.message : 'Erro desconhecido'
-          console.error('[notify_team] Failed to create notification:', msg)
-          return {
-            success: false,
-            message: `Erro ao notificar equipe: ${msg}`,
-          }
-        }
-      },
-    }),
-
     // -----------------------------------------------------------------------
     // schedule_appointment — captura intenção de agendamento na sessão
     // -----------------------------------------------------------------------
@@ -454,115 +358,22 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     }),
 
     // -----------------------------------------------------------------------
-    // transfer_to_human — pausa IA + escala para atendente humano
+    // transfer_to_human — UNIFICADA: routing queue|department|self + pauseAI.
+    // Consolidou os antigos notify_team (routing:queue,pauseAI:false) e
+    // dispatch_to_agent (routing:department → delega à roleta madura via
+    // executeDispatchToAgent). Ver transfer-to-human.tool.ts.
     // -----------------------------------------------------------------------
-    // Efeito colateral: aiEnabled=false, aiBlockReason, pausedBy='agent',
-    // cria notificação WARNING. O próximo operador online pega a sessão
-    // pelo painel.
-    transfer_to_human: tool({
-      description:
-        'Pausa a IA e transfere a conversa para um atendente humano. Use quando o cliente pedir para falar com uma pessoa, reclamar, ou quando a situação exigir julgamento humano.',
-      inputSchema: z.object({
-        reason: z
-          .string()
-          .min(10)
-          .max(500)
-          .describe(
-            'Motivo da transferência (ex: "cliente insatisfeito com entrega")',
-          ),
-        urgency: z
-          .enum(['low', 'medium', 'high'])
-          .default('medium')
-          .describe('Urgência: low (pode esperar), medium, high (imediato)'),
-        summary: z
-          .string()
-          .max(800)
-          .optional()
-          .describe(
-            'Resumo da conversa até agora para o humano pegar rápido.',
-          ),
-      }),
-      execute: async (input) => {
-        const { reason, urgency, summary } = input
-
-        try {
-          const session = await database.chatSession.findUnique({
-            where: { id: ctx.sessionId },
-            select: { customFields: true, contactPhone: true, status: true },
-          })
-          if (!session) {
-            return { success: false, message: 'Sessão não encontrada.' }
-          }
-
-          const existing =
-            (session.customFields as Record<string, unknown> | null) ?? {}
-
-          await database.chatSession.update({
-            where: { id: ctx.sessionId },
-            data: {
-              aiEnabled: false,
-              aiBlockReason: reason,
-              pausedBy: 'agent',
-              status:
-                session.status === 'CLOSED' ? session.status : 'PAUSED',
-              customFields: {
-                ...existing,
-                handoff: {
-                  reason,
-                  urgency,
-                  summary: summary ?? null,
-                  transferredAt: new Date().toISOString(),
-                },
-              } as Prisma.InputJsonValue,
-              tags: { push: 'human_handoff' },
-            },
-          })
-
-          await database.notification.create({
-            data: {
-              organizationId: ctx.organizationId,
-              type: urgency === 'high' ? 'ERROR' : 'WARNING',
-              title:
-                urgency === 'high'
-                  ? 'Transferência urgente para humano'
-                  : 'Transferência para humano',
-              description: `${session.contactPhone}: ${reason}`,
-              source: 'ai-agent',
-              sourceId: ctx.sessionId,
-              actionUrl: `/conversations/${ctx.sessionId}`,
-              actionLabel: 'Assumir conversa',
-              metadata: {
-                sessionId: ctx.sessionId,
-                urgency,
-                summary,
-                triggeredBy: 'transfer_to_human_tool',
-              },
-            },
-          })
-
-          return {
-            success: true,
-            message: `Transferido para humano (${urgency}).`,
-          }
-        } catch (error) {
-          const msg =
-            error instanceof Error ? error.message : 'Erro desconhecido'
-          console.error('[transfer_to_human] Failed:', msg)
-          return { success: false, message: `Erro ao transferir: ${msg}` }
-        }
-      },
-    }),
-
-    // dispatch_to_agent (roleta) — encaminha para um departamento e distribui
-    // ao próximo atendente via round-robin. Degrada para transfer_to_human-like
-    // até a migration de departamentos landar.
-    dispatch_to_agent: createDispatchToAgentTool(ctx),
+    transfer_to_human: createTransferToHumanTool(ctx),
 
     // Google Calendar (Wave 4b) — degradam ("agenda não conectada") até o
     // profissional conectar a agenda pelo link.
     check_availability: createCheckAvailabilityTool(ctx),
     create_event: createCreateEventTool(ctx),
     cancel_event: createCancelEventTool(ctx),
+
+    // calendar_list_slots — lista horários livres dos próximos dias já dentro do
+    // expediente (conveniência sobre check_availability; sem montar datas ISO).
+    calendar_list_slots: createListSlotsTool(ctx),
 
     // get_pricing — consulta o catálogo de preços real (PriceList/PriceItem).
     // Degrada ("catálogo não configurado") até o profissional preencher a lista.
@@ -584,6 +395,14 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     // quando o agente não tem ragCollectionId.
     // -----------------------------------------------------------------------
     buscar_media: createSearchMediaTool(ctx),
+
+    // -----------------------------------------------------------------------
+    // calculator — aritmética exata (parcelas/descontos/%). Pura, sem ctx.
+    // think — scratchpad de raciocínio (máx 3/turno). Sem efeito colateral.
+    // Criadas por turno (contador do think reseta a cada createBuiltinTools).
+    // -----------------------------------------------------------------------
+    calculator: createCalculatorTool(),
+    think: createThinkTool(),
 
   }
 }
@@ -624,13 +443,10 @@ export type BuiltinToolName = keyof ReturnType<typeof createBuiltinTools>
 
 /** Ordered list of all available built-in tool names */
 export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
-  'get_session_history',
-  'notify_team',
   'schedule_appointment',
   'send_pricing',
   'create_lead',
   'transfer_to_human',
-  'dispatch_to_agent',
   'check_availability',
   'create_event',
   'cancel_event',
@@ -638,4 +454,7 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'enrich_instagram',
   'search_knowledge',
   'buscar_media',
+  'calendar_list_slots',
+  'calculator',
+  'think',
 ]

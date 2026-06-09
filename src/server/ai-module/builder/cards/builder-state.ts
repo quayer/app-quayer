@@ -113,6 +113,10 @@ export const teamMemberSchema = z.object({
   // É por esse número que o agente notifica a pessoa quando o lead cai no rodízio
   // dela. Coexiste com userId/name; uma linha só-nome (legado) continua válida.
   whatsapp: z.string().optional(),
+  // F0 (warm transfer) — Connection.id da instância WhatsApp PRÓPRIA do membro
+  // (pareada por QR). Quando presente, o handoff faz warm transfer: a conexão do
+  // membro manda a 1ª mensagem ao cliente. Validado no runtime (tenant-scoped, fail-open).
+  connectionId: z.string().optional(),
   position: z.number().int().nonnegative(),
 })
 
@@ -121,6 +125,10 @@ export const teamStateSchema = z.object({
   departmentName: z.string().optional(),
   departmentType: z.string().optional(),
   members: z.array(teamMemberSchema).default([]),
+  // B2 (warm transfer) — mensagem de abertura editável que a conexão do membro
+  // manda ao cliente no warm transfer. Vazio = usa o default do warm-transfer.ts.
+  // Threading ao runtime = B1b (hoje só persistido no builderState).
+  openingMessage: z.string().optional(),
 })
 
 /** calendar_connect card → CalendarConnection. */
@@ -207,6 +215,9 @@ export const confirmationsSchema = z.object({
   qualificationAction: z.boolean().default(false),
   qualificationSteps: z.boolean().default(false),
   team: z.boolean().default(false),
+  // B2 — passo OPCIONAL: vira true quando o dono pareia o WhatsApp dos atendentes
+  // (warm transfer). Só aplicável quando há membros na roleta; nunca bloqueia deploy.
+  handoffPairing: z.boolean().default(false),
   calendar: z.boolean().default(false),
   activation: z.boolean().default(false),
   summary: z.boolean().default(false),

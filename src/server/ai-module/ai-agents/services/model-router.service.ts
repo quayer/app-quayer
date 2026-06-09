@@ -70,7 +70,6 @@ export type ModelForTurnInput = z.infer<typeof ModelForTurnInputSchema>
 
 const HEAVY_TOOL_EXACT = new Set<string>([
   'transfer_to_human',
-  'dispatch_to_agent',
   'create_lead',
   'create_event',
   'check_availability',

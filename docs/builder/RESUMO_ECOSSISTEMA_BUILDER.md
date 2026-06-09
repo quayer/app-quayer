@@ -1,8 +1,10 @@
 # Resumo do Ecossistema Quayer Builder
 
-> **Data original:** 2026-04-17 | **Validado:** 2026-05-10
+> **Data original:** 2026-04-17 | **Validado:** 2026-05-10 | **Atualizado:** 2026-06-08
 >
 > Versao simplificada do BUILDER_AGENT_ARCHITECTURE.md
+>
+> ⚠️ **Handoff consolidado (2026-06):** `notify_team` e `dispatch_to_agent` foram unificados na tool `transfer_to_human` (routing `queue`/`department`/`self` + `pauseAI`); os aliases foram REMOVIDOS do runtime. Lista canônica das tools do agente publicado = `BUILTIN_TOOL_NAMES` em `src/server/ai-module/ai-agents/tools/builtin-tools.ts` (algumas linhas abaixo são históricas).
 
 ---
 
@@ -63,7 +65,7 @@ O criador diz algo como "cria um agente de vendas de vinho" e o Builder:
 | `transfer_to_human` | Transfere pra atendente humano |
 | `create_lead` | Registra lead no CRM |
 | `create_followup` | Agenda follow-up proativo (BullMQ) |
-| `notify_team` | Notifica equipe sem pausar a IA |
+| `transfer_to_human` (`pauseAI: false`) | Avisa a equipe sem pausar a IA — consolidou o antigo `notify_team` |
 | `detect_talking_to_ai` | Detecta "voce e robo?" ou spam/bot |
 | `search_contacts` | Busca contatos no CRM |
 | `get_session_history` | Recupera historico da sessao |

@@ -23,13 +23,6 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     status: 'available',
   },
   {
-    name: 'notify_team',
-    description: 'Notifica equipe sem pausar IA',
-    phase: 'v1',
-    type: 'builtin',
-    status: 'available',
-  },
-  {
     name: 'detect_talking_to_ai',
     description: 'Detecta se contato percebeu IA ou se e bot/spam',
     phase: 'v1',
@@ -46,13 +39,6 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
   {
     name: 'search_contacts',
     description: 'Busca contatos da organizacao',
-    phase: 'v1',
-    type: 'builtin',
-    status: 'available',
-  },
-  {
-    name: 'get_session_history',
-    description: 'Historico da sessao atual',
     phase: 'v1',
     type: 'builtin',
     status: 'available',
@@ -87,9 +73,23 @@ export const OFFICIAL_TOOLS: OfficialTool[] = [
     status: 'backlog',
   },
   {
-    name: 'dispatch_to_agent',
-    description: 'Distribui conversa para atendente via roleta',
+    name: 'calendar_list_slots',
+    description: 'Lista horarios livres dos proximos dias no expediente',
     phase: 'v1.5',
+    type: 'official',
+    status: 'available',
+  },
+  {
+    name: 'calculator',
+    description: 'Calculadora para contas exatas (parcelas, descontos, %)',
+    phase: 'v1',
+    type: 'builtin',
+    status: 'available',
+  },
+  {
+    name: 'think',
+    description: 'Raciocinio interno (scratchpad) antes de responder',
+    phase: 'v1',
     type: 'builtin',
     status: 'available',
   },

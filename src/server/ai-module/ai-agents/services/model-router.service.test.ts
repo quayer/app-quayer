@@ -8,7 +8,7 @@
  *     3. previousTools undefined → tier full (primeiro turno)
  *     4. previousTools vazio, sem tool pesada → tier mini
  *     5. Tool pesada exata (transfer_to_human) → tier full
- *     6. Tool pesada exata (dispatch_to_agent) → tier full
+ *     6. Tool pesada exata (transfer_to_human) → tier full
  *     7. Tool pesada exata (create_lead) → tier full
  *     8. Tool pesada exata (create_event) → tier full
  *     9. Tool pesada exata (check_availability) → tier full
@@ -124,7 +124,6 @@ describe('modelForTurn', () => {
   describe('tools pesadas exatas → full', () => {
     const heavyTools = [
       'transfer_to_human',
-      'dispatch_to_agent',
       'create_lead',
       'create_event',
       'check_availability',

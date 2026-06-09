@@ -7,9 +7,9 @@
  * Data model (added in migration `add_department_round_robin`, gated by
  * approval — see prisma/schema.prisma DESIGN block):
  *
- *   - Department.lastAssignedUserId / lastAssignedAt
- *       Persisted CURSOR: the User.id of the LAST member the roleta picked.
- *       NULL = the roleta never ran (start from the first member).
+ *   - Department.lastAssignedMemberId / lastAssignedAt
+ *       Persisted CURSOR: the DepartmentMember.id of the LAST member the roleta
+ *       picked. NULL = the roleta never ran (start from the first member).
  *
  *   - DepartmentMember (table `department_members`)
  *       Junction User<->Department. The pool of candidates.
@@ -69,6 +69,8 @@ export interface RouletteCandidate {
   displayName: string
   /** Member WhatsApp (E.164-BR), or null when absent — drives the 6A send. */
   whatsapp: string | null
+  /** F0 — Connection.id da instância PRÓPRIA do membro (warm transfer), ou null. */
+  connectionId: string | null
   /** Ordering key — DepartmentMember.position */
   position: number
 }
@@ -114,6 +116,8 @@ interface DepartmentMemberRow {
   name: string | null
   /** M1 — member WhatsApp (E.164-BR); drives the 6A notification. */
   whatsapp: string | null
+  /** F0 — Connection.id da instância própria do membro (warm transfer). */
+  connectionId: string | null
   position: number
   createdAt: Date
   user?: { name?: string | null } | null
@@ -156,8 +160,8 @@ function getDepartmentMemberDelegate(db: Db): DepartmentMemberDelegate | null {
  * distinguish them and serve as the persisted cursor.
  *
  * @param orderedPool   candidates sorted by (position, createdAt) ascending
- * @param lastMemberId  Department.lastAssignedUserId reinterpreted as the last
- *                      assigned DepartmentMember.id (cursor), or null
+ * @param lastMemberId  Department.lastAssignedMemberId — the last assigned
+ *                      DepartmentMember.id (cursor), or null
  * @returns the next candidate, or null if the pool is empty
  */
 export function pickNextInOrder(
@@ -224,6 +228,7 @@ export async function loadActivePool(
       userId: true,
       name: true,
       whatsapp: true,
+      connectionId: true,
       position: true,
       user: { select: { name: true } },
     },
@@ -238,6 +243,7 @@ export async function loadActivePool(
       userName: displayName,
       displayName,
       whatsapp: m.whatsapp ?? null,
+      connectionId: m.connectionId ?? null,
       position: m.position,
     }
   })
@@ -255,7 +261,7 @@ export async function loadActivePool(
  *   1. Validate the department exists, belongs to `organizationId`, is active.
  *   2. Load the active, ordered member pool.
  *   3. Pick the next member after the cursor (circular).
- *   4. Advance the cursor: lastAssignedUserId = chosen.memberId, lastAssignedAt = now().
+ *   4. Advance the cursor: lastAssignedMemberId = chosen.memberId, lastAssignedAt = now().
  *
  * CURSOR semantics (M1): the cursor is keyed by `DepartmentMember.id` (userId is
  * nullable now — a member can be a non-user). It is persisted in the DEDICATED
