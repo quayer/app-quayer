@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react"
 
+import { api } from "@/igniter.client"
 import { Input } from "@/client/components/ui/input"
 import { Switch } from "@/client/components/ui/switch"
 import { Textarea } from "@/client/components/ui/textarea"
@@ -115,6 +116,91 @@ const DEPARTMENT_TYPE_PRESETS: { value: string; label: string }[] = [
   { value: "scheduling", label: "Agendamento" },
   { value: "financial", label: "Financeiro" },
 ]
+
+/** Valor da opção default do picker de instância (vazio → connectionId undefined). */
+const NO_CONNECTION_VALUE = "__none__"
+
+/** Uma instância WhatsApp atribuível (warm transfer). */
+interface ConnectionRow {
+  id: string
+  name: string | null
+  phoneNumber: string | null
+  status: string | null
+}
+
+/** Shape mínimo do hook de query (defensivo — client pode não ter a action ainda). */
+interface ListConnectionsQuery {
+  useQuery: (opts?: unknown) => {
+    data?:
+      | { connections?: ConnectionRow[] }
+      | { data?: { connections?: ConnectionRow[] } }
+      | undefined
+    isLoading?: boolean
+  }
+}
+
+/**
+ * Resolve o hook `api.builder.listConnections` UMA vez (module-eval), com fallback
+ * no-op se a action não existir no client gerado — mantém a IDENTIDADE do hook
+ * estável (Rules of Hooks) e o card renderiza com lista vazia em vez de quebrar.
+ */
+const LIST_CONNECTIONS_QUERY: ListConnectionsQuery = (() => {
+  const builderApi = (api as { builder?: { listConnections?: unknown } }).builder
+  const candidate = builderApi?.listConnections
+  if (
+    candidate &&
+    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
+  ) {
+    return candidate as ListConnectionsQuery
+  }
+  return { useQuery: () => ({ data: undefined, isLoading: false }) }
+})()
+
+/** Desembrulha o envelope ({ data: { connections } } OU { connections }). */
+function readConnections(
+  raw: ReturnType<ListConnectionsQuery["useQuery"]>["data"],
+): ConnectionRow[] {
+  if (!raw || typeof raw !== "object") return []
+  const inner = (raw as { data?: { connections?: ConnectionRow[] } }).data
+  if (inner && Array.isArray(inner.connections)) return inner.connections
+  const flat = (raw as { connections?: ConnectionRow[] }).connections
+  return Array.isArray(flat) ? flat : []
+}
+
+/** Label da instância no `<select>`: "nome (telefone)" ou só "nome". */
+function connectionLabel(c: ConnectionRow): string {
+  const name = c.name?.trim() || "WhatsApp"
+  const phone = c.phoneNumber?.trim()
+  return phone ? `${name} (${phone})` : name
+}
+
+/**
+ * Status em que a instância consegue ENVIAR (pré-requisito do warm transfer).
+ * Só instâncias conectáveis ficam selecionáveis — atribuir uma caída faria o
+ * warm transfer cair em send_failed silencioso (o cliente nunca receberia a
+ * abertura). Case-insensitive.
+ */
+const CONNECTABLE_STATUSES = new Set(["CONNECTED", "ACTIVE", "READY"])
+
+function isConnectable(status: string | null): boolean {
+  return !!status && CONNECTABLE_STATUSES.has(status.toUpperCase())
+}
+
+/** Dica curta de status (pt-BR) para instâncias não-conectáveis no `<select>`. */
+function statusHint(status: string | null): string {
+  switch ((status ?? "").toUpperCase()) {
+    case "DISCONNECTED":
+      return "desconectado"
+    case "CONNECTING":
+    case "QR_PENDING":
+    case "PENDING":
+      return "conectando"
+    case "ERROR":
+      return "com erro"
+    default:
+      return "indisponível"
+  }
+}
 
 /** Linha de membro do roster — id estável para keys React entre reordenações. */
 interface MemberRow {
@@ -212,12 +298,28 @@ export function HandoffCard({
 
   const needsRoster = modeNeedsRoster(mode)
 
+  // ── Instâncias WhatsApp disponíveis (warm transfer) ──────────────────────
+  // Hook resolvido em module-eval (identidade estável). 1 leitura defensiva.
+  const connectionsQuery = LIST_CONNECTIONS_QUERY.useQuery({})
+  const connections = readConnections(connectionsQuery.data)
+
   // ── Mutadores do roster ──────────────────────────────────────────────────
   const updateMemberName = React.useCallback((id: string, name: string) => {
     setMemberRows((current) =>
       current.map((row) => (row.id === id ? { ...row, name } : row)),
     )
   }, [])
+
+  const updateMemberConnection = React.useCallback(
+    (id: string, rawValue: string) => {
+      const connectionId =
+        rawValue && rawValue !== NO_CONNECTION_VALUE ? rawValue : undefined
+      setMemberRows((current) =>
+        current.map((row) => (row.id === id ? { ...row, connectionId } : row)),
+      )
+    },
+    [],
+  )
 
   const updateMemberPhone = React.useCallback((id: string, whatsapp: string) => {
     setMemberRows((current) =>
@@ -594,7 +696,7 @@ export function HandoffCard({
                     return (
                       <div
                         key={row.id}
-                        className="flex items-center gap-2 rounded-md border p-2"
+                        className="flex flex-col gap-2 rounded-md border p-2"
                         style={{
                           backgroundColor: tokens.bgBase,
                           borderColor: invalidPhone
@@ -602,6 +704,7 @@ export function HandoffCard({
                             : tokens.divider,
                         }}
                       >
+                       <div className="flex items-center gap-2">
                         <div
                           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold"
                           style={{
@@ -684,11 +787,76 @@ export function HandoffCard({
                             <X className="h-3.5 w-3.5" />
                           </button>
                         </div>
+                       </div>
+
+                       {/* Instância WhatsApp própria do membro (warm transfer) */}
+                       <div className="flex flex-col gap-1 sm:pl-9">
+                         <label
+                           className="text-[11px] font-medium"
+                           style={labelStyle}
+                           htmlFor={`handoff-conn-${row.id}`}
+                         >
+                           WhatsApp próprio (warm transfer)
+                         </label>
+                         <select
+                           id={`handoff-conn-${row.id}`}
+                           value={row.connectionId ?? NO_CONNECTION_VALUE}
+                           disabled={disabled}
+                           onChange={(event) =>
+                             updateMemberConnection(row.id, event.target.value)
+                           }
+                           aria-label={`Instância WhatsApp do membro na posição ${index + 1}`}
+                           className="h-8 rounded-md border px-2 text-[13px] outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                           style={{
+                             backgroundColor: tokens.bgSurface,
+                             borderColor: tokens.divider,
+                             color: tokens.textPrimary,
+                           }}
+                         >
+                           <option value={NO_CONNECTION_VALUE}>
+                             Sem WhatsApp próprio (usa o número do bot)
+                           </option>
+                           {connections.map((connection) => {
+                             const connectable = isConnectable(connection.status)
+                             return (
+                               <option
+                                 key={connection.id}
+                                 value={connection.id}
+                                 disabled={!connectable}
+                               >
+                                 {connectionLabel(connection)}
+                                 {connectable
+                                   ? ""
+                                   : ` — ${statusHint(connection.status)}`}
+                               </option>
+                             )
+                           })}
+                         </select>
+                       </div>
                       </div>
                     )
                   })}
                 </div>
               )}
+
+              {connections.length === 0 && (
+                <p
+                  className="text-[12px] leading-relaxed"
+                  style={{ color: tokens.textTertiary }}
+                >
+                  Nenhuma instância WhatsApp encontrada. Crie uma para cada
+                  atendente (peça ao assistente: &ldquo;crie uma instância para o
+                  João&rdquo;) e volte aqui para atribuir.
+                </p>
+              )}
+
+              <p
+                className="text-[11px] leading-relaxed"
+                style={{ color: tokens.textTertiary }}
+              >
+                ⚠️ No warm transfer o cliente passa a receber mensagem do número
+                do atendente — garanta a base legal (LGPD).
+              </p>
 
               {phoneError != null && (
                 <p
