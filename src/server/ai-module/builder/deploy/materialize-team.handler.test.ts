@@ -108,10 +108,20 @@ function baseContext(overrides: Partial<DeployContext> = {}): DeployContext {
   }
 }
 
-function stateWithTeam(
-  team: Partial<BuilderState['team']>,
+function stateWithHandoff(
+  handoff: Partial<BuilderState['handoff']>,
 ): Record<string, unknown> {
-  return { team: { members: [], ...team } }
+  // Onda 2 — default mode 'roleta' (caminho que materializa a roleta); os testes
+  // que exercem solo/nenhum sobrescrevem `mode`.
+  return {
+    handoff: {
+      mode: 'roleta',
+      alsoSchedule: false,
+      steps: [],
+      members: [],
+      ...handoff,
+    },
+  }
 }
 
 function dbMember(
@@ -150,7 +160,7 @@ beforeEach(() => {
   mockAgentUpdate.mockResolvedValue({ id: AGENT_ID })
 
   mockReadBuilderStateByProject.mockResolvedValue(
-    stateWithTeam({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
+    stateWithHandoff({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
   )
 })
 
@@ -204,7 +214,7 @@ describe('materializeTeam — M1 step', () => {
 
     it('usa name/type do state quando presentes', async () => {
       mockReadBuilderStateByProject.mockResolvedValue(
-        stateWithTeam({
+        stateWithHandoff({
           departmentName: 'Vendas',
           departmentType: 'sales',
           members: [],
@@ -221,7 +231,7 @@ describe('materializeTeam — M1 step', () => {
     })
 
     it('aplica defaults (Atendimento/support) quando name/type ausentes', async () => {
-      mockReadBuilderStateByProject.mockResolvedValue(stateWithTeam({ members: [] }))
+      mockReadBuilderStateByProject.mockResolvedValue(stateWithHandoff({ members: [] }))
       await materializeTeam(baseContext())
       const arg = mockDepartmentUpsert.mock.calls[0]?.[0] as {
         create: { name: string; type: string }
@@ -234,7 +244,7 @@ describe('materializeTeam — M1 step', () => {
   describe('reconciliação dos membros (create / update / deactivate)', () => {
     it('CREATE para membro presente no state e ausente no DB (org+dept escopados)', async () => {
       mockReadBuilderStateByProject.mockResolvedValue(
-        stateWithTeam({ members: [{ name: 'Bia', whatsapp: '11988887777', position: 0 }] }),
+        stateWithHandoff({ members: [{ name: 'Bia', whatsapp: '11988887777', position: 0 }] }),
       )
       mockMemberFindMany.mockResolvedValue([])
       const result = await materializeTeam(baseContext())
@@ -251,7 +261,7 @@ describe('materializeTeam — M1 step', () => {
 
     it('UPDATE (não CREATE) quando o membro casa por userId no DB', async () => {
       mockReadBuilderStateByProject.mockResolvedValue(
-        stateWithTeam({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
+        stateWithHandoff({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
       )
       mockMemberFindMany.mockResolvedValue([dbMember({ id: 'm-1', userId: 'u-1' })])
       await materializeTeam(baseContext())
@@ -266,7 +276,7 @@ describe('materializeTeam — M1 step', () => {
 
     it('DESATIVA (isActive:false) membro do DB ausente no state — NUNCA delete', async () => {
       mockReadBuilderStateByProject.mockResolvedValue(
-        stateWithTeam({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
+        stateWithHandoff({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
       )
       mockMemberFindMany.mockResolvedValue([
         dbMember({ id: 'm-1', userId: 'u-1' }),
@@ -361,7 +371,7 @@ describe('materializeTeam — M1 step', () => {
       mockDepartmentUpsert.mockResolvedValue({ id: DEPT_ID })
       mockMemberFindMany.mockResolvedValue([])
       mockReadBuilderStateByProject.mockResolvedValue(
-        stateWithTeam({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
+        stateWithHandoff({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
       )
       mockAgentFindFirst.mockResolvedValue({
         systemPrompt: written,
@@ -369,6 +379,46 @@ describe('materializeTeam — M1 step', () => {
       })
       await materializeTeam(baseContext())
       expect(mockAgentUpdate).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Onda 2 — modo gateia a roleta (solo/nenhum: tear-down)', () => {
+    it("modo 'solo' NÃO injeta bloco de roleta, desativa membros legados e limpa o vínculo", async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ mode: 'solo', members: [] }),
+      )
+      mockMemberFindMany.mockResolvedValue([dbMember({ id: 'm-old', userId: 'u-old' })])
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt:
+          'Base\n\n<!--ROLETA:start-->\n## Roleta antiga\n<!--ROLETA:end-->',
+        departmentId: DEPT_ID,
+      })
+      await materializeTeam(baseContext())
+
+      // desired vazio (não-roleta) → membro legado desativado (nunca delete).
+      expect(mockMemberDelete).not.toHaveBeenCalled()
+      const deactivate = mockMemberUpdate.mock.calls.find((c) => {
+        const a = c[0] as { where: { id: string }; data: { isActive?: boolean } }
+        return a.where.id === 'm-old' && a.data.isActive === false
+      })
+      expect(deactivate).toBeTruthy()
+
+      // tear-down do prompt: bloco de roleta removido.
+      const promptUpdate = mockAgentUpdate.mock.calls.find((c) => {
+        const a = c[0] as { data: { systemPrompt?: string } }
+        return typeof a.data.systemPrompt === 'string'
+      })
+      expect(promptUpdate).toBeTruthy()
+      expect(
+        (promptUpdate?.[0] as { data: { systemPrompt: string } }).data.systemPrompt,
+      ).not.toContain('<!--ROLETA:start-->')
+
+      // vínculo estruturado limpo (apontava para ESTE department).
+      const deptClear = mockAgentUpdate.mock.calls.find((c) => {
+        const a = c[0] as { data: { departmentId?: string | null } }
+        return a.data.departmentId === null
+      })
+      expect(deptClear).toBeTruthy()
     })
   })
 

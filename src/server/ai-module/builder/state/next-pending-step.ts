@@ -88,33 +88,13 @@ function hasText(value: string | undefined | null): boolean {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-/** The team/roleta step only applies when the agent notifies a team on qualify. */
-function needsTeam(state: BuilderState): boolean {
-  return state.qualification.action === 'notify_team'
-}
-
 /**
- * O passo de pareamento (warm transfer) só aplica quando há roleta (notify_team)
- * E pelo menos 1 membro cadastrado — sem membros não há a quem parear. Passo
- * OPCIONAL: nunca bloqueia o deploy (isDone retorna true quando não aplicável).
+ * O passo `calendar` só aplica quando o card de handoff liga "também agenda"
+ * (`handoff.alsoSchedule`) — ORTOGONAL ao modo (Onda 2). Antes era
+ * `qualification.action === 'book_appointment'`.
  */
-function needsHandoffPairing(state: BuilderState): boolean {
-  return needsTeam(state) && state.team.members.length > 0
-}
-
-/**
- * B2 — o card OPCIONAL de pareamento (warm transfer) toma o active-step slot
- * (mesma mecânica do silenced_contacts) quando há roleta com membros e o dono
- * ainda NÃO confirmou o pareamento. Some assim que ele submete (pareando OU
- * pulando) — `confirmations.handoffPairing` flippa. Optional → nunca gateia deploy.
- */
-function handoffPairingActive(state: BuilderState): boolean {
-  return needsHandoffPairing(state) && !confirmed(state, 'handoffPairing')
-}
-
-/** The calendar step only applies when the agent books an appointment on qualify. */
 function needsCalendar(state: BuilderState): boolean {
-  return state.qualification.action === 'book_appointment'
+  return state.handoff.alsoSchedule === true
 }
 
 /** A channel is selected only if it is a non-empty key in the canonical catálogo. */
@@ -247,53 +227,15 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
     missing: (s) => (confirmed(s, 'pricing') ? [] : ['confirmations.pricing']),
   },
   {
-    id: 'qualification_action',
-    title: 'Ação de qualificação',
-    ask: 'Ao qualificar um lead, o agente deve avisar a equipe, agendar ou só registrar? Use o card.',
-    requiredPaths: ['qualification.action', 'confirmations.qualificationAction'],
-    isDone: (s) => confirmed(s, 'qualificationAction') && hasText(s.qualification.action),
-    missing: (s) => {
-      const out: string[] = []
-      if (!hasText(s.qualification.action)) out.push('qualification.action')
-      if (!confirmed(s, 'qualificationAction')) out.push('confirmations.qualificationAction')
-      return out
-    },
-  },
-  {
-    id: 'qualification_steps',
-    title: 'Perguntas de qualificação',
-    ask: 'Quais perguntas o agente faz para qualificar? Use o card de qualificação.',
-    requiredPaths: ['confirmations.qualificationSteps'],
-    isDone: (s) => confirmed(s, 'qualificationSteps'),
-    missing: (s) =>
-      confirmed(s, 'qualificationSteps') ? [] : ['confirmations.qualificationSteps'],
-  },
-  {
-    id: 'team',
-    title: 'Equipe / roleta',
-    ask: 'Quer montar a equipe para distribuir os atendimentos (roleta)? Use o card de equipe.',
-    requiredPaths: ['confirmations.team'],
-    // Only relevant when the qualification action notifies a team. For
-    // book_appointment / lead_only it is non-applicable, so treat as satisfied.
-    applies: needsTeam,
-    isDone: (s) => !needsTeam(s) || confirmed(s, 'team'),
-    missing: (s) =>
-      !needsTeam(s) || confirmed(s, 'team') ? [] : ['confirmations.team'],
-  },
-  {
-    id: 'handoff_pairing',
-    title: 'WhatsApp dos atendentes (warm transfer)',
-    ask: 'Quer que cada atendente atenda direto no WhatsApp dele? Pareie a instância de cada um no card — é opcional, pode pular.',
-    requiredPaths: ['confirmations.handoffPairing'],
-    // OPCIONAL — nunca gateia o deploy (fora de REQUIRED_STEPS). Surge via override
-    // (handoffPairingActive) só p/ agentes de roleta com membros; clears ao submeter.
-    optional: true,
-    applies: needsHandoffPairing,
-    isDone: (s) => !needsHandoffPairing(s) || confirmed(s, 'handoffPairing'),
-    missing: (s) =>
-      !needsHandoffPairing(s) || confirmed(s, 'handoffPairing')
-        ? []
-        : ['confirmations.handoffPairing'],
+    id: 'handoff',
+    title: 'Passagem para humano',
+    ask: 'Como o agente passa o atendimento para um humano — você mesmo (solo), rodízio da equipe (roleta), por departamento, ou nenhum? Use o card de handoff.',
+    requiredPaths: ['confirmations.handoff'],
+    // Onda 2 — FUSÃO de qualification_action + qualification_steps + team +
+    // handoff_pairing. Sempre obrigatório: o usuário escolhe UM modo (mesmo
+    // 'nenhum'). Roster/roteiro/agenda vivem como seções DENTRO do card.
+    isDone: (s) => confirmed(s, 'handoff'),
+    missing: (s) => (confirmed(s, 'handoff') ? [] : ['confirmations.handoff']),
   },
   {
     id: 'calendar',
@@ -398,9 +340,9 @@ export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
   'hours.preset': 'card',
   'hours.schedule': 'card',
   'pricing.items': 'card',
-  'qualification.action': 'card',
-  'qualification.steps': 'card',
-  'team.members': 'card',
+  'handoff.mode': 'card',
+  'handoff.steps': 'card',
+  'handoff.members': 'card',
   'calendar.connectionId': 'card',
   'activation.mode': 'card',
   'activation.keywords': 'card',
@@ -580,16 +522,7 @@ export function nextPendingStep(
       ? QUAYER_STEPS.find((def) => def.id === 'silenced_contacts') ?? null
       : null
 
-  // B2 — o card opcional de pareamento (warm transfer) toma o slot após a equipe
-  // (prioridade abaixo de source/silenced), só p/ roleta com membros; clears ao submeter.
-  const handoffStep =
-    sourceStep === null &&
-    silencedStep === null &&
-    handoffPairingActive(state)
-      ? QUAYER_STEPS.find((def) => def.id === 'handoff_pairing') ?? null
-      : null
-
-  const overrideStep = sourceStep ?? silencedStep ?? handoffStep
+  const overrideStep = sourceStep ?? silencedStep
 
   // When everything is done, surface the summary step as the terminal "ask".
   const chosen = overrideStep ?? surfaced ?? QUAYER_STEPS[QUAYER_STEPS.length - 1]

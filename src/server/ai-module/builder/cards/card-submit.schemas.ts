@@ -160,29 +160,8 @@ export const pricingPayloadSchema = z.object({
 })
 
 /**
- * qualification_action — the deploy gate: what the agent does once a lead is
- * qualified. Strict enum. → `builderState.qualification.action` /
- * confirmation `qualificationAction`.
- */
-export const qualificationActionPayloadSchema = z.object({
-  cardKey: z.literal('qualification_action'),
-  action: z.enum(['notify_team', 'book_appointment', 'lead_only']),
-})
-
-/**
- * qualification_steps — ordered list of qualification questions the agent asks.
- * → `builderState.qualification.steps` / confirmation `qualificationSteps`.
- */
-export const qualificationStepsPayloadSchema = z.object({
-  cardKey: z.literal('qualification_steps'),
-  steps: z.array(z.string().min(1)).default([]),
-})
-
-/**
- * team_structure — department + round-robin (roleta) members. Each member has a
- * non-negative int `position`; userId/name optional. The deploy saga later
- * materializes Department/DepartmentMember — here ONLY builderState.
- * → `builderState.team.*` / confirmation `team`.
+ * Membro do roster (roleta), reusado pelo `handoff`. `position` é o índice no
+ * rodízio; userId/name/whatsapp/connectionId opcionais. RE-validado server-side.
  */
 export const teamMemberPayloadSchema = z.object({
   userId: z.string().min(1).optional(),
@@ -196,29 +175,23 @@ export const teamMemberPayloadSchema = z.object({
   position: z.number().int().nonnegative(),
 })
 
-export const teamStructurePayloadSchema = z.object({
-  cardKey: z.literal('team_structure'),
+/**
+ * handoff (Onda 2) — FUSÃO de qualification_action + qualification_steps +
+ * team_structure + handoff_pairing num único card. `mode` define o destino do
+ * bastão (solo→routing self; roleta/departamentos→department; nenhum→sem handoff);
+ * `alsoSchedule` é ORTOGONAL (gateia o card de calendário); `steps` é o roteiro de
+ * qualificação; `members` o roster (com connectionId p/ warm transfer);
+ * `openingMessage` a 1ª mensagem do warm transfer. → `builderState.handoff.*` /
+ * confirmation `handoff`. Tudo RE-validado server-side.
+ */
+export const handoffPayloadSchema = z.object({
+  cardKey: z.literal('handoff'),
+  mode: z.enum(['solo', 'roleta', 'departamentos', 'nenhum']),
+  alsoSchedule: z.boolean().default(false),
+  steps: z.array(z.string().min(1)).default([]),
   departmentName: z.string().min(1).max(200).optional(),
   departmentType: z.string().min(1).max(120).optional(),
   members: z.array(teamMemberPayloadSchema).default([]),
-})
-
-/**
- * handoff_pairing — F0/B2 do warm transfer. Pareia a instância WhatsApp PRÓPRIA
- * de cada membro da roleta (por `position`) + a mensagem de abertura editável.
- * Quando o membro tem `connectionId`, o handoff faz warm transfer (a conexão dele
- * manda a 1ª mensagem ao cliente). O `connectionId` transita; o runtime valida
- * tenant-scoped (fail-open). → `builderState.team.members[].connectionId` +
- * `team.openingMessage` / confirmation `handoffPairing`.
- */
-export const handoffPairingMemberSchema = z.object({
-  position: z.number().int().nonnegative(),
-  connectionId: z.string().min(1).max(80).optional(),
-})
-
-export const handoffPairingPayloadSchema = z.object({
-  cardKey: z.literal('handoff_pairing'),
-  members: z.array(handoffPairingMemberSchema).default([]),
   openingMessage: z.string().min(1).max(500).optional(),
 })
 
@@ -321,10 +294,7 @@ export const CARD_PAYLOAD_SCHEMAS = {
   services: servicesPayloadSchema,
   business_hours: businessHoursPayloadSchema,
   pricing: pricingPayloadSchema,
-  qualification_action: qualificationActionPayloadSchema,
-  qualification_steps: qualificationStepsPayloadSchema,
-  team_structure: teamStructurePayloadSchema,
-  handoff_pairing: handoffPairingPayloadSchema,
+  handoff: handoffPayloadSchema,
   calendar_connect: calendarConnectPayloadSchema,
   activation_mode: activationModePayloadSchema,
   preview_summary: previewSummaryPayloadSchema,
@@ -369,10 +339,7 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   servicesPayloadSchema,
   businessHoursPayloadSchema,
   pricingPayloadSchema,
-  qualificationActionPayloadSchema,
-  qualificationStepsPayloadSchema,
-  teamStructurePayloadSchema,
-  handoffPairingPayloadSchema,
+  handoffPayloadSchema,
   calendarConnectPayloadSchema,
   activationModePayloadSchema,
   previewSummaryPayloadSchema,
@@ -394,15 +361,8 @@ export type ServicesPayload = z.infer<typeof servicesPayloadSchema>
 export type BusinessHoursPayload = z.infer<typeof businessHoursPayloadSchema>
 export type PricingItemPayload = z.infer<typeof pricingItemPayloadSchema>
 export type PricingPayload = z.infer<typeof pricingPayloadSchema>
-export type QualificationActionPayload = z.infer<
-  typeof qualificationActionPayloadSchema
->
-export type QualificationStepsPayload = z.infer<
-  typeof qualificationStepsPayloadSchema
->
 export type TeamMemberPayload = z.infer<typeof teamMemberPayloadSchema>
-export type TeamStructurePayload = z.infer<typeof teamStructurePayloadSchema>
-export type HandoffPairingPayload = z.infer<typeof handoffPairingPayloadSchema>
+export type HandoffPayload = z.infer<typeof handoffPayloadSchema>
 export type CalendarConnectPayload = z.infer<typeof calendarConnectPayloadSchema>
 export type ActivationModePayload = z.infer<typeof activationModePayloadSchema>
 export type PreviewSummaryPayload = z.infer<typeof previewSummaryPayloadSchema>

@@ -25,7 +25,7 @@ export const SUMMARY_AREA = {
   services: "services",
   pricing: "pricing",
   hours: "hours",
-  qualification: "qualification",
+  handoff: "handoff",
 } as const
 
 /** Uma chave de área (valor de {@link SUMMARY_AREA}). */
@@ -52,11 +52,12 @@ function hasText(value: string | undefined | null): boolean {
 // Resumos (string-only, sem JSX → helper puro)
 // ==========================================
 
-/** Rótulos PT-BR para o enum `qualification.action`. */
-const QUALIFICATION_ACTION_LABELS: Record<string, string> = {
-  notify_team: "Avisar a equipe",
-  book_appointment: "Agendar atendimento",
-  lead_only: "Apenas captar o lead",
+/** Rótulos PT-BR para o enum `handoff.mode` (Onda 2). */
+const HANDOFF_MODE_LABELS: Record<string, string> = {
+  solo: "Eu mesmo atendo",
+  roleta: "Equipe em rodízio",
+  departamentos: "Triagem por assunto",
+  nenhum: "Só conversa",
 }
 
 /** Junta uma lista numa frase curta, ou "" quando não há nada a mostrar. */
@@ -128,37 +129,42 @@ export function summarizePricing(pricing: BuilderState["pricing"]): string {
   return out
 }
 
-/** Resumo da qualificação: ação + quantidade de perguntas. */
-export function summarizeQualification(
-  qualification: BuilderState["qualification"],
-): string {
-  const parts: string[] = []
-  if (qualification.action) {
-    parts.push(
-      QUALIFICATION_ACTION_LABELS[qualification.action] ?? qualification.action,
-    )
-  }
-  if (qualification.steps.length > 0) {
-    const noun = qualification.steps.length === 1 ? "pergunta" : "perguntas"
-    parts.push(`${qualification.steps.length} ${noun}`)
-  }
-  return joinList(parts)
-}
-
-/** Resumo de equipe + agenda: departamento, roleta e conexão de calendário. */
-export function summarizeTeam(
-  team: BuilderState["team"],
+/**
+ * Resumo da passagem para humano (Onda 2 — card `handoff`): modo + roteiro de
+ * qualificação + roster (departamento/roleta) + agenda. Consolida os antigos
+ * `summarizeQualification` + `summarizeTeam` num único resumo.
+ *
+ * - modo (`solo`/`roleta`/`departamentos`/`nenhum`), em PT-BR;
+ * - departamento + nº de pessoas na roleta (só quando o modo usa roster);
+ * - nº de perguntas de qualificação antes do handoff;
+ * - "também marca na agenda" / "agenda conectada".
+ */
+export function summarizeHandoff(
+  handoff: BuilderState["handoff"],
   calendar: BuilderState["calendar"],
 ): string {
   const parts: string[] = []
-  if (team.departmentName) parts.push(team.departmentName)
-  if (team.members.length > 0) {
-    const noun = team.members.length === 1 ? "pessoa" : "pessoas"
-    parts.push(`${team.members.length} ${noun} na roleta`)
+
+  if (handoff.mode) {
+    parts.push(HANDOFF_MODE_LABELS[handoff.mode] ?? handoff.mode)
   }
-  if (calendar.connectionId || calendar.status === "connected") {
-    parts.push("agenda conectada")
+
+  if (handoff.departmentName) parts.push(handoff.departmentName)
+  if (handoff.members.length > 0) {
+    const noun = handoff.members.length === 1 ? "pessoa" : "pessoas"
+    parts.push(`${handoff.members.length} ${noun} na roleta`)
   }
+
+  if (handoff.steps.length > 0) {
+    const noun = handoff.steps.length === 1 ? "pergunta" : "perguntas"
+    parts.push(`${handoff.steps.length} ${noun}`)
+  }
+
+  const calendarConnected =
+    calendar.connectionId || calendar.status === "connected"
+  if (calendarConnected) parts.push("agenda conectada")
+  else if (handoff.alsoSchedule) parts.push("também marca na agenda")
+
   return joinList(parts)
 }
 
@@ -186,7 +192,7 @@ export function summarizeActivation(
  *  3. nenhum serviço cadastrado → o agente improvisa.
  *  4. sem tabela de preços → não responde valores.
  *  5. horário não definido (sem preset E sem schedule) → a definir.
- *  6. nenhuma pergunta de qualificação → usa critério genérico.
+ *  6. passagem para humano sem modo definido → comportamento genérico.
  */
 export function computeSummaryWarnings(value: BuilderState): SummaryWarning[] {
   const warnings: SummaryWarning[] = []
@@ -231,11 +237,11 @@ export function computeSummaryWarnings(value: BuilderState): SummaryWarning[] {
     })
   }
 
-  // 6. Qualificação sem perguntas.
-  if (value.qualification.steps.length === 0) {
+  // 6. Passagem para humano sem modo definido.
+  if (!hasText(value.handoff.mode)) {
     warnings.push({
-      area: SUMMARY_AREA.qualification,
-      message: "Sem perguntas de qualificação — usa critério genérico",
+      area: SUMMARY_AREA.handoff,
+      message: "Passagem para humano não definida — comportamento genérico",
     })
   }
 

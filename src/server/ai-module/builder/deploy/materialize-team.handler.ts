@@ -1,11 +1,23 @@
 /**
  * materializeTeam handler — step "materialize_team" da saga de deploy (M1).
  *
- * Materializa o TEAM coletado no `builderState` (Onda A, card team_structure) nos
- * modelos de RUNTIME (Department + DepartmentMember) para que a ROLETA (round-robin)
- * roteie o lead ao próximo atendente humano — e, na M1/decisão 6A, notifique-o por
- * WhatsApp. Hoje a saga NÃO carrega o builderState; o team morre no JSONB e o
- * notify_team só cria Notification IN-APP. Este step fecha o gap (G6).
+ * Materializa o handoff de EQUIPE coletado no `builderState` (Onda 2, card unificado
+ * `handoff` — fusão de qualification_action + qualification_steps + team_structure +
+ * handoff_pairing) nos modelos de RUNTIME (Department + DepartmentMember) para que a
+ * ROLETA (round-robin) roteie o lead ao próximo atendente humano — e, na M1/decisão
+ * 6A, notifique-o por WhatsApp.
+ *
+ * Onda 2 — modo→roteamento do runtime:
+ *   - 'solo'          → transfer_to_human routing 'self' (sem roleta);
+ *   - 'roleta'        → routing 'department' (roleta neste Department) — MATERIALIZA;
+ *   - 'departamentos' → routing 'department' (idem) — MATERIALIZA;
+ *   - 'nenhum'/ausente→ sem handoff de equipe (sem roleta).
+ * `handoff.alsoSchedule` (ORTOGONAL ao modo) substitui o antigo
+ * `qualification.action==='book_appointment'` para gatear a agenda — porém a AGENDA é
+ * materializada por OUTRO step (calendar), não aqui. Este step só cuida da roleta:
+ * a roleta (Department + membros ativos + bloco/vínculo no agente) só é materializada
+ * quando o modo é 'roleta' OU 'departamentos'; em 'solo'/'nenhum' o desired é vazio
+ * (tear-down dos membros legados) e o agente não recebe o bloco/vínculo de roleta.
  *
  * Espelho EXATO de `materialize-pricing.handler.ts` (M2):
  *   - read fail-open do builderState (`readBuilderStateByProject` + `parseBuilderState`
@@ -121,6 +133,24 @@ export function applyRouletteBlock(
   return `${current}\n\n${block}`
 }
 
+/**
+ * Remove um bloco de roleta entre os marcadores do `systemPrompt` de forma
+ * IDEMPOTENTE (tear-down quando o modo deixa de ser roleta — solo/nenhum). Tira
+ * também a linha em branco que o `applyRouletteBlock` injeta no append. Pura:
+ * não toca DB, não muta o input. Retorna o systemPrompt sem o bloco (string vazia
+ * vira string vazia; nenhum bloco presente => o prompt inalterado).
+ */
+export function stripRouletteBlock(systemPrompt: string | null): string {
+  const current = systemPrompt ?? ''
+  const blockPattern = new RegExp(
+    // `\n*` à esquerda absorve o separador `\n\n` do append (evita sobra de linhas).
+    `\\n*${escapeRegExp(ROULETTE_BLOCK_START)}[\\s\\S]*?${escapeRegExp(
+      ROULETTE_BLOCK_END,
+    )}`,
+  )
+  return current.replace(blockPattern, '')
+}
+
 /** Escapa metacaracteres de regex (os marcadores têm `<`, `-`, `>`). */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -186,29 +216,45 @@ export async function materializeTeam(
 ): Promise<MaterializeTeamResult> {
   // 1. Carrega o builderState LAZY (fail-open: nenhum desses lança).
   const state = parseBuilderState(await readBuilderStateByProject(ctx.projectId))
-  const team = state.team
+  // Onda 2 — `state.team`/`state.qualification` foram FUNDIDOS em `state.handoff`
+  // (action+steps+roster+openingMessage num único card). Lemos tudo daqui.
+  const handoff = state.handoff
+
+  // Mapeamento modo→roteamento do runtime:
+  //   solo            → transfer_to_human routing 'self' (não cria roleta)
+  //   roleta          → routing 'department' (roleta round-robin neste Department)
+  //   departamentos   → routing 'department' (idem; vários setores compartilham o modelo)
+  //   nenhum / ausente→ sem handoff de equipe (não cria roleta)
+  // A roleta (Department + membros ATIVOS + bloco no prompt + vínculo departmentId)
+  // só é materializada quando o modo é 'roleta' OU 'departamentos'. Nos demais modos
+  // o desired é VAZIO — isso desativa qualquer membro legado (tear-down de uma roleta
+  // antiga ao trocar para solo/nenhum) e o agente NÃO recebe o bloco/vínculo de roleta.
+  const isRoulette = handoff.mode === 'roleta' || handoff.mode === 'departamentos'
 
   // Sanitização + reconciliação delegadas ao helper PURO `team-reconcile`
   // (espelha o `pricing-reconcile`): dedupa o desired (last-write-wins),
   // normaliza o WhatsApp E.164-BR e reescreve `position` pela ordem do state.
-  const desired = sanitizeTeamMembersForRuntime(team.members)
+  // Fora do modo roleta, o desired é vazio (desativa órfãos; não há roleta ativa).
+  const desired = isRoulette
+    ? sanitizeTeamMembersForRuntime(handoff.members)
+    : []
 
   // 2. Upsert org-scoped do Department do projeto. Chave DETERMINÍSTICA = slug
   //    `team:${projectId}` (não há unique por name). `name`/`type` do state com
   //    defaults; `isActive:true`. Idempotente por @@unique([organizationId, slug]).
   const slug = `team:${ctx.projectId}`
   const name =
-    team.departmentName && team.departmentName.trim().length > 0
-      ? team.departmentName.trim()
+    handoff.departmentName && handoff.departmentName.trim().length > 0
+      ? handoff.departmentName.trim()
       : 'Atendimento'
   const type =
-    team.departmentType && team.departmentType.trim().length > 0
-      ? team.departmentType.trim()
+    handoff.departmentType && handoff.departmentType.trim().length > 0
+      ? handoff.departmentType.trim()
       : 'support'
 
   // B1b — mensagem de abertura do warm transfer (editável no card handoff_pairing).
   // Trim + clear-on-empty: apagar no Builder zera a coluna (runtime volta ao default).
-  const warmTransferOpeningMessage = team.openingMessage?.trim() || null
+  const warmTransferOpeningMessage = handoff.openingMessage?.trim() || null
 
   const department = await database.department.upsert({
     where: {
@@ -274,14 +320,17 @@ export async function materializeTeam(
       desired,
     )
 
-    // Guard de observabilidade: `state.team` vazio desativa TODOS os membros ativos
-    // (mesma semântica intencional do pricing). Se isso vier de uma falha transitória
-    // de leitura do builderState, a roleta foi zerada silenciosamente — loga em alto
-    // nível para não confundir um deploy futuro (a reconciliação se recupera).
+    // Guard de observabilidade: desired vazio desativa TODOS os membros ativos
+    // (mesma semântica intencional do pricing). Acontece quando `state.handoff.members`
+    // está vazio OU o modo NÃO é roleta/departamentos (tear-down de uma roleta antiga
+    // ao trocar para solo/nenhum). Se vier de uma falha transitória de leitura do
+    // builderState, a roleta foi zerada silenciosamente — loga em alto nível para não
+    // confundir um deploy futuro (a reconciliação se recupera).
     if (desired.length === 0 && existingRows.some((r) => r.isActive)) {
       console.warn(
-        `[deploy/materialize_team] state.team vazio, mas o departamento tem membro(s) ativo(s) — ` +
-          `TODOS serão desativados. Se for leitura transitória do state, a roleta foi zerada (re-deploy reconcilia).`,
+        `[deploy/materialize_team] desired vazio (handoff.members vazio ou modo '${handoff.mode ?? 'nenhum'}' não-roleta), ` +
+          `mas o departamento tem membro(s) ativo(s) — TODOS serão desativados. ` +
+          `Se for leitura transitória do state, a roleta foi zerada (re-deploy reconcilia).`,
       )
     }
 
@@ -334,32 +383,57 @@ export async function materializeTeam(
   //    a ser a coluna `AIAgentConfig.departmentId` (gravada logo abaixo), que o
   //    dispatch_to_agent lê via `ctx.agentDepartmentId` como FALLBACK — robusto a qual
   //    tabela de prompt vence.
+  //
+  //    Onda 2 — esse bloco + vínculo SÓ valem para modos de roleta ('roleta' /
+  //    'departamentos'). Em 'solo'/'nenhum' o agente NÃO deve aprender a dispatchar
+  //    para um setor: removemos um bloco de roleta legado do prompt (tear-down
+  //    idempotente) e limpamos o vínculo departmentId QUANDO aponta para ESTE
+  //    department (não clobbera um vínculo manual para outro setor).
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
       select: { systemPrompt: true, departmentId: true, businessHours: true },
     })
     if (agent) {
-      const block = buildRouletteBlock(department.id, name)
-      const nextPrompt = applyRouletteBlock(agent.systemPrompt, block)
-      // Só escreve quando muda — idempotente (rodar 2x não gera write redundante).
-      if (nextPrompt !== (agent.systemPrompt ?? '')) {
-        await database.aIAgentConfig.update({
-          where: { id: ctx.aiAgentId },
-          data: { systemPrompt: nextPrompt },
-        })
-      }
+      if (isRoulette) {
+        const block = buildRouletteBlock(department.id, name)
+        const nextPrompt = applyRouletteBlock(agent.systemPrompt, block)
+        // Só escreve quando muda — idempotente (rodar 2x não gera write redundante).
+        if (nextPrompt !== (agent.systemPrompt ?? '')) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { systemPrompt: nextPrompt },
+          })
+        }
 
-      // Vínculo ESTRUTURADO (fonte AUTORITATIVA do id): grava o departamento na
-      // coluna AIAgentConfig.departmentId. O dispatch_to_agent lê esta coluna como
-      // FALLBACK quando o LLM não passa um departmentId válido — robusto a qual
-      // tabela de prompt vence (o bloco acima pode ser sombreado por AgentPromptVersion
-      // ACTIVE). Idempotente: só escreve quando muda.
-      if (agent.departmentId !== department.id) {
-        await database.aIAgentConfig.update({
-          where: { id: ctx.aiAgentId },
-          data: { departmentId: department.id },
-        })
+        // Vínculo ESTRUTURADO (fonte AUTORITATIVA do id): grava o departamento na
+        // coluna AIAgentConfig.departmentId. O dispatch_to_agent lê esta coluna como
+        // FALLBACK quando o LLM não passa um departmentId válido — robusto a qual
+        // tabela de prompt vence (o bloco acima pode ser sombreado por
+        // AgentPromptVersion ACTIVE). Idempotente: só escreve quando muda.
+        if (agent.departmentId !== department.id) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { departmentId: department.id },
+          })
+        }
+      } else {
+        // solo/nenhum — tear-down idempotente da roleta no agente:
+        //  - remove um bloco de roleta legado do systemPrompt (se houver);
+        //  - limpa o vínculo departmentId apenas quando aponta para ESTE department.
+        const strippedPrompt = stripRouletteBlock(agent.systemPrompt)
+        if (strippedPrompt !== (agent.systemPrompt ?? '')) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { systemPrompt: strippedPrompt },
+          })
+        }
+        if (agent.departmentId === department.id) {
+          await database.aIAgentConfig.update({
+            where: { id: ctx.aiAgentId },
+            data: { departmentId: null },
+          })
+        }
       }
 
       // Melhoria #2 — materializa o HORÁRIO COMERCIAL (agent-level) do builderState

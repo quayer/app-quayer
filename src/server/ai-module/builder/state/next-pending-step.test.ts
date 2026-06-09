@@ -68,25 +68,26 @@ function confirm(state: BuilderState, key: ConfirmationKey): BuilderState {
  */
 function fullyCompletedState(): BuilderState {
   let s = freshState()
-  // Free-form fields. 'uazapi' is a canonical channel key (CHANNEL_KEYS);
-  // 'book_appointment' makes the calendar step applicable.
+  // Free-form fields. 'uazapi' is a canonical channel key (CHANNEL_KEYS). Onda 2:
+  // the handoff card replaced qualification/team. `alsoSchedule: false` keeps the
+  // calendar step non-applicable (treated as satisfied); we still flip the
+  // `calendar` sentinel below so its raw step.done is true on the full checklist.
   s = patchBuilderState(s, {
     project: { name: 'Clínica X', objective: 'Agendar consultas' },
     selectedChannelKey: 'uazapi',
-    qualification: { action: 'book_appointment' },
+    handoff: { mode: 'solo', alsoSchedule: false, steps: [], members: [] },
   })
   // Every confirmation sentinel. 'silencedContacts' (G1, optional) is included so
   // the full-checklist `steps.every(done)` assertion stays green — its step.done
-  // reads the raw sentinel regardless of applicability.
+  // reads the raw sentinel regardless of applicability. Onda 2: the single
+  // `handoff` sentinel replaced qualificationAction/qualificationSteps/team/handoffPairing.
   const allSentinels: ConfirmationKey[] = [
     'source',
     'persona',
     'services',
     'hours',
     'pricing',
-    'qualificationAction',
-    'qualificationSteps',
-    'team',
+    'handoff',
     'calendar',
     'activation',
     'silencedContacts',
@@ -163,22 +164,75 @@ describe('nextPendingStep — sequential gating', () => {
     expect(r.steps.find((st) => st.id === 'source_ingestion')?.done).toBe(true)
   })
 
-  it('qualification_action requires BOTH the action value and the sentinel', () => {
+  it('handoff is the pending step right after pricing (Onda 2 unified)', () => {
     let s = freshState()
     s = patchBuilderState(s, { project: { name: 'X', objective: 'Y' } })
     for (const k of ['source', 'persona', 'services', 'hours', 'pricing'] as ConfirmationKey[]) {
       s = confirm(s, k)
     }
-    // Sentinel set but no action value → still on qualification_action.
-    s = confirm(s, 'qualificationAction')
+    // Everything up to pricing is done → handoff is the next required step.
     let r = nextPendingStep(s, READY_CTX)
-    expect(r.step.id).toBe<StepId>('qualification_action')
-    expect(r.requiredMissing).toContain('qualification.action')
+    expect(r.step.id).toBe<StepId>('handoff')
+    expect(r.requiredMissing).toContain('confirmations.handoff')
 
-    // Now set the action value → advances.
-    s = patchBuilderState(s, { qualification: { action: 'notify_team' } })
+    // Confirming handoff advances past it (next required step is activation, since
+    // alsoSchedule defaults to false → calendar is non-applicable).
+    s = confirm(s, 'handoff')
     r = nextPendingStep(s, READY_CTX)
-    expect(r.step.id).toBe<StepId>('qualification_steps')
+    expect(r.step.id).toBe<StepId>('activation')
+  })
+
+  it('handoff mode "solo" satisfies the step without a roster', () => {
+    let s = freshState()
+    s = patchBuilderState(s, {
+      project: { name: 'X', objective: 'Y' },
+      handoff: { mode: 'solo', alsoSchedule: false, steps: [], members: [] },
+    })
+    for (const k of ['source', 'persona', 'services', 'hours', 'pricing'] as ConfirmationKey[]) {
+      s = confirm(s, k)
+    }
+    s = confirm(s, 'handoff')
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'handoff')?.done).toBe(true)
+    expect(r.step.id).not.toBe<StepId>('handoff')
+  })
+
+  it('handoff mode "roleta" with members satisfies the step', () => {
+    let s = freshState()
+    s = patchBuilderState(s, {
+      project: { name: 'X', objective: 'Y' },
+      handoff: {
+        mode: 'roleta',
+        alsoSchedule: false,
+        steps: ['Qual seu nome?'],
+        members: [
+          { name: 'João', position: 0 },
+          { name: 'Maria', position: 1 },
+        ],
+      },
+    })
+    for (const k of ['source', 'persona', 'services', 'hours', 'pricing'] as ConfirmationKey[]) {
+      s = confirm(s, k)
+    }
+    s = confirm(s, 'handoff')
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'handoff')?.done).toBe(true)
+    expect(r.step.id).not.toBe<StepId>('handoff')
+  })
+
+  it('handoff mode "nenhum" satisfies the step', () => {
+    let s = freshState()
+    s = patchBuilderState(s, {
+      project: { name: 'X', objective: 'Y' },
+      handoff: { mode: 'nenhum', alsoSchedule: false, steps: [], members: [] },
+    })
+    for (const k of ['source', 'persona', 'services', 'hours', 'pricing'] as ConfirmationKey[]) {
+      s = confirm(s, k)
+    }
+    s = confirm(s, 'handoff')
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'handoff')?.done).toBe(true)
+    expect(r.step.id).not.toBe<StepId>('handoff')
   })
 
   it('channel requires BOTH selectedChannelKey and the sentinel', () => {
@@ -274,16 +328,15 @@ describe('nextPendingStep — completenessPct', () => {
     expect(pct).toBeGreaterThanOrEqual(prev)
     prev = pct
 
-    // Confirm sentinels one by one — never decreases.
+    // Confirm sentinels one by one — never decreases. Onda 2: the single
+    // `handoff` sentinel replaced the 4 legacy qualification/team sentinels.
     const order: ConfirmationKey[] = [
       'source',
       'persona',
       'services',
       'hours',
       'pricing',
-      'qualificationAction',
-      'qualificationSteps',
-      'team',
+      'handoff',
       'calendar',
       'activation',
       'silencedContacts',
@@ -294,7 +347,9 @@ describe('nextPendingStep — completenessPct', () => {
     ]
     s = patchBuilderState(s, {
       selectedChannelKey: 'uazapi',
-      qualification: { action: 'lead_only' },
+      // alsoSchedule:false → calendar non-applicable (excluded from the ratio),
+      // so confirming the `calendar` sentinel later never decreases completeness.
+      handoff: { mode: 'solo', alsoSchedule: false, steps: [], members: [] },
     })
     for (const key of order) {
       s = confirm(s, key)
@@ -356,26 +411,30 @@ describe('nextPendingStep — isDeployReady', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Action-gated steps: team (notify_team) and calendar (book_appointment)
+// Onda 2 — calendar gated by handoff.alsoSchedule (orthogonal to mode)
 // ---------------------------------------------------------------------------
 
-describe('nextPendingStep — team/calendar gated by qualification.action', () => {
-  /** All required sentinels EXCEPT team + calendar, with a given action. */
+describe('nextPendingStep — calendar gated by handoff.alsoSchedule', () => {
+  /**
+   * All required sentinels EXCEPT calendar, with a given handoff mode + schedule
+   * flag. `handoff` is confirmed; `calendar` is left pending so the alsoSchedule
+   * gate is the only thing in play.
+   */
   function stateUpToActivation(
-    action: 'notify_team' | 'book_appointment' | 'lead_only',
+    mode: 'solo' | 'roleta' | 'departamentos' | 'nenhum',
+    alsoSchedule: boolean,
   ): BuilderState {
     let s = patchBuilderState(freshState(), {
       project: { name: 'X', objective: 'Y' },
       selectedChannelKey: 'uazapi',
-      qualification: { action },
+      handoff: { mode, alsoSchedule, steps: [], members: [] },
     })
     for (const k of [
       'persona',
       'services',
       'hours',
       'pricing',
-      'qualificationAction',
-      'qualificationSteps',
+      'handoff',
       'activation',
       'tools',
       'channel',
@@ -387,62 +446,42 @@ describe('nextPendingStep — team/calendar gated by qualification.action', () =
     return s
   }
 
-  it('lead_only: team + calendar are non-applicable → deploy-ready without confirming either', () => {
-    const s = stateUpToActivation('lead_only')
+  it('alsoSchedule=false: calendar is non-applicable → deploy-ready without confirming it', () => {
+    const s = stateUpToActivation('solo', false)
     const r = nextPendingStep(s, READY_CTX)
-    expect(r.steps.find((st) => st.id === 'team')?.done).toBe(true)
+    // calendar step is treated as satisfied (non-applicable) and never surfaces.
     expect(r.steps.find((st) => st.id === 'calendar')?.done).toBe(true)
+    expect(r.step.id).not.toBe<StepId>('calendar')
     expect(r.isDeployReady).toBe(true)
   })
 
-  it('notify_team: team is required (surfaced) but calendar is non-applicable', () => {
-    const s = stateUpToActivation('notify_team')
+  it('alsoSchedule=true: calendar becomes applicable, is required (surfaced) and gates deploy', () => {
+    const s = stateUpToActivation('solo', true)
     const r = nextPendingStep(s, READY_CTX)
-    // calendar never blocks for notify_team...
-    expect(r.steps.find((st) => st.id === 'calendar')?.done).toBe(true)
-    // ...but team must be confirmed → it gates and is the surfaced step.
-    expect(r.steps.find((st) => st.id === 'team')?.done).toBe(false)
-    expect(r.step.id).toBe<StepId>('team')
-    expect(r.isDeployReady).toBe(false)
-
-    // Confirming team clears it.
-    const r2 = nextPendingStep(confirm(s, 'team'), READY_CTX)
-    expect(r2.isDeployReady).toBe(true)
-  })
-
-  it('B2 — handoff_pairing (opcional) surge após o team COM membros, sem bloquear deploy', () => {
-    let s = stateUpToActivation('notify_team')
-    s = confirm(s, 'team')
-    s = patchBuilderState(s, { team: { members: [{ name: 'João', position: 0 }] } })
-    const r = nextPendingStep(s, READY_CTX)
-    // o card opcional toma o active-step slot (override)…
-    expect(r.step.id).toBe<StepId>('handoff_pairing')
-    // …mas é OPCIONAL → deploy-ready mesmo sem confirmar o pareamento.
-    expect(r.isDeployReady).toBe(true)
-    // confirmar (parear OU pular) limpa o override.
-    const r2 = nextPendingStep(confirm(s, 'handoffPairing'), READY_CTX)
-    expect(r2.step.id).not.toBe('handoff_pairing')
-    expect(r2.isDeployReady).toBe(true)
-  })
-
-  it('B2 — handoff_pairing NÃO aplica sem membros (roleta vazia)', () => {
-    const s = confirm(stateUpToActivation('notify_team'), 'team') // team confirmado, 0 membros
-    const r = nextPendingStep(s, READY_CTX)
-    expect(r.step.id).not.toBe('handoff_pairing')
-    expect(r.steps.find((st) => st.id === 'handoff_pairing')?.done).toBe(true)
-    expect(r.isDeployReady).toBe(true)
-  })
-
-  it('book_appointment: calendar is required (surfaced) but team is non-applicable', () => {
-    const s = stateUpToActivation('book_appointment')
-    const r = nextPendingStep(s, READY_CTX)
-    expect(r.steps.find((st) => st.id === 'team')?.done).toBe(true)
+    // calendar now applies and is not yet confirmed → it gates + is the surfaced step.
     expect(r.steps.find((st) => st.id === 'calendar')?.done).toBe(false)
     expect(r.step.id).toBe<StepId>('calendar')
     expect(r.isDeployReady).toBe(false)
 
+    // Confirming calendar clears it.
     const r2 = nextPendingStep(confirm(s, 'calendar'), READY_CTX)
+    expect(r2.steps.find((st) => st.id === 'calendar')?.done).toBe(true)
     expect(r2.isDeployReady).toBe(true)
+  })
+
+  it('alsoSchedule=true works regardless of mode (orthogonal): roleta also requires calendar', () => {
+    const s = stateUpToActivation('roleta', true)
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('calendar')
+    expect(r.isDeployReady).toBe(false)
+    expect(nextPendingStep(confirm(s, 'calendar'), READY_CTX).isDeployReady).toBe(true)
+  })
+
+  it('mode "nenhum" with alsoSchedule=false: calendar non-applicable, deploy-ready', () => {
+    const s = stateUpToActivation('nenhum', false)
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'calendar')?.done).toBe(true)
+    expect(r.isDeployReady).toBe(true)
   })
 })
 
@@ -504,7 +543,7 @@ describe('nextPendingStep — silenced_contacts (optional, applies-gated)', () =
     let s = patchBuilderState(freshState(), {
       project: { name: 'X', objective: 'Y' },
       selectedChannelKey: 'uazapi',
-      qualification: { action: 'lead_only' },
+      handoff: { mode: 'solo', alsoSchedule: false, steps: [], members: [] },
       activation: { mode: 'all_except_blacklist' },
     })
     for (const k of [
@@ -512,8 +551,7 @@ describe('nextPendingStep — silenced_contacts (optional, applies-gated)', () =
       'services',
       'hours',
       'pricing',
-      'qualificationAction',
-      'qualificationSteps',
+      'handoff',
     ] as ConfirmationKey[]) {
       s = confirm(s, k)
     }

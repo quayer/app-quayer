@@ -1,7 +1,35 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-import { parseBuilderState, patchBuilderState } from '../builder-state'
-import { applyPricing, applyHandoffPairing } from './apply-card-submit'
+// ---------------------------------------------------------------------------
+// Hoisted mock — builderProjectConversation delegate (tenant-scoped read+write)
+// ---------------------------------------------------------------------------
+//
+// `applyHandoff` is NOT exported (only the pure `applyPricing` is), so the
+// Onda 2 `handoff` card is exercised through the PUBLIC `applyCardSubmit`
+// entrypoint. That entrypoint reads the conversation (proving ownership) and
+// writes the new state in a single tenant-filtered updateMany — both mocked
+// here. The `applyPricing` suite below stays a pure-function unit (no DB), and
+// the database mock is inert for it.
+
+const mockFindUnique = vi.hoisted(() => vi.fn())
+const mockUpdateMany = vi.hoisted(() => vi.fn())
+
+vi.mock('@/server/services/database', () => ({
+  database: {
+    builderProjectConversation: {
+      findUnique: mockFindUnique,
+      updateMany: mockUpdateMany,
+    },
+  },
+}))
+
+import {
+  parseBuilderState,
+  patchBuilderState,
+  type BuilderState,
+} from '../builder-state'
+import { applyPricing, applyCardSubmit } from './apply-card-submit'
+import type { CardSubmitBody } from '../card-submit.schemas'
 
 /**
  * Onda B — G5a regression guard.
@@ -47,42 +75,141 @@ describe('applyPricing — G5a min ticket (wholesale clear)', () => {
   })
 })
 
-describe('applyHandoffPairing — B2 (warm transfer)', () => {
-  const teamState = () =>
-    patchBuilderState(parseBuilderState(undefined), {
-      team: {
-        members: [
-          { name: 'João', whatsapp: '+5511988887777', position: 0 },
-          { name: 'Maria', whatsapp: '+5511966665555', position: 1 },
-        ],
-      },
+/**
+ * Onda 2 — the unified `handoff` card (FUSÃO of the 4 retired handlers:
+ * qualification_action + qualification_steps + team_structure + handoff_pairing).
+ *
+ * `applyHandoff` is internal, so we drive the PUBLIC `applyCardSubmit` with a
+ * cardKey 'handoff' body and assert on the persisted state captured by the
+ * mocked updateMany: it must write `state.handoff.*` (mode/roster/steps/schedule/
+ * openingMessage) AND flip `confirmations.handoff` (the single sentinel that
+ * replaced the 4 legacy ones).
+ */
+describe('applyCardSubmit — handoff card (Onda 2 unified)', () => {
+  const PROJECT_ID = 'proj-1'
+  const ORG_ID = 'org-1'
+  const CONV_ID = 'conv-1'
+
+  /** Seed conversation row with a given (already-parsed) builderState JSON. */
+  function seedConversation(builderState: unknown): void {
+    mockFindUnique.mockResolvedValue({
+      id: CONV_ID,
+      organizationId: ORG_ID,
+      builderState,
+    })
+    mockUpdateMany.mockResolvedValue({ count: 1 })
+  }
+
+  /** The BuilderState written by the (single) updateMany call. */
+  function writtenState(): BuilderState {
+    expect(mockUpdateMany).toHaveBeenCalledTimes(1)
+    const arg = mockUpdateMany.mock.calls[0][0] as {
+      data: { builderState: BuilderState }
+    }
+    return arg.data.builderState
+  }
+
+  async function submitHandoff(
+    body: Omit<Extract<CardSubmitBody, { cardKey: 'handoff' }>, 'cardKey'>,
+  ) {
+    return applyCardSubmit({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      body: { cardKey: 'handoff', ...body },
+    })
+  }
+
+  beforeEach(() => {
+    mockFindUnique.mockReset()
+    mockUpdateMany.mockReset()
+  })
+
+  it('mode "solo": writes handoff.mode + flips confirmations.handoff (empty roster)', async () => {
+    seedConversation(null)
+    const res = await submitHandoff({
+      mode: 'solo',
+      alsoSchedule: false,
+      steps: [],
+      members: [],
     })
 
-  it('seta connectionId por position e grava openingMessage + flag', () => {
-    const { next } = applyHandoffPairing(teamState(), {
-      members: [{ position: 0, connectionId: 'conn-joao' }],
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.handoff.mode).toBe('solo')
+    expect(next.handoff.alsoSchedule).toBe(false)
+    expect(next.handoff.members).toEqual([])
+    expect(next.confirmations.handoff).toBe(true)
+  })
+
+  it('mode "roleta": persists the sanitized roster (E.164-BR whatsapp + connectionId)', async () => {
+    seedConversation(null)
+    await submitHandoff({
+      mode: 'roleta',
+      alsoSchedule: false,
+      steps: ['Qual seu nome?', 'Qual o serviço?'],
+      members: [
+        { name: 'João', whatsapp: '11988887777', connectionId: 'conn-joao', position: 0 },
+        { name: 'Maria', whatsapp: '+5511966665555', position: 1 },
+      ],
+    })
+
+    const next = writtenState()
+    expect(next.handoff.mode).toBe('roleta')
+    expect(next.handoff.steps).toEqual(['Qual seu nome?', 'Qual o serviço?'])
+    const joao = next.handoff.members.find((m) => m.position === 0)
+    const maria = next.handoff.members.find((m) => m.position === 1)
+    // whatsapp is re-normalized server-side to E.164-BR.
+    expect(joao?.whatsapp).toBe('+5511988887777')
+    expect(joao?.connectionId).toBe('conn-joao') // warm transfer pairing transits through
+    expect(maria?.whatsapp).toBe('+5511966665555')
+    expect(next.confirmations.handoff).toBe(true)
+  })
+
+  it('alsoSchedule + openingMessage are persisted (warm transfer opener)', async () => {
+    seedConversation(null)
+    await submitHandoff({
+      mode: 'roleta',
+      alsoSchedule: true,
+      steps: [],
+      members: [{ name: 'João', position: 0 }],
       openingMessage: 'Oi, aqui é o João!',
     })
-    const joao = next.team.members.find((m) => m.position === 0)
-    const maria = next.team.members.find((m) => m.position === 1)
-    expect(joao?.connectionId).toBe('conn-joao')
-    expect(maria?.connectionId).toBeUndefined() // fora do payload → intacto
-    expect(next.team.openingMessage).toBe('Oi, aqui é o João!')
-    expect(next.confirmations.handoffPairing).toBe(true)
+
+    const next = writtenState()
+    expect(next.handoff.alsoSchedule).toBe(true)
+    expect(next.handoff.openingMessage).toBe('Oi, aqui é o João!')
+    expect(next.confirmations.handoff).toBe(true)
   })
 
-  it('connectionId em branco limpa o pareamento daquele membro', () => {
-    const withConn = patchBuilderState(teamState(), {
-      team: { members: [{ name: 'João', whatsapp: '+5511988887777', connectionId: 'old', position: 0 }] },
+  it('mode "nenhum": flips the sentinel with no roster', async () => {
+    seedConversation(null)
+    await submitHandoff({
+      mode: 'nenhum',
+      alsoSchedule: false,
+      steps: [],
+      members: [],
     })
-    const { next } = applyHandoffPairing(withConn, {
-      members: [{ position: 0, connectionId: '   ' }],
-    })
-    expect(next.team.members.find((m) => m.position === 0)?.connectionId).toBeUndefined()
+
+    const next = writtenState()
+    expect(next.handoff.mode).toBe('nenhum')
+    expect(next.handoff.members).toEqual([])
+    expect(next.confirmations.handoff).toBe(true)
   })
 
-  it('confirma mesmo sem nenhum pareamento (passo opcional)', () => {
-    const { next } = applyHandoffPairing(teamState(), { members: [] })
-    expect(next.confirmations.handoffPairing).toBe(true)
+  it('does not write nor confirm when the conversation belongs to another org', async () => {
+    mockFindUnique.mockResolvedValue({
+      id: CONV_ID,
+      organizationId: 'other-org',
+      builderState: null,
+    })
+    const res = await submitHandoff({
+      mode: 'solo',
+      alsoSchedule: false,
+      steps: [],
+      members: [],
+    })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('forbidden')
+    expect(mockUpdateMany).not.toHaveBeenCalled()
   })
 })

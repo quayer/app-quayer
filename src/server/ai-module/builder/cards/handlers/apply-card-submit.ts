@@ -37,10 +37,7 @@ import {
   type BusinessHoursPayload,
   type PricingPayload,
   type PricingItemPayload,
-  type QualificationActionPayload,
-  type QualificationStepsPayload,
-  type TeamStructurePayload,
-  type HandoffPairingPayload,
+  type HandoffPayload,
   type CalendarConnectPayload,
   type ActivationModePayload,
   type QuickReplyChipsPayload,
@@ -226,8 +223,8 @@ function normalizeWhatsappBr(raw: string | undefined): string | undefined {
  * campo só quando confiável (espelha o opcional `userId`).
  */
 function sanitizeTeamMembers(
-  members: TeamStructurePayload['members'],
-): TeamStructurePayload['members'] {
+  members: HandoffPayload['members'],
+): HandoffPayload['members'] {
   return members.map((m) => {
     const userId = m.userId?.trim()
     const name = m.name?.trim()
@@ -480,130 +477,68 @@ export function applyPricing(
   }
 }
 
-function applyQualificationAction(
-  state: BuilderState,
-  action: QualificationActionPayload['action'],
-): CardApplication {
-  const patch: DeepPartial<BuilderState> = {
-    qualification: { action },
-  }
-  const next = applyConfirmation(
-    patchBuilderState(state, patch),
-    'qualificationAction',
-  )
-
-  const labels: Record<QualificationActionPayload['action'], string> = {
-    notify_team: 'avisar a equipe',
-    book_appointment: 'agendar um horário',
-    lead_only: 'apenas registrar o lead',
-  }
-  return {
-    next,
-    cardInstruction:
-      `O usuário ESCOLHEU a ação de qualificação via card: ${labels[action]}. ` +
-      'Conduza o lead qualificado para essa ação e siga para o próximo passo. ' +
-      'Não reabra o card de ação de qualificação.',
-  }
-}
-
-function applyQualificationSteps(
-  state: BuilderState,
-  payload: Pick<QualificationStepsPayload, 'steps'>,
-): CardApplication {
-  const steps = sanitizeStringList(payload.steps)
-  const patch: DeepPartial<BuilderState> = {
-    qualification: { steps },
-  }
-  const next = applyConfirmation(
-    patchBuilderState(state, patch),
-    'qualificationSteps',
-  )
-
-  const countLabel =
-    steps.length === 1 ? '1 pergunta' : `${steps.length} perguntas`
-  return {
-    next,
-    cardInstruction:
-      `O usuário DEFINIU as etapas de qualificação via card (${countLabel}). ` +
-      'Faça essas perguntas na ordem para qualificar o lead e siga para o próximo passo. ' +
-      'Não reabra o card de etapas de qualificação.',
-  }
-}
-
-function applyTeamStructure(
+/**
+ * handoff (Onda 2) — FUSÃO de qualification_action + qualification_steps +
+ * team_structure + handoff_pairing num único handler. Grava `builderState.handoff.*`
+ * + flipa `handoff`. O roster (members) só é relevante em roleta/departamentos
+ * (em solo/nenhum vem vazio). `connectionId` por membro habilita warm transfer
+ * (runtime valida tenant-scoped, fail-open). A saga materializa
+ * Department/DepartmentMember + routing conforme o `mode`.
+ */
+function applyHandoff(
   state: BuilderState,
   payload: Pick<
-    TeamStructurePayload,
-    'departmentName' | 'departmentType' | 'members'
+    HandoffPayload,
+    | 'mode'
+    | 'alsoSchedule'
+    | 'steps'
+    | 'departmentName'
+    | 'departmentType'
+    | 'members'
+    | 'openingMessage'
   >,
 ): CardApplication {
-  // builderState only — the deploy saga materializes Department/DepartmentMember.
+  const steps = sanitizeStringList(payload.steps)
   const members = sanitizeTeamMembers(payload.members)
-  const patch: DeepPartial<BuilderState> = {
-    team: {
-      departmentName: payload.departmentName,
-      departmentType: payload.departmentType,
-      members,
-    },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'team')
-
-  const countLabel =
-    members.length === 1 ? '1 membro' : `${members.length} membros`
-  const deptLabel = payload.departmentName
-    ? `departamento "${payload.departmentName}"`
-    : 'a roleta'
-  // G6 — alguns membros podem ter WhatsApp para receber o aviso do rodízio.
-  const withPhoneCount = members.filter((m) => Boolean(m.whatsapp)).length
-  const phoneNote =
-    withPhoneCount > 0
-      ? ` ${withPhoneCount === 1 ? '1 membro tem' : `${withPhoneCount} membros têm`} WhatsApp para receber a notificação do rodízio.`
-      : ''
-  return {
-    next,
-    cardInstruction:
-      `O usuário CONFIGUROU a equipe via card (${deptLabel}, ${countLabel} na roleta).${phoneNote} ` +
-      'Use essa distribuição na transferência para humano e siga para o próximo passo. ' +
-      'Não reabra o card de equipe.',
-  }
-}
-
-/**
- * B2 (warm transfer) — pareia a instância WhatsApp PRÓPRIA de cada membro (por
- * `position`) e grava a mensagem de abertura editável. O `connectionId` só transita;
- * o runtime valida tenant-scoped (fail-open). Membros fora do payload ficam intactos.
- */
-export function applyHandoffPairing(
-  state: BuilderState,
-  payload: Pick<HandoffPairingPayload, 'members' | 'openingMessage'>,
-): CardApplication {
-  const connByPosition = new Map<number, string | undefined>(
-    payload.members.map((m) => [m.position, m.connectionId?.trim() || undefined]),
-  )
-  const members = state.team.members.map((m) =>
-    connByPosition.has(m.position)
-      ? { ...m, connectionId: connByPosition.get(m.position) }
-      : m,
-  )
-
   const openingMessage = payload.openingMessage?.trim()
   const patch: DeepPartial<BuilderState> = {
-    team: {
+    handoff: {
+      mode: payload.mode,
+      alsoSchedule: payload.alsoSchedule,
+      steps,
+      departmentName: payload.departmentName,
+      departmentType: payload.departmentType,
       members,
       ...(openingMessage ? { openingMessage } : {}),
     },
   }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'handoffPairing')
+  const next = applyConfirmation(patchBuilderState(state, patch), 'handoff')
 
+  const modeLabel: Record<HandoffPayload['mode'], string> = {
+    solo: 'SOLO — o próprio dono atende (o bot pausa e avisa no WhatsApp dele)',
+    roleta: 'ROLETA — rodízio entre os membros',
+    departamentos:
+      'DEPARTAMENTOS — a IA tria por assunto e encaminha ao departamento certo',
+    nenhum: 'NENHUM — o agente não passa para humano (só conversa)',
+  }
+  const hasRoster = payload.mode === 'roleta' || payload.mode === 'departamentos'
   const pairedCount = members.filter((m) => Boolean(m.connectionId)).length
-  const label =
-    pairedCount === 1 ? '1 atendente' : `${pairedCount} atendentes`
+  const rosterNote = hasRoster
+    ? ` ${members.length === 1 ? '1 atendente' : `${members.length} atendentes`} no roster${pairedCount > 0 ? ' (alguns com WhatsApp próprio para warm transfer)' : ''}.`
+    : ''
+  const stepsNote =
+    steps.length > 0
+      ? ` ${steps.length === 1 ? '1 pergunta' : `${steps.length} perguntas`} de qualificação antes do bastão.`
+      : ''
+  const scheduleNote = payload.alsoSchedule
+    ? ' Também marca na agenda (conecte o calendário no próximo passo).'
+    : ''
   return {
     next,
     cardInstruction:
-      `O usuário PAREOU o WhatsApp de ${label} para warm transfer. ` +
-      'Quando o lead cair na roleta de um atendente pareado, a conexão própria dele ' +
-      'inicia o atendimento direto no WhatsApp do cliente. Siga para o próximo passo; não reabra o card.',
+      `O usuário CONFIGUROU a passagem para humano via card: ${modeLabel[payload.mode]}.` +
+      `${rosterNote}${stepsNote}${scheduleNote} ` +
+      'Siga para o próximo passo; não reabra o card de handoff.',
   }
 }
 
@@ -895,17 +830,8 @@ export async function applyCardSubmit(
     case 'pricing':
       application = applyPricing(current, body)
       break
-    case 'qualification_action':
-      application = applyQualificationAction(current, body.action)
-      break
-    case 'qualification_steps':
-      application = applyQualificationSteps(current, body)
-      break
-    case 'team_structure':
-      application = applyTeamStructure(current, body)
-      break
-    case 'handoff_pairing':
-      application = applyHandoffPairing(current, body)
+    case 'handoff':
+      application = applyHandoff(current, body)
       break
     case 'calendar_connect':
       application = applyCalendarConnect(current, body)

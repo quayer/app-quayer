@@ -4,7 +4,7 @@
  * Builder Cards — preview_summary ("Tudo certo?") (Orayon Uplift, W3)
  *
  * Read-only recap of every confirmed BuilderState section (persona, services,
- * hours, pricing, qualification, team/calendar, activation) shown right before
+ * hours, pricing, handoff/calendar, activation) shown right before
  * publish. Each section carries an "Ajustar" link that reopens that step (via
  * `onDismiss`, the single reopen affordance the framework hands every card), and
  * a single "Tudo certo, publicar" button confirms the whole build.
@@ -25,12 +25,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Headset,
   ListChecks,
   MessageSquare,
   Sparkles,
   Tag,
-  Target,
-  Users,
 } from "lucide-react"
 
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
@@ -40,12 +39,11 @@ import {
   computeSummaryWarnings,
   SUMMARY_AREA,
   summarizeActivation,
+  summarizeHandoff,
   summarizeHours,
   summarizePersona,
   summarizePricing,
-  summarizeQualification,
   summarizeServices,
-  summarizeTeam,
   type SummaryArea,
 } from "./preview-summary-helpers"
 import type { CardComponentProps } from "./types"
@@ -175,7 +173,7 @@ export function PreviewSummaryCard({
 
   // Uma seção fica "genérica" se QUALQUER warning de uma de suas áreas estiver
   // aberto. Persona agrega nome + saudação; Serviços e Preços têm seções
-  // próprias. Equipe/agenda não tem regra de warning (sempre opcional).
+  // próprias. "Passagem para humano" fica amber quando o modo não foi definido.
   const personaWarn =
     warnAreas.has(SUMMARY_AREA.persona) || warnAreas.has(SUMMARY_AREA.greeting)
 
@@ -221,21 +219,14 @@ export function PreviewSummaryCard({
       tokens,
     },
     {
-      icon: <Target className="h-4 w-4" />,
-      title: "Qualificação",
-      detail: summarizeQualification(value.qualification),
-      confirmed:
-        confirmations.qualificationAction || confirmations.qualificationSteps,
-      warn: warnAreas.has(SUMMARY_AREA.qualification),
-      onAdjust: onDismiss,
-      disabled,
-      tokens,
-    },
-    {
-      icon: <Users className="h-4 w-4" />,
-      title: "Equipe e agenda",
-      detail: summarizeTeam(value.team, value.calendar),
-      confirmed: confirmations.team || confirmations.calendar,
+      // Onda 2 — seção única que consolida a antiga "Qualificação" + "Equipe e
+      // agenda" (cards qualification_action/qualification_steps/team_structure/
+      // handoff_pairing fundidos no card `handoff`).
+      icon: <Headset className="h-4 w-4" />,
+      title: "Passagem para humano",
+      detail: summarizeHandoff(value.handoff, value.calendar),
+      confirmed: confirmations.handoff || confirmations.calendar,
+      warn: warnAreas.has(SUMMARY_AREA.handoff),
       onAdjust: onDismiss,
       disabled,
       tokens,

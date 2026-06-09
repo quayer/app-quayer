@@ -99,13 +99,7 @@ export const pricingStateSchema = z.object({
   minTicketCents: z.number().int().nonnegative().optional(),
 })
 
-/** qualification_action card → deploy gate; qualification_steps → prompt. */
-export const qualificationStateSchema = z.object({
-  action: z.enum(['notify_team', 'book_appointment', 'lead_only']).optional(),
-  steps: z.array(z.string()).default([]),
-})
-
-/** A team member slot for the round-robin (roleta). */
+/** A team member slot for the round-robin (roleta). Reusado por handoffStateSchema. */
 export const teamMemberSchema = z.object({
   userId: z.string().optional(),
   name: z.string().optional(),
@@ -120,14 +114,30 @@ export const teamMemberSchema = z.object({
   position: z.number().int().nonnegative(),
 })
 
-/** team_structure card → Department + DepartmentMember. */
-export const teamStateSchema = z.object({
+/**
+ * handoff card (Onda 2) — FUSÃO de qualification_action + qualification_steps +
+ * team_structure + handoff_pairing num único card de 4 seções.
+ *
+ * Materializado no deploy: `solo`→routing self; `roleta`/`departamentos`→department;
+ * `nenhum`→sem handoff. `alsoSchedule` é ORTOGONAL ao modo (qualquer modo pode também
+ * agendar) e é quem gateia o card de calendário (no lugar do antigo action==='book_appointment').
+ */
+export const handoffModeSchema = z.enum([
+  'solo',
+  'roleta',
+  'departamentos',
+  'nenhum',
+])
+
+export const handoffStateSchema = z.object({
+  mode: handoffModeSchema.optional(),
+  alsoSchedule: z.boolean().default(false),
+  // Roteiro de qualificação — perguntas antes de passar o bastão (era qualification.steps).
+  steps: z.array(z.string()).default([]),
   departmentName: z.string().optional(),
   departmentType: z.string().optional(),
   members: z.array(teamMemberSchema).default([]),
-  // B2 (warm transfer) — mensagem de abertura editável que a conexão do membro
-  // manda ao cliente no warm transfer. Vazio = usa o default do warm-transfer.ts.
-  // Threading ao runtime = B1b (hoje só persistido no builderState).
+  // Mensagem de abertura do warm transfer (era team.openingMessage). Vazio = default do warm-transfer.ts.
   openingMessage: z.string().optional(),
 })
 
@@ -212,12 +222,9 @@ export const confirmationsSchema = z.object({
   services: z.boolean().default(false),
   hours: z.boolean().default(false),
   pricing: z.boolean().default(false),
-  qualificationAction: z.boolean().default(false),
-  qualificationSteps: z.boolean().default(false),
-  team: z.boolean().default(false),
-  // B2 — passo OPCIONAL: vira true quando o dono pareia o WhatsApp dos atendentes
-  // (warm transfer). Só aplicável quando há membros na roleta; nunca bloqueia deploy.
-  handoffPairing: z.boolean().default(false),
+  // Onda 2 — handoff unificado (modo + roster + roteiro + agenda). Substitui os
+  // antigos qualificationAction / qualificationSteps / team / handoffPairing.
+  handoff: z.boolean().default(false),
   calendar: z.boolean().default(false),
   activation: z.boolean().default(false),
   summary: z.boolean().default(false),
@@ -245,8 +252,11 @@ export const builderStateSchema = z.object({
     currency: 'BRL',
     disclosureStyle: 'exact',
   }),
-  qualification: qualificationStateSchema.default({ steps: [] }),
-  team: teamStateSchema.default({ members: [] }),
+  handoff: handoffStateSchema.default({
+    alsoSchedule: false,
+    steps: [],
+    members: [],
+  }),
   calendar: calendarStateSchema.default({}),
   activation: activationStateSchema.default({ keywords: [] }),
   sourceIngestion: sourceIngestionStateSchema.default({ sources: [] }),
@@ -269,9 +279,9 @@ export type ServicesState = z.infer<typeof servicesStateSchema>
 export type HoursState = z.infer<typeof hoursStateSchema>
 export type PricingItem = z.infer<typeof pricingItemSchema>
 export type PricingState = z.infer<typeof pricingStateSchema>
-export type QualificationState = z.infer<typeof qualificationStateSchema>
 export type TeamMember = z.infer<typeof teamMemberSchema>
-export type TeamState = z.infer<typeof teamStateSchema>
+export type HandoffMode = z.infer<typeof handoffModeSchema>
+export type HandoffState = z.infer<typeof handoffStateSchema>
 export type CalendarState = z.infer<typeof calendarStateSchema>
 export type ActivationState = z.infer<typeof activationStateSchema>
 export type SourceIngestionItem = z.infer<typeof sourceIngestionItemSchema>
@@ -365,6 +375,73 @@ export function patchBuilderState(
 }
 
 /**
+ * Onda 2 — migra estado legado (qualification/team + sentinels antigos) para o
+ * `handoff` unificado, ANTES do safeParse (que descartaria os campos antigos).
+ * Pura, nunca lança. Retorna o input inalterado quando já está no novo formato
+ * ou não há nada legado a migrar.
+ *
+ * Mapeamento (spec Q1-Q3): notify_team → roleta se há membros, senão solo;
+ * book_appointment → solo + alsoSchedule; lead_only → solo. Preserva steps,
+ * roster e openingMessage; herda a confirmação para a jornada NÃO re-exibir o passo.
+ */
+export function migrateLegacyHandoff(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw
+  if (isPlainObject(raw.handoff)) return raw // já no novo formato
+
+  const qualification = isPlainObject(raw.qualification)
+    ? raw.qualification
+    : undefined
+  const team = isPlainObject(raw.team) ? raw.team : undefined
+  if (!qualification && !team) return raw // nada legado a migrar
+
+  const action =
+    qualification && typeof qualification.action === 'string'
+      ? qualification.action
+      : undefined
+  const members: unknown[] =
+    team && Array.isArray(team.members) ? (team.members as unknown[]) : []
+  const hasMembers = members.length > 0
+
+  let mode: string | undefined
+  if (action === 'notify_team') mode = hasMembers ? 'roleta' : 'solo'
+  else if (action === 'book_appointment' || action === 'lead_only') mode = 'solo'
+
+  const handoff: Record<string, unknown> = {
+    alsoSchedule: action === 'book_appointment',
+    steps:
+      qualification && Array.isArray(qualification.steps)
+        ? (qualification.steps as unknown[])
+        : [],
+    members,
+  }
+  if (mode) handoff.mode = mode
+  if (team && typeof team.departmentName === 'string') {
+    handoff.departmentName = team.departmentName
+  }
+  if (team && typeof team.departmentType === 'string') {
+    handoff.departmentType = team.departmentType
+  }
+  if (team && typeof team.openingMessage === 'string') {
+    handoff.openingMessage = team.openingMessage
+  }
+
+  const conf = isPlainObject(raw.confirmations) ? raw.confirmations : {}
+  const handoffConfirmed =
+    conf.qualificationAction === true ||
+    conf.qualificationSteps === true ||
+    conf.team === true ||
+    conf.handoffPairing === true
+
+  // Descarta os campos legados; safeParse já remove as confirmations antigas.
+  const next: Record<string, unknown> = { ...raw }
+  delete next.qualification
+  delete next.team
+  next.handoff = handoff
+  next.confirmations = { ...conf, handoff: handoffConfirmed }
+  return next
+}
+
+/**
  * Coerce any persisted JSON (including null/undefined or a partial legacy row)
  * into a fully-resolved BuilderState. MUST NEVER THROW — on any failure it
  * backfills to DEFAULT_BUILDER_STATE. Accepts a JSON string or a parsed value.
@@ -383,9 +460,12 @@ export function parseBuilderState(json: unknown): BuilderState {
     }
   }
 
+  // Onda 2 — migra estado legado (qualification/team → handoff) antes do parse.
+  const migrated = migrateLegacyHandoff(candidate)
+
   // safeParse fills every missing field via the schema defaults, so a partial
   // legacy object is upgraded rather than rejected.
-  const result = builderStateSchema.safeParse(candidate)
+  const result = builderStateSchema.safeParse(migrated)
   return result.success ? result.data : cloneDefault()
 }
 

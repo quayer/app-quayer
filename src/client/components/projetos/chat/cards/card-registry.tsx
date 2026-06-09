@@ -14,13 +14,13 @@
  * via {@link getCardForStep}. Direct lookup by key uses {@link getCardDescriptor}.
  *
  * CARD DRIVE MODES — three ways a card reaches the screen:
- *  1. ACTIVE-STEP-DRIVEN (10 cards): resolved by `getCardForStep` from the
+ *  1. ACTIVE-STEP-DRIVEN (8 cards): resolved by `getCardForStep` from the
  *     step-engine. Each carries a `stepId` and appears in {@link STEP_TO_CARD}:
- *     `agent_persona`, `services`, `business_hours`, `pricing`,
- *     `qualification_action`, `qualification_steps`, `team_structure`,
+ *     `agent_persona`, `services`, `business_hours`, `pricing`, `handoff`
+ *     (Onda 2 — fusão de qualification + team + handoff_pairing),
  *     `calendar_connect`, `activation_mode`, `preview_summary`, plus
- *     `source_progress` (→ `source_ingestion`, an OPTIONAL step). They are the
- *     only descriptors `getCardForStep` may return.
+ *     `source_progress` (→ `source_ingestion`) and `silenced_contacts` (both
+ *     OPTIONAL steps). They are the only descriptors `getCardForStep` may return.
  *  2. TRANSIENT (1 card): `quick_reply_chips` — a quick-answer prompt with NO
  *     `stepId` and no sentinel; it routes as a normal chat turn. Its descriptor
  *     stays registered for direct lookup, but it is EXPLICITLY excluded from the
@@ -38,16 +38,14 @@ import type { ComponentType } from "react"
 import {
   CalendarPlus,
   CheckCircle2,
-  ClipboardCheck,
   Clock,
+  Headset,
   KeyRound,
   ListChecks,
-  PhoneForwarded,
   ShieldOff,
   Sparkles,
   Tag,
   UserRound,
-  Users,
   Wrench,
 } from "lucide-react"
 
@@ -59,10 +57,7 @@ import { AgentPersonaCard } from "./agent-persona-card"
 import { ServicesOfferedCard } from "./services-offered-card"
 import { BusinessHoursCard } from "./business-hours-card"
 import { PricingCard } from "./pricing-card"
-import { QualificationActionCard } from "./qualification-action-card"
-import { QualificationStepsCard } from "./qualification-steps-card"
-import { TeamStructureCard } from "./team-structure-card"
-import { HandoffPairingCard } from "./handoff-pairing-card"
+import { HandoffCard } from "./handoff-card"
 import { CalendarConnectCard } from "./calendar-connect-card"
 import { ActivationModeCard } from "./activation-mode-card"
 import { PreviewSummaryCard } from "./preview-summary-card"
@@ -71,7 +66,7 @@ import { SourceProgressCard } from "./source-progress-card"
 import { SilencedContactsCard } from "./silenced-contacts-card"
 
 /**
- * The `CardKey`s this registry renders — the 12 catalog cards. Excludes the 3
+ * The `CardKey`s this registry renders — the 11 catalog cards. Excludes the 3
  * legacy keys (rendered inline in ToolCallCard).
  */
 export type RegisteredW3CardKey =
@@ -79,10 +74,7 @@ export type RegisteredW3CardKey =
   | "services"
   | "business_hours"
   | "pricing"
-  | "qualification_action"
-  | "qualification_steps"
-  | "team_structure"
-  | "handoff_pairing"
+  | "handoff"
   | "calendar_connect"
   | "activation_mode"
   | "preview_summary"
@@ -129,33 +121,15 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     icon: <Tag className="h-4 w-4" />,
     component: PricingCard as ComponentType<CardComponentProps>,
   },
-  qualification_action: {
-    cardKey: "qualification_action",
-    stepId: "qualification_action",
-    title: "Ação de qualificação",
-    icon: <ClipboardCheck className="h-4 w-4" />,
-    component: QualificationActionCard as ComponentType<CardComponentProps>,
-  },
-  qualification_steps: {
-    cardKey: "qualification_steps",
-    stepId: "qualification_steps",
-    title: "Perguntas de qualificação",
-    icon: <ListChecks className="h-4 w-4" />,
-    component: QualificationStepsCard as ComponentType<CardComponentProps>,
-  },
-  team_structure: {
-    cardKey: "team_structure",
-    stepId: "team",
-    title: "Estrutura da equipe",
-    icon: <Users className="h-4 w-4" />,
-    component: TeamStructureCard as ComponentType<CardComponentProps>,
-  },
-  handoff_pairing: {
-    cardKey: "handoff_pairing",
-    stepId: "handoff_pairing",
-    title: "WhatsApp dos atendentes",
-    icon: <PhoneForwarded className="h-4 w-4" />,
-    component: HandoffPairingCard as ComponentType<CardComponentProps>,
+  handoff: {
+    // Onda 2 — FUSÃO de qualification_action + qualification_steps +
+    // team_structure + handoff_pairing num único card de 4 seções (modo + roster
+    // + roteiro + agenda). Mapeia para o StepId 'handoff' do step-engine.
+    cardKey: "handoff",
+    stepId: "handoff",
+    title: "Passagem para humano",
+    icon: <Headset className="h-4 w-4" />,
+    component: HandoffCard as ComponentType<CardComponentProps>,
   },
   calendar_connect: {
     cardKey: "calendar_connect",
