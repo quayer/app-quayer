@@ -72,10 +72,10 @@ que gravava sempre `elevenlabs`; + `maxMessages` editável; + Select de provider
 > (mode→routing + tear-down), e os 4 cards antigos deletados.
 > **T15/T16 (prompts + backfill): N/A** — o system prompt é engine-driven (defere ao banner
 > determinístico, não nomeia os 4 steps), então não precisou mudar nem re-provisionar.
-> 🔶 **Follow-up aberto:** o seletor de instância WhatsApp por atendente (connectionId, warm
-> transfer) NÃO foi portado para o card unificado — o `connectionId` é preservado se já existir,
-> mas não há UI para atribuí-lo. Restaurar o picker (reusar `api.builder.listConnections`) na
-> seção de roster.
+> ✅ **FR-05 fechada (commit `e2efc0b`):** o seletor de instância WhatsApp por atendente
+> (connectionId, warm transfer) foi restaurado no roster — reusa `api.builder.listConnections`
+> com resolver defensivo, só permite instâncias conectáveis, trata o caso sem-instância e
+> mostra aviso LGPD. Sem mudança de contrato.
 
 Backend de runtime (routing self/department/queue, round-robin, warm transfer) **já existe**.
 Decisões aprovadas: **toggle ortogonal "também agenda"** + **roteiro de qualificação fundido**
