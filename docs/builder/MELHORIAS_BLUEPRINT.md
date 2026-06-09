@@ -42,16 +42,20 @@ Plano de execução das melhorias dos cards/etapas do Chat Builder, organizado p
 | ⑬ activation_mode | esconder modos avançados | **3d** | front |
 | ⑭ silenced_contacts | aparecer sempre como opcional | **5** | state |
 | ⑮ tool_selection | auto-selecionar pelo arquétipo + migrar p/ registry | **5** (dep. Onda 3) | front+back |
-| ⑯ channel | ~~remover~~ | 🚫 **descartado** | — |
+| ⑯ channel | seletor **2 níveis** (WhatsApp/Instagram → sabor) + nomes verdadeiros + esconder quando 1 canal | **5a** | front+catálogo |
 | ⑰ agent_approval | ~~fundir no resumo~~ | 🚫 **descartado** | — |
 | ⑱ preview_summary | "Ajustar" com deep-link | **3d** | front |
 | ⚡ quick_reply_chips | loading após o toque | **5** | front |
 | (transversal) dual-input | anti-trava em todas as etapas | **3** | back |
 | (aba) Avançado | buffer/multimodal/voz/idioma/typing + pausa | **1** + pausa na **4** | front+back |
 
-**Descartados de propósito (a revisão provou que estavam errados):**
-- ⑯ remover Channel — **falso que tenha 1 opção**: `CHANNEL_CATALOG` tem 3 canais
-  (cloudapi/uazapi/instagram). Manter.
+**Refinado (não removido):**
+- ⑯ Channel — a proposta de **remover** caiu (`CHANNEL_CATALOG` tem 3 chaves reais, não 1).
+  Em vez disso vira **seletor de 2 níveis** com nomes verdadeiros (ver Onda 5a). ⚠️ Nomeação
+  validada contra o código: `uazapi` é **QR Code** (não-oficial) — chamá-lo de "WhatsApp
+  Business" engana; `cloudapi` é a **API Oficial (Meta)**.
+
+**Descartado de propósito (a revisão provou que estava errado):**
 - ⑰ fundir Aprovação no Resumo — **quebra causalidade**: `agentApproved` é o gate que
   autoriza `create_agent`, que roda ANTES de o summary existir.
 
@@ -102,6 +106,15 @@ Junta os furos que não eram estruturais. Divide-se por dependência:
   - ④ `agent-persona-card` — **bloquear confirm** com persona vazia (exigir nome ou saudação).
   - ⚡ `quick-reply-chips-card` — **loading** após o toque (hoje fica "apertado" mudo).
   - ⑭ `silenced-contacts` — aparecer **sempre como opcional** (não só no modo blacklist).
+  - ⑯ `channel` (`ChannelSelectionCard` inline em `chat-panel.tsx` ~L1181-1321) — **seletor
+    de 2 níveis**: nível 1 WhatsApp vs Instagram; nível 2 (só WhatsApp) os 2 sabores.
+    Nomes verdadeiros: `uazapi`→**"Conectar por QR Code"**, `cloudapi`→**"API Oficial (Meta)"**,
+    `instagram`→**"Instagram"**. Adiciona campo `platform` em `CHANNEL_CATALOG`
+    ([select-channel.tool.ts](../../src/server/ai-module/builder/tools/select-channel.tool.ts));
+    **sem mudança de contrato** — a chave-folha (`uazapi`/`cloudapi`/`instagram`) continua
+    sendo o que vai no submit, o nível 1 é só agrupamento visual (cabeçalho WhatsApp NÃO
+    submete). Regra "esconder quando 1 canal": se sobra só WhatsApp, mostra direto os 2
+    sabores; se sobra 1 folha, auto-seleciona e não pinta o card.
 - **5b — backend de chat (pequeno):**
   - ③ `chat.routes` — emitir o `source_progress` ("lendo seu site…") **no mesmo turno**,
     antes do enqueue do job (mata a dor "colei e não apareceu nada").
