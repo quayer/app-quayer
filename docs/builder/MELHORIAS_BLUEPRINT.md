@@ -66,7 +66,17 @@ Front-only, sem schema. Fix do bug do provider TTS ([agent-runtime-settings.ts:1
 que gravava sempre `elevenlabs`; + `maxMessages` editável; + Select de provider coerente
 (Deepgram usa `voiceId` como voz Aura); + Alert de credencial dinâmico.
 
-### Onda 2 — Handoff unificado (funde ⑧⑨⑩⑪ → card `handoff` de 4 seções)
+### Onda 2 — Handoff unificado (funde ⑧⑨⑩⑪ → card `handoff` de 4 seções) ✅ FEITA (commit `001318b`)
+> Branch `feat/builder-handoff-unified`. tsc 0, 312 testes do Builder verdes. Inclui
+> `migrateLegacyHandoff` (conversas em andamento), saga `materialize-team` repontada
+> (mode→routing + tear-down), e os 4 cards antigos deletados.
+> **T15/T16 (prompts + backfill): N/A** — o system prompt é engine-driven (defere ao banner
+> determinístico, não nomeia os 4 steps), então não precisou mudar nem re-provisionar.
+> 🔶 **Follow-up aberto:** o seletor de instância WhatsApp por atendente (connectionId, warm
+> transfer) NÃO foi portado para o card unificado — o `connectionId` é preservado se já existir,
+> mas não há UI para atribuí-lo. Restaurar o picker (reusar `api.builder.listConnections`) na
+> seção de roster.
+
 Backend de runtime (routing self/department/queue, round-robin, warm transfer) **já existe**.
 Decisões aprovadas: **toggle ortogonal "também agenda"** + **roteiro de qualificação fundido**
 como 4ª seção.
