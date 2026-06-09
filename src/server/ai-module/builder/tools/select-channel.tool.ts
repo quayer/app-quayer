@@ -43,20 +43,29 @@ export interface BuilderToolExecutionContext {
 export const CHANNEL_CATALOG = [
   {
     key: 'cloudapi' as const,
-    title: 'WhatsApp Cloud API',
-    description: 'API oficial da Meta. Mais estável, requer aprovação.',
+    // `platform` agrupa visualmente no card (nível 1); NÃO é submetido — só a
+    // chave-folha (`key`) vai no payload. Ver ChannelSelectionCard (2 níveis).
+    platform: 'whatsapp' as const,
+    title: 'API Oficial (Meta)',
+    description:
+      'Número oficial via Meta Cloud API. Mais estável e escalável, mas requer aprovação.',
     requiresApproval: true,
   },
   {
     key: 'uazapi' as const,
-    title: 'WhatsApp Business',
-    description: 'Pareamento por QR Code. Rápido, sem aprovação.',
+    platform: 'whatsapp' as const,
+    // Nome verdadeiro: é pareamento por QR Code (estilo WhatsApp Web), NÃO o
+    // produto/app oficial "WhatsApp Business" — chamá-lo assim enganaria.
+    title: 'Conectar por QR Code',
+    description:
+      'Pareia escaneando um QR Code, como no WhatsApp Web. Rápido, sem aprovação da Meta.',
     requiresApproval: false,
   },
   {
     key: 'instagram' as const,
-    title: 'Instagram Direct',
-    description: 'DMs via Meta Graph API. Requer Meta App + webhook.',
+    platform: 'instagram' as const,
+    title: 'Instagram',
+    description: 'Responde DMs do Instagram via Meta Graph API. Requer Meta App + webhook.',
     requiresApproval: true,
   },
 ] as const

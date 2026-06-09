@@ -140,6 +140,8 @@ export function AgentPersonaCard({
   const previewText = greeting.trim().length > 0 ? greeting : GREETING_PLACEHOLDER
   const isPreviewPlaceholder = greeting.trim().length === 0
   const agentName = name.trim().length > 0 ? name.trim() : "Seu agente"
+  // Exige ao menos nome OU saudação — nunca confirma uma persona totalmente vazia.
+  const canConfirm = Boolean(clean(name) || clean(greeting))
 
   // Footer actions differ per step: A navigates forward, B confirms + back.
   const actions =
@@ -169,7 +171,7 @@ export function AgentPersonaCard({
             onClick: submit,
             variant: "primary" as const,
             icon: <Check className="h-3.5 w-3.5" />,
-            disabled,
+            disabled: disabled || !canConfirm,
           },
           {
             label: "Voltar",

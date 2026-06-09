@@ -714,6 +714,13 @@ export function SourceProgressCard({
         proposed.tone,
     )
 
+  // Todas as fontes falharam e nenhuma síntese saiu → estado de erro EXPLÍCITO,
+  // em vez do "aguarde concluir" eterno com o Aceitar mudo desabilitado.
+  const allErrored =
+    sources.length > 0 &&
+    sources.every((source) => resolvePhase(source.status) === "error")
+  const hasFailedWithoutProposal = allErrored && !hasProposal && !alreadyConfirmed
+
   // ── Edit mode + draft (seeded from the proposal) ────────────────────────
   const [editing, setEditing] = React.useState(false)
   const [businessName, setBusinessName] = React.useState("")
@@ -815,9 +822,11 @@ export function SourceProgressCard({
 
   const reason = alreadyConfirmed
     ? "Fontes processadas — os campos detectados já foram aplicados ao agente."
-    : hasProposal
-      ? "Revise os campos detectados a partir do seu site/Instagram. Edite se precisar e clique em Aceitar para aplicar ao agente."
-      : "Estamos lendo seu site/Instagram e extraindo os campos do negócio. Isto atualiza sozinho — aguarde concluir."
+    : hasFailedWithoutProposal
+      ? "Não consegui ler suas fontes. Cole o link de novo, ou siga sem fonte e preencha manualmente."
+      : hasProposal
+        ? "Revise os campos detectados a partir do seu site/Instagram. Edite se precisar e clique em Aceitar para aplicar ao agente."
+        : "Estamos lendo seu site/Instagram e extraindo os campos do negócio. Isto atualiza sozinho — aguarde concluir."
 
   return (
     <CardShell
@@ -828,6 +837,25 @@ export function SourceProgressCard({
       tokens={tokens}
     >
       <div className="flex flex-col gap-4">
+        {/* ── Erro: todas as fontes falharam, nenhuma síntese ── */}
+        {hasFailedWithoutProposal && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border px-3 py-2.5 text-[12px] leading-relaxed"
+            style={{
+              backgroundColor: tokens.dangerSubtle,
+              borderColor: tokens.danger,
+              color: tokens.dangerText,
+            }}
+          >
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              Não consegui ler o conteúdo dessas fontes. Verifique o link e cole de
+              novo, ou toque em “Agora não” para preencher os campos manualmente.
+            </span>
+          </div>
+        )}
+
         {/* ── Sources list ── */}
         {sources.length > 0 && (
           <div className="flex flex-col gap-2">

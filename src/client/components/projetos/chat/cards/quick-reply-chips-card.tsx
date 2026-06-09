@@ -18,7 +18,7 @@
  */
 
 import * as React from "react"
-import { MessageSquareReply } from "lucide-react"
+import { Loader2, MessageSquareReply } from "lucide-react"
 
 import type { CardComponentProps } from "./types"
 import { CardShell } from "./card-shell"
@@ -165,6 +165,12 @@ export function QuickReplyChipsCard({
                 color: isChosen ? tokens.textInverse : tokens.textPrimary,
               }}
             >
+              {isChosen && (
+                <Loader2
+                  className="mr-1.5 inline h-3 w-3 animate-spin align-[-1px]"
+                  aria-hidden="true"
+                />
+              )}
               {chip.label ?? chip.value}
             </button>
           )
