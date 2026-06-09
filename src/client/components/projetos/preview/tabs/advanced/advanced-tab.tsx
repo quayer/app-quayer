@@ -33,6 +33,8 @@ import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import {
   DEFAULT_AGENT_RUNTIME_SETTINGS,
+  DEFAULT_DEEPGRAM_VOICE_ID,
+  DEFAULT_ELEVENLABS_VOICE_ID,
   type AgentRuntimeSettings,
 } from "@/lib/agent-runtime-settings"
 import type {
@@ -126,6 +128,9 @@ export function AdvancedTab({ project, onTabChange }: AdvancedTabProps) {
     }
   }, [project.id, settings])
 
+  const isDeepgram = settings.tts.provider === "deepgram"
+  const providerLabel = isDeepgram ? "Deepgram" : "ElevenLabs"
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-3 flex flex-col gap-6 py-2 duration-500">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -202,6 +207,29 @@ export function AdvancedTab({ project, onTabChange }: AdvancedTabProps) {
             }}
           />
         </div>
+
+        <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_220px]" style={{ borderColor: tokens.divider }}>
+          <div className="space-y-1">
+            <Label className="text-xs font-medium" style={{ color: tokens.textPrimary }}>
+              Máximo de mensagens por rajada
+            </Label>
+            <p className="text-xs" style={{ color: tokens.textSecondary }}>
+              Quantas mensagens seguidas o buffer junta antes de chamar a IA, mesmo sem atingir o tempo.
+            </p>
+          </div>
+          <Input
+            type="number"
+            min={2}
+            max={20}
+            value={settings.messageBuffer.maxMessages}
+            onChange={(event) => {
+              const n = Number(event.target.value)
+              update((draft) => {
+                draft.messageBuffer.maxMessages = Math.min(20, Math.max(2, Math.round(n)))
+              })
+            }}
+          />
+        </div>
       </section>
 
       <section className="space-y-3">
@@ -250,34 +278,66 @@ export function AdvancedTab({ project, onTabChange }: AdvancedTabProps) {
             title="Responder com voz"
             description="Converte blocos de texto em áudio antes do envio."
             enabled={settings.tts.enabled}
-            badge="ElevenLabs"
+            badge={providerLabel}
             onChange={(value) => update((draft) => { draft.tts.enabled = value })}
           />
 
           <div className="rounded-lg border p-4" style={{ borderColor: tokens.divider, backgroundColor: tokens.bgSurface }}>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="tts-model">Modelo</Label>
-                <Select
-                  value={settings.tts.model}
-                  onValueChange={(value) => update((draft) => { draft.tts.model = value })}
-                >
-                  <SelectTrigger id="tts-model">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="eleven_flash_v2_5">Flash v2.5</SelectItem>
-                    <SelectItem value="eleven_multilingual_v2">Multilingual v2</SelectItem>
-                    <SelectItem value="eleven_v3">Eleven v3</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="tts-provider">Provedor de voz</Label>
+              <Select
+                value={settings.tts.provider}
+                onValueChange={(value) =>
+                  update((draft) => {
+                    const provider = value === "deepgram" ? "deepgram" : "elevenlabs"
+                    if (draft.tts.provider === provider) return
+                    draft.tts.provider = provider
+                    // Troca a voz só se ainda for o default do outro provider —
+                    // nunca sobrescreve uma voz que o usuário customizou.
+                    if (provider === "deepgram" && draft.tts.voiceId === DEFAULT_ELEVENLABS_VOICE_ID) {
+                      draft.tts.voiceId = DEFAULT_DEEPGRAM_VOICE_ID
+                    } else if (provider === "elevenlabs" && draft.tts.voiceId === DEFAULT_DEEPGRAM_VOICE_ID) {
+                      draft.tts.voiceId = DEFAULT_ELEVENLABS_VOICE_ID
+                    }
+                  })
+                }
+              >
+                <SelectTrigger id="tts-provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                  <SelectItem value="deepgram">Deepgram (Aura)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {!isDeepgram && (
+                <div className="space-y-2">
+                  <Label htmlFor="tts-model">Modelo</Label>
+                  <Select
+                    value={settings.tts.model}
+                    onValueChange={(value) => update((draft) => { draft.tts.model = value })}
+                  >
+                    <SelectTrigger id="tts-model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="eleven_flash_v2_5">Flash v2.5</SelectItem>
+                      <SelectItem value="eleven_multilingual_v2">Multilingual v2</SelectItem>
+                      <SelectItem value="eleven_v3">Eleven v3</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-2">
-                <Label htmlFor="tts-voice">Voice ID</Label>
+                <Label htmlFor="tts-voice">{isDeepgram ? "Voz (Aura)" : "Voice ID"}</Label>
                 <Input
                   id="tts-voice"
                   value={settings.tts.voiceId}
+                  placeholder={isDeepgram ? "aura-2-theia-en" : undefined}
                   onChange={(event) => update((draft) => { draft.tts.voiceId = event.target.value })}
                   spellCheck={false}
                 />
@@ -306,7 +366,7 @@ export function AdvancedTab({ project, onTabChange }: AdvancedTabProps) {
           <Volume2 className="h-4 w-4" />
           <AlertTitle>Credencial de voz</AlertTitle>
           <AlertDescription>
-            Configure a chave ElevenLabs na aba Credenciais antes de ativar áudio em produção.
+            Configure a chave {providerLabel} na aba Credenciais antes de ativar áudio em produção.
             <Button
               type="button"
               variant="link"

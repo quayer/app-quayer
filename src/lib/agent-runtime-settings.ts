@@ -1,5 +1,7 @@
 export const DEFAULT_ELEVENLABS_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb'
 export const DEFAULT_ELEVENLABS_MODEL = 'eleven_flash_v2_5'
+/** Voz Aura default do Deepgram (o `model` do ElevenLabs é ignorado neste provider). */
+export const DEFAULT_DEEPGRAM_VOICE_ID = 'aura-2-theia-en'
 
 export interface AgentRuntimeSettings {
   typingIndicatorEnabled: boolean
@@ -136,7 +138,13 @@ export function normalizeAgentRuntimeSettings(
     },
     tts: {
       enabled: asBoolean(tts.enabled, defaults.tts.enabled),
-      provider: defaults.tts.provider,
+      // Preserva o provider escolhido na UI (metadata). Sem isto, o Select era
+      // descartado e o ttsProvider gravava sempre o default. O override pela
+      // coluna do DB (agentTts) ainda se aplica logo abaixo quando presente.
+      provider:
+        tts.provider === 'deepgram' || tts.provider === 'elevenlabs'
+          ? tts.provider
+          : defaults.tts.provider,
       voiceId: asString(tts.voiceId, defaults.tts.voiceId),
       model: asString(tts.model, defaults.tts.model),
       speechRate: asNumber(tts.speechRate, defaults.tts.speechRate, 0.7, 1.3),
