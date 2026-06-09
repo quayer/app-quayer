@@ -206,6 +206,10 @@ export async function materializeTeam(
       ? team.departmentType.trim()
       : 'support'
 
+  // B1b — mensagem de abertura do warm transfer (editável no card handoff_pairing).
+  // Trim + clear-on-empty: apagar no Builder zera a coluna (runtime volta ao default).
+  const warmTransferOpeningMessage = team.openingMessage?.trim() || null
+
   const department = await database.department.upsert({
     where: {
       organizationId_slug: { organizationId: ctx.organizationId, slug },
@@ -216,11 +220,13 @@ export async function materializeTeam(
       slug,
       type,
       isActive: true,
+      warmTransferOpeningMessage,
     },
     update: {
       name,
       type,
       isActive: true,
+      warmTransferOpeningMessage,
     },
     select: { id: true },
   })

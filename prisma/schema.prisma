@@ -469,6 +469,11 @@ model Department {
   lastAssignedMemberId String? // M1 — cursor por DepartmentMember.id (SEM FK; membro pode ser não-usuário)
   lastAssignedAt       DateTime?
 
+  // B1b warm transfer — mensagem de abertura editável que a conexão do membro envia
+  // ao cliente no handoff (interpola {nome}). NULL = usa o texto default de
+  // warm-transfer.ts. Materializada por materialize_team de builderState.team.openingMessage.
+  warmTransferOpeningMessage String?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

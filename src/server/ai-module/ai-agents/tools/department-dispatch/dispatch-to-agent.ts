@@ -374,6 +374,22 @@ export async function executeDispatchToAgent(
     // a conexão DELE manda a 1ª mensagem AO CLIENTE → o atendimento segue no
     // WhatsApp do humano (que responde no app dele; a conexão dele não tem agente,
     // então o bot não processa o inbound). Best-effort, fail-open quando ausente.
+    // B1b — carrega a mensagem de abertura editável do departamento (fail-open: se a
+    // coluna/migration ainda não existir, segue com o texto default do warm-transfer).
+    let openingMessage: string | null = null
+    try {
+      const dept = await database.department.findFirst({
+        where: { id: departmentId, organizationId: ctx.organizationId },
+        select: { warmTransferOpeningMessage: true },
+      })
+      openingMessage = dept?.warmTransferOpeningMessage ?? null
+    } catch (deptErr) {
+      console.warn(
+        '[warm-transfer] leitura de openingMessage falhou (usando default):',
+        deptErr instanceof Error ? deptErr.message : String(deptErr),
+      )
+    }
+
     let warmTransferSent = false
     try {
       const wt = await tryWarmTransferToClient({
@@ -381,6 +397,7 @@ export async function executeDispatchToAgent(
         memberConnectionId: chosen.connectionId,
         contactPhone: session.contactPhone,
         memberDisplayName: chosen.displayName,
+        openingMessage,
       })
       warmTransferSent = wt.sent
     } catch (wtErr) {

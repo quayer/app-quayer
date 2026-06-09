@@ -51,6 +51,16 @@ export function buildWarmTransferText(memberDisplayName: string): string {
 }
 
 /**
+ * Renderiza o template editável de abertura (card handoff_pairing) interpolando
+ * `{nome}` pelo nome do atendente. Determinístico; nunca lança. Usado quando o dono
+ * customizou a mensagem — senão o caller cai no `buildWarmTransferText` default.
+ */
+export function renderOpeningMessage(template: string, memberDisplayName: string): string {
+  const name = memberDisplayName?.trim() || 'um atendente'
+  return template.replace(/\{nome\}/g, name)
+}
+
+/**
  * Tenta o warm transfer: a conexão própria do membro manda a abertura ao cliente.
  * Sem connectionId → { sent:false, 'no_connection' } (caminho normal segue).
  */
@@ -59,6 +69,8 @@ export async function tryWarmTransferToClient(args: {
   memberConnectionId: string | null
   contactPhone: string
   memberDisplayName: string
+  /** Template editável (card handoff_pairing) com `{nome}`. Vazio → texto default. */
+  openingMessage?: string | null
 }): Promise<WarmTransferResult> {
   try {
     const connId = args.memberConnectionId?.trim()
@@ -72,7 +84,10 @@ export async function tryWarmTransferToClient(args: {
     if (!token) return { sent: false, skippedReason: 'no_instance' }
 
     const baseUrl = conn.uazapiBaseUrl ?? FALLBACK_BASE_URL
-    const text = buildWarmTransferText(args.memberDisplayName)
+    const custom = args.openingMessage?.trim()
+    const text = custom
+      ? renderOpeningMessage(custom, args.memberDisplayName)
+      : buildWarmTransferText(args.memberDisplayName)
     const res = await sendText(token, baseUrl, normalizePhone(args.contactPhone), text)
     return res.success ? { sent: true } : { sent: false, skippedReason: 'send_failed' }
   } catch (err) {
