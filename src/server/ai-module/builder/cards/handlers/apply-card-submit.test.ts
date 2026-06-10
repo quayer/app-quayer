@@ -213,3 +213,132 @@ describe('applyCardSubmit — handoff card (Onda 2 unified)', () => {
     expect(mockUpdateMany).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * Onda E — source_progress accept: a síntese grava só `sourceIngestion.proposed`;
+ * o "Aceitar" copia os valores propostos (com overrides em `edited`) para os
+ * campos OWNED — incluindo os novos `identity.address`/`identity.description` —
+ * e flipa `confirmations.source` (único sentinel do passo; sem sentinel novo).
+ */
+describe('applyCardSubmit — source_progress (Onda E: address + description)', () => {
+  const PROJECT_ID = 'proj-1'
+  const ORG_ID = 'org-1'
+  const CONV_ID = 'conv-1'
+
+  const VIBRA_ADDRESS = 'Rua Coronel Ferreira Leal, 161, Vila Gomes, São Paulo'
+  const VIBRA_DESCRIPTION =
+    'Empreendimento residencial na Vila Gomes com studios e apartamentos de 2 dormitórios.'
+
+  function seedConversation(builderState: unknown): void {
+    mockFindUnique.mockResolvedValue({
+      id: CONV_ID,
+      organizationId: ORG_ID,
+      builderState,
+    })
+    mockUpdateMany.mockResolvedValue({ count: 1 })
+  }
+
+  function writtenState(): BuilderState {
+    expect(mockUpdateMany).toHaveBeenCalledTimes(1)
+    const arg = mockUpdateMany.mock.calls[0][0] as {
+      data: { builderState: BuilderState }
+    }
+    return arg.data.builderState
+  }
+
+  /** builderState com um proposal completo já sintetizado (pré-accept). */
+  function stateWithProposal(): BuilderState {
+    return patchBuilderState(parseBuilderState(undefined), {
+      sourceIngestion: {
+        sources: [
+          { value: 'https://vibra.example', type: 'url', status: 'ready' },
+        ],
+        proposed: {
+          businessName: 'Vibra Residencial',
+          services: ['apartamentos de 2 dormitórios'],
+          audience: 'compradores de imóveis na Vila Gomes',
+          tone: 'acolhedor e direto',
+          address: VIBRA_ADDRESS,
+          description: VIBRA_DESCRIPTION,
+        },
+      },
+    })
+  }
+
+  async function submitAccept(
+    edited?: Extract<
+      CardSubmitBody,
+      { cardKey: 'source_progress' }
+    >['edited'],
+  ) {
+    return applyCardSubmit({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      body: { cardKey: 'source_progress', accept: true, ...(edited ? { edited } : {}) },
+    })
+  }
+
+  beforeEach(() => {
+    mockFindUnique.mockReset()
+    mockUpdateMany.mockReset()
+  })
+
+  it('accept sem edits: copia address/description do proposal para identity.* e flipa source', async () => {
+    seedConversation(stateWithProposal())
+    const res = await submitAccept()
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.identity.address).toBe(VIBRA_ADDRESS)
+    expect(next.identity.description).toBe(VIBRA_DESCRIPTION)
+    // Mapeamentos pré-existentes continuam intactos.
+    expect(next.project.name).toBe('Vibra Residencial')
+    expect(next.project.objective).toBe('compradores de imóveis na Vila Gomes')
+    expect(next.persona.tone).toBe('acolhedor e direto')
+    expect(next.services.offered).toContain('apartamentos de 2 dormitórios')
+    expect(next.confirmations.source).toBe(true)
+  })
+
+  it('edited.address/description sobrescrevem o proposal (trim aplicado)', async () => {
+    seedConversation(stateWithProposal())
+    await submitAccept({
+      address: '  Av. Nova, 200, Butantã, São Paulo  ',
+      description: '  Residencial compacto perto da USP.  ',
+    })
+
+    const next = writtenState()
+    expect(next.identity.address).toBe('Av. Nova, 200, Butantã, São Paulo')
+    expect(next.identity.description).toBe('Residencial compacto perto da USP.')
+    expect(next.confirmations.source).toBe(true)
+  })
+
+  it('proposal sem address/description: identity fica vazia (nunca inventa)', async () => {
+    seedConversation(
+      patchBuilderState(parseBuilderState(undefined), {
+        sourceIngestion: {
+          sources: [
+            { value: 'https://acme.example', type: 'url', status: 'ready' },
+          ],
+          proposed: { businessName: 'Acme' },
+        },
+      }),
+    )
+    await submitAccept()
+
+    const next = writtenState()
+    expect(next.identity.address).toBeUndefined()
+    expect(next.identity.description).toBeUndefined()
+    expect(next.project.name).toBe('Acme')
+    expect(next.confirmations.source).toBe(true)
+  })
+
+  it('state legado (null) parseia com identity default {} e aceita edited.address', async () => {
+    seedConversation(null)
+    await submitAccept({ address: VIBRA_ADDRESS })
+
+    const next = writtenState()
+    expect(next.identity.address).toBe(VIBRA_ADDRESS)
+    expect(next.identity.description).toBeUndefined()
+    expect(next.confirmations.source).toBe(true)
+  })
+})

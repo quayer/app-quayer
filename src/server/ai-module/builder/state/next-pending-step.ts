@@ -110,6 +110,8 @@ function hasSourceProposal(state: BuilderState): boolean {
     p.businessName ||
       p.audience ||
       p.tone ||
+      p.address ||
+      p.description ||
       (p.services && p.services.length > 0) ||
       (p.differentiators && p.differentiators.length > 0),
   )

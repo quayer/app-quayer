@@ -16,7 +16,8 @@
  *      route, not the SSE turn).
  *   2. "Campos detectados" — the PROPOSED synthesis from
  *      `value.sourceIngestion.proposed` (businessName / services / audience /
- *      differentiators / tone). These are anti-hallucination PROPOSALS: they only
+ *      differentiators / tone / address / description). These are
+ *      anti-hallucination PROPOSALS: they only
  *      commit to the owned BuilderState fields + flip `confirmations.source` when
  *      the user clicks "Aceitar" (which calls `onSubmit({ accept:true, edited? })`
  *      per the SOURCE_PROGRESS CARD CONTRACT). "Editar" lets the user tweak the
@@ -77,6 +78,10 @@ export interface SourceProgressPayload {
     audience?: string
     differentiators?: string[]
     tone?: string
+    /** Onda E — endereço físico completo detectado na fonte. */
+    address?: string
+    /** Onda E — descrição do negócio (1-2 frases) detectada na fonte. */
+    description?: string
   }
 }
 
@@ -241,6 +246,8 @@ function parseStatusProposed(body: unknown): SourceProposal | undefined {
   const businessName = typeof p.businessName === "string" ? p.businessName : undefined
   const audience = typeof p.audience === "string" ? p.audience : undefined
   const tone = typeof p.tone === "string" ? p.tone : undefined
+  const address = typeof p.address === "string" ? p.address : undefined
+  const description = typeof p.description === "string" ? p.description : undefined
   const services = Array.isArray(p.services)
     ? p.services.filter((s): s is string => typeof s === "string")
     : undefined
@@ -255,6 +262,8 @@ function parseStatusProposed(body: unknown): SourceProposal | undefined {
     proposal.differentiators = differentiators
   }
   if (tone) proposal.tone = tone
+  if (address) proposal.address = address
+  if (description) proposal.description = description
   return Object.keys(proposal).length > 0 ? proposal : undefined
 }
 
@@ -711,7 +720,9 @@ export function SourceProgressCard({
         (proposed.services && proposed.services.length > 0) ||
         proposed.audience ||
         (proposed.differentiators && proposed.differentiators.length > 0) ||
-        proposed.tone,
+        proposed.tone ||
+        proposed.address ||
+        proposed.description,
     )
 
   // Todas as fontes falharam e nenhuma síntese saiu → estado de erro EXPLÍCITO,
@@ -728,6 +739,8 @@ export function SourceProgressCard({
   const [audience, setAudience] = React.useState("")
   const [differentiators, setDifferentiators] = React.useState<string[]>([])
   const [tone, setTone] = React.useState("")
+  const [address, setAddress] = React.useState("")
+  const [description, setDescription] = React.useState("")
 
   const enterEdit = React.useCallback(() => {
     // Seed the draft from the freshest proposal at the moment "Editar" is pressed.
@@ -736,6 +749,8 @@ export function SourceProgressCard({
     setAudience(proposed?.audience ?? "")
     setDifferentiators(proposed?.differentiators ?? [])
     setTone(proposed?.tone ?? "")
+    setAddress(proposed?.address ?? "")
+    setDescription(proposed?.description ?? "")
     setEditing(true)
   }, [proposed])
 
@@ -764,11 +779,15 @@ export function SourceProgressCard({
     const trimmedName = businessName.trim()
     const trimmedAudience = audience.trim()
     const trimmedTone = tone.trim()
+    const trimmedAddress = address.trim()
+    const trimmedDescription = description.trim()
     if (trimmedName) edited.businessName = trimmedName
     if (services.length > 0) edited.services = services
     if (trimmedAudience) edited.audience = trimmedAudience
     if (differentiators.length > 0) edited.differentiators = differentiators
     if (trimmedTone) edited.tone = trimmedTone
+    if (trimmedAddress) edited.address = trimmedAddress
+    if (trimmedDescription) edited.description = trimmedDescription
     onSubmit(
       Object.keys(edited).length > 0 ? { accept: true, edited } : { accept: true },
     )
@@ -779,6 +798,8 @@ export function SourceProgressCard({
     audience,
     differentiators,
     tone,
+    address,
+    description,
     onSubmit,
   ])
 
@@ -937,6 +958,26 @@ export function SourceProgressCard({
                     aria-label="Tom de voz"
                   />
                 </FieldRow>
+                <FieldRow label="Endereço" tokens={tokens}>
+                  <Input
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="Ex.: Rua das Flores, 100, Centro, São Paulo"
+                    disabled={disabled}
+                    className="h-8 text-[12px]"
+                    aria-label="Endereço"
+                  />
+                </FieldRow>
+                <FieldRow label="Descrição" tokens={tokens}>
+                  <Input
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Ex.: empreendimento residencial com studios e 2 dorms"
+                    disabled={disabled}
+                    className="h-8 text-[12px]"
+                    aria-label="Descrição"
+                  />
+                </FieldRow>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -981,6 +1022,26 @@ export function SourceProgressCard({
                       style={{ color: tokens.textPrimary }}
                     >
                       {proposed.tone}
+                    </span>
+                  </FieldRow>
+                )}
+                {proposed.address && (
+                  <FieldRow label="Endereço" tokens={tokens}>
+                    <span
+                      className="text-[13px]"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      {proposed.address}
+                    </span>
+                  </FieldRow>
+                )}
+                {proposed.description && (
+                  <FieldRow label="Descrição" tokens={tokens}>
+                    <span
+                      className="text-[13px]"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      {proposed.description}
                     </span>
                   </FieldRow>
                 )}

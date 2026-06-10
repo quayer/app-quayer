@@ -261,6 +261,10 @@ export const sourceProgressPayloadSchema = z.object({
       audience: z.string().min(1).max(2000).optional(),
       differentiators: z.array(z.string().min(1)).optional(),
       tone: z.string().min(1).max(120).optional(),
+      // Onda E — identidade do negócio extraída da fonte (endereço completo +
+      // descrição em 1-2 frases). No accept vão para `builderState.identity.*`.
+      address: z.string().min(1).max(400).optional(),
+      description: z.string().min(1).max(1000).optional(),
     })
     .optional(),
 })

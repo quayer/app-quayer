@@ -674,6 +674,13 @@ function resolveAcceptedProposal(
   const tone = (edited?.tone ?? base.tone)?.trim()
   if (tone) out.tone = tone
 
+  // Onda E — identidade do negócio (endereço completo + descrição 1-2 frases).
+  const address = (edited?.address ?? base.address)?.trim()
+  if (address) out.address = address
+
+  const description = (edited?.description ?? base.description)?.trim()
+  if (description) out.description = description
+
   // Lists: edited replaces the proposal wholesale when supplied. Trim + dedupe.
   const services = sanitizeStringList(edited?.services ?? base.services ?? [])
   if (services.length > 0) out.services = services
@@ -698,6 +705,8 @@ function resolveAcceptedProposal(
  *   - audience        → project.objective  (the only free-text "who it serves" slot)
  *   - tone            → persona.tone
  *   - services        → services.offered    (UNIONed with already-confirmed list)
+ *   - address         → identity.address     (Onda E)
+ *   - description     → identity.description (Onda E)
  *   - differentiators → kept in `proposed` + RAG (no owned field today; never
  *                       force-fit into a mismatched slot — see the report note).
  *
@@ -723,6 +732,13 @@ function applySourceProgress(
   if (accepted.tone) {
     patch.persona = { tone: accepted.tone }
   }
+  if (accepted.address || accepted.description) {
+    // Onda E — endereço + descrição do negócio têm um lar canônico próprio.
+    patch.identity = {
+      ...(accepted.address ? { address: accepted.address } : {}),
+      ...(accepted.description ? { description: accepted.description } : {}),
+    }
+  }
   if (accepted.services && accepted.services.length > 0) {
     // Union with the already-present offered list (the user may have confirmed
     // services earlier) so accepting the source never DROPS prior choices.
@@ -746,6 +762,8 @@ function applySourceProgress(
   }
   if (accepted.audience) bits.push('público-alvo')
   if (accepted.tone) bits.push(`tom "${accepted.tone}"`)
+  if (accepted.address) bits.push(`endereço "${accepted.address}"`)
+  if (accepted.description) bits.push('descrição do negócio')
   const summary = bits.length > 0 ? bits.join(', ') : 'as informações da fonte'
   return {
     next,

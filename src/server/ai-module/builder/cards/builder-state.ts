@@ -175,19 +175,40 @@ export const sourceIngestionItemSchema = z.object({
 })
 
 /** Proposed synthesis written by the source-enrich pipeline (anti-hallucination:
- *  these are PROPOSED only — owned fields/sentinels commit only via "Aceitar"). */
+ *  these are PROPOSED only — owned fields/sentinels commit only via "Aceitar").
+ *
+ *  `address`/`description` (Onda E): endereço completo e descrição (1-2 frases)
+ *  do negócio, extraídos APENAS quando fundamentados no texto da fonte (mesma
+ *  regra anti-alucinação dos demais). No accept eles vão para `identity.*`. */
 export const sourceProposalSchema = z.object({
   businessName: z.string().optional(),
   services: z.array(z.string()).optional(),
   audience: z.string().optional(),
   differentiators: z.array(z.string()).optional(),
   tone: z.string().optional(),
+  address: z.string().optional(),
+  description: z.string().optional(),
 })
 
 /** source_progress card → KnowledgeSource + builderState. */
 export const sourceIngestionStateSchema = z.object({
   sources: z.array(sourceIngestionItemSchema).default([]),
   proposed: sourceProposalSchema.optional(),
+})
+
+/**
+ * Identidade do negócio (Onda E) — campos OWNED sem card próprio: endereço físico
+ * e descrição curta (1-2 frases) do negócio/empreendimento. Hoje são gravados
+ * EXCLUSIVAMENTE pelo accept do `source_progress` (apply-card-submit), seguindo o
+ * mesmo padrão anti-alucinação dos demais campos do proposal: a síntese só escreve
+ * `sourceIngestion.proposed.{address,description}`; o flip para cá acontece no
+ * "Aceitar" — coberto pelo sentinel existente `confirmations.source` (sem sentinel
+ * novo: o passo source já gateia esses campos, e eles NUNCA gateiam a jornada).
+ * Mudança 100% aditiva — `parseBuilderState` backfilla `{}` em states legados.
+ */
+export const identityStateSchema = z.object({
+  address: z.string().optional(),
+  description: z.string().optional(),
 })
 
 /**
@@ -265,6 +286,9 @@ export const builderStateSchema = z.object({
   calendar: calendarStateSchema.default({}),
   activation: activationStateSchema.default({ keywords: [] }),
   sourceIngestion: sourceIngestionStateSchema.default({ sources: [] }),
+  // Onda E — identidade do negócio (address/description) gravada no accept do
+  // source_progress. Additivo: legados parseiam para {}.
+  identity: identityStateSchema.default({}),
   // G1 — contatos silenciados (passo OPCIONAL). Default vazio + não-reconhecido.
   silencedContacts: silencedContactsStateSchema.default({
     contacts: [],
@@ -292,6 +316,7 @@ export type ActivationState = z.infer<typeof activationStateSchema>
 export type SourceIngestionItem = z.infer<typeof sourceIngestionItemSchema>
 export type SourceProposal = z.infer<typeof sourceProposalSchema>
 export type SourceIngestionState = z.infer<typeof sourceIngestionStateSchema>
+export type IdentityState = z.infer<typeof identityStateSchema>
 export type SilencedContactItem = z.infer<typeof silencedContactItemSchema>
 export type SilencedContactsState = z.infer<typeof silencedContactsStateSchema>
 export type BuilderConfirmations = z.infer<typeof confirmationsSchema>

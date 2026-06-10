@@ -286,6 +286,20 @@ describe('nextPendingStep — in-flight source ingestion', () => {
     expect(r.step.id).toBe<StepId>('source_ingestion')
   })
 
+  it('a proposal carrying ONLY address/description (Onda E) also counts as grounded', () => {
+    const s = patchBuilderState(freshState(), {
+      sourceIngestion: {
+        sources: [{ value: 'https://vibra.com', type: 'url', status: 'ready' }],
+        proposed: {
+          address: 'Rua Coronel Ferreira Leal, 161, Vila Gomes, São Paulo',
+          description: 'Empreendimento residencial na Vila Gomes.',
+        },
+      },
+    })
+    const r = nextPendingStep(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('source_ingestion')
+  })
+
   it('stops surfacing source_ingestion once accepted (confirmations.source)', () => {
     let s = patchBuilderState(freshState(), {
       project: { name: 'X', objective: 'Y' },
