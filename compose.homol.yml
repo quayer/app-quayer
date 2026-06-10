@@ -105,6 +105,11 @@ services:
       # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
 
+      # Pesquisa de nicho (Tavily) + enriquecimento Instagram (Apify)
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - APIFY_TOKEN=${APIFY_TOKEN:-}
+      - APIFY_INSTAGRAM_ACTOR_ID=${APIFY_INSTAGRAM_ACTOR_ID:-}
+
       # Observability (Sentry) — build de homol usa --webpack
       # (NEXT_BUILD_FLAGS no deploy-homol.yml) para contornar
       # vercel/next.js#87737 + #88844, permitindo @sentry/nextjs subir
@@ -125,6 +130,15 @@ services:
       - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-homol-media-whatsapp}
       - SUPABASE_STORAGE_BUCKET_PROFILES=${SUPABASE_STORAGE_BUCKET_PROFILES:-homol-profile-pictures}
       - SUPABASE_STORAGE_BUCKET_ATTACHMENTS=${SUPABASE_STORAGE_BUCKET_ATTACHMENTS:-homol-attachments}
+
+      # Storage LOCAL na VPS (substitui Supabase Storage em homol) — driver `local`
+      # grava no bind mount e gera link público servido por GET /api/v1/files/...
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - STORAGE_LOCAL_ROOT=/data/storage
+      - PUBLIC_STORAGE_BASE_URL=${PUBLIC_STORAGE_BASE_URL:-https://homol.quayer.com/api/v1/files}
+
+    volumes:
+      - /opt/quayer-homol/data/storage:/data/storage
 
     depends_on:
       homol-quayer-postgres:
@@ -204,6 +218,11 @@ services:
       # OpenAI — source-enrich (embed/síntese)
       - OPENAI_API_KEY=${OPENAI_API_KEY}
 
+      # Pesquisa de nicho (Tavily) + enriquecimento Instagram (Apify) — paridade com o app
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - APIFY_TOKEN=${APIFY_TOKEN:-}
+      - APIFY_INSTAGRAM_ACTOR_ID=${APIFY_INSTAGRAM_ACTOR_ID:-}
+
       # Observability (Sentry)
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SENTRY_RELEASE=${SENTRY_RELEASE:-}
@@ -215,6 +234,15 @@ services:
       - SUPABASE_STORAGE_BUCKET_MEDIA=${SUPABASE_STORAGE_BUCKET_MEDIA:-homol-media-whatsapp}
       - SUPABASE_STORAGE_BUCKET_PROFILES=${SUPABASE_STORAGE_BUCKET_PROFILES:-homol-profile-pictures}
       - SUPABASE_STORAGE_BUCKET_ATTACHMENTS=${SUPABASE_STORAGE_BUCKET_ATTACHMENTS:-homol-attachments}
+
+      # Storage LOCAL na VPS — o image-pipeline roda NO WORKER, precisa do mesmo mount
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - STORAGE_LOCAL_ROOT=/data/storage
+      - PUBLIC_STORAGE_BASE_URL=${PUBLIC_STORAGE_BASE_URL:-https://homol.quayer.com/api/v1/files}
+
+    volumes:
+      - /opt/quayer-homol/data/storage:/data/storage
+
     depends_on:
       homol-quayer-postgres:
         condition: service_healthy
@@ -225,8 +253,9 @@ services:
     # Healthcheck por processo: o worker não expõe HTTP. Confirma que o PID 1
     # (node) está vivo — graceful shutdown (SIGTERM/SIGINT) já é tratado pelo
     # start-workers.ts. Se o processo morrer, restart: unless-stopped o sobe.
+    # NOTA: a imagem não tem `ps` (ficava unhealthy permanente); /proc/1 cumpre o mesmo papel.
     healthcheck:
-      test: ["CMD-SHELL", "ps -o pid= -p 1 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -296,10 +325,12 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+    # noeviction: exigência do BullMQ — sob pressão de memória, escrever FALHA alto
+    # em vez de despejar chaves de jobs silenciosamente (volatile-lru perdia jobs).
     command: >
       redis-server
       --maxmemory 128mb
-      --maxmemory-policy volatile-lru
+      --maxmemory-policy noeviction
       --save 300 10
       --appendonly yes
       --appendfsync everysec

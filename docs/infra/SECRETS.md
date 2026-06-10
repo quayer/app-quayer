@@ -1,3 +1,13 @@
+---
+Criado: 2026-03-01
+Atualizado: 2026-06-10
+Revisar em: novo secret em .env.example ou mudança de workflow de deploy
+Relacionados:
+  - .env.example
+  - docs/infra/HOMOL_SETUP.md
+  - compose.homol.yml
+---
+
 # GitHub Secrets — Quayer
 
 > ⚠️ Nunca commitar valores reais. Apenas nomes e descrição.
@@ -112,6 +122,14 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 - `APIFY_INSTAGRAM_ACTOR_ID` — **opcional**, default `apify~instagram-profile-scraper`. Permite trocar o actor sem deploy de código. **Não é segredo** (identificador público de actor) — sem rotação. Validado em `src/server/services/server-config.ts` junto de `APIFY_TOKEN`/`TAVILY_API_KEY`.
 - `RAG_TOP_K` / `RAG_THRESHOLD` / `RAG_OVER_FETCH` — **opcionais**, tuning do retrieval pgvector (defaults 5 / 0.75 / 12). **Não são segredos** — sem rotação. Validados/coercidos em `server-config.ts`. Permitem tunar recall/latência do RAG sem deploy.
 - `STT_COST_PER_MIN_DEEPGRAM` / `STT_COST_PER_MIN_WHISPER` — **opcionais**, tarifa USD/minuto de STT (defaults aprox. 0.0043 / 0.006). **Não são segredos** — sem rotação. Usados em `ext-service-cost.service.ts` para computar custo de serviço externo por turno (STT inbound). Ajustáveis quando o preço do provider mudar.
+
+## Storage (local na VPS vs Supabase) — 2026-06-10
+
+- `STORAGE_BACKEND` — **não é segredo.** `supabase` (default) ou `local`. Homol usa `local`: o driver grava no bind mount `/opt/quayer-homol/data/storage` → `/data/storage` e os links públicos são servidos por `GET /api/v1/files/{bucket}/{key}` (padrão portado do Orayon.Profissoes K4). Sem rotação.
+- `STORAGE_LOCAL_ROOT` — **não é segredo**, default `/data/storage`. Caminho do mount dentro do container (app E worker precisam do MESMO mount — o image-pipeline roda no worker).
+- `PUBLIC_STORAGE_BASE_URL` — **não é segredo** (ex.: `https://homol.quayer.com/api/v1/files`). Sem ela o driver `local` se declara indisponível (links seriam inúteis). Links são públicos-por-link (keys sha256/uuid não-adivinháveis); se um link vazar, o "revoke" é deletar o arquivo.
+- Com `STORAGE_BACKEND=local`, as `SUPABASE_*` de storage ficam dispensáveis nesse ambiente (mantidas para quem usar o backend `supabase`).
+- `TAVILY_API_KEY` — busca web do sub-agente niche-researcher (`research_niche`). Sem ela o research degrada para conhecimento do LLM (`fromLLMKnowledgeOnly=true`) sem quebrar. Em homol foi copiada do cofre do Orayon.Profissoes (mesma conta). Rotacionar a cada incidente.
 
 ## Google Calendar (connect-link — Wave 4b)
 
