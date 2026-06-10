@@ -327,6 +327,21 @@ async function processCandidate(
       finalKind.ext,
     )
 
+    // Dedup ANTES do upload/insert: páginas reais repetem a mesma imagem em URLs
+    // diferentes (srcset/galerias) — sem este check cada duplicata vira um P2002
+    // que o logger interno do Prisma imprime como erro (ruído de monitoramento),
+    // além de um upload redundante. Corrida residual continua coberta pelo catch
+    // P2002 abaixo. Fail-open: erro na consulta → segue para o insert normal.
+    try {
+      const existing = await database.knowledgeImage.findUnique({
+        where: { sourceId_sha256: { sourceId: input.sourceId, sha256 } },
+        select: { id: true },
+      })
+      if (existing) return 'skipped'
+    } catch {
+      // segue para o caminho normal — o catch do create cobre o dedup
+    }
+
     try {
       await storage.upload(BUCKETS.MEDIA, storageKey, finalBuffer, {
         contentType: finalKind.contentType,
