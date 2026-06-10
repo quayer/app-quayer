@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { extractSourceRefs } from './url-extractor'
+import { canonicalizeSourceValue, extractSourceRefs } from './url-extractor'
 
 describe('extractSourceRefs', () => {
   it('returns [] for plain chat with no link or handle', () => {
@@ -117,5 +117,41 @@ describe('extractSourceRefs', () => {
     expect(refs).toEqual([
       { value: 'https://acme.com.br', type: 'url' },
     ])
+  })
+})
+
+describe('canonicalizeSourceValue', () => {
+  it('strips the trailing slash (with-slash === without-slash)', () => {
+    expect(canonicalizeSourceValue('https://vibraresidencial.com.br/')).toBe(
+      'https://vibraresidencial.com.br',
+    )
+    expect(canonicalizeSourceValue('https://acme.com.br/sobre/')).toBe(
+      'https://acme.com.br/sobre',
+    )
+  })
+
+  it('is idempotent on already-canonical values', () => {
+    const canonical = 'https://vibraresidencial.com.br'
+    expect(canonicalizeSourceValue(canonical)).toBe(canonical)
+    expect(canonicalizeSourceValue(canonicalizeSourceValue(canonical))).toBe(
+      canonical,
+    )
+  })
+
+  it('matches the extractSourceRefs canon (host lowercased, tracking/fragment stripped)', () => {
+    expect(
+      canonicalizeSourceValue('https://ACME.COM.BR/p/?utm_source=ig#topo'),
+    ).toBe('https://acme.com.br/p')
+  })
+
+  it('keeps real query strings (and the slash WHATWG requires before them)', () => {
+    expect(canonicalizeSourceValue('https://acme.com.br/p?id=42')).toBe(
+      'https://acme.com.br/p?id=42',
+    )
+  })
+
+  it('fails open on non-URL input (trimmed, unchanged — Zod owns rejection)', () => {
+    expect(canonicalizeSourceValue('  texto solto  ')).toBe('texto solto')
+    expect(canonicalizeSourceValue('')).toBe('')
   })
 })

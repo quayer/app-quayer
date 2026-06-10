@@ -5,11 +5,13 @@
  * Two signals, independent:
  *   - `working`: the last assistant message has at least one tool call without
  *     a `result` yet (in-flight). Banner auto-hides when everything settles.
- *   - `error`: any of the five most recent assistant messages has a tool call
- *     whose `result` is an object indicating failure (`success === false` or
- *     presence of an `error` field). The error banner is dismissable per
+ *   - `error`: the LATEST assistant message has a tool call whose `result` is
+ *     an object indicating failure (`success === false` or presence of an
+ *     `error` field). Scanning only the latest turn means any subsequent
+ *     action (success or not) naturally clears a stale error — the banner
+ *     never outlives the turn that caused it. It is also dismissable per
  *     message id — the caller passes `dismissedErrorId` and we hide the banner
- *     when the latest erroring message matches it.
+ *     when the erroring message matches it.
  *
  * Kept as a pure function so the preview-panel can `useMemo` over
  * `[messages, dismissedErrorId]` without triggering React strict-mode warnings
@@ -25,7 +27,9 @@ export interface BannerState {
   error: { lastErrorId: string; message: string } | null
 }
 
-const ERROR_SCAN_WINDOW = 5
+// Only the LATEST assistant turn can surface an error — a wider window made
+// old failures haunt every later (successful) interaction.
+const ERROR_SCAN_WINDOW = 1
 
 export function getBannerState(
   messages: ChatMessage[],
@@ -52,7 +56,7 @@ function detectWorking(messages: ChatMessage[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Error detection — scan the last N assistant messages, latest first.
+// Error detection — scan only the latest assistant message(s), newest first.
 // ---------------------------------------------------------------------------
 
 function detectError(

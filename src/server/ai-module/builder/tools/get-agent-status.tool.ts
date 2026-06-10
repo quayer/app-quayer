@@ -13,6 +13,10 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -24,28 +28,27 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: true },
     tool: tool({
       description:
-        'Returns the current status of an AI agent including deployment state, prompt versions (current and draft), connected WhatsApp instance details, active conversation count, and message volume from the last 24 hours. Use this to check if an agent is live, how many conversations it handles, and whether there are unpublished prompt changes.',
+        'Returns the current status of the AI agent of the active Builder project, including deployment state, prompt versions (current and draft), connected WhatsApp instance details, active conversation count, and message volume from the last 24 hours. The agent is resolved automatically from the project — do NOT provide agentId. Use this to check if the agent is live, how many conversations it handles, and whether there are unpublished prompt changes.',
       inputSchema: z.object({
-        agentId: z.string().uuid().describe('The AIAgentConfig.id to inspect'),
+        agentId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
       }),
       execute: async (input) => {
         try {
-          // 1. Verify agent belongs to the active project
-          const project = await database.builderProject.findFirst({
-            where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
-            select: { id: true },
-          })
-          if (!project) {
-            return {
-              success: false,
-              message: 'Agent does not belong to the active project',
-            }
+          // 1. Resolve the REAL agent from the active project (LLM-provided
+          //    ids are ignored when divergent — they tend to be hallucinated).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok) {
+            return { success: false, message: resolved.message }
           }
 
           // 2. Load agent (scoped to org)
           const agent = await database.aIAgentConfig.findFirst({
             where: {
-              id: input.agentId,
+              id: resolved.agentId,
               organizationId: ctx.organizationId,
             },
             select: {
@@ -60,7 +63,7 @@ export function getAgentStatusTool(ctx: BuilderToolExecutionContext) {
           if (!agent) {
             return {
               success: false,
-              message: `Agent ${input.agentId} not found in this organization.`,
+              message: `Agent ${resolved.agentId} not found in this organization.`,
             }
           }
 

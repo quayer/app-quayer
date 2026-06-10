@@ -34,13 +34,17 @@ export type FieldOwnership = 'card' | 'livre'
  *  - Digressão → responda em 1-3 linhas e re-apresente o passo pendente.
  *  - Nunca pule um campo obrigatório em silêncio.
  *  - Campo `card` → peça para o usuário usar o card (não colete por texto).
+ *  - Conduza APENAS o passo do banner no turno; registre respostas de outros
+ *    passos via tool sem anunciar e volte ao passo ativo.
  */
 export const BUILDER_JOURNEY_RULES = `Regras da jornada (texto-livre):
 - Se a mensagem do usuário já preenche o campo "livre" do PRÓXIMO PASSO, registre-a chamando a tool correspondente — não re-pergunte o que ele acabou de responder.
 - Digressão ou pergunta fora do passo: responda em no máximo 1-3 linhas e, em seguida, re-apresente o PRÓXIMO PASSO pendente.
 - Nunca pule um campo obrigatório em silêncio. Se o usuário tentar avançar sem preencher, explique o que falta e mantenha o passo atual.
 - Campos marcados como "card" são preenchidos na interface, não por texto. Quando o passo for de um campo "card", peça ao usuário para usar o card exibido — não colete o valor por texto livre nem invente o conteúdo.
-- Uma pergunta por vez. Assuma defaults razoáveis e confirme depois, mas só marque um passo como concluído quando o estado realmente tiver o valor.`
+- Uma pergunta por vez. Assuma defaults razoáveis e confirme depois, mas só marque um passo como concluído quando o estado realmente tiver o valor.
+- Conduza APENAS o passo do PRÓXIMO PASSO neste turno. Se o usuário responder algo de OUTRO passo, registre com a tool adequada (ex.: set_project_basics para objetivo/nome) SEM anunciar, e volte ao passo ativo — não puxe perguntas de passos futuros.
+- Quando o passo ativo for source_ingestion (card "Fontes do negócio"), resposta CURTA ancorada no card — sem novas perguntas de outros passos no mesmo turno.`
 
 /**
  * Renders the "card vs livre" field-ownership table as a compact Markdown list,

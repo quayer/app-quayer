@@ -712,6 +712,12 @@ export function SourceProgressCard({
     (!imagesAllReady || imagesLoading) && images.length === 0
   const imagesCatalogEmpty =
     imagesAllReady && !imagesLoading && images.length === 0
+  // Copy honesta no vazio: erro de extração ≠ fonte sem fotos. O espelho
+  // por fonte (`imagesStatus`) distingue — alguma fonte com `error` mantém a
+  // mensagem de falha; todas settladas sem falha e 0 imagens é vazio legítimo.
+  const imagesAnyError = sources.some(
+    (source) => source.imagesStatus === "error",
+  )
 
   const hasProposal =
     proposed != null &&
@@ -1082,7 +1088,11 @@ export function SourceProgressCard({
               }}
             >
               <Images className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Não consegui ler as fotos desta fonte.</span>
+              <span>
+                {imagesAnyError
+                  ? "Não consegui ler as fotos desta fonte."
+                  : "Nenhuma foto encontrada nas fontes."}
+              </span>
             </div>
           ) : (
             <ImagesPreviewPanel

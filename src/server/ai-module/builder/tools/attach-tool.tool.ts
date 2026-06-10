@@ -36,6 +36,10 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { BUILTIN_TOOL_NAMES } from '@/server/ai-module/ai-agents/tools/builtin-tools'
 import { buildBuilderTool } from './build-tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other builder tools)
@@ -79,12 +83,13 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
-      'Attaches a built-in tool to an existing AI agent in the current Builder project. Use this to enable capabilities like transfer_to_human, pause_session, search_contacts, create_lead, schedule_callback or get_session_history on an agent the user has already created. Idempotent: re-attaching an already-enabled tool is a no-op success.',
+      'Attaches a built-in tool to the AI agent of the current Builder project. Use this to enable capabilities like transfer_to_human, pause_session, search_contacts, create_lead, schedule_callback or get_session_history on an agent the user has already created. The agent is resolved automatically from the active project — do NOT provide agentId. Idempotent: re-attaching an already-enabled tool is a no-op success.',
     inputSchema: z.object({
       agentId: z
         .string()
         .uuid()
-        .describe('The AIAgentConfig.id of the agent to modify (must belong to the current organization)'),
+        .optional()
+        .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
       toolKey: toolKeyEnum.describe(
         'The built-in tool key to enable. Must be one of the registered builtin tool names.',
       ),
@@ -102,22 +107,18 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
           }
         }
 
-        // Ensure the agent belongs to the active project (prevents cross-project mutation).
-        const project = await database.builderProject.findFirst({
-          where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
-          select: { id: true },
-        })
-        if (!project) {
-          return {
-            success: false,
-            message: 'Agent does not belong to the active project',
-          }
+        // Resolve the REAL agent from the active project (never trust the
+        // LLM-provided id — it hallucinates uuids when the history lacks
+        // toolCalls). Fails only when the project has no agent yet.
+        const resolved = await resolveProjectAgent(ctx, input.agentId)
+        if (!resolved.ok) {
+          return { success: false, message: resolved.message }
         }
 
         // Ensure the agent exists AND belongs to the current organization.
         const agent = await database.aIAgentConfig.findFirst({
           where: {
-            id: input.agentId,
+            id: resolved.agentId,
             organizationId: ctx.organizationId,
           },
           select: { id: true, name: true, enabledTools: true },
@@ -126,7 +127,7 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
         if (!agent) {
           return {
             success: false,
-            message: `Agent ${input.agentId} not found in organization ${ctx.organizationId}`,
+            message: `Agent ${resolved.agentId} not found in organization ${ctx.organizationId}`,
           }
         }
 

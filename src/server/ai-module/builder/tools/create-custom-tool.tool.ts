@@ -15,6 +15,10 @@ import { database } from '@/server/services/database'
 import { encrypt } from '@/lib/crypto'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -147,9 +151,8 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
         agentId: z
           .string()
           .uuid()
-          .describe(
-            'The AIAgentConfig.id this tool is being created for (used for context, not directly linked)',
-          ),
+          .optional()
+          .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
         name: z
           .string()
           .min(2)
@@ -207,20 +210,11 @@ export function createCustomToolTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // 3. Verify the agent exists in this org (context validation)
-          const agent = await database.aIAgentConfig.findFirst({
-            where: {
-              id: input.agentId,
-              organizationId: ctx.organizationId,
-            },
-            select: { id: true },
-          })
-
-          if (!agent) {
-            return {
-              success: false,
-              message: `Agent ${input.agentId} not found in this organization.`,
-            }
+          // 3. Resolve the REAL agent from the active project (context
+          //    validation — the LLM-provided id is ignored when divergent).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok) {
+            return { success: false, message: resolved.message }
           }
 
           // 4. Check for name uniqueness within the org

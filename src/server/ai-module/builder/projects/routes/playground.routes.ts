@@ -12,6 +12,10 @@ import {
   processPlaygroundStream,
   type AgentStreamEvent,
 } from '@/server/ai-module/ai-agents/agent-runtime.service'
+import {
+  resolveCollectionId,
+  collectionNameFor,
+} from '../../knowledge/knowledge-helpers'
 
 // ---------------------------------------------------------------------------
 // Shared param schema
@@ -63,12 +67,42 @@ export const playgroundRoutes = {
       const db = getDatabase()
       const project = await db.builderProject.findFirst({
         where: { id, organizationId: user.currentOrgId },
-        select: { id: true, aiAgentId: true },
+        select: { id: true, aiAgentId: true, metadata: true },
       })
 
       if (!project) return response.notFound('Projeto não encontrado')
       if (!project.aiAgentId) {
         return response.notFound('Este projeto ainda não tem um agente vinculado')
+      }
+
+      // RAG no playground (fail-open): resolve a collection design-time do
+      // projeto (agente.ragCollectionId → metadata.knowledgeCollectionId →
+      // nome `kb:<projectId>`) e repassa ao runtime stateless. Pré-deploy o
+      // agente ainda não tem ragCollectionId (o vínculo acontece na saga de
+      // deploy) — sem isto o agente alucina sobre o conteúdo que o usuário
+      // acabou de ingerir nos cards. Qualquer falha → segue sem RAG.
+      let knowledgeCollectionId: string | null = null
+      try {
+        knowledgeCollectionId = await resolveCollectionId(
+          project,
+          user.currentOrgId,
+        )
+        if (!knowledgeCollectionId) {
+          const byName = await db.knowledgeCollection.findFirst({
+            where: {
+              organizationId: user.currentOrgId,
+              name: collectionNameFor(project.id),
+              isActive: true,
+            },
+            select: { id: true },
+          })
+          knowledgeCollectionId = byName?.id ?? null
+        }
+      } catch (err: unknown) {
+        console.warn(
+          '[playgroundStream] collection resolve failed (segue sem RAG):',
+          err instanceof Error ? err.message : String(err),
+        )
       }
 
       const encoder = new TextEncoder()
@@ -85,6 +119,7 @@ export const playgroundRoutes = {
               organizationId: user!.currentOrgId!,
               message,
               history,
+              knowledgeCollectionId,
             })) {
               sendEvent(ev)
               if (ev.type === 'finish' || ev.type === 'error') break

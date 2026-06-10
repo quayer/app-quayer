@@ -18,6 +18,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { BUILTIN_TOOL_NAMES } from '@/server/ai-module/ai-agents/tools/builtin-tools'
 import { buildBuilderTool } from './build-tool'
+import { resolveProjectAgent } from './resolve-project-agent'
 
 export interface BuilderToolExecutionContext {
   projectId: string
@@ -54,7 +55,7 @@ const RAW_CATALOG: ToolCatalogEntry[] = [
     icon: 'headphones',
     recommended: true,
     note:
-      'Ideal para SDR: depois da qualificação, a conversa fica pronta para advogado, vendedor ou secretária assumir no painel.',
+      'Ideal para SDR: depois da qualificação, a conversa fica pronta para um atendente humano assumir no painel.',
   },
   {
     key: 'department_dispatch',
@@ -111,7 +112,7 @@ const RAW_CATALOG: ToolCatalogEntry[] = [
     icon: 'tag',
     recommended: false,
     note:
-      'Não recomendado por padrão para advocacia. Use só quando preço automático fizer sentido para o negócio.',
+      'Use só quando divulgar preço automaticamente fizer sentido para o negócio (em serviços sob consulta, ex. advocacia, costuma não fazer).',
   },
   {
     key: 'lead_only',
@@ -132,20 +133,20 @@ const CATALOG: ToolCatalogEntry[] = RAW_CATALOG.filter((entry) =>
   ),
 )
 
-export function proposeToolSelectionTool(_ctx: BuilderToolExecutionContext) {
+export function proposeToolSelectionTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'propose_tool_selection',
     metadata: { isReadOnly: true, isConcurrencySafe: true },
     tool: tool({
       description:
-        'Presents the user with a multi-select picker of available capabilities (schedule, pricing, lead qualification, human handoff, team notifications) so they can choose which tools to attach to the agent. Use at the "tools" stage after the prompt is approved, before testing. Does NOT mutate — the user picks and the card triggers follow-up attach_tool_to_agent calls.',
+        'Presents the user with a multi-select picker of available capabilities (schedule, pricing, lead qualification, human handoff, team notifications) so they can choose which tools to attach to the agent. Use at the "tools" stage after the prompt is approved, before testing. The agent is resolved automatically from the active project — do NOT provide agentId. Does NOT mutate — the user picks and the card triggers follow-up attach_tool_to_agent calls.',
       inputSchema: z.object({
         agentId: z
           .string()
           .uuid()
           .optional()
           .describe(
-            'Optional AIAgentConfig.id. Omit before agent creation; provide it when applying tools after create_agent.',
+            'Opcional; resolvido automaticamente do projeto ativo. Omita este campo.',
           ),
         reason: z
           .string()
@@ -156,9 +157,14 @@ export function proposeToolSelectionTool(_ctx: BuilderToolExecutionContext) {
           ),
       }),
       execute: async (input) => {
+        // Resolve the REAL agent from the active project. Purely cosmetic here
+        // (the card's follow-up attach_tool_to_agent calls resolve again), but
+        // it prevents echoing a hallucinated LLM id back into the chat. The
+        // picker is also valid BEFORE agent creation, so failure → null.
+        const resolved = await resolveProjectAgent(ctx, input.agentId)
         return {
           success: true as const,
-          agentId: input.agentId ?? null,
+          agentId: resolved.ok ? resolved.agentId : null,
           reason: input.reason ?? null,
           tools: CATALOG,
           message: `Exibindo ${CATALOG.length} ferramentas para o usuário escolher.`,

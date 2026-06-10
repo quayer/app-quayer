@@ -14,8 +14,14 @@
  * `builderState.sourceIngestion.sources[].status`, all scoped by `organizationId`.
  *
  * ANTI-HALLUCINATION: synthesis writes ONLY `proposed`. The owned builderState
- * fields + `confirmations.source` flip ONLY when the user clicks "Aceitar" on the
- * `source_progress` card (handled in apply-card-submit.ts, a different agent).
+ * fields + `confirmations.source` flip to TRUE only when the user clicks
+ * "Aceitar" on the `source_progress` card (apply-card-submit.ts, a different
+ * agent). The ONE exception in the other direction: when a NON-EMPTY proposal
+ * lands AFTER an accept (link pasted post-accept), the atomic patch flips
+ * `confirmations.source` back to FALSE (`reopenOnProposal`) so the card
+ * resurfaces for review instead of the proposal landing silently. Cross-batch,
+ * the persisted `proposed` is MERGED (same first-wins/union semantics as the
+ * intra-batch fold below), never overwritten.
  *
  * FAIL-SAFE (mirrors session-close.job): NEVER throws. Per-source ingestion
  * errors are already persisted to `KnowledgeSource.error`/`status` by
@@ -37,6 +43,8 @@ import { runLLMSubAgent } from '../sub-agents/base'
 import type { SubAgentContext } from '../sub-agents/types'
 import type { SourceProposal } from '../cards/builder-state'
 import {
+  hasAnyProposalField,
+  mergeProposal,
   patchSourceIngestionAtomic,
   type SourceImagesMirror,
 } from './builder-state-db'
@@ -329,66 +337,9 @@ export async function runSourceEnrich(
 }
 
 // ---------------------------------------------------------------------------
-// Proposal merge (PROPOSED-only; pure)
-// ---------------------------------------------------------------------------
-
-/**
- * Merge one source's proposal into the running aggregate. First non-empty wins
- * for scalar fields (businessName/audience/tone); list fields union + dedupe.
- * Pure mutation of the `target` accumulator (caller owns it).
- */
-function mergeProposal(target: SourceProposal, add: SourceProposal): void {
-  if (!target.businessName && add.businessName) {
-    target.businessName = add.businessName
-  }
-  if (!target.audience && add.audience) target.audience = add.audience
-  if (!target.tone && add.tone) target.tone = add.tone
-  if (!target.address && add.address) target.address = add.address
-  if (!target.description && add.description) {
-    target.description = add.description
-  }
-
-  if (add.services && add.services.length > 0) {
-    target.services = dedupeUnion(target.services, add.services)
-  }
-  if (add.differentiators && add.differentiators.length > 0) {
-    target.differentiators = dedupeUnion(
-      target.differentiators,
-      add.differentiators,
-    )
-  }
-}
-
-/** Case-insensitive, order-preserving union of two optional string lists. */
-function dedupeUnion(
-  base: string[] | undefined,
-  extra: string[],
-): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const v of [...(base ?? []), ...extra]) {
-    const trimmed = v.trim()
-    if (trimmed.length === 0) continue
-    const key = trimmed.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(trimmed)
-  }
-  return out
-}
-
-function hasAnyProposalField(p: SourceProposal): boolean {
-  return Boolean(
-    p.businessName ||
-      p.audience ||
-      p.tone ||
-      p.address ||
-      p.description ||
-      (p.services && p.services.length > 0) ||
-      (p.differentiators && p.differentiators.length > 0),
-  )
-}
-
+// Proposal merge — `mergeProposal`/`hasAnyProposalField` live in
+// builder-state-db.ts (the write boundary reuses the SAME semantics
+// cross-batch, so intra-job and cross-batch merging can never diverge).
 // ---------------------------------------------------------------------------
 // builderState PATCH (org-scoped; race-safe via builder-state-db atomic patch)
 // ---------------------------------------------------------------------------
@@ -402,8 +353,12 @@ function hasAnyProposalField(p: SourceProposal): boolean {
  * prevents the previous read-modify-write of the WHOLE state from clobbering a
  * concurrent applyCardSubmit's confirmations/owned fields (LOW #20/#22).
  *
- * Writes ONLY `sourceIngestion` (proposed + sources[].status). Owned fields and
- * `confirmations.source` are NEVER touched here — those flip on "Aceitar".
+ * Writes ONLY `sourceIngestion` (proposed + sources[].status). Owned fields are
+ * NEVER touched here, and `confirmations.source` only ever flips TRUE on
+ * "Aceitar" — the one move made from here is the OPPOSITE direction
+ * (`reopenOnProposal`): a grounded proposal landing after an accept flips it
+ * back to FALSE inside the same atomic patch, so the card resurfaces for
+ * review (instead of silently mutating `proposed` behind a confirmed step).
  */
 async function patchSourceIngestion(
   conversationId: string,
@@ -421,8 +376,12 @@ async function patchSourceIngestion(
       // poll de imagens do source_progress card depende disso para parar).
       imagesBySourceId,
       // Only attach `proposed` when we actually have grounded fields, so a
-      // failed/ungrounded batch never clobbers an existing proposal with {}.
-      ...(proposed ? { proposed } : {}),
+      // failed/ungrounded batch never clobbers an existing proposal with {}
+      // (and never reopens an accepted card for nothing). The write boundary
+      // MERGES it onto the persisted proposal (first-wins scalars, union
+      // lists) and flips `confirmations.source` back to false when the card
+      // had already been accepted (reopen-for-review).
+      ...(proposed ? { proposed, reopenOnProposal: true } : {}),
     },
   )
   if (!patched) {

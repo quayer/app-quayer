@@ -78,7 +78,10 @@ export function ActiveStepCard({
   const value = resolveBuilderState(readiness)
 
   return (
-    <div className="px-4 pb-1 pt-2 md:px-6">
+    // max-h + scroll próprio: o card pinado vive FORA do scroll de mensagens
+    // (irmão flex entre mensagens e composer); sem o teto, um card alto (ex.:
+    // Fontes do negócio) esmaga a área flex-1 da conversa.
+    <div className="max-h-[45vh] overflow-y-auto overscroll-contain px-4 pb-1 pt-2 md:px-6">
       <div className="mx-auto w-full max-w-2xl">
         <CardComponent
           projectId={projectId}

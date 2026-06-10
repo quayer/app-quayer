@@ -9,9 +9,10 @@
  * runtime's playground path — same tools, BYOK, cooldown fallback) instead of
  * a bare `generateText`. This ensures the preview is faithful to production.
  *
- * Fallback: if the agent has no linked BuilderProject yet (agentId → projectId
- * lookup fails), we still return an error with a clear message rather than
- * silently falling back to simulated output.
+ * The agent is resolved from the active project (`builder_projects.aiAgentId`
+ * via ctx) — the LLM-provided agentId is optional and ignored when divergent
+ * (anti-hallucination, see resolve-project-agent.ts). If the project has no
+ * agent yet we return a clear error rather than simulated output.
  */
 
 import { tool } from 'ai'
@@ -20,6 +21,10 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 import { runFaithfulPreview } from '@/server/ai-module/builder/services/faithful-preview.service'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -31,12 +36,13 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: false },
     tool: tool({
       description:
-        'Renders 2-3 example conversation turns using the agent\'s current system prompt, so the user can preview the tone and answers before publishing. Unlike run_playground_test, this does NOT judge the response — it simply shows what the agent would say. Prefer 2-3 scenarios that reflect the most common questions in the agent\'s niche (e.g. pricing, scheduling, objections).',
+        'Renders 2-3 example conversation turns using the agent\'s current system prompt, so the user can preview the tone and answers before publishing. The agent is resolved automatically from the active project — do NOT provide agentId. Unlike run_playground_test, this does NOT judge the response — it simply shows what the agent would say. Prefer 2-3 scenarios that reflect the most common questions in the agent\'s niche (e.g. pricing, scheduling, objections).',
       inputSchema: z.object({
         agentId: z
           .string()
           .uuid()
-          .describe('The AIAgentConfig.id whose prompt to preview'),
+          .optional()
+          .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
         scenarios: z
           .array(
             z.object({
@@ -60,10 +66,17 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
       execute: async (input) => {
         const startTime = Date.now()
         try {
+          // Resolve the REAL agent from the active project (LLM-provided ids
+          // are ignored when divergent — they tend to be hallucinated).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok) {
+            return { success: false as const, message: resolved.message }
+          }
+
           // QH-08: load agent for name + org-scope check
           const agent = await database.aIAgentConfig.findFirst({
             where: {
-              id: input.agentId,
+              id: resolved.agentId,
               organizationId: ctx.organizationId,
             },
             select: { id: true, name: true },
@@ -72,24 +85,7 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
           if (!agent) {
             return {
               success: false as const,
-              message: `Agent ${input.agentId} not found in this organization.`,
-            }
-          }
-
-          // QH-08: resolve projectId from agentId (1:1 relation)
-          const project = await database.builderProject.findFirst({
-            where: {
-              aiAgentId: input.agentId,
-              organizationId: ctx.organizationId,
-            },
-            select: { id: true },
-          })
-
-          if (!project) {
-            return {
-              success: false as const,
-              message:
-                'Agent has no linked Builder project yet. Publish the agent first so the faithful preview can use the real runtime.',
+              message: `Agent ${resolved.agentId} not found in this organization.`,
             }
           }
 
@@ -104,7 +100,7 @@ export function runPromptPreviewTool(ctx: BuilderToolExecutionContext) {
           // QH-08: use the real runtime path (same tools, BYOK, model routing)
           for (const scenario of input.scenarios) {
             const result = await runFaithfulPreview({
-              projectId: project.id,
+              projectId: ctx.projectId,
               organizationId: ctx.organizationId,
               messages: [{ role: 'user', content: scenario.userMessage }],
             })

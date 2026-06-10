@@ -9,6 +9,18 @@ export const TOOL_STAGE_MAP: Array<{
   detailFn?: (result: unknown) => string | undefined
 }> = [
   {
+    toolName: "set_project_basics",
+    label: "Objetivo definido",
+  },
+  {
+    toolName: "research_niche",
+    label: "Pesquisa de nicho",
+  },
+  {
+    toolName: "propose_agent_creation",
+    label: "Proposta do agente",
+  },
+  {
     toolName: "generate_prompt_anatomy",
     label: "Prompt gerado",
     detailFn: (result) => {
@@ -34,6 +46,10 @@ export const TOOL_STAGE_MAP: Array<{
   {
     toolName: "update_agent_prompt",
     label: "Prompt atualizado",
+  },
+  {
+    toolName: "propose_tool_selection",
+    label: "Seleção de ferramentas",
   },
   {
     toolName: "attach_tool_to_agent",

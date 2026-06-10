@@ -23,6 +23,10 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 import { runFaithfulPreview } from '@/server/ai-module/builder/services/faithful-preview.service'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 /**
  * Get a lightweight judge model for evaluation.
@@ -53,9 +57,13 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: false },
     tool: tool({
       description:
-        'Runs scenario-based tests against an AI agent\'s system prompt. For each scenario, sends a test message through the agent and uses a judge LLM to evaluate whether the response matches the expected behavior. Returns per-scenario pass/fail results, an overall score (0-100), improvement suggestions, and usage metrics.',
+        'Runs scenario-based tests against the system prompt of the agent of the current Builder project. The agent is resolved automatically from the active project — do NOT provide agentId. For each scenario, sends a test message through the agent and uses a judge LLM to evaluate whether the response matches the expected behavior. Returns per-scenario pass/fail results, an overall score (0-100), improvement suggestions, and usage metrics.',
       inputSchema: z.object({
-        agentId: z.string().uuid().describe('The AIAgentConfig.id to test'),
+        agentId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
         scenarios: z
           .array(
             z.object({
@@ -79,10 +87,17 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
         const startTime = Date.now()
 
         try {
-          // 1. Load agent config (scoped to org) — only for existence check
+          // 1. Resolve the REAL agent from the active project (LLM-provided
+          //    ids are ignored when divergent — they tend to be hallucinated).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok) {
+            return { success: false, message: resolved.message }
+          }
+
+          // Load agent config (scoped to org) — only for existence check
           const agent = await database.aIAgentConfig.findFirst({
             where: {
-              id: input.agentId,
+              id: resolved.agentId,
               organizationId: ctx.organizationId,
             },
             select: { id: true },
@@ -91,24 +106,7 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
           if (!agent) {
             return {
               success: false,
-              message: `Agent ${input.agentId} not found in this organization.`,
-            }
-          }
-
-          // QH-08: resolve projectId from agentId (1:1 BuilderProject.aiAgentId)
-          const project = await database.builderProject.findFirst({
-            where: {
-              aiAgentId: input.agentId,
-              organizationId: ctx.organizationId,
-            },
-            select: { id: true },
-          })
-
-          if (!project) {
-            return {
-              success: false,
-              message:
-                'Agent has no linked Builder project yet. Publish the agent first so the faithful preview can use the real runtime.',
+              message: `Agent ${resolved.agentId} not found in this organization.`,
             }
           }
 
@@ -122,7 +120,7 @@ export function runPlaygroundTestTool(ctx: BuilderToolExecutionContext) {
             // 2a. QH-08: Generate agent response via the real runtime playground path
             //     (same tools, BYOK, model routing, cooldown fallback — no side-effects)
             const previewResult = await runFaithfulPreview({
-              projectId: project.id,
+              projectId: ctx.projectId,
               organizationId: ctx.organizationId,
               messages: [{ role: 'user', content: scenario.userMessage }],
             })

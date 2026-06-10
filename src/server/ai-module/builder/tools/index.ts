@@ -35,6 +35,7 @@ import { agentInsightsTool } from './agent-insights.tool'
 import { teachAgentTool } from './teach-agent.tool'
 import { editPromptSectionTool } from './edit-prompt-section.tool'
 import { revertPromptTool } from './revert-prompt.tool'
+import { setProjectBasicsTool } from './set-project-basics.tool'
 
 export type { BuilderToolExecutionContext }
 
@@ -68,6 +69,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     teach_agent: teachAgentTool(ctx),
     edit_prompt_section: editPromptSectionTool(ctx),
     revert_prompt: revertPromptTool(ctx),
+    set_project_basics: setProjectBasicsTool(ctx),
     // Instagram agora é configurado pelo card de credenciais (deploy tab), não
     // por um wizard no chat — o wizard antigo foi removido (dead UI).
   }

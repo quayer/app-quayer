@@ -14,6 +14,10 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import { validatePrompt } from '../validators'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Section catalogue
@@ -87,7 +91,7 @@ function applyRemove(body: string, target: string): string {
 // ---------------------------------------------------------------------------
 
 export const editPromptSectionInputSchema = z.object({
-  agentId:     z.string().uuid().describe('AIAgentConfig.id to edit'),
+  agentId:     z.string().uuid().optional().describe(OPTIONAL_AGENT_ID_DESCRIPTION),
   section:     z.enum([
     'papel', 'objetivo', 'tom', 'comunicacao', 'ferramentas', 'regras',
     'fluxo', 'gatilhos', 'limitacoes', 'encerramento', 'horario', 'formato',
@@ -111,7 +115,8 @@ export function editPromptSectionTool(ctx: BuilderToolExecutionContext) {
       description:
         'Edits a single named section (papel/objetivo/tom/comunicacao/ferramentas/regras/fluxo/' +
         'gatilhos/limitacoes/encerramento/horario/formato) of the active ' +
-        'agent prompt without touching the others. Operations: add/replace/remove. ' +
+        'agent prompt without touching the others. The agent is resolved automatically from ' +
+        'the active project — do NOT provide agentId. Operations: add/replace/remove. ' +
         'Runs full validation after the edit — errors block persistence. ' +
         'Success creates a new draft BuilderPromptVersion (not published).',
       inputSchema: editPromptSectionInputSchema,
@@ -122,17 +127,16 @@ export function editPromptSectionTool(ctx: BuilderToolExecutionContext) {
           if (input.operation === 'remove' && !input.target)
             return { success: false as const, message: '"target" is required for operation "remove"' }
 
-          // Tenant boundary: agent must belong to the active project
-          const project = await database.builderProject.findFirst({
-            where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
-            select: { id: true },
-          })
-          if (!project)
-            return { success: false as const, message: 'Agent does not belong to the active project' }
+          // Resolve the REAL agent from the active project (LLM-provided ids
+          // are ignored when divergent — they tend to be hallucinated).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok)
+            return { success: false as const, message: resolved.message }
+          const agentId = resolved.agentId
 
           // Load active prompt (prefer published, fall back to latest draft)
           const activeVersion = await database.builderPromptVersion.findFirst({
-            where: { aiAgentId: input.agentId },
+            where: { aiAgentId: agentId },
             orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { versionNumber: 'desc' }],
             select: { content: true, versionNumber: true },
           })
@@ -167,7 +171,7 @@ export function editPromptSectionTool(ctx: BuilderToolExecutionContext) {
           const nextVersion = activeVersion.versionNumber + 1
           const version = await database.builderPromptVersion.create({
             data: {
-              aiAgentId:     input.agentId,
+              aiAgentId:     agentId,
               versionNumber: nextVersion,
               content:       newPrompt,
               description:   input.description ?? `edit_prompt_section: ${input.operation} on "${input.section}"`,

@@ -157,6 +157,21 @@ export function useChatStream({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Re-anchor the bottom whenever the scroll VIEWPORT itself resizes — e.g. the
+  // pinned active-step card mounting (readiness refetch on SSE finish) or
+  // growing (status poll) shrinks the flex-1 messages area without touching
+  // [messages, streamingText, streamingToolCalls], so the deps-effect above
+  // never fires. Only re-anchors while the user is already pinned to bottom.
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => {
+      if (autoScrollRef.current) scrollToBottom()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [scrollToBottom])
+
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
   // ── SSE parser (preserved) ─────────────────────────────────────

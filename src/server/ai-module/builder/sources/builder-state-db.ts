@@ -10,9 +10,15 @@
  *
  * Also owns the `sourceIngestion` merge/patch logic shared by the chat hook, the
  * POST /sources/ingest route, and the async enrich job:
- *   - `mergeSources`             — dedupe-by-value source list merge (pure).
+ *   - `mergeSources`             — dedupe-by-CANONICAL-value source list merge (pure).
+ *   - `mergeProposal`/`dedupeUnion`/`hasAnyProposalField` — pure SourceProposal
+ *      merge semantics (scalars: first non-empty wins; lists: case-insensitive
+ *      union). Used intra-job (source-enrich) AND cross-batch at the write
+ *      boundary below, so two pastes in separate messages merge exactly like
+ *      two pastes in the same message.
  *   - `patchSourceIngestionAtomic` — RACE-SAFE read+merge+write of ONLY the
- *      `sourceIngestion` subtree inside a `$transaction`, so a concurrent
+ *      `sourceIngestion` subtree (plus the `confirmations.source` reopen flip,
+ *      see `reopenOnProposal`) inside a `$transaction`, so a concurrent
  *      applyCardSubmit (which writes the WHOLE state) can't be clobbered.
  *
  * RULES: TS strict, zero `any`, EVERY query filtered by organizationId on the
@@ -31,6 +37,7 @@ import {
   type SourceProposal,
   type SourceIngestionItem,
 } from '../cards/builder-state'
+import { canonicalizeSourceValue } from './url-extractor'
 
 // ---------------------------------------------------------------------------
 // Reads (typed — `builderState` is in the generated client)
@@ -110,22 +117,95 @@ export async function writeBuilderState(
 // ---------------------------------------------------------------------------
 
 /**
- * Merge newly-seeded sources into the existing list, deduped by `value`
- * (last-write-wins so a re-paste refreshes status/sourceId). Order-preserving:
- * existing refs first, then the new ones. Pure — never touches the DB.
+ * Merge newly-seeded sources into the existing list, deduped by the CANONICAL
+ * value (`canonicalizeSourceValue` — no trailing slash, no tracking params), so
+ * "https://acme.com.br" and a legacy-mirrored "https://acme.com.br/" collapse
+ * into ONE entry. Last-write-wins so a re-paste refreshes status/sourceId, and
+ * every surviving entry carries the canonical `value` (self-heals legacy
+ * mirrors written before canonicalization). Order-preserving: existing refs
+ * first, then the new ones. Pure — never touches the DB.
  */
 export function mergeSources(
   current: BuilderState,
   incoming: SourceIngestionItem[],
 ): SourceIngestionItem[] {
   const byValue = new Map<string, SourceIngestionItem>()
-  for (const item of current.sourceIngestion.sources) {
-    byValue.set(item.value, item)
-  }
-  for (const item of incoming) {
-    byValue.set(item.value, item)
+  for (const item of [...current.sourceIngestion.sources, ...incoming]) {
+    const value = canonicalizeSourceValue(item.value)
+    byValue.set(value, { ...item, value })
   }
   return [...byValue.values()]
+}
+
+// ---------------------------------------------------------------------------
+// SourceProposal merge (pure — shared intra-job AND cross-batch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge one proposal into the running aggregate. First non-empty wins for
+ * scalar fields (businessName/audience/tone/address/description); list fields
+ * union + dedupe (case-insensitive). Pure mutation of the `target` accumulator
+ * (caller owns it).
+ *
+ * This is the SINGLE merge semantic for proposals: the enrich job uses it to
+ * fold the sources of ONE batch, and `patchSourceIngestionAtomic` applies it
+ * against the ALREADY-PERSISTED `proposed` so a second batch (a link pasted in
+ * a later message) never clobbers scalars nor replaces lists wholesale.
+ */
+export function mergeProposal(
+  target: SourceProposal,
+  add: SourceProposal,
+): void {
+  if (!target.businessName && add.businessName) {
+    target.businessName = add.businessName
+  }
+  if (!target.audience && add.audience) target.audience = add.audience
+  if (!target.tone && add.tone) target.tone = add.tone
+  if (!target.address && add.address) target.address = add.address
+  if (!target.description && add.description) {
+    target.description = add.description
+  }
+
+  if (add.services && add.services.length > 0) {
+    target.services = dedupeUnion(target.services, add.services)
+  }
+  if (add.differentiators && add.differentiators.length > 0) {
+    target.differentiators = dedupeUnion(
+      target.differentiators,
+      add.differentiators,
+    )
+  }
+}
+
+/** Case-insensitive, order-preserving union of two optional string lists. */
+export function dedupeUnion(
+  base: string[] | undefined,
+  extra: string[],
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const v of [...(base ?? []), ...extra]) {
+    const trimmed = v.trim()
+    if (trimmed.length === 0) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(trimmed)
+  }
+  return out
+}
+
+/** True when the proposal carries at least one grounded (non-empty) field. */
+export function hasAnyProposalField(p: SourceProposal): boolean {
+  return Boolean(
+    p.businessName ||
+      p.audience ||
+      p.tone ||
+      p.address ||
+      p.description ||
+      (p.services && p.services.length > 0) ||
+      (p.differentiators && p.differentiators.length > 0),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -159,15 +239,29 @@ export interface SourceIngestionPatch {
    */
   seedSources?: SourceIngestionItem[]
   /**
-   * Synthesized proposal to attach. Only written when present, so a failed/
-   * ungrounded batch never clobbers an existing proposal with `{}`.
+   * Synthesized proposal to attach. Only written when present AND non-empty, so
+   * a failed/ungrounded batch never clobbers an existing proposal with `{}`.
+   * MERGED against the already-persisted `proposed` with the `mergeProposal`
+   * semantics (scalars: existing non-empty wins; lists: dedupe union) — a later
+   * batch ADDS to the proposal, it never overwrites it.
    */
   proposed?: SourceProposal
+  /**
+   * When true AND `proposed` carries at least one grounded field AND the
+   * CURRENT state has `confirmations.source === true` (the card was already
+   * accepted), flip `confirmations.source` back to `false` in the SAME atomic
+   * write. The step-engine only resurfaces the `source_progress` card while the
+   * confirmation is false — without this flip, a proposal synthesized from a
+   * link pasted AFTER the accept would land silently and never be reviewable.
+   * Empty/ungrounded batches never reopen (they don't even attach `proposed`).
+   */
+  reopenOnProposal?: boolean
 }
 
 /**
- * Race-safe read-modify-write of ONLY the `sourceIngestion` subtree, scoped by
- * `organizationId` and wrapped in a `$transaction` so a concurrent
+ * Race-safe read-modify-write of ONLY the `sourceIngestion` subtree (plus the
+ * single `confirmations.source` reopen flip when `reopenOnProposal` applies),
+ * scoped by `organizationId` and wrapped in a `$transaction` so a concurrent
  * applyCardSubmit (which read-modifies-writes the WHOLE state) cannot interleave
  * and clobber confirmations/owned fields written between our read and write.
  *
@@ -230,13 +324,33 @@ export async function patchSourceIngestionAtomic(
       })
     }
 
+    // Cross-batch proposal merge: fold the incoming proposal ONTO the persisted
+    // one with the same semantics the job uses intra-batch (scalars: existing
+    // non-empty wins; lists: dedupe union). Empty/ungrounded patches attach
+    // nothing, so they can never clobber an existing proposal.
+    let proposed: SourceProposal | undefined
+    if (patch.proposed && hasAnyProposalField(patch.proposed)) {
+      proposed = { ...(current.sourceIngestion.proposed ?? {}) }
+      mergeProposal(proposed, patch.proposed)
+    }
+
+    // Reopen-on-proposal (opt-in): a grounded proposal landing AFTER the card
+    // was accepted flips the confirmation back so the card resurfaces for
+    // review. Checked against the FRESHEST in-transaction state (race-safe).
+    const reopenSource =
+      patch.reopenOnProposal === true &&
+      proposed !== undefined &&
+      current.confirmations.source === true
+
     const subtreePatch: DeepPartial<BuilderState> = {
       sourceIngestion: {
         // Arrays are replaced wholesale by patchBuilderState (last-write-wins).
         sources,
         // Only attach `proposed` when grounded fields exist.
-        ...(patch.proposed ? { proposed: patch.proposed } : {}),
+        ...(proposed ? { proposed } : {}),
       },
+      // deepMerge keeps every other confirmation flag untouched.
+      ...(reopenSource ? { confirmations: { source: false } } : {}),
     }
 
     const next = patchBuilderState(current, subtreePatch)

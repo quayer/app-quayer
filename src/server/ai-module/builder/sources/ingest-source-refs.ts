@@ -7,9 +7,18 @@
  *   - sources.routes.ts → POST /projects/:id/sources/ingest (explicit)
  *
  * Steps (all org-scoped):
+ *   0. CANONICALIZE every ref value (canonicalizeSourceValue — no trailing
+ *      slash, no tracking params) and dedupe. The chat hook already emits
+ *      canonical values (extractSourceRefs), but the POST /sources/ingest body
+ *      and the teach_agent tool pass RAW URLs — without this, the same site
+ *      pasted as "https://acme.com.br/" and "https://acme.com.br" becomes two
+ *      KnowledgeSource rows + two mirror entries.
  *   1. ensureCollectionIdOrThrow — resolve (or lazily create + wire) the
  *      per-project kb collection that backs the agent's RAG.
- *   2. Create one KnowledgeSource (status=pending) per ref, org-stamped. Both
+ *   2. Create one KnowledgeSource (status=pending) per ref, org-stamped — or
+ *      REUSE the existing row when the collection already has one with the
+ *      same canonical value (re-paste = refresh: status reset to pending and
+ *      re-ingested; ingestSource deletes old chunks before re-embedding). Both
  *      'url' and 'instagram' refs flow through the SAME url fetch path on the
  *      job (Instagram is instagram.com/<handle>), so KnowledgeSource.type is
  *      always 'url'.
@@ -30,10 +39,12 @@ import { ensureCollectionIdOrThrow, type ProjectRow } from '../knowledge/knowled
 import { enqueueSourceEnrich } from '@/server/services/jobs/source-enrich.queue'
 import type { SourceIngestionItem } from '../cards/builder-state'
 import { patchSourceIngestionAtomic } from './builder-state-db'
+import { canonicalizeSourceValue } from './url-extractor'
 
 /** A ref to ingest. Shape shared by `extractSourceRefs` and the POST body. */
 export interface IngestRef {
-  /** Normalized absolute http(s) URL (Instagram already canonicalized). */
+  /** Absolute http(s) URL. May arrive RAW (POST body / teach_agent) — it is
+   *  canonicalized here before any row/mirror write. */
   value: string
   type: 'url' | 'instagram'
 }
@@ -69,13 +80,41 @@ export async function ingestSourceRefs(
 ): Promise<IngestSourceRefsResult> {
   const { project, conversationId, organizationId, userId, refs } = args
 
+  // 0. ONE canonical form everywhere (no trailing slash, no tracking params):
+  //    the chat hook already canonicalizes via extractSourceRefs, but the POST
+  //    body and the teach_agent tool pass raw URLs. Dedupe by canonical value
+  //    so "https://acme.com.br" + "https://acme.com.br/" in one call is 1 ref.
+  const seen = new Set<string>()
+  const canonicalRefs: IngestRef[] = []
+  for (const ref of refs) {
+    const value = canonicalizeSourceValue(ref.value)
+    if (value.length === 0 || seen.has(value)) continue
+    seen.add(value)
+    canonicalRefs.push({ value, type: ref.type })
+  }
+
   // 1. Resolve (or lazily create + wire) the per-project kb collection.
   const collectionId = await ensureCollectionIdOrThrow(project, organizationId)
 
-  // 2. One KnowledgeSource per ref, org-stamped, status=pending. The async job
-  //    reloads these by id and runs ingestSource() (org-guarded, idempotent).
+  // 2. One KnowledgeSource per canonical ref, org-stamped, status=pending. A
+  //    re-paste of a URL the collection already holds REUSES the row (reset to
+  //    pending; ingestSource deletes old chunks before re-embedding) instead of
+  //    accumulating duplicates in GET /sources/status. The async job reloads
+  //    these by id and runs ingestSource() (org-guarded, idempotent).
   const created: { id: string; ref: IngestRef }[] = []
-  for (const ref of refs) {
+  for (const ref of canonicalRefs) {
+    const existing = await database.knowledgeSource.findFirst({
+      where: { collectionId, organizationId, type: 'url', source: ref.value },
+      select: { id: true },
+    })
+    if (existing) {
+      await database.knowledgeSource.updateMany({
+        where: { id: existing.id, organizationId },
+        data: { status: 'pending', error: null },
+      })
+      created.push({ id: existing.id, ref })
+      continue
+    }
     const row = await database.knowledgeSource.create({
       data: {
         collectionId,
@@ -89,6 +128,12 @@ export async function ingestSourceRefs(
       select: { id: true },
     })
     created.push({ id: row.id, ref })
+  }
+
+  // Nothing survived canonicalization (defensive — Zod upstream already
+  // requires valid URLs): no rows, no seed, no empty job.
+  if (created.length === 0) {
+    return { collectionId, sources: [] }
   }
 
   const seeded: SourceIngestionItem[] = created.map(({ id, ref }) => ({

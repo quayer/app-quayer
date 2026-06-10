@@ -1,10 +1,12 @@
 "use client"
 
 /**
- * ErrorBanner — persistent strip shown above the tab strip when a recent
- * Builder tool call returned an error-shaped result. Dismissing calls back
- * to the parent so a new error id can re-open the banner. Uses the DS feedback
- * tokens (--q-danger*) so contrast follows the theme (WCAG AA).
+ * ErrorBanner — strip shown above the tab content when the LATEST Builder
+ * tool call returned an error-shaped result. Purely presentational: the parent
+ * (PreviewPanel) owns the lifecycle — auto-dismiss após ~10s, dismiss ao trocar
+ * de tab, e um novo erro (novo message id) re-abre o banner. Dismissing calls
+ * back to the parent so a new error id can re-open the banner. Uses the DS
+ * feedback tokens (--q-danger*) so contrast follows the theme (WCAG AA).
  */
 
 import { AlertTriangle } from "lucide-react"

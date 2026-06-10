@@ -111,6 +111,26 @@ function instagramUrlFromHandle(handle: string): string {
   return `https://www.instagram.com/${handle.toLowerCase()}`
 }
 
+/**
+ * Canonicalize a SINGLE already-pasted source value into the SAME canonical
+ * form `extractSourceRefs` emits: lowercased host, tracking params stripped,
+ * no fragment, **no trailing slash**. This is the ONE canonical shape persisted
+ * everywhere (KnowledgeSource.source, the builderState mirror, mergeSources
+ * dedupe) — callers that receive a raw URL from a request body or an LLM tool
+ * call (POST /sources/ingest, teach_agent) MUST run it through here, otherwise
+ * "https://acme.com.br" and "https://acme.com.br/" become two distinct sources.
+ *
+ * Fail-open: non-URL / unparseable input is returned trimmed, unchanged (the
+ * caller's Zod validation owns rejection; this helper never throws).
+ */
+export function canonicalizeSourceValue(raw: string): string {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return trimmed
+  const normalized = normalizeUrl(trimmed)
+  return normalized ? normalized.value : trimmed
+}
+
 // ---------------------------------------------------------------------------
 // extractSourceRefs
 // ---------------------------------------------------------------------------

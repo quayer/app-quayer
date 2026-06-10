@@ -16,6 +16,10 @@ import { getModel } from '../services/provider-factory'
 import { getEnabledBuiltinTools } from '../tools/builtin-tools'
 import { getCustomTools } from '../tools/custom-tools'
 import { renderWhatsAppMediaGuide } from '../services/whatsapp-media-guide'
+import {
+  retrieveRelevantChunks,
+  buildContextBlock,
+} from '../knowledge/knowledge-retrieval.service'
 import { type AgentStreamEvent } from './runtime.types'
 import { getActivePrompt } from './context-builders'
 import { estimateTokens, calculateCost } from './cost'
@@ -37,6 +41,15 @@ export interface ProcessPlaygroundStreamParams {
   organizationId: string
   message: string
   history: Array<{ role: 'user' | 'assistant'; content: string }>
+  /**
+   * Fallback design-time: id da KnowledgeCollection do PROJETO (`kb:<projectId>`),
+   * resolvido pelo caller (a rota do playground conhece o projeto). Usado quando
+   * o agente ainda NÃO foi deployado — `useRAG`/`ragCollectionId` só são ligados
+   * na saga de deploy, e sem isto o playground alucina sobre conteúdo que o
+   * usuário acabou de ingerir nos cards. Opcional: callers existentes (faithful
+   * preview) seguem inalterados.
+   */
+  knowledgeCollectionId?: string | null
 }
 
 /**
@@ -86,6 +99,74 @@ export async function* processPlaygroundStream(
   )
   systemPrompt = `${systemPrompt}\n\n${renderWhatsAppMediaGuide(previewHasMediaTool)}`
 
+  // 2·rag: paridade com o runtime real (prepare-agent-call.ts §2c) — retrieval
+  // pgvector da mensagem do turno injetado no system prompt, MESMO formato
+  // (buildContextBlock). Diferença deliberada do playground: o agente pode ainda
+  // não estar deployado (useRAG=false / ragCollectionId NULL — o vínculo acontece
+  // na saga de deploy), então aceitamos o collectionId do PROJETO resolvido pelo
+  // caller como fallback. Fail-open TOTAL: qualquer falha (sem collection, sem
+  // embeddings, pgvector fora) → segue SEM RAG, nunca quebra o stream.
+  const pgRagCollectionId =
+    (agentConfig.useRAG ? agentConfig.ragCollectionId : null) ??
+    params.knowledgeCollectionId ??
+    null
+  if (pgRagCollectionId) {
+    try {
+      const chunks = await retrieveRelevantChunks({
+        collectionId: pgRagCollectionId,
+        query: params.message,
+        organizationId: params.organizationId,
+      })
+      const ragBlock = buildContextBlock(chunks)
+      if (ragBlock) {
+        systemPrompt = `${systemPrompt}\n\n${ragBlock}`
+      }
+    } catch (err) {
+      console.warn(
+        '[AgentRuntime:playground] RAG retrieval failed (ignored):',
+        err instanceof Error ? err.message : String(err),
+      )
+    }
+
+    // 2·catálogo: linha informativa com o count de fotos do projeto — evita o
+    // agente NEGAR que existem fotos (P0). Pré-deploy as fotos curadas vivem em
+    // knowledge_images (MediaAsset só é materializado pela saga), por isso o
+    // max() entre os dois (a materialização gallery→MediaAsset é 1:1, então o
+    // max evita double-count). NÃO envia mídia — só informa a existência.
+    // Fail-open: erro → segue sem a linha.
+    try {
+      const [confirmedAssets, galleryImages] = await Promise.all([
+        database.mediaAsset.count({
+          where: {
+            collectionId: pgRagCollectionId,
+            organizationId: params.organizationId,
+            mediaType: 'image',
+            confirmedAt: { not: null },
+            deletedAt: null,
+          },
+        }),
+        database.knowledgeImage.count({
+          where: {
+            collectionId: pgRagCollectionId,
+            organizationId: params.organizationId,
+            deletedAt: null,
+          },
+        }),
+      ])
+      const photoCount = Math.max(confirmedAssets, galleryImages)
+      if (photoCount > 0) {
+        // Sem instrução de "como enviar" o LLM INVENTA urls de imagem (observado
+        // em teste E2E). No playground não há envio real de mídia.
+        systemPrompt = `${systemPrompt}\n\nCatálogo: ${photoCount} fotos do negócio cadastradas. NUNCA diga que não existem fotos, e NUNCA invente links/URLs de imagem: se pedirem fotos, diga que elas serão enviadas pelo WhatsApp quando o agente estiver publicado (neste modo de teste o envio de mídia fica desativado).`
+      }
+    } catch (err) {
+      console.warn(
+        '[AgentRuntime:playground] media catalog count failed (ignored):',
+        err instanceof Error ? err.message : String(err),
+      )
+    }
+  }
+
   // 3. Use caller-supplied history directly (no DB round-trip)
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> =
     params.history
@@ -97,7 +178,10 @@ export async function* processPlaygroundStream(
     connectionId: 'playground',
     organizationId: params.organizationId,
     agentConfigId: agentConfig.id,
-    ragCollectionId: agentConfig.useRAG ? agentConfig.ragCollectionId : null,
+    // Mesmo fallback do bloco 2·rag: pré-deploy as tools (buscar_conhecimento /
+    // buscar_media) enxergam a collection design-time do projeto. Para agentes
+    // já deployados o valor é idêntico ao anterior (agentConfig.ragCollectionId).
+    ragCollectionId: pgRagCollectionId,
     agentDepartmentId: agentConfig.departmentId ?? null,
   }
   const tools: import('ai').ToolSet = {

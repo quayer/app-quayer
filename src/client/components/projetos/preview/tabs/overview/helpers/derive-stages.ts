@@ -84,16 +84,15 @@ export function deriveStagesFromMessages(
   })
 
   // If there are no stages at all and conversation has messages,
-  // show a single "active" stage indicating work is in progress
+  // show a single "active" stage indicating work is in progress —
+  // regardless of who spoke last (the early turns are assistant-heavy,
+  // so gating on lastMsg.role === "user" left the Overview empty).
   if (stages.length === 0 && messages.length > 0) {
-    const lastMsg = messages[messages.length - 1]
-    if (lastMsg?.role === "user") {
-      stages.push({
-        number: 1,
-        title: "Definindo objetivo",
-        status: "active",
-      })
-    }
+    stages.push({
+      number: 1,
+      title: "Configurando seu agente…",
+      status: "active",
+    })
   }
 
   // Mark the last stage's next logical step as "active" if conversation

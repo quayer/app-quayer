@@ -7,7 +7,7 @@
  * `@/server/services/database` and `../validators`.
  *
  * DB mock returns:
- *   - builderProject.findFirst  → { id: 'proj-1' }      (project guard pass)
+ *   - builderProject.findFirst  → { aiAgentId: AGENT_ID } (resolver finds the real agent)
  *   - builderPromptVersion.findFirst → { content: WELL_FORMED_PROMPT, versionNumber: 3 }
  *   - builderPromptVersion.create   → { id: 'ver-new' }
  *
@@ -69,6 +69,9 @@ const CTX = {
   organizationId: 'org-test',
   userId:         'user-test',
 }
+
+/** The REAL agent bound to the project (what the resolver returns). */
+const AGENT_ID = '00000000-0000-0000-0000-000000000001'
 
 /**
  * Well-formed prompt with all sections recognised by SECTION_HEADING.
@@ -228,8 +231,8 @@ function getExecute(tool: ReturnType<typeof editPromptSectionTool>) {
 describe('editPromptSectionTool — handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default happy-path DB stubs
-    mockFindFirstProject.mockResolvedValue({ id: 'proj-1' })
+    // Default happy-path DB stubs — resolver finds the project's REAL agent.
+    mockFindFirstProject.mockResolvedValue({ aiAgentId: AGENT_ID })
     mockFindFirstVersion.mockResolvedValue({
       content:       WELL_FORMED_PROMPT,
       versionNumber: 3,
@@ -304,6 +307,23 @@ describe('editPromptSectionTool — handler', () => {
     // The other limitacoes lines must still be present (different lines)
     expect(createCall.data.content).toContain('Nao atende fora do escopo odontologico')
     expect(createCall.data.content).toContain('O que nao e do escopo vai para humano imediatamente')
+  })
+
+  // --------------------------------------------------------------------------
+  // 5b. omitted agentId — resolved automatically from the project
+  // --------------------------------------------------------------------------
+  it('resolves the agent from the project when agentId is omitted', async () => {
+    const execute = getExecute(editPromptSectionTool(CTX))
+
+    const result = await execute({
+      section:   'regras',
+      operation: 'add',
+      content:   'NUNCA responder fora do horario comercial.',
+    }) as { success: boolean }
+
+    expect(result.success).toBe(true)
+    const createCall = mockCreateVersion.mock.calls[0]![0] as { data: { aiAgentId: string } }
+    expect(createCall.data.aiAgentId).toBe(AGENT_ID)
   })
 
   // --------------------------------------------------------------------------

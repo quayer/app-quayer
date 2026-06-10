@@ -51,7 +51,8 @@ describe('getServerConfig', () => {
   it('aplica os defaults de RAG quando as envs estão ausentes', () => {
     const cfg = getServerConfig()
     expect(cfg.RAG_TOP_K).toBe(5)
-    expect(cfg.RAG_THRESHOLD).toBe(0.75)
+    // 0.4: recalibrado — 0.75 filtrava tudo com text-embedding-3 (ver server-config.ts)
+    expect(cfg.RAG_THRESHOLD).toBe(0.4)
     expect(cfg.RAG_OVER_FETCH).toBe(12)
   })
 

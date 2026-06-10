@@ -15,8 +15,10 @@
  *   3. guard — no version history (active findFirst → null) → success=false
  *   4. guard — no earlier version for "previous" → success=false, no persist
  *   5. guard — target not found by id → success=false, no persist
- *   6. guard — agent not in project → success=false, no persist
+ *   6. guard — project has no agent yet → success=false, no persist
  *   7. guard — neither targetVersionId nor target provided → success=false
+ *   8. fallback — hallucinated agentId is IGNORED; real project agent is used
+ *   9. fallback — omitted agentId resolves from the project
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -58,6 +60,7 @@ const CTX = {
 }
 
 const AGENT_ID = '00000000-0000-0000-0000-000000000001'
+const HALLUCINATED_AGENT_ID = '00000000-0000-0000-0000-00000000dead'
 const TARGET_VERSION_ID = '00000000-0000-0000-0000-0000000000a2'
 
 // Helper: extract the raw Vercel AI SDK execute function from the tool.
@@ -68,8 +71,8 @@ function getExecute(t: ReturnType<typeof revertPromptTool>) {
 describe('revertPromptTool — handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default happy-path stubs: project guard passes.
-    mockFindFirstProject.mockResolvedValue({ id: 'proj-1' })
+    // Default happy-path stubs: resolver finds the project's REAL agent.
+    mockFindFirstProject.mockResolvedValue({ aiAgentId: AGENT_ID })
     mockCreateVersion.mockResolvedValue({ id: 'ver-new-1' })
   })
 
@@ -191,9 +194,25 @@ describe('revertPromptTool — handler', () => {
   })
 
   // -------------------------------------------------------------------------
-  // 6. guard — agent not in the active project
+  // 6. guard — project has no agent yet (resolver fallback)
   // -------------------------------------------------------------------------
-  it('returns success=false when the agent does not belong to the active project', async () => {
+  it('returns success=false when the project has no agent created yet', async () => {
+    mockFindFirstProject.mockResolvedValue({ aiAgentId: null })
+
+    const execute = getExecute(revertPromptTool(CTX))
+
+    const result = (await execute({
+      agentId: AGENT_ID,
+      target: 'previous',
+    })) as { success: boolean; message: string }
+
+    expect(result.success).toBe(false)
+    expect(result.message).toMatch(/ainda não tem agente.*create_agent/i)
+    expect(mockFindFirstVersion).not.toHaveBeenCalled()
+    expect(mockCreateVersion).not.toHaveBeenCalled()
+  })
+
+  it('returns success=false when the project is not found in the org', async () => {
     mockFindFirstProject.mockResolvedValue(null)
 
     const execute = getExecute(revertPromptTool(CTX))
@@ -204,7 +223,7 @@ describe('revertPromptTool — handler', () => {
     })) as { success: boolean; message: string }
 
     expect(result.success).toBe(false)
-    expect(result.message).toMatch(/does not belong/i)
+    expect(result.message).toMatch(/not found/i)
     expect(mockFindFirstVersion).not.toHaveBeenCalled()
     expect(mockCreateVersion).not.toHaveBeenCalled()
   })
@@ -223,5 +242,57 @@ describe('revertPromptTool — handler', () => {
     expect(result.message).toMatch(/targetVersionId.*previous|previous.*targetVersionId/i)
     expect(mockFindFirstProject).not.toHaveBeenCalled()
     expect(mockCreateVersion).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // 8. fallback — hallucinated agentId is IGNORED; real project agent is used
+  // -------------------------------------------------------------------------
+  it('ignores a hallucinated agentId and operates on the real project agent', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockFindFirstVersion
+      .mockResolvedValueOnce({ id: 'ver-5', versionNumber: 5 })
+      .mockResolvedValueOnce({ id: 'ver-4', versionNumber: 4, content: 'PROMPT V4' })
+
+    const execute = getExecute(revertPromptTool(CTX))
+
+    const result = (await execute({
+      agentId: HALLUCINATED_AGENT_ID,
+      target: 'previous',
+    })) as { success: boolean }
+
+    expect(result.success).toBe(true)
+    // Every version query/write must use the REAL agent id, not the LLM's.
+    const activeQuery = mockFindFirstVersion.mock.calls[0]![0] as {
+      where: { aiAgentId: string }
+    }
+    expect(activeQuery.where.aiAgentId).toBe(AGENT_ID)
+    const createCall = mockCreateVersion.mock.calls[0]![0] as {
+      data: { aiAgentId: string }
+    }
+    expect(createCall.data.aiAgentId).toBe(AGENT_ID)
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
+  // -------------------------------------------------------------------------
+  // 9. fallback — omitted agentId resolves from the project
+  // -------------------------------------------------------------------------
+  it('resolves the agent from the project when agentId is omitted', async () => {
+    mockFindFirstVersion
+      .mockResolvedValueOnce({ id: 'ver-5', versionNumber: 5 })
+      .mockResolvedValueOnce({ id: 'ver-4', versionNumber: 4, content: 'PROMPT V4' })
+
+    const execute = getExecute(revertPromptTool(CTX))
+
+    const result = (await execute({
+      target: 'previous',
+    })) as { success: boolean; versionNumber?: number }
+
+    expect(result.success).toBe(true)
+    expect(result.versionNumber).toBe(6)
+    const createCall = mockCreateVersion.mock.calls[0]![0] as {
+      data: { aiAgentId: string }
+    }
+    expect(createCall.data.aiAgentId).toBe(AGENT_ID)
   })
 })

@@ -17,6 +17,10 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -45,12 +49,13 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
     metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
     description:
-      'Updates the system prompt of an existing agent. Creates a NEW version (linear increment) but does NOT publish it — stays as draft until user explicitly publishes.',
+      'Updates the system prompt of the agent of the current Builder project. The agent is resolved automatically from the active project — do NOT provide agentId. Creates a NEW version (linear increment) but does NOT publish it — stays as draft until user explicitly publishes.',
     inputSchema: z.object({
       agentId: z
         .string()
         .uuid()
-        .describe('The ai_agent_configs.id to update'),
+        .optional()
+        .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
       newPrompt: z
         .string()
         .min(50)
@@ -66,21 +71,19 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
     }),
     execute: async (input) => {
       try {
-        // 1. Validate the agent belongs to the active project (prevents cross-project mutation).
-        const project = await database.builderProject.findFirst({
-          where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
-          select: { id: true },
-        })
-        if (!project) {
+        // 1. Resolve the REAL agent from the active project (LLM-provided ids
+        //    are ignored when divergent — they tend to be hallucinated).
+        const resolved = await resolveProjectAgent(ctx, input.agentId)
+        if (!resolved.ok) {
           return {
             success: false as const,
-            message: 'Agent does not belong to the active project',
+            message: resolved.message,
           }
         }
 
         const agent = await database.aIAgentConfig.findFirst({
           where: {
-            id: input.agentId,
+            id: resolved.agentId,
             organizationId: ctx.organizationId,
           },
           select: { id: true },
@@ -95,7 +98,7 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
 
         // 2. Compute the next linear version number (max + 1).
         const lastVersion = await database.builderPromptVersion.findFirst({
-          where: { aiAgentId: input.agentId },
+          where: { aiAgentId: resolved.agentId },
           orderBy: { versionNumber: 'desc' },
           select: { versionNumber: true },
         })
@@ -104,7 +107,7 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
         // 3. Create the draft version. publishedAt stays null — not published.
         const version = await database.builderPromptVersion.create({
           data: {
-            aiAgentId: input.agentId,
+            aiAgentId: resolved.agentId,
             versionNumber: nextVersion,
             content: input.newPrompt,
             description: input.description ?? null,

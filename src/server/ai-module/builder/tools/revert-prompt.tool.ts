@@ -25,13 +25,17 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------
 
 export const revertPromptInputSchema = z.object({
-  agentId: z.string().uuid().describe('AIAgentConfig.id whose prompt to roll back'),
+  agentId: z.string().uuid().optional().describe(OPTIONAL_AGENT_ID_DESCRIPTION),
   targetVersionId: z
     .string()
     .uuid()
@@ -58,7 +62,8 @@ export function revertPromptTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
       description:
-        'Reverts (undo/rollback) the active agent prompt to a PRIOR version. Provide ' +
+        'Reverts (undo/rollback) the active agent prompt to a PRIOR version. The agent is ' +
+        'resolved automatically from the active project — do NOT provide agentId. Provide ' +
         '`targetVersionId` for a specific version, or `target: "previous"` to step back one ' +
         'version. Creates a NEW draft BuilderPromptVersion (tagged rollback) with the old ' +
         'content — non-destructive and not published until the user publishes. Use when the ' +
@@ -73,19 +78,18 @@ export function revertPromptTool(ctx: BuilderToolExecutionContext) {
             }
           }
 
-          // Tenant boundary: agent must belong to the active project.
-          const project = await database.builderProject.findFirst({
-            where: { id: ctx.projectId, organizationId: ctx.organizationId, aiAgentId: input.agentId },
-            select: { id: true },
-          })
-          if (!project) {
-            return { success: false as const, message: 'Agent does not belong to the active project' }
+          // Resolve the REAL agent from the active project (LLM-provided ids
+          // are ignored when divergent — they tend to be hallucinated).
+          const resolved = await resolveProjectAgent(ctx, input.agentId)
+          if (!resolved.ok) {
+            return { success: false as const, message: resolved.message }
           }
+          const agentId = resolved.agentId
 
           // Active version (prefer published, fall back to latest draft) — same
           // ordering as edit_prompt_section so "previous" is well-defined.
           const activeVersion = await database.builderPromptVersion.findFirst({
-            where: { aiAgentId: input.agentId },
+            where: { aiAgentId: agentId },
             orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { versionNumber: 'desc' }],
             select: { id: true, versionNumber: true },
           })
@@ -96,11 +100,11 @@ export function revertPromptTool(ctx: BuilderToolExecutionContext) {
           // Resolve the target version (explicit id OR "previous").
           const target = input.targetVersionId
             ? await database.builderPromptVersion.findFirst({
-                where: { id: input.targetVersionId, aiAgentId: input.agentId },
+                where: { id: input.targetVersionId, aiAgentId: agentId },
                 select: { id: true, versionNumber: true, content: true },
               })
             : await database.builderPromptVersion.findFirst({
-                where: { aiAgentId: input.agentId, versionNumber: { lt: activeVersion.versionNumber } },
+                where: { aiAgentId: agentId, versionNumber: { lt: activeVersion.versionNumber } },
                 orderBy: { versionNumber: 'desc' },
                 select: { id: true, versionNumber: true, content: true },
               })
@@ -124,7 +128,7 @@ export function revertPromptTool(ctx: BuilderToolExecutionContext) {
           const nextVersion = activeVersion.versionNumber + 1
           const version = await database.builderPromptVersion.create({
             data: {
-              aiAgentId: input.agentId,
+              aiAgentId: agentId,
               versionNumber: nextVersion,
               content: target.content,
               description: input.description ?? `revert_prompt: rollback to v${target.versionNumber}`,

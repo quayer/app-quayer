@@ -11,7 +11,7 @@
  * para não empurrar o tab strip a cada ferramenta que a AI executa.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Lock } from "lucide-react"
 import {
   Tabs,
@@ -30,6 +30,9 @@ import {
 import { BuilderWorkingBanner } from "@/client/components/projetos/preview/banners/builder-working-banner"
 import { ErrorBanner } from "@/client/components/projetos/preview/banners/error-banner"
 import { getBannerState } from "@/client/components/projetos/preview/banners/derive-banner-state"
+
+/** Erro de tool não deve ser eterno — o banner se auto-oculta após ~10s. */
+const ERROR_BANNER_AUTO_DISMISS_MS = 10_000
 
 export function PreviewPanel({
   project,
@@ -59,6 +62,18 @@ export function PreviewPanel({
   )
   const errorBanner = bannerState.error
 
+  // Auto-dismiss: cada novo erro (lastErrorId) arma um timer de ~10s; fechar
+  // manualmente ("Ocultar") ou um erro mais novo re-arma/limpa o timer.
+  const lastErrorId = errorBanner?.lastErrorId ?? null
+  useEffect(() => {
+    if (lastErrorId === null) return
+    const timer = window.setTimeout(
+      () => setDismissedErrorId(lastErrorId),
+      ERROR_BANNER_AUTO_DISMISS_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [lastErrorId])
+
   return (
     <div
       className="flex h-full min-h-0 flex-col"
@@ -66,7 +81,12 @@ export function PreviewPanel({
     >
       <Tabs
         value={safeActiveTab}
-        onValueChange={(v) => onTabChange(v as PreviewTab)}
+        onValueChange={(v) => {
+          // Trocar de tab descarta o erro corrente — ele não deve perseguir o
+          // usuário pelas demais tabs.
+          if (errorBanner !== null) setDismissedErrorId(errorBanner.lastErrorId)
+          onTabChange(v as PreviewTab)
+        }}
         className="flex h-full min-h-0 flex-col"
       >
         {/* Tab strip — sempre estável, locked tabs não clicáveis */}

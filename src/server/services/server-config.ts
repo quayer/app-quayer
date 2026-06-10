@@ -28,8 +28,13 @@ const serverConfigSchema = z.object({
   APIFY_INSTAGRAM_ACTOR_ID: z.string().min(1).default(DEFAULT_INSTAGRAM_ACTOR),
   /** RAG: nº de chunks retornados ao agente (antes hardcoded em 5). */
   RAG_TOP_K: z.coerce.number().int().min(1).max(50).default(5),
-  /** RAG: score mínimo de cosseno (0..1) p/ um chunk ser relevante (antes 0.75). */
-  RAG_THRESHOLD: z.coerce.number().min(0).max(1).default(0.75),
+  /**
+   * RAG: score mínimo de cosseno (0..1) p/ um chunk ser relevante.
+   * 0.75 (valor antigo) filtrava TUDO com text-embedding-3 (similaridade típica
+   * de par relevante: 0.3–0.6) — comprovado em teste E2E: query diretamente
+   * relevante retornava 0 chunks e o agente alucinava. 0.4 calibrado empiricamente.
+   */
+  RAG_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
   /** RAG: candidatos buscados antes do filtro de threshold (antes 12). */
   RAG_OVER_FETCH: z.coerce.number().int().min(1).max(200).default(12),
 })

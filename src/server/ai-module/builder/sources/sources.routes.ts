@@ -66,9 +66,11 @@ function getUser(context: unknown): AuthedUser | null {
 // ---------------------------------------------------------------------------
 
 /**
- * A single source ref produced by the pure `extractSourceRefs` (url-extractor):
- * `value` is always a normalized absolute http(s) URL (Instagram handles are
- * already canonicalized to https://www.instagram.com/<handle>).
+ * A single source ref. The chat hook emits values already canonicalized by
+ * `extractSourceRefs` (url-extractor), but THIS body arrives raw from the
+ * client — `ingestSourceRefs` re-canonicalizes every value server-side
+ * (canonicalizeSourceValue: no trailing slash, no tracking params) before any
+ * KnowledgeSource/mirror write, so both entrypoints persist ONE canonical form.
  */
 const sourceRefSchema = z.object({
   value: z.string().url(),

@@ -18,19 +18,24 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
+import {
+  resolveProjectAgent,
+  OPTIONAL_AGENT_ID_DESCRIPTION,
+} from './resolve-project-agent'
 
-export function adjustPromptToneTool(_ctx: BuilderToolExecutionContext) {
+export function adjustPromptToneTool(ctx: BuilderToolExecutionContext) {
   return buildBuilderTool({
     name: 'adjust_prompt_tone',
     metadata: { isReadOnly: true, isConcurrencySafe: true },
     tool: tool({
       description:
-        'Renders a tone-adjustment slider card (formality / energy / emoji / verbosity, each 0-1) so the user can fine-tune the agent prompt numerically. Does NOT mutate. After the user clicks Apply, the chat receives a message with the chosen values — at that point call update_agent_prompt to rewrite the system prompt reflecting those knobs.',
+        'Renders a tone-adjustment slider card (formality / energy / emoji / verbosity, each 0-1) so the user can fine-tune the agent prompt numerically. The agent is resolved automatically from the active project — do NOT provide agentId. Does NOT mutate. After the user clicks Apply, the chat receives a message with the chosen values — at that point call update_agent_prompt to rewrite the system prompt reflecting those knobs.',
       inputSchema: z.object({
         agentId: z
           .string()
           .uuid()
-          .describe('The AIAgentConfig.id this tone panel targets'),
+          .optional()
+          .describe(OPTIONAL_AGENT_ID_DESCRIPTION),
         currentTone: z
           .object({
             formality: z.number().min(0).max(1).optional(),
@@ -44,9 +49,15 @@ export function adjustPromptToneTool(_ctx: BuilderToolExecutionContext) {
           ),
       }),
       execute: async (input) => {
+        // Resolve the REAL agent from the active project (LLM-provided ids
+        // are ignored when divergent — they tend to be hallucinated).
+        const resolved = await resolveProjectAgent(ctx, input.agentId)
+        if (!resolved.ok) {
+          return { success: false as const, message: resolved.message }
+        }
         return {
           success: true as const,
-          agentId: input.agentId,
+          agentId: resolved.agentId,
           initialTone: {
             formality: input.currentTone?.formality ?? 0.5,
             energy: input.currentTone?.energy ?? 0.5,
