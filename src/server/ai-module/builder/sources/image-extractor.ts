@@ -40,11 +40,27 @@ const IMG_TAG_REGEX = /<img\b[^>]*>/gi
  */
 const SOURCE_TAG_REGEX = /<source\b[^>]*>/gi
 
-/** Pull the `src="..."` / `src='...'` value out of a tag body. */
-const SRC_ATTR_REGEX = /\bsrc\s*=\s*(["'])(.*?)\1/i
+/** Pull the `src="..."` / `src='...'` value out of a tag body. The negative
+ *  lookbehind keeps it from matching the tail of `data-src=`/`data-lazy-src=`
+ *  (those lazy-load attributes are handled explicitly below). */
+const SRC_ATTR_REGEX = /(?<![\w-])src\s*=\s*(["'])(.*?)\1/i
 
-/** Pull the `srcset="..."` / `srcset='...'` value out of a tag body. */
-const SRCSET_ATTR_REGEX = /\bsrcset\s*=\s*(["'])(.*?)\1/i
+/** Pull the `srcset="..."` / `srcset='...'` value out of a tag body (same
+ *  lookbehind guard against `data-srcset=`/`data-lazy-srcset=`). */
+const SRCSET_ATTR_REGEX = /(?<![\w-])srcset\s*=\s*(["'])(.*?)\1/i
+
+/**
+ * Lazy-load src attributes (WP lazy-load plugins, lazysizes, Elementor, Sliders):
+ * `data-src` / `data-lazy-src` / `data-original` / `data-bg`. On those pages the
+ * real image lives here while `src` is a 1x1/`data:` placeholder — without this
+ * the extractor sees only the placeholder and the catalog comes out empty.
+ */
+const DATA_SRC_ATTR_REGEX =
+  /\bdata-(?:src|lazy-src|original|bg)\s*=\s*(["'])(.*?)\1/gi
+
+/** Lazy-load srcset attributes: `data-srcset` / `data-lazy-srcset`. */
+const DATA_SRCSET_ATTR_REGEX =
+  /\bdata-(?:srcset|lazy-srcset)\s*=\s*(["'])(.*?)\1/gi
 
 /** Pull the `style="..."` / `style='...'` value out of a tag body (inline css). */
 const STYLE_ATTR_REGEX = /\bstyle\s*=\s*(["'])(.*?)\1/i
@@ -168,9 +184,10 @@ function pickLargestFromSrcset(srcset: string): string | null {
  * short-circuits the whole image pipeline in that case).
  *
  * Sources scanned:
- *   - `<img src=...>`
- *   - `<img srcset=...>` (largest candidate) + inline `<img style="...url()">`
- *   - `<source srcset=...>` (inside `<picture>`)
+ *   - `<img src=...>` + lazy-load `data-src`/`data-lazy-src`/`data-original`/`data-bg`
+ *   - `<img srcset=...>` / `data-srcset` / `data-lazy-srcset` (largest candidate)
+ *     + inline `<img style="...url()">`
+ *   - `<source srcset=...>` (inside `<picture>`, incl. lazy variants)
  *   - `background-image:url(...)` in inline styles and `<style>` blocks
  *
  * Dedupe key is the resolved absolute URL, so the same asset referenced from a
@@ -189,15 +206,22 @@ export function extractImageRefs(html: string, baseUrl: string): ExtractedImageR
     if (!byUrl.has(resolved)) byUrl.set(resolved, { url: resolved })
   }
 
-  // 1) <img> elements — src, srcset (largest), and inline style url().
+  // 1) <img> elements — src, lazy-load data-src variants, srcset (largest),
+  //    lazy srcset variants, and inline style url().
   for (const tag of html.matchAll(IMG_TAG_REGEX)) {
     const body = tag[0]
 
     const src = SRC_ATTR_REGEX.exec(body)
     if (src) add(src[2])
 
+    for (const dataSrc of body.matchAll(DATA_SRC_ATTR_REGEX)) add(dataSrc[2])
+
     const srcset = SRCSET_ATTR_REGEX.exec(body)
     if (srcset) add(pickLargestFromSrcset(srcset[2]))
+
+    for (const dataSrcset of body.matchAll(DATA_SRCSET_ATTR_REGEX)) {
+      add(pickLargestFromSrcset(dataSrcset[2]))
+    }
 
     const style = STYLE_ATTR_REGEX.exec(body)
     if (style) {
@@ -205,10 +229,14 @@ export function extractImageRefs(html: string, baseUrl: string): ExtractedImageR
     }
   }
 
-  // 2) <source srcset=...> inside <picture>.
+  // 2) <source srcset=...> inside <picture> (incl. lazy-load variants).
   for (const tag of html.matchAll(SOURCE_TAG_REGEX)) {
-    const srcset = SRCSET_ATTR_REGEX.exec(tag[0])
+    const body = tag[0]
+    const srcset = SRCSET_ATTR_REGEX.exec(body)
     if (srcset) add(pickLargestFromSrcset(srcset[2]))
+    for (const dataSrcset of body.matchAll(DATA_SRCSET_ATTR_REGEX)) {
+      add(pickLargestFromSrcset(dataSrcset[2]))
+    }
   }
 
   // 3) Every `url(...)` in the document — covers <style> blocks AND any inline

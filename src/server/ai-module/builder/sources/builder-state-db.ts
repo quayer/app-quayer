@@ -132,6 +132,13 @@ export function mergeSources(
 // Atomic sourceIngestion patch (race-safe read+merge+write of the subtree)
 // ---------------------------------------------------------------------------
 
+/** Image-catalog mirror of ONE source (Onda D — `imagesStatus`/`imagesCount`). */
+export interface SourceImagesMirror {
+  imagesStatus: NonNullable<SourceIngestionItem['imagesStatus']>
+  /** Persisted-image count; omitted = leave the stored count untouched. */
+  imagesCount?: number
+}
+
 /** What an atomic `sourceIngestion` patch may change. All optional. */
 export interface SourceIngestionPatch {
   /**
@@ -139,6 +146,13 @@ export interface SourceIngestionPatch {
    * `sources[].sourceId` has its `status` refreshed; unknown ids are ignored.
    */
   statusBySourceId?: ReadonlyMap<string, string>
+  /**
+   * Image-catalog mirror overrides keyed by `KnowledgeSource.id` (Onda D).
+   * Each matching `sources[].sourceId` has its `imagesStatus`/`imagesCount`
+   * refreshed; unknown ids are ignored. This is the mirror the source_progress
+   * card polls to know when the photo catalog has settled.
+   */
+  imagesBySourceId?: ReadonlyMap<string, SourceImagesMirror>
   /**
    * New refs to merge into `sources` (deduped by value). Used by the seed path
    * (chat hook / POST ingest) so a concurrent write can't drop earlier sources.
@@ -198,6 +212,21 @@ export async function patchSourceIngestionAtomic(
         if (!s.sourceId) return s
         const updated = statuses.get(s.sourceId)
         return updated ? { ...s, status: updated } : s
+      })
+    }
+    if (patch.imagesBySourceId && patch.imagesBySourceId.size > 0) {
+      const mirrors = patch.imagesBySourceId
+      sources = sources.map((s) => {
+        if (!s.sourceId) return s
+        const mirror = mirrors.get(s.sourceId)
+        if (!mirror) return s
+        return {
+          ...s,
+          imagesStatus: mirror.imagesStatus,
+          ...(mirror.imagesCount !== undefined
+            ? { imagesCount: mirror.imagesCount }
+            : {}),
+        }
       })
     }
 

@@ -8,7 +8,7 @@
  *      fetch (no second network round-trip, no re-entry into the SSRF guard).
  *   2. LLM synthesis (source-synthesis.prompt + the niche-researcher
  *      `runLLMSubAgent` pattern + BYOK org-key resolution) → a `SourceProposal`
- *      `{ businessName, services[], audience, differentiators[], tone }`.
+ *      `{ businessName, services[], audience, differentiators[], tone, address, description }`.
  * Then it PATCHes `builderState.sourceIngestion.proposed` (PROPOSED values only —
  * never owned fields, never `*_confirmed` sentinels) and updates each source's
  * `builderState.sourceIngestion.sources[].status`, all scoped by `organizationId`.
@@ -36,7 +36,10 @@ import { ingestSource } from '@/server/ai-module/ai-agents/knowledge/knowledge-i
 import { runLLMSubAgent } from '../sub-agents/base'
 import type { SubAgentContext } from '../sub-agents/types'
 import type { SourceProposal } from '../cards/builder-state'
-import { patchSourceIngestionAtomic } from './builder-state-db'
+import {
+  patchSourceIngestionAtomic,
+  type SourceImagesMirror,
+} from './builder-state-db'
 import { extractImagesForSource } from './image-pipeline'
 import {
   SOURCE_SYNTHESIS_SYSTEM,
@@ -80,6 +83,13 @@ export interface EnrichSourceResult {
   status: 'ready' | 'error'
   /** Proposal synthesized from this source (undefined when ungrounded/failed). */
   proposal?: SourceProposal
+  /**
+   * Image-catalog outcome mirrored into builderState (Onda D). ALWAYS present so
+   * every source seeded with `imagesStatus:'pending'` settles (ready|error) —
+   * including the gated paths (no html / imagesEnabled=false / ingest error),
+   * otherwise the card's images poll would spin forever.
+   */
+  images: SourceImagesMirror
   /** First error encountered (ingestion or synthesis), for logging only. */
   error?: string
 }
@@ -122,12 +132,22 @@ export async function enrichSource(
       sourceId,
       message,
     )
-    return { sourceId, status: 'error', error: message }
+    return {
+      sourceId,
+      status: 'error',
+      images: { imagesStatus: 'error', imagesCount: 0 },
+      error: message,
+    }
   }
 
   if (ingest.status === 'error') {
     // Error already persisted to KnowledgeSource by ingestSource.
-    return { sourceId, status: 'error', error: ingest.error }
+    return {
+      sourceId,
+      status: 'error',
+      images: { imagesStatus: 'error', imagesCount: 0 },
+      error: ingest.error,
+    }
   }
 
   // Resolve source metadata ONCE (org-scoped) — reused by the image hook below
@@ -142,9 +162,12 @@ export async function enrichSource(
   // fonte, derrube o job, ou bloqueie a síntese/RAG/texto. `await` (em vez de
   // void) evita promise órfã no worker; a síntese de texto NÃO espera por isso
   // do ponto de vista de resultado — o retorno `EnrichSourceResult` é intocado.
+  // O espelho imagesStatus/imagesCount SEMPRE settla: caminhos gateados (sem
+  // html / instagram / opt-out) reportam ready com 0 — assim o poll do card para.
+  let images: SourceImagesMirror = { imagesStatus: 'ready', imagesCount: 0 }
   if (ingest.extractedHtml && meta.type === 'url' && meta.imagesEnabled) {
     try {
-      await extractImagesForSource({
+      const imagesResult = await extractImagesForSource({
         sourceId,
         collectionId: meta.collectionId,
         organizationId,
@@ -153,12 +176,14 @@ export async function enrichSource(
         html: ingest.extractedHtml,
         baseUrl: meta.value,
       })
+      images = { imagesStatus: 'ready', imagesCount: imagesResult.persisted }
     } catch (err) {
       console.warn(
         '[source-enrich.job] image extraction failed (fail-open)',
         sourceId,
         errorMessage(err),
       )
+      images = { imagesStatus: 'error', imagesCount: 0 }
     }
   }
 
@@ -166,7 +191,7 @@ export async function enrichSource(
   const text = ingest.extractedText ?? ''
   if (text.replace(/\s/g, '').length < SOURCE_TEXT_MIN_CHARS) {
     // Too thin to ground anything — the source is in RAG; just no proposal.
-    return { sourceId, status: 'ready' }
+    return { sourceId, status: 'ready', images }
   }
 
   const synthInput: SourceSynthesisInput = {
@@ -197,7 +222,7 @@ export async function enrichSource(
       `(conversation ${conversationId})`,
       llm.error,
     )
-    return { sourceId, status: 'ready', error: llm.error }
+    return { sourceId, status: 'ready', images, error: llm.error }
   }
 
   const parsed = parseSourceSynthesisJSON(llm.data.text)
@@ -207,15 +232,15 @@ export async function enrichSource(
       sourceId,
       parsed.message,
     )
-    return { sourceId, status: 'ready', error: parsed.message }
+    return { sourceId, status: 'ready', images, error: parsed.message }
   }
 
   // `ungrounded` (no fields) is a VALID answer — return ready with no proposal.
   if (parsed.ungrounded) {
-    return { sourceId, status: 'ready' }
+    return { sourceId, status: 'ready', images }
   }
 
-  return { sourceId, status: 'ready', proposal: parsed.value }
+  return { sourceId, status: 'ready', images, proposal: parsed.value }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +267,7 @@ export async function runSourceEnrich(
   // Accumulate per-source outcomes; merge into one proposal at the end.
   const merged: SourceProposal = {}
   const statusBySourceId = new Map<string, 'ready' | 'error'>()
+  const imagesBySourceId = new Map<string, SourceImagesMirror>()
 
   for (const sourceId of sourceIds) {
     processed += 1
@@ -262,10 +288,16 @@ export async function runSourceEnrich(
         sourceId,
         errorMessage(err),
       )
-      outcome = { sourceId, status: 'error', error: errorMessage(err) }
+      outcome = {
+        sourceId,
+        status: 'error',
+        images: { imagesStatus: 'error', imagesCount: 0 },
+        error: errorMessage(err),
+      }
     }
 
     statusBySourceId.set(sourceId, outcome.status)
+    imagesBySourceId.set(sourceId, outcome.images)
     if (outcome.status === 'ready') ingested += 1
     else errors += 1
 
@@ -283,6 +315,7 @@ export async function runSourceEnrich(
       organizationId,
       proposalWritten ? merged : undefined,
       statusBySourceId,
+      imagesBySourceId,
     )
   } catch (err) {
     console.error(
@@ -310,6 +343,10 @@ function mergeProposal(target: SourceProposal, add: SourceProposal): void {
   }
   if (!target.audience && add.audience) target.audience = add.audience
   if (!target.tone && add.tone) target.tone = add.tone
+  if (!target.address && add.address) target.address = add.address
+  if (!target.description && add.description) {
+    target.description = add.description
+  }
 
   if (add.services && add.services.length > 0) {
     target.services = dedupeUnion(target.services, add.services)
@@ -345,6 +382,8 @@ function hasAnyProposalField(p: SourceProposal): boolean {
     p.businessName ||
       p.audience ||
       p.tone ||
+      p.address ||
+      p.description ||
       (p.services && p.services.length > 0) ||
       (p.differentiators && p.differentiators.length > 0),
   )
@@ -371,12 +410,16 @@ async function patchSourceIngestion(
   organizationId: string,
   proposed: SourceProposal | undefined,
   statusBySourceId: Map<string, 'ready' | 'error'>,
+  imagesBySourceId: Map<string, SourceImagesMirror>,
 ): Promise<void> {
   const patched = await patchSourceIngestionAtomic(
     conversationId,
     organizationId,
     {
       statusBySourceId,
+      // Onda D — settla o espelho imagesStatus/imagesCount de cada fonte (o
+      // poll de imagens do source_progress card depende disso para parar).
+      imagesBySourceId,
       // Only attach `proposed` when we actually have grounded fields, so a
       // failed/ungrounded batch never clobbers an existing proposal with {}.
       ...(proposed ? { proposed } : {}),

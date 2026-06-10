@@ -134,6 +134,34 @@ vi.mock('image-size', () => ({
   imageSize: mockImageSize,
 }))
 
+// sharp (downscale de imagens oversized): mock encadeável controlável pelo
+// toBuffer. O pipeline importa via dynamic import('sharp') lazy + fail-open.
+type SharpToBufferResult = {
+  data: Buffer
+  info: { width: number; height: number }
+}
+const mockSharpToBuffer = vi.hoisted(() =>
+  vi.fn<() => Promise<SharpToBufferResult>>(async () => ({
+    data: Buffer.alloc(1024),
+    info: { width: 1600, height: 1200 },
+  })),
+)
+const mockSharpFactory = vi.hoisted(() =>
+  vi.fn(() => {
+    const chain = {
+      rotate: () => chain,
+      resize: () => chain,
+      jpeg: () => chain,
+      png: () => chain,
+      webp: () => chain,
+      toBuffer: mockSharpToBuffer,
+    }
+    return chain
+  }),
+)
+
+vi.mock('sharp', () => ({ default: mockSharpFactory }))
+
 // ---------------------------------------------------------------------------
 // Import após os mocks registrados
 // ---------------------------------------------------------------------------
@@ -142,8 +170,11 @@ import {
   extractImagesForSource,
   MAX_IMAGES_PER_SOURCE,
   MAX_IMAGE_BYTES,
+  MAX_DOWNLOAD_BYTES,
+  MAX_STORED_DIMENSION_PX,
   MIN_DIMENSION_PX,
   IMAGE_CONCURRENCY,
+  OVERSIZE_READ_CONCURRENCY,
   type ExtractImagesInput,
 } from './image-pipeline'
 
@@ -151,15 +182,22 @@ import {
 // Helpers / fixtures
 // ---------------------------------------------------------------------------
 
-/** Resposta de imagem "boa" (Response-like que `safeFetch` devolveria). */
-function okImageResponse(bytes: number): Response {
+/** Resposta de imagem "boa" (Response-like que `safeFetch` devolveria).
+ *  `declaredLength` simula o header content-length (cap de download declarado). */
+function okImageResponse(bytes: number, declaredLength?: number): Response {
   const body = new Uint8Array(bytes)
   return {
     ok: true,
     status: 200,
     headers: {
-      get: (h: string) =>
-        h.toLowerCase() === 'content-type' ? 'image/jpeg' : null,
+      get: (h: string) => {
+        const header = h.toLowerCase()
+        if (header === 'content-type') return 'image/jpeg'
+        if (header === 'content-length' && declaredLength !== undefined) {
+          return String(declaredLength)
+        }
+        return null
+      },
     },
     // O pipeline lê o corpo via arrayBuffer (cap de bytes aplicado lendo length).
     arrayBuffer: async () => body.buffer,
@@ -207,6 +245,10 @@ beforeEach(() => {
   mockImageCreate.mockResolvedValue({ id: 'img-1' })
   mockImageUpdate.mockResolvedValue({ id: 'img-1' })
   mockCaptionImage.mockResolvedValue({ ok: true, caption: 'Foto.' })
+  mockSharpToBuffer.mockResolvedValue({
+    data: Buffer.alloc(1024),
+    info: { width: 1600, height: 1200 },
+  })
 })
 
 // ===========================================================================
@@ -217,8 +259,11 @@ describe('image-pipeline — constantes de cap (contrato §6)', () => {
   it('expõe os caps duros nos valores do contrato', () => {
     expect(MAX_IMAGES_PER_SOURCE).toBe(30)
     expect(MAX_IMAGE_BYTES).toBe(5 * 1024 * 1024)
+    expect(MAX_DOWNLOAD_BYTES).toBe(64 * 1024 * 1024)
+    expect(MAX_STORED_DIMENSION_PX).toBe(2048)
     expect(MIN_DIMENSION_PX).toBe(200)
     expect(IMAGE_CONCURRENCY).toBe(8)
+    expect(OVERSIZE_READ_CONCURRENCY).toBe(2)
   })
 })
 
@@ -290,25 +335,73 @@ describe('extractImagesForSource — caps', () => {
     )
   })
 
-  it('descarta imagem acima de MAX_IMAGE_BYTES (5MB) — skip, não erro', async () => {
+  it('REDUZ (downscale) imagem acima de MAX_IMAGE_BYTES em vez de descartar — persiste o buffer reduzido', async () => {
+    // Caso real (Vibra Butantã): fotos de galeria de 6–62MB; antes viravam skip
+    // em massa e o catálogo saía vazio.
     mockSafeFetch.mockResolvedValue(okImageResponse(MAX_IMAGE_BYTES + 1))
+
+    const r = await extractImagesForSource(BASE_INPUT)
+
+    expect(r.candidates).toBe(1)
+    expect(r.skipped).toBe(0)
+    expect(r.persisted).toBe(1)
+    expect(r.errors).toBe(0)
+    // Persistiu o REDUZIDO (dimensões/bytes do sharp, não do original).
+    const createArg = mockImageCreate.mock.calls[0]![0]
+    expect(createArg.data.sizeBytes).toBe(1024)
+    expect(createArg.data.width).toBe(1600)
+    expect(createArg.data.height).toBe(1200)
+  })
+
+  it('REDUZ imagem acima de MAX_STORED_DIMENSION_PX mesmo quando cabe em bytes', async () => {
+    mockImageSize.mockReturnValue({
+      width: MAX_STORED_DIMENSION_PX + 1,
+      height: 1000,
+    })
+
+    const r = await extractImagesForSource(BASE_INPUT)
+
+    expect(r.persisted).toBe(1)
+    expect(mockSharpToBuffer).toHaveBeenCalledTimes(1)
+    const createArg = mockImageCreate.mock.calls[0]![0]
+    expect(createArg.data.width).toBe(1600)
+    expect(createArg.data.height).toBe(1200)
+  })
+
+  it('downscale falhando (sharp lança) em imagem > cap → skip, não erro (fail-open)', async () => {
+    mockSafeFetch.mockResolvedValue(okImageResponse(MAX_IMAGE_BYTES + 1))
+    mockSharpToBuffer.mockRejectedValue(new Error('unsupported image format'))
 
     const r = await extractImagesForSource(BASE_INPUT)
 
     expect(r.candidates).toBe(1)
     expect(r.skipped).toBe(1)
     expect(r.persisted).toBe(0)
-    expect(r.errors).toBe(0) // exceder cap NÃO é erro
+    expect(r.errors).toBe(0) // exceder cap sem conseguir reduzir NÃO é erro
     expect(mockImageCreate).not.toHaveBeenCalled()
   })
 
-  it('aceita imagem exatamente no limite de bytes (boundary inclusivo)', async () => {
+  it('descarta download acima de MAX_DOWNLOAD_BYTES (content-length declarado) sem ler o corpo', async () => {
+    mockSafeFetch.mockResolvedValue(
+      okImageResponse(1024, MAX_DOWNLOAD_BYTES + 1),
+    )
+
+    const r = await extractImagesForSource(BASE_INPUT)
+
+    expect(r.skipped).toBe(1)
+    expect(r.persisted).toBe(0)
+    expect(r.errors).toBe(0)
+    expect(mockSharpToBuffer).not.toHaveBeenCalled()
+  })
+
+  it('aceita imagem exatamente no limite de bytes sem reduzir (boundary inclusivo)', async () => {
     mockSafeFetch.mockResolvedValue(okImageResponse(MAX_IMAGE_BYTES))
 
     const r = await extractImagesForSource(BASE_INPUT)
 
     expect(r.skipped).toBe(0)
     expect(r.persisted).toBe(1)
+    expect(mockSharpToBuffer).not.toHaveBeenCalled()
   })
 
   it('descarta dimensão < MIN_DIMENSION_PX em qualquer eixo (largura OU altura)', async () => {

@@ -22,11 +22,11 @@
  * existir. O job deve exportar exatamente `runSourceEnrich: RunSourceEnrich`.
  *
  * Convenção: queues sempre prefixadas com "quayer:" no Redis (isola de outros
- * apps no mesmo cluster). parseRedisUrl + wiring copiados de ./index.ts.
+ * apps no mesmo cluster). parseRedisUrl compartilhado em @/lib/redis.
  */
 
-import type { ConnectionOptions } from 'bullmq'
 import { Queue, Worker } from 'bullmq'
+import { parseRedisUrl } from '@/lib/redis/parse-redis-url'
 import {
   withTrace,
   getTraceId,
@@ -112,22 +112,6 @@ export type RunSourceEnrich = (
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * parseRedisUrl — idêntico ao de ./index.ts (session-close). Mantemos cópia
- * local para a fila não depender do módulo de registry (evita acoplamento e
- * imports circulares no entrypoint de workers).
- */
-function parseRedisUrl(url: string): ConnectionOptions {
-  const u = new URL(url)
-  const password = u.password ? decodeURIComponent(u.password) : undefined
-  return {
-    host: u.hostname,
-    port: Number(u.port || '6379'),
-    password,
-    db: u.pathname && u.pathname !== '/' ? Number(u.pathname.slice(1)) : undefined,
-  }
-}
 
 /**
  * Carrega `runSourceEnrich` do job dono via import dinâmico (lazy).
@@ -222,6 +206,14 @@ export async function enqueueSourceEnrich(
 
   try {
     await queue.add(SOURCE_ENRICH_JOB_NAME, tracedPayload, {
+      // RETRY: falha transitória (site fora do ar, timeout de embed, blip de DB)
+      // não pode deixar a fonte eternamente "pending" — 3 tentativas com backoff
+      // exponencial (5s → 10s → 20s). Seguro re-executar: o handler recarrega os
+      // KnowledgeSource do DB por status e a escrita do proposal é idempotente
+      // (sobrescreve builderState.sourceIngestion.proposed; owned só flipa no
+      // "Aceitar" do usuário).
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5_000 },
       // Mesma política de retenção do session-close.
       removeOnComplete: { age: 3600, count: 100 },
       removeOnFail: { age: 24 * 3600, count: 50 },

@@ -179,7 +179,7 @@ const sourcesStatus = igniter.query({
       select: { id: true },
     })
 
-    const sources = collection
+    const rows = collection
       ? await db.knowledgeSource.findMany({
           // Double tenant guard: org on the source AND its collection.
           where: { collectionId: collection.id, organizationId },
@@ -195,9 +195,35 @@ const sourcesStatus = igniter.query({
         })
       : []
 
-    // Proposed synthesis lives on the conversation's builderState. Read it via
-    // the centralized accessor (builder-state-db).
+    // Proposed synthesis + the per-source mirror (ref type 'url'|'instagram',
+    // imagesStatus/imagesCount) live on the conversation's builderState. Read it
+    // via the centralized accessor (builder-state-db).
     const state = parseBuilderState(await readBuilderStateByProject(projectId))
+    const mirrorBySourceId = new Map(
+      state.sourceIngestion.sources.flatMap((s) =>
+        s.sourceId ? ([[s.sourceId, s]] as const) : [],
+      ),
+    )
+
+    // Response shape: keep the original row fields (id/source/...) AND the
+    // card-contract fields the source_progress poll parses (`value`, `sourceId`,
+    // ref `type`, `imagesStatus`, `imagesCount`). Without these aliases the FE
+    // parser drops every entry (it requires `value`) and the card never settles.
+    const sources = rows.map((row) => {
+      const mirror = mirrorBySourceId.get(row.id)
+      return {
+        ...row,
+        value: row.source,
+        sourceId: row.id,
+        // KnowledgeSource.type is always 'url' (fetcher contract); the REF type
+        // ('url'|'instagram') lives on the builderState mirror.
+        type: mirror?.type ?? row.type,
+        ...(mirror?.imagesStatus ? { imagesStatus: mirror.imagesStatus } : {}),
+        ...(mirror?.imagesCount !== undefined
+          ? { imagesCount: mirror.imagesCount }
+          : {}),
+      }
+    })
 
     return response.success({
       sources,

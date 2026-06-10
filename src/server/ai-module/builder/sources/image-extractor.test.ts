@@ -274,4 +274,50 @@ describe('extractImageRefs', () => {
     const refs = extractImageRefs('<img src="foto.jpg" />', '')
     expect(Array.isArray(refs)).toBe(true)
   })
+
+  // -------------------------------------------------------------------------
+  // Lazy-load attributes (data-src / data-lazy-src / data-original / data-srcset)
+  // -------------------------------------------------------------------------
+
+  it('extracts data-src/data-lazy-src/data-original even when src is a placeholder', () => {
+    const refs = extractImageRefs(
+      [
+        // lazysizes/WP idiom: src é um data: placeholder; o real vive em data-src.
+        '<img src="data:image/gif;base64,R0lGOD" data-src="/p/real-1.jpg" />',
+        '<img data-lazy-src="/p/real-2.jpg" alt="x" />',
+        '<img data-original="https://cdn.acme.com.br/p/real-3.jpg" />',
+      ].join('\n'),
+      BASE,
+    )
+    expect(urls(refs).sort()).toEqual(
+      [
+        'https://www.acme.com.br/p/real-1.jpg',
+        'https://www.acme.com.br/p/real-2.jpg',
+        'https://cdn.acme.com.br/p/real-3.jpg',
+      ].sort(),
+    )
+  })
+
+  it('extracts the largest candidate from data-srcset / data-lazy-srcset', () => {
+    const refs = extractImageRefs(
+      '<img data-srcset="/p/a-320.jpg 320w, /p/a-1280.jpg 1280w" />' +
+        '<source data-lazy-srcset="/p/b-1x.jpg 1x, /p/b-2x.jpg 2x" />',
+      BASE,
+    )
+    expect(urls(refs).sort()).toEqual(
+      [
+        'https://www.acme.com.br/p/a-1280.jpg',
+        'https://www.acme.com.br/p/b-2x.jpg',
+      ].sort(),
+    )
+  })
+
+  it('does NOT mistake data-src= for src= (placeholder em src é descartado normalmente)', () => {
+    // Sem o lookbehind no SRC_ATTR_REGEX, `src=` casaria o sufixo de `data-src=`.
+    const refs = extractImageRefs(
+      '<img data-src="/p/lazy.jpg" src="/p/pixel-spacer.gif" />',
+      BASE,
+    )
+    expect(urls(refs)).toEqual(['https://www.acme.com.br/p/lazy.jpg'])
+  })
 })

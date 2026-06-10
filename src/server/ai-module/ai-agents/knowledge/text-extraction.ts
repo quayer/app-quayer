@@ -49,6 +49,100 @@ export function stripHtml(html: string): string {
     .trim()
 }
 
+// ── JSON-LD (schema.org) ──────────────────────────────────────────────────────
+// `stripHtml` remove <script> — inclusive os blocos `application/ld+json`, que
+// em muitos sites carregam EXATAMENTE os dados de negócio que a ingestão quer
+// (nome, endereço, telefone, faixa de preço, horários). Extraímos esses campos
+// ANTES do strip e os anexamos ao texto como linhas "chave: valor".
+
+const JSON_LD_SCRIPT_REGEX =
+  /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+
+/** Chaves schema.org cujo valor primitivo vira texto (allowlist anti-ruído). */
+const JSON_LD_TEXT_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'legalName',
+  'alternateName',
+  'description',
+  'telephone',
+  'email',
+  'address',
+  'streetAddress',
+  'addressLocality',
+  'addressRegion',
+  'postalCode',
+  'addressCountry',
+  'priceRange',
+  'price',
+  'lowPrice',
+  'highPrice',
+  'priceCurrency',
+  'openingHours',
+])
+
+/** Cap do bloco JSON-LD anexado ao texto (anti-inflar chunks/prompt). */
+const JSON_LD_MAX_CHARS = 2000
+/** Profundidade máxima da varredura (JSON-LD real é raso; evita ciclos/abuso). */
+const JSON_LD_MAX_DEPTH = 8
+
+function collectJsonLdValues(
+  node: unknown,
+  out: Map<string, string>,
+  depth: number,
+): void {
+  if (depth > JSON_LD_MAX_DEPTH || node === null || node === undefined) return
+  if (Array.isArray(node)) {
+    for (const item of node) collectJsonLdValues(item, out, depth + 1)
+    return
+  }
+  if (typeof node !== 'object') return
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (
+      JSON_LD_TEXT_KEYS.has(key) &&
+      (typeof value === 'string' || typeof value === 'number')
+    ) {
+      const text = String(value).trim()
+      // Dedupe por "chave: valor" (vários blocos repetem os mesmos dados).
+      if (text.length > 0 && text.length <= 500) out.set(`${key}: ${text}`, key)
+    } else {
+      collectJsonLdValues(value, out, depth + 1)
+    }
+  }
+}
+
+/**
+ * Extrai os campos de negócio dos blocos `<script type="application/ld+json">`
+ * como linhas "chave: valor" (allowlist schema.org), deduplicadas e com cap de
+ * tamanho. Retorna '' quando não há JSON-LD útil. PURE, fail-safe (JSON inválido
+ * é ignorado bloco a bloco).
+ */
+export function extractJsonLdText(html: string): string {
+  if (typeof html !== 'string' || html.length === 0) return ''
+  const lines = new Map<string, string>()
+  for (const match of html.matchAll(JSON_LD_SCRIPT_REGEX)) {
+    const raw = match[1]?.trim()
+    if (!raw) continue
+    try {
+      collectJsonLdValues(JSON.parse(raw), lines, 0)
+    } catch {
+      // Bloco malformado — ignora e segue para o próximo.
+    }
+  }
+  if (lines.size === 0) return ''
+  const block = ['Dados estruturados (JSON-LD):', ...lines.keys()].join('\n')
+  return block.length > JSON_LD_MAX_CHARS
+    ? block.slice(0, JSON_LD_MAX_CHARS)
+    : block
+}
+
+/** Junta o texto visível com o bloco JSON-LD (quando houver). */
+function combineHtmlText(html: string): string {
+  const text = stripHtml(html)
+  const jsonLd = extractJsonLdText(html)
+  if (jsonLd.length === 0) return text
+  return text.length > 0 ? `${text}\n\n${jsonLd}` : jsonLd
+}
+
 // ── SSRF guard ────────────────────────────────────────────────────────────────
 // Espelha isWebhookUrlBlocked (ai-agents/tools/custom-tools.ts): bloqueia hosts
 // privados/loopback/link-local e schemes não-http(s). Aqui aceitamos http E https
@@ -170,7 +264,16 @@ export async function safeFetch(rawUrl: string): Promise<Response> {
     let res: Response
     try {
       res = await fetch(current, {
-        headers: { 'user-agent': 'QuayerKnowledgeBot/1.0 (+https://quayer.com)' },
+        headers: {
+          // "Mozilla/5.0 (compatible; ...)" é o formato canônico de bot honesto:
+          // identifica o QuayerKnowledgeBot mas passa nos filtros ingênuos de WAF
+          // que bloqueiam qualquer UA que não comece com "Mozilla" (sites do
+          // cliente atrás de Cloudflare/etc. devolviam 403 ao UA puro de bot).
+          'user-agent':
+            'Mozilla/5.0 (compatible; QuayerKnowledgeBot/1.0; +https://quayer.com)',
+          accept:
+            'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8',
+        },
         redirect: 'manual',
         signal: controller.signal,
       })
@@ -197,7 +300,7 @@ export async function extractUrlText(url: string): Promise<string> {
     const buf = Buffer.from(await res.arrayBuffer())
     return extractPdfText(buf)
   }
-  return stripHtml(await res.text())
+  return combineHtmlText(await res.text())
 }
 
 /**
@@ -220,7 +323,7 @@ export async function extractUrlTextWithHtml(
     return { text: await extractPdfText(buf), html: '' }
   }
   const html = await res.text()
-  return { text: stripHtml(html), html }
+  return { text: combineHtmlText(html), html }
 }
 
 /** Dispatcher por tipo de fonte. Lança em tipo desconhecido / dados ausentes. */

@@ -7,9 +7,13 @@
  *
  *   extractImageRefs → cap MAX_IMAGES_PER_SOURCE →
  *     [ safeFetch (SSRF-guarded, revalida cada hop de redirect)
- *       → cap MAX_IMAGE_BYTES (lê o corpo com contador, aborta se passar)
+ *       → cap MAX_DOWNLOAD_BYTES (lê o corpo com contador, aborta se passar;
+ *         corpos > MAX_IMAGE_BYTES passam pelo semáforo oversize)
  *       → sniffImage (magic bytes; ignora content-type spoofado)
  *       → imageSize (descarta < MIN_DIMENSION_PX em qualquer eixo)
+ *       → downscale (sharp, fail-open) quando > MAX_IMAGE_BYTES ou
+ *         > MAX_STORED_DIMENSION_PX — REDUZ em vez de descartar; o cap
+ *         MAX_IMAGE_BYTES vale para o buffer FINAL armazenado/legendado
  *       → sha256 (content-addressed; é a chave de dedup)
  *       → storage.upload(BUCKETS.MEDIA, storageKey)
  *       → database.knowledgeImage.create (catch P2002 = dedup → skip silencioso)
@@ -40,7 +44,7 @@ import { imageSize } from 'image-size'
 
 import { database } from '@/server/services/database'
 import { BUCKETS, storage } from '@/server/services/storage'
-import { sniffImage } from '@/lib/images/sniff-image'
+import { sniffImage, type ImageKind } from '@/lib/images/sniff-image'
 import { safeFetch } from '@/server/ai-module/ai-agents/knowledge/text-extraction'
 
 import { extractImageRefs } from './image-extractor'
@@ -52,12 +56,28 @@ import { captionImage } from './image-caption.service'
 
 /** Máximo de imagens persistidas por fonte (controle de custo de visão). */
 export const MAX_IMAGES_PER_SOURCE = 30
-/** Tamanho máximo por imagem em bytes (5 MB) — corta blobs pesados na leitura. */
+/** Tamanho máximo ARMAZENADO por imagem em bytes (5 MB). Imagens maiores não são
+ *  mais descartadas direto: são absorvidas até MAX_DOWNLOAD_BYTES e REDUZIDAS
+ *  (downscale via sharp, fail-open) até caber — só viram skip se nem reduzidas
+ *  couberem (ou se o sharp estiver indisponível). */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+/** Cap de DOWNLOAD por imagem (64 MB) — fotos de galeria/imobiliária em alta
+ *  resolução chegam a dezenas de MB (caso real: 6–62 MB por foto); baixamos até
+ *  aqui APENAS para reduzir, nunca para armazenar/legendar no tamanho original. */
+export const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+/** Dimensão máxima (px) armazenada em cada eixo — acima disso a imagem é reduzida
+ *  (fit inside, sem ampliar). 2048px é suficiente p/ curadoria + envio WhatsApp e
+ *  mantém o caption multimodal dentro dos limites dos provedores de visão. */
+export const MAX_STORED_DIMENSION_PX = 2048
+/** Qualidade JPEG/WebP do downscale. */
+export const RESIZE_QUALITY = 82
 /** Dimensão mínima (px) em CADA eixo — descarta ícones/spacers/tracking pixels. */
 export const MIN_DIMENSION_PX = 200
 /** Concorrência do download/caption (semáforo p-limit) — equilíbrio custo/latência. */
 export const IMAGE_CONCURRENCY = 8
+/** Concorrência EXTRA (interna) p/ leitura de corpos ACIMA de MAX_IMAGE_BYTES:
+ *  limita o pico de memória do caminho oversized a ~2×MAX_DOWNLOAD_BYTES. */
+export const OVERSIZE_READ_CONCURRENCY = 2
 
 // ---------------------------------------------------------------------------
 // Contrato de I/O
@@ -213,6 +233,10 @@ type CandidateOutcome =
   | 'skipped'
   | 'error'
 
+/** Semáforo GLOBAL p/ leitura de corpos acima de MAX_IMAGE_BYTES (cap de memória:
+ *  no pior caso OVERSIZE_READ_CONCURRENCY × MAX_DOWNLOAD_BYTES em buffers). */
+const oversizeReadLimit = pLimit(OVERSIZE_READ_CONCURRENCY)
+
 async function processCandidate(
   url: string,
   input: ExtractImagesInput,
@@ -237,9 +261,16 @@ async function processCandidate(
       return 'skipped'
     }
 
-    // 2. Lê o corpo com cap de bytes (aborta a leitura se passar de MAX_IMAGE_BYTES).
-    const buffer = await readBodyCapped(res, MAX_IMAGE_BYTES)
-    if (!buffer) return 'skipped' // > cap ou corpo ilegível.
+    // 2. Lê o corpo com cap de DOWNLOAD (aborta se passar de MAX_DOWNLOAD_BYTES).
+    //    Corpos declaradamente acima do cap de ARMAZENAMENTO passam pelo semáforo
+    //    oversize (limita o pico de memória do caminho de downscale).
+    const declaredLength = Number(res.headers.get('content-length') ?? '')
+    const declaredOversize =
+      Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES
+    const buffer = declaredOversize
+      ? await oversizeReadLimit(() => readBodyCapped(res, MAX_DOWNLOAD_BYTES))
+      : await readBodyCapped(res, MAX_DOWNLOAD_BYTES)
+    if (!buffer) return 'skipped' // > cap de download ou corpo ilegível.
 
     // 3. Valida a assinatura REAL (magic bytes) — content-type é spoofável.
     const kind = sniffImage(buffer)
@@ -256,18 +287,49 @@ async function processCandidate(
       return 'skipped'
     }
 
-    // 5. sha256 (content-addressed) → storageKey → upload → persist.
-    const sha256 = createHash('sha256').update(buffer).digest('hex')
+    // 4.5 Normalização: acima do cap de bytes OU da dimensão máxima → REDUZ
+    //     (downscale via sharp, fail-open) em vez de descartar. Caso real: sites
+    //     imobiliários servem fotos de galeria de 6–62 MB que antes viravam skip
+    //     em massa ("não consegui ler as fotos"). GIF fica de fora (animação).
+    //     Se a redução falhar/indisponível, o original só segue se couber no cap.
+    let finalBuffer = buffer
+    let finalKind: ImageKind = kind
+    let finalWidth = dims.width
+    let finalHeight = dims.height
+    const needsShrink =
+      buffer.length > MAX_IMAGE_BYTES ||
+      dims.width > MAX_STORED_DIMENSION_PX ||
+      dims.height > MAX_STORED_DIMENSION_PX
+    if (needsShrink && kind.ext !== 'gif') {
+      const shrunk = await downscaleImage(buffer, kind)
+      if (shrunk) {
+        finalBuffer = shrunk.buffer
+        finalKind = shrunk.kind
+        finalWidth = shrunk.width
+        finalHeight = shrunk.height
+      }
+    }
+    // Guards finais pós-normalização: nem reduzida coube no cap de armazenamento
+    // (ou sharp indisponível p/ um corpo grande) → skip; reduzida abaixo do mínimo
+    // (aspect ratio extremo) → skip.
+    if (finalBuffer.length > MAX_IMAGE_BYTES) return 'skipped'
+    if (finalWidth < MIN_DIMENSION_PX || finalHeight < MIN_DIMENSION_PX) {
+      return 'skipped'
+    }
+
+    // 5. sha256 (content-addressed, sobre o buffer FINAL armazenado) → storageKey
+    //    → upload → persist.
+    const sha256 = createHash('sha256').update(finalBuffer).digest('hex')
     const storageKey = buildStorageKey(
       input.organizationId,
       input.sourceId,
       sha256,
-      kind.ext,
+      finalKind.ext,
     )
 
     try {
-      await storage.upload(BUCKETS.MEDIA, storageKey, buffer, {
-        contentType: kind.contentType,
+      await storage.upload(BUCKETS.MEDIA, storageKey, finalBuffer, {
+        contentType: finalKind.contentType,
         upsert: true,
       })
     } catch (err) {
@@ -292,11 +354,11 @@ async function processCandidate(
           sourceId: input.sourceId,
           originalUrl: url,
           storageKey,
-          width: dims.width,
-          height: dims.height,
-          sizeBytes: buffer.length,
+          width: finalWidth,
+          height: finalHeight,
+          sizeBytes: finalBuffer.length,
           sha256,
-          mimeType: kind.contentType,
+          mimeType: finalKind.contentType,
         },
         select: { id: true },
       })
@@ -321,7 +383,7 @@ async function processCandidate(
     let caption: { ok: true; caption: string } | { ok: false; error: string }
     try {
       caption = await captionImage(
-        { buffer, mimeType: kind.contentType },
+        { buffer: finalBuffer, mimeType: finalKind.contentType },
         {
           organizationId: input.organizationId,
           userId: input.userId,
@@ -367,6 +429,83 @@ async function processCandidate(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ── Downscale (sharp, lazy + fail-open) ─────────────────────────────────────
+
+/** Resultado de uma redução bem-sucedida (buffer final + formato + dimensões). */
+interface DownscaledImage {
+  buffer: Buffer
+  kind: ImageKind
+  width: number
+  height: number
+}
+
+type SharpModule = typeof import('sharp')
+
+/** Loader lazy do sharp. O sharp chega transitivamente via Next.js (image
+ *  optimization) — se um dia estiver ausente do runtime, o caminho oversized
+ *  degrada para o comportamento antigo (skip), NUNCA derruba o worker. */
+let sharpModulePromise: Promise<SharpModule | null> | null = null
+function loadSharp(): Promise<SharpModule | null> {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import('sharp')
+      .then((mod) => {
+        const withDefault = mod as unknown as { default?: SharpModule }
+        return withDefault.default ?? (mod as unknown as SharpModule)
+      })
+      .catch(() => null)
+  }
+  return sharpModulePromise
+}
+
+/**
+ * Reduz a imagem para caber em MAX_STORED_DIMENSION_PX (fit inside, nunca amplia),
+ * re-encodando no MESMO formato (jpeg/png/webp) com RESIZE_QUALITY e respeitando a
+ * orientação EXIF. FAIL-OPEN: retorna `null` em qualquer falha (sharp ausente,
+ * buffer corrompido, formato não suportado) — o caller decide se o original cabe.
+ */
+async function downscaleImage(
+  buffer: Buffer,
+  kind: ImageKind,
+): Promise<DownscaledImage | null> {
+  const sharp = await loadSharp()
+  if (!sharp) return null
+  try {
+    const resized = sharp(buffer)
+      .rotate() // auto-orient via EXIF antes de descartar metadados
+      .resize({
+        width: MAX_STORED_DIMENSION_PX,
+        height: MAX_STORED_DIMENSION_PX,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+    const encoded =
+      kind.ext === 'png'
+        ? resized.png()
+        : kind.ext === 'webp'
+          ? resized.webp({ quality: RESIZE_QUALITY })
+          : resized.jpeg({ quality: RESIZE_QUALITY })
+    const { data, info } = await encoded.toBuffer({ resolveWithObject: true })
+    const outKind: ImageKind =
+      kind.ext === 'png'
+        ? { ext: 'png', contentType: 'image/png' }
+        : kind.ext === 'webp'
+          ? { ext: 'webp', contentType: 'image/webp' }
+          : { ext: 'jpg', contentType: 'image/jpeg' }
+    return {
+      buffer: Buffer.from(data),
+      kind: outKind,
+      width: info.width,
+      height: info.height,
+    }
+  } catch (err) {
+    console.warn(
+      '[image-pipeline] downscale falhou (fail-open):',
+      errorMessage(err),
+    )
+    return null
+  }
+}
 
 /**
  * storageKey content-addressed em BUCKETS.MEDIA:

@@ -96,6 +96,10 @@ export async function ingestSourceRefs(
     type: ref.type,
     status: 'pending',
     sourceId: id,
+    // Onda D — espelho do catálogo de fotos. Seedar 'pending' arma o poll de
+    // imagens do source_progress card; o enrich job SEMPRE settla este espelho
+    // (ready|error) por fonte ao final, mesmo nos caminhos gateados/sem imagem.
+    imagesStatus: 'pending',
   }))
 
   // 3. Seed builderState.sourceIngestion.sources via the race-safe atomic patch

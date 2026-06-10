@@ -186,7 +186,15 @@ export async function ingestSource(
         where: { id: sourceId },
         data: { status: 'error', error: message.slice(0, 1000), updatedAt: new Date() },
       })
-      .catch(() => {})
+      .catch((statusErr: unknown) => {
+        // Se ESTE write falha, a fonte fica presa em "pending" para sempre na UI
+        // (sintoma de "fonte eternamente na fila") — loga alto, nunca silencia.
+        console.error(
+          '[KnowledgeIngestion] falha ao gravar status=error (fonte ficará pending!)',
+          sourceId,
+          statusErr instanceof Error ? statusErr.message : String(statusErr),
+        )
+      })
     return { sourceId, status: 'error', chunkCount: 0, error: message }
   }
 }
