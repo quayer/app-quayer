@@ -395,27 +395,30 @@ export async function materializeTeam(
       select: { systemPrompt: true, departmentId: true, businessHours: true },
     })
     if (agent) {
+      // ATOMICIDADE: acumula todas as mudanças do agente num ÚNICO update — antes
+      // eram 3-4 UPDATEs separados na mesma linha; uma falha no meio deixava estado
+      // parcial (ex: prompt com bloco de roleta SEM o vínculo departmentId que o
+      // dispatch usa como fallback). Continua idempotente: só inclui campo que mudou.
+      const agentData: {
+        systemPrompt?: string
+        departmentId?: string | null
+        businessHours?: Prisma.InputJsonValue
+      } = {}
+
       if (isRoulette) {
         const block = buildRouletteBlock(department.id, name)
         const nextPrompt = applyRouletteBlock(agent.systemPrompt, block)
-        // Só escreve quando muda — idempotente (rodar 2x não gera write redundante).
         if (nextPrompt !== (agent.systemPrompt ?? '')) {
-          await database.aIAgentConfig.update({
-            where: { id: ctx.aiAgentId },
-            data: { systemPrompt: nextPrompt },
-          })
+          agentData.systemPrompt = nextPrompt
         }
 
         // Vínculo ESTRUTURADO (fonte AUTORITATIVA do id): grava o departamento na
         // coluna AIAgentConfig.departmentId. O dispatch_to_agent lê esta coluna como
         // FALLBACK quando o LLM não passa um departmentId válido — robusto a qual
         // tabela de prompt vence (o bloco acima pode ser sombreado por
-        // AgentPromptVersion ACTIVE). Idempotente: só escreve quando muda.
+        // AgentPromptVersion ACTIVE).
         if (agent.departmentId !== department.id) {
-          await database.aIAgentConfig.update({
-            where: { id: ctx.aiAgentId },
-            data: { departmentId: department.id },
-          })
+          agentData.departmentId = department.id
         }
       } else {
         // solo/nenhum — tear-down idempotente da roleta no agente:
@@ -423,16 +426,10 @@ export async function materializeTeam(
         //  - limpa o vínculo departmentId apenas quando aponta para ESTE department.
         const strippedPrompt = stripRouletteBlock(agent.systemPrompt)
         if (strippedPrompt !== (agent.systemPrompt ?? '')) {
-          await database.aIAgentConfig.update({
-            where: { id: ctx.aiAgentId },
-            data: { systemPrompt: strippedPrompt },
-          })
+          agentData.systemPrompt = strippedPrompt
         }
         if (agent.departmentId === department.id) {
-          await database.aIAgentConfig.update({
-            where: { id: ctx.aiAgentId },
-            data: { departmentId: null },
-          })
+          agentData.departmentId = null
         }
       }
 
@@ -448,11 +445,15 @@ export async function materializeTeam(
         const currentHours =
           (agent as { businessHours?: unknown }).businessHours ?? null
         if (JSON.stringify(currentHours) !== JSON.stringify(nextHours)) {
-          await database.aIAgentConfig.update({
-            where: { id: ctx.aiAgentId },
-            data: { businessHours: nextHours as Prisma.InputJsonValue },
-          })
+          agentData.businessHours = nextHours as Prisma.InputJsonValue
         }
+      }
+
+      if (Object.keys(agentData).length > 0) {
+        await database.aIAgentConfig.update({
+          where: { id: ctx.aiAgentId },
+          data: agentData,
+        })
       }
     }
   }
