@@ -21,7 +21,7 @@
  */
 
 import * as React from "react"
-import { Check, Plus, Wrench, X } from "lucide-react"
+import { AlertTriangle, Check, Plus, Wrench, X } from "lucide-react"
 
 import { Input } from "@/client/components/ui/input"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
@@ -174,7 +174,6 @@ export function ServicesOfferedCard({
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
   tokens,
 }: CardComponentProps<ServicesCardPayload>) {
   const [offered, setOffered] = React.useState<string[]>(
@@ -183,6 +182,9 @@ export function ServicesOfferedCard({
   const [notOffered, setNotOffered] = React.useState<string[]>(
     () => value.services.notOffered,
   )
+  // Alerta NÃO-bloqueante (jornada-builder-v2): confirmar com as duas listas
+  // vazias mostra o aviso uma vez; o 2º clique confirma mesmo assim.
+  const [emptyWarned, setEmptyWarned] = React.useState(false)
 
   const addOffered = React.useCallback((raw: string) => {
     setOffered((current) => addItem(current, raw))
@@ -197,9 +199,18 @@ export function ServicesOfferedCard({
     setNotOffered((current) => current.filter((_, i) => i !== index))
   }, [])
 
+  const bothEmpty = offered.length === 0 && notOffered.length === 0
+  const showEmptyWarning = emptyWarned && bothEmpty
+
   const handleConfirm = React.useCallback(() => {
+    // Alerta (não bloqueia): 1º clique com tudo vazio só exibe o aviso; o
+    // clique seguinte confirma de verdade ("Confirmar mesmo assim").
+    if (bothEmpty && !emptyWarned) {
+      setEmptyWarned(true)
+      return
+    }
     onSubmit({ offered, notOffered })
-  }, [offered, notOffered, onSubmit])
+  }, [bothEmpty, emptyWarned, offered, notOffered, onSubmit])
 
   return (
     <CardShell
@@ -207,24 +218,15 @@ export function ServicesOfferedCard({
       title="O que o agente faz"
       reason="Liste o que o agente FAZ e o que ele NÃO faz, para evitar promessas indevidas nas conversas."
       tokens={tokens}
+      // FR-20 (jornada-builder-v2) — passo OBRIGATÓRIO: sem "Agora não"/dismiss.
       actions={[
         {
-          label: "Confirmar serviços",
+          label: showEmptyWarning ? "Confirmar mesmo assim" : "Confirmar serviços",
           onClick: handleConfirm,
           variant: "primary",
           icon: <Check className="h-3.5 w-3.5" />,
           disabled,
         },
-        ...(onDismiss
-          ? [
-              {
-                label: "Agora não",
-                onClick: onDismiss,
-                variant: "secondary" as const,
-                disabled,
-              },
-            ]
-          : []),
       ]}
     >
       <div className="flex flex-col gap-4">
@@ -248,6 +250,19 @@ export function ServicesOfferedCard({
           tokens={tokens}
           disabled={disabled}
         />
+
+        {showEmptyWarning && (
+          <p
+            role="alert"
+            className="flex items-start gap-1.5 text-[12px] leading-relaxed"
+            style={{ color: tokens.warningText }}
+          >
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            As duas listas estão vazias — o agente não vai saber o que você
+            oferece. Você pode confirmar mesmo assim e completar depois pela
+            conversa.
+          </p>
+        )}
       </div>
     </CardShell>
   )

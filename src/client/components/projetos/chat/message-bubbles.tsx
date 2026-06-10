@@ -59,6 +59,7 @@ export function MessageBubble({
   onDraft,
   onSubmitCard,
   isStreaming = false,
+  toolSelectionPrefill,
 }: {
   message: ChatMessage
   tokens: ReturnType<typeof useAppTokens>["tokens"]
@@ -70,6 +71,11 @@ export function MessageBubble({
   onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** Global chat streaming state — disables interactive cards mid-send. */
   isStreaming?: boolean
+  /** Seleção persistida no builderState — prefill do ToolSelectionCard. */
+  toolSelectionPrefill?: {
+    selectedCapabilityKeys: string[]
+    selectedToolKeys: string[]
+  }
 }) {
   if (message.role === "user") {
     return (
@@ -139,6 +145,7 @@ export function MessageBubble({
             isStreaming={isStreaming}
             onDraft={onDraft}
             onSubmitCard={onSubmitCard}
+            toolSelectionPrefill={toolSelectionPrefill}
           />
         ))}
       </div>
@@ -152,6 +159,7 @@ export function StreamingBubble({
   tokens,
   onDraft,
   onSubmitCard,
+  toolSelectionPrefill,
 }: {
   text: string
   toolCalls: ToolCallView[]
@@ -160,6 +168,11 @@ export function StreamingBubble({
   onDraft: (content: string) => void
   /** Card-action protocol submit — see MessageBubble. */
   onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
+  /** Seleção persistida no builderState — prefill do ToolSelectionCard. */
+  toolSelectionPrefill?: {
+    selectedCapabilityKeys: string[]
+    selectedToolKeys: string[]
+  }
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -197,6 +210,7 @@ export function StreamingBubble({
             isStreaming
             onDraft={onDraft}
             onSubmitCard={onSubmitCard}
+            toolSelectionPrefill={toolSelectionPrefill}
           />
         ))}
       </div>

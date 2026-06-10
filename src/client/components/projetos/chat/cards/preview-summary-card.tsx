@@ -5,9 +5,10 @@
  *
  * Read-only recap of every confirmed BuilderState section (persona, services,
  * hours, pricing, handoff/calendar, activation) shown right before
- * publish. Each section carries an "Ajustar" link that reopens that step (via
- * `onDismiss`, the single reopen affordance the framework hands every card), and
- * a single "Tudo certo, publicar" button confirms the whole build.
+ * publish. Each section carries an "Ajustar" link that REOPENS the matching
+ * card pre-filled with the current value via `onAdjust(cardKey)` (FR-17,
+ * jornada-builder-v2 — never a generic "pular" turn), and a single
+ * "Tudo certo, publicar" button confirms the whole build.
  *
  * Contract (CARD CONTRACTS):
  *   cardKey      = 'preview_summary'
@@ -15,8 +16,9 @@
  *   sentinel     = confirmations.summary  (gates deploy)
  *
  * Presentational only: reads `value` and calls `props.onSubmit({})` /
- * `props.onDismiss()`. The chat-panel owns POST + SSE. Styling matches the
- * existing chat-panel cards via `CardShell` + design tokens (no raw colors).
+ * `props.onAdjust(cardKey)`. The chat-panel owns POST + SSE and the reopen
+ * state (use-chat-stream `reopenedCardKey`). Styling matches the existing
+ * chat-panel cards via `CardShell` + design tokens (no raw colors).
  */
 
 import type { ReactNode } from "react"
@@ -46,10 +48,22 @@ import {
   summarizeServices,
   type SummaryArea,
 } from "./preview-summary-helpers"
-import type { CardComponentProps } from "./types"
+import type { CardComponentProps, CardKey } from "./types"
 
 /** Confirm-only payload — no owned fields, just flips `confirmations.summary`. */
 export type PreviewSummaryPayload = Record<string, never>
+
+/**
+ * FR-17: beyond the base contract, the summary card receives `onAdjust` from
+ * ActiveStepCard — each section's "Ajustar" calls it with the `cardKey` of the
+ * card that owns that section, and chat-panel reopens that card in the pinned
+ * slot pre-filled with the current builderState. Optional so a render without
+ * the affordance (e.g. legacy paths) simply hides the links.
+ */
+interface PreviewSummaryCardProps
+  extends CardComponentProps<PreviewSummaryPayload> {
+  onAdjust?: (cardKey: CardKey) => void
+}
 
 /** A single recap row: an area icon + title, its summarized value, and Ajustar. */
 interface SummarySectionProps {
@@ -154,17 +168,23 @@ function SummarySection({
 
 /**
  * PreviewSummaryCard — the "Tudo certo?" recap. Renders one row per build area
- * (each with an Ajustar reopen link) and a single confirm button that submits
- * `{}` to flip `confirmations.summary` (the deploy gate).
+ * (each with an Ajustar link that reopens that area's card via `onAdjust`) and
+ * a single confirm button that submits `{}` to flip `confirmations.summary`
+ * (the deploy gate).
  */
 export function PreviewSummaryCard({
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
+  onAdjust,
   tokens,
-}: CardComponentProps<PreviewSummaryPayload>) {
+}: PreviewSummaryCardProps) {
   const { confirmations } = value
+
+  // FR-17 — section → owning card. Returns undefined without `onAdjust` so the
+  // SummarySection hides the link instead of promising an action it can't do.
+  const adjust = (cardKey: CardKey): (() => void) | undefined =>
+    onAdjust ? () => onAdjust(cardKey) : undefined
 
   // Config genérica → warnings amber (puramente informativos, ver helpers).
   const warnings = computeSummaryWarnings(value)
@@ -184,7 +204,7 @@ export function PreviewSummaryCard({
       detail: summarizePersona(value.persona),
       confirmed: confirmations.persona,
       warn: personaWarn,
-      onAdjust: onDismiss,
+      onAdjust: adjust("agent_persona"),
       disabled,
       tokens,
     },
@@ -194,7 +214,7 @@ export function PreviewSummaryCard({
       detail: summarizeServices(value.services),
       confirmed: confirmations.services,
       warn: warnAreas.has(SUMMARY_AREA.services),
-      onAdjust: onDismiss,
+      onAdjust: adjust("services"),
       disabled,
       tokens,
     },
@@ -204,7 +224,7 @@ export function PreviewSummaryCard({
       detail: summarizeHours(value.hours),
       confirmed: confirmations.hours,
       warn: warnAreas.has(SUMMARY_AREA.hours),
-      onAdjust: onDismiss,
+      onAdjust: adjust("business_hours"),
       disabled,
       tokens,
     },
@@ -214,7 +234,7 @@ export function PreviewSummaryCard({
       detail: summarizePricing(value.pricing),
       confirmed: confirmations.pricing,
       warn: warnAreas.has(SUMMARY_AREA.pricing),
-      onAdjust: onDismiss,
+      onAdjust: adjust("pricing"),
       disabled,
       tokens,
     },
@@ -227,7 +247,7 @@ export function PreviewSummaryCard({
       detail: summarizeHandoff(value.handoff, value.calendar),
       confirmed: confirmations.handoff || confirmations.calendar,
       warn: warnAreas.has(SUMMARY_AREA.handoff),
-      onAdjust: onDismiss,
+      onAdjust: adjust("handoff"),
       disabled,
       tokens,
     },
@@ -236,7 +256,7 @@ export function PreviewSummaryCard({
       title: "Ativação",
       detail: summarizeActivation(value.activation),
       confirmed: confirmations.activation,
-      onAdjust: onDismiss,
+      onAdjust: adjust("activation_mode"),
       disabled,
       tokens,
     },

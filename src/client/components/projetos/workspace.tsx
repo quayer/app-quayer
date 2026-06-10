@@ -107,6 +107,41 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
   // derive dynamic progress from tool calls.
   const [liveMessages, setLiveMessages] = React.useState<ChatMessage[]>(initialMessages)
 
+  // ── Refetch pós-create_agent (destravar tabs sem F5) ──────────────────────
+  // `project` é um snapshot RSC: quando o Builder cria o agente (ou a instância
+  // WhatsApp) no meio da conversa, as tabs Prompt/Testar/Publicar ficariam
+  // travadas até um F5. Este efeito observa os tool-results do chat e dispara
+  // UM `router.refresh()` por evento (guard por toolName via ref) para
+  // rebuscar o Server Component. Sem loop: o tool já marcado nunca re-dispara,
+  // e o guard de staleness pula histórico antigo cujo efeito já está no snapshot.
+  const handledUnlockToolsRef = React.useRef<Set<string>>(new Set())
+  React.useEffect(() => {
+    const staleChecks: ReadonlyArray<{
+      toolName: string
+      isStale: () => boolean
+    }> = [
+      { toolName: "create_agent", isStale: () => project.aiAgent === null },
+      {
+        toolName: "create_whatsapp_instance",
+        isStale: () => !project.hasWhatsAppConnection,
+      },
+    ]
+    for (const msg of liveMessages) {
+      if (msg.role !== "assistant" || !msg.toolCalls) continue
+      for (const call of msg.toolCalls) {
+        const check = staleChecks.find((c) => c.toolName === call.toolName)
+        if (!check || !call.result) continue
+        const result = call.result as Record<string, unknown>
+        if (result.success === false) continue
+        if (handledUnlockToolsRef.current.has(call.toolName)) continue
+        handledUnlockToolsRef.current.add(call.toolName)
+        if (!check.isStale()) continue
+        router.refresh()
+        return
+      }
+    }
+  }, [liveMessages, project.aiAgent, project.hasWhatsAppConnection, router])
+
   const status = getProjectStatusStyle(project.status)
   const statusLabel = PROJECT_STATUS_LABEL[project.status]
 

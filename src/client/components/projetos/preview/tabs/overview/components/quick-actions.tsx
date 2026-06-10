@@ -3,12 +3,19 @@
 import { FileText, Play, Plug, Rocket } from "lucide-react"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { PreviewTab, ProjectStatus } from "@/client/components/projetos/types"
+import type { DeployGate } from "../../../deploy-gate"
 import { ActionButton } from "./action-button"
 
 interface QuickActionsProps {
   hasAgent: boolean
   hasWhatsAppConnection: boolean
   status: ProjectStatus
+  /**
+   * Gate único da tela de publicação (`canOpenDeploy`) — os CTAs que navegam
+   * para a tab "Publicar" usam o MESMO predicado da tab (FR-20: desabilitado
+   * explica o porquê via `title`, nunca fallback silencioso).
+   */
+  deployGate: DeployGate
   onTabChange?: (tab: PreviewTab) => void
   tokens: AppTokens
 }
@@ -28,6 +35,7 @@ export function QuickActions({
   hasAgent,
   hasWhatsAppConnection,
   status,
+  deployGate,
   onTabChange,
   tokens,
 }: QuickActionsProps) {
@@ -41,6 +49,8 @@ export function QuickActions({
           label="Conectar WhatsApp"
           onClick={() => onTabChange?.("deploy")}
           primary
+          disabled={!deployGate.allowed}
+          title={deployGate.reason ?? undefined}
           tokens={tokens}
         />
         <ActionButton
@@ -61,6 +71,8 @@ export function QuickActions({
           label="Publicar agente"
           onClick={() => onTabChange?.("deploy")}
           primary
+          disabled={!deployGate.allowed}
+          title={deployGate.reason ?? undefined}
           tokens={tokens}
         />
         <ActionButton

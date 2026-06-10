@@ -149,7 +149,7 @@ Ordem do registry: `overview → prompt → activity → playground → deploy`.
 | Quick actions | [`QuickActions`](../../src/client/components/projetos/preview/tabs/overview/components/quick-actions.tsx) | sempre |
 | Métricas | [`MetricsCard`](../../src/client/components/projetos/preview/tabs/overview/components/metrics-card.tsx) | `status !== 'draft'` |
 
-**Fonte dos dados:** derivação pura de `project` + `messages` via [`useOverviewDerivations`](../../src/client/components/projetos/preview/tabs/overview/hooks/use-overview-derivations.ts). Zero fetch adicional.
+**Fonte dos dados (atualizado 2026-06-10):** fonte única do step-engine — `GET /builder/projects/:id/readiness` via [`use-project-readiness.ts`](../../src/client/components/projetos/preview/tabs/overview/helpers/use-project-readiness.ts) (refetch on-focus + quando a conversa avança) adaptado por [`readiness-adapters.ts`](../../src/client/components/projetos/preview/tabs/overview/helpers/readiness-adapters.ts). O modelo anterior (derivação local de `project` + tool calls, `useOverviewDerivations`) foi removido por produzir progresso contraditório com o chat.
 
 ---
 

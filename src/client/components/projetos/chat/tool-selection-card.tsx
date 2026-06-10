@@ -38,6 +38,8 @@ export function ToolSelectionCard({
   tokens,
   onSubmitCard,
   disabled = false,
+  selectedCapabilityKeys,
+  selectedToolKeys,
 }: {
   selection: NonNullable<ReturnType<typeof getToolSelection>>
   tokens: ReturnType<typeof useAppTokens>["tokens"]
@@ -45,6 +47,15 @@ export function ToolSelectionCard({
   onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** True while the assistant is streaming — blocks re-submitting the card. */
   disabled?: boolean
+  /**
+   * FR-17 (jornada-builder-v2) — seleção JÁ persistida no builderState
+   * (`value.selectedCapabilityKeys` / `value.selectedToolKeys`). Quando
+   * não-vazia, pré-seleciona em vez dos recomendados, para reabrir o card
+   * preenchido com a decisão atual. Props OPCIONAIS/retro-compatíveis: sem
+   * elas o comportamento legado (recommended) permanece.
+   */
+  selectedCapabilityKeys?: string[]
+  selectedToolKeys?: string[]
 }) {
   const recommended = React.useMemo(
     () =>
@@ -53,7 +64,26 @@ export function ToolSelectionCard({
         .map((tool) => tool.key),
     [selection.tools],
   )
-  const [selected, setSelected] = React.useState<string[]>(recommended)
+  // Pré-seleção: persistido (capabilityKeys, filtrado pelo catálogo ATUAL —
+  // o catálogo server-side pode mudar/enxugar) → derivado dos toolKeys
+  // persistidos → recommended. Nunca depende de chaves específicas do catálogo.
+  const [selected, setSelected] = React.useState<string[]>(() => {
+    const catalog = new Set(selection.tools.map((tool) => tool.key))
+    const persisted = (selectedCapabilityKeys ?? []).filter((key) =>
+      catalog.has(key),
+    )
+    if (persisted.length > 0) return persisted
+
+    const persistedToolKeys = new Set(selectedToolKeys ?? [])
+    if (persistedToolKeys.size > 0) {
+      const derived = selection.tools
+        .filter((tool) => tool.toolKeys.some((key) => persistedToolKeys.has(key)))
+        .map((tool) => tool.key)
+      if (derived.length > 0) return derived
+    }
+
+    return recommended
+  })
 
   const toggleTool = React.useCallback((key: string) => {
     setSelected((current) =>

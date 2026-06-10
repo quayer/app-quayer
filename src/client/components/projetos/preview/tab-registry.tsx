@@ -26,6 +26,7 @@ import type {
   WorkspaceProject,
 } from "@/client/components/projetos/types"
 
+import { canOpenDeploy } from "./deploy-gate"
 import { OverviewTab } from "./tabs/overview/overview-tab"
 import { PromptTab } from "./tabs/prompt/prompt-tab"
 import { KnowledgeTab } from "./tabs/knowledge/knowledge-tab"
@@ -77,6 +78,11 @@ export function isProjectPublished(project: WorkspaceProject): boolean {
 export interface TabDescriptorWithState extends TabDescriptor {
   /** Tab exists in the strip but is locked (agent not created yet). */
   locked: boolean
+  /**
+   * Why the tab is locked — surfaced as tooltip/toast on click (FR-20: nothing
+   * is silently blocked). Null when unlocked.
+   */
+  lockedReason: string | null
 }
 
 /**
@@ -163,10 +169,17 @@ export function getTabsForType(type: ProjectType): TabDescriptor[] {
   )
 }
 
+/** Copy for tabs locked by the generic `requiresAgent` rule. */
+const AGENT_LOCK_REASON =
+  "Disponível após o Builder criar o agente — continue a conversa no chat."
+
 /**
- * Returns all eligible tabs for the project type, each with a `locked` flag.
- * Locked tabs are shown in the strip but are unclickable — this avoids layout
- * shift when the agent is created mid-session.
+ * Returns all eligible tabs for the project type, each with a `locked` flag
+ * and the human reason why. Locked tabs are shown in the strip but never
+ * activate — this avoids layout shift when the agent is created mid-session.
+ *
+ * The "Publicar" tab delegates to the SHARED `canOpenDeploy` gate — the same
+ * predicate the Overview CTAs use, so tab and buttons can never disagree.
  */
 export function getTabsForProjectWithLocked(
   project: WorkspaceProject,
@@ -179,10 +192,14 @@ export function getTabsForProjectWithLocked(
     // entirely until the agent goes live — they have no pre-publish content.
     if (tab.requiresPublished && !published) return false
     return true
-  }).map((tab) => ({
-    ...tab,
-    locked: !!(tab.requiresAgent && !hasAgent),
-  }))
+  }).map((tab) => {
+    if (tab.value === "deploy") {
+      const gate = canOpenDeploy(project)
+      return { ...tab, locked: !gate.allowed, lockedReason: gate.reason }
+    }
+    const locked = !!(tab.requiresAgent && !hasAgent)
+    return { ...tab, locked, lockedReason: locked ? AGENT_LOCK_REASON : null }
+  })
 }
 
 /**

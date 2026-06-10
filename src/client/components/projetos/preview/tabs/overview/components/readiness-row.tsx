@@ -12,7 +12,7 @@ export function ReadinessRow({
   tokens: AppTokens
 }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-start gap-2.5">
       <div
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
         style={{
@@ -25,15 +25,25 @@ export function ReadinessRow({
           <X className="h-3 w-3" style={{ color: tokens.danger }} aria-hidden="true" />
         )}
       </div>
-      <span
-        className="text-[13px]"
-        style={{
-          color: item.met ? tokens.textPrimary : tokens.textSecondary,
-        }}
-      >
-        {item.label}
-        <span className="sr-only">{item.met ? " — atendido" : " — pendente"}</span>
-      </span>
+      <div className="flex min-w-0 flex-col">
+        <span
+          className="text-[13px]"
+          style={{
+            color: item.met ? tokens.textPrimary : tokens.textSecondary,
+          }}
+        >
+          {item.label}
+          <span className="sr-only">{item.met ? " — atendido" : " — pendente"}</span>
+        </span>
+        {!item.met && item.detail && (
+          <span
+            className="text-[11px] leading-snug"
+            style={{ color: tokens.textTertiary }}
+          >
+            {item.detail}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,43 +1,37 @@
 "use client"
 
 /**
- * Builder Cards — calendar_connect (Orayon Uplift W3 + Onda C G10)
+ * Builder Cards — calendar_connect (Orayon Uplift W3 + Onda C G10 + v2 FR-11)
  *
- * Read-mostly connection card for cardKey `calendar_connect`. Backed by
- * `CalendarConnection`; shown only when `qualification.action === 'book_appointment'`.
+ * Connection card for cardKey `calendar_connect`. Backed by `CalendarConnection`;
+ * shown only when `handoff.alsoSchedule` liga o passo de agenda.
  *
- * Behaviour:
- *   - Renders a connect button/link + the current connection status read from
- *     `value.calendar.status`.
- *   - The OAuth/connection flow itself is driven OUTSIDE the card (the deploy
- *     saga / chat-panel owns the real CalendarConnection + POST + SSE). This card
- *     is presentational: pressing "Conectar" fires `onSubmit` to kick off the
- *     connect turn; each ACK re-renders the card with a fresher `value.calendar`.
- *   - "Polls until CONNECTED then auto-confirms": cards never fetch, so the poll
- *     is expressed as a reaction to `value` — when `value.calendar.status`
- *     resolves to CONNECTED and the card has not yet been confirmed, the card
- *     fires `onSubmit({connectionId, status})` EXACTLY ONCE (guarded per
- *     connectionId) so chat-panel flips the `calendar` sentinel automatically.
+ * Jornada-builder-v2 (FR-11/FR-20) — CALENDÁRIO HONESTO:
+ *   - O passo NUNCA confirma sem conexão real ou pulo explícito. Em idle/erro o
+ *     botão PRIMÁRIO é "Pular por agora" → onSubmit({ status: 'skipped' })
+ *     (applyCalendarConnect persiste e flipa `confirmations.calendar`, então a
+ *     jornada avança).
+ *   - "Conectar agenda" só aparece quando existe um fluxo REAL acionável: o
+ *     sub-módulo `./calendar/connect-link-flow.tsx` cria o connect-link
+ *     (POST /builder/calendar/connect-link → shareLink /conectar-agenda/<token>),
+ *     abre a aba do OAuth e VERIFICA via GET /builder/calendar/status/:projectId.
+ *     Só quando a leitura devolve CONNECTED o card submete
+ *     { connectionId, status: 'connected' } — nunca por clique do usuário.
+ *   - Auto-confirm reativo preservado: quando `value.calendar.status` já resolve
+ *     para CONNECTED (escrito por ACKs externos) e o sentinel ainda não flipou,
+ *     o card confirma EXATAMENTE uma vez (ref-guarded por connectionId).
  *
- * Onda C (G10) — duas adições:
- *   1. PROVA SOCIAL: depois que a fase resolve para `connected`, o card faz UMA
- *      leitura (ref-guarded por connectionId, igual ao autoConfirmedRef) de
- *      `GET /builder/calendar/events-preview/:projectId` e renderiza uma linha
- *      inline com a contagem de compromissos ("Identifiquei N compromisso(s)…").
- *      Cards normalmente NÃO fazem fetch — esta única leitura usa o mesmo `api`
- *      do chat-panel, é guardada e SOFT-FAILING (nunca rebaixa o status).
- *   2. ESCAPE HATCH: um contador local de tentativas incrementa a cada
- *      `handleConnect` que NÃO chega a `connected`. Após 2 tentativas sem
- *      sucesso (e fora de `connected`), aparece um botão secundário "Continuar
- *      sem agenda" que faz `onSubmit({ connectionId, status: 'skipped' })`. O
- *      backend (applyCalendarConnect) persiste `calendar.status='skipped'` e
- *      flipa `confirmations.calendar` — então nextPendingStep AVANÇA e o usuário
- *      nunca fica travado. A fase `skipped` é terminal/neutra (chip "Pulada") e
- *      ainda oferece "Conectar agenda" para reconectar depois.
+ * Onda C (G10) — PROVA SOCIAL preservada: depois que a fase resolve para
+ * `connected`, o card faz UMA leitura (ref-guarded por connectionId) de
+ * `GET /builder/calendar/events-preview/:projectId` e renderiza uma linha
+ * inline com a contagem de compromissos. SOFT-FAILING (nunca rebaixa o status).
+ * (O antigo escape hatch por contagem de tentativas saiu: o pulo explícito
+ * agora é primário e está sempre disponível fora de `connected`.)
  *
- * Presentational + 1 leitura guardada: token-driven styling via CardShell.
+ * Presentational + leituras guardadas: token-driven styling via CardShell.
  *
- * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md (card catalog).
+ * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md (card catalog) +
+ *           specs/jornada-builder-v2/spec.md (FR-11/FR-20).
  */
 
 import * as React from "react"
@@ -55,6 +49,10 @@ import { api } from "@/igniter.client"
 import { CardShell, type CardShellAction } from "./card-shell"
 import type { CardComponentProps } from "./types"
 import { type AgendaPreviewState, previewCopy } from "./calendar/events-preview"
+import {
+  ConnectFlowPanel,
+  useCalendarConnectFlow,
+} from "./calendar/connect-link-flow"
 
 /**
  * Exact submit payload for `calendar_connect` (CARD CONTRACT). The Wire phase
@@ -72,9 +70,6 @@ export interface CalendarConnectPayload {
 
 /** Normalized connection state derived from the free-form `calendar.status`. */
 type CalendarPhase = "idle" | "connecting" | "connected" | "skipped" | "error"
-
-/** Quantas tentativas de conexão sem sucesso antes de surgir o escape hatch. */
-const SKIP_AFTER_FAILED_ATTEMPTS = 2
 
 /**
  * Map the opaque `value.calendar.status` (a free-form string written by the
@@ -122,7 +117,7 @@ const PHASE_COPY: Record<
   idle: {
     title: "Conectar agenda",
     reason:
-      "Conecte sua agenda para que o agente possa marcar horários direto na conversa.",
+      "Conecte sua agenda para que o agente possa marcar horários direto na conversa — ou pule por agora e conecte quando quiser.",
   },
   connecting: {
     title: "Conectando agenda…",
@@ -141,7 +136,7 @@ const PHASE_COPY: Record<
   error: {
     title: "Falha ao conectar a agenda",
     reason:
-      "Não foi possível concluir a conexão. Tente conectar novamente para reautorizar o acesso.",
+      "Não foi possível concluir a conexão. Gere um novo link para tentar de novo — ou pule por agora.",
   },
 }
 
@@ -233,15 +228,15 @@ function readEventsPreview(
  * CalendarConnectCard — presentational card for `calendar_connect`.
  *
  * Props: {@link CardComponentProps}<{@link CalendarConnectPayload}>.
- * On confirm/connect it calls `onSubmit({ connectionId, status })`. On escape it
- * calls `onSubmit({ connectionId, status: 'skipped' })`.
+ * Confirma só por conexão VERIFICADA (status read CONNECTED) ou por pulo
+ * explícito `onSubmit({ connectionId, status: 'skipped' })` — nunca um clique
+ * de "Conectar" confirma o passo (FR-11).
  */
 export function CalendarConnectCard({
   projectId,
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
   tokens,
 }: CardComponentProps<CalendarConnectPayload>) {
   const calendar = value.calendar
@@ -254,22 +249,6 @@ export function CalendarConnectCard({
   // connectionId (falling back to a sentinel for connections that report
   // CONNECTED before an id lands) to survive re-mounts within the same value.
   const autoConfirmedRef = React.useRef<string | null>(null)
-
-  // G10 escape hatch — local counter of connect attempts that did NOT reach
-  // `connected`. Increments on each handleConnect; resets to 0 once the phase
-  // resolves to `connected`. Mirrors Orayon's failureCount/skipPersistentAfterFailures.
-  const [failedAttempts, setFailedAttempts] = React.useState(0)
-  React.useEffect(() => {
-    // A successful connection clears the attempt counter — no escape needed.
-    if (phase === "connected" && failedAttempts !== 0) {
-      setFailedAttempts(0)
-    }
-  }, [phase, failedAttempts])
-
-  const showSkipHatch =
-    phase !== "connected" &&
-    phase !== "skipped" &&
-    failedAttempts >= SKIP_AFTER_FAILED_ATTEMPTS
 
   // "Poll until CONNECTED then auto-confirm": cards don't fetch, so we react to
   // the canonical `value`. When the status resolves to CONNECTED and the
@@ -296,17 +275,20 @@ export function CalendarConnectCard({
     onSubmit,
   ])
 
-  const handleConnect = React.useCallback(() => {
-    // Kick off (or retry) the connect/poll turn. The actual OAuth flow + status
-    // updates are owned by chat-panel / the deploy saga; we just signal intent
-    // and carry whatever connection data we already have. G10: count this as an
-    // attempt — if it doesn't land on `connected`, the escape hatch surfaces.
-    setFailedAttempts((n) => n + 1)
-    onSubmit({
-      connectionId: calendar.connectionId,
-      status: calendar.status,
-    })
-  }, [onSubmit, calendar.connectionId, calendar.status])
+  // FR-11 — fluxo REAL de conexão (connect-link + verificação de status). Só a
+  // leitura verificada CONNECTED confirma; o callback abaixo é o ÚNICO ponto
+  // que submete status 'connected' a partir deste fluxo.
+  const handleVerifiedConnected = React.useCallback(
+    (connectionId: string | undefined) => {
+      onSubmit({ connectionId, status: "connected" })
+    },
+    [onSubmit],
+  )
+  const flow = useCalendarConnectFlow({
+    projectId,
+    disabled,
+    onVerifiedConnected: handleVerifiedConnected,
+  })
 
   const handleConfirm = React.useCallback(() => {
     onSubmit({
@@ -315,9 +297,9 @@ export function CalendarConnectCard({
     })
   }, [onSubmit, calendar.connectionId, calendar.status])
 
-  // G10 escape hatch: opt out of the calendar. Persists status='skipped' and
-  // flips confirmations.calendar via applyCalendarConnect — nextPendingStep
-  // advances past `calendar`, so the user is NEVER trapped.
+  // Pulo EXPLÍCITO (FR-11/FR-20): persiste status='skipped' e flipa
+  // confirmations.calendar via applyCalendarConnect — nextPendingStep avança,
+  // o usuário nunca fica travado e nada é confirmado como "conectado".
   const handleSkip = React.useCallback(() => {
     onSubmit({
       connectionId: calendar.connectionId,
@@ -339,46 +321,38 @@ export function CalendarConnectCard({
         disabled,
       })
     }
-  } else if (phase === "connecting") {
-    actions.push({
-      label: "Conectando…",
-      onClick: handleConnect,
-      variant: "secondary",
-      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
-      disabled: true,
-    })
   } else {
-    // idle / error / skipped — always offer to connect (skipped is re-connectable).
-    actions.push({
-      label: phase === "error" ? "Conectar novamente" : "Conectar agenda",
-      onClick: handleConnect,
-      variant: "primary",
-      icon: <CalendarPlus className="h-3.5 w-3.5" />,
-      disabled,
-    })
-  }
-
-  // G10 escape hatch button — only after N failed attempts, and never once
-  // connected/skipped. Lets a user stuck behind the OAuth gate move on.
-  if (showSkipHatch) {
-    actions.push({
-      label: "Continuar sem agenda",
-      onClick: handleSkip,
-      variant: "secondary",
-      icon: <CalendarX className="h-3.5 w-3.5" />,
-      disabled,
-    })
-  }
-
-  // "Agora não" only while not connected/skipped — never let the user dismiss a
-  // fully connected (and auto-confirmed) calendar out from under the flow.
-  if (onDismiss && phase !== "connected" && phase !== "skipped") {
-    actions.push({
-      label: "Agora não",
-      onClick: onDismiss,
-      variant: "secondary",
-      disabled,
-    })
+    // idle / connecting / error / skipped — honesto (FR-11/FR-20):
+    // primário = pulo explícito (fora de skipped, que já avançou a jornada);
+    // "Conectar" só existe quando o fluxo REAL está acionável (flow.available).
+    if (phase !== "skipped") {
+      actions.push({
+        label: "Pular por agora",
+        onClick: handleSkip,
+        variant: "primary",
+        icon: <CalendarX className="h-3.5 w-3.5" />,
+        disabled,
+      })
+    }
+    if (flow.available) {
+      actions.push({
+        label: flow.requesting
+          ? "Gerando link…"
+          : flow.connectUrl
+            ? "Gerar novo link"
+            : phase === "error"
+              ? "Conectar novamente"
+              : "Conectar agenda",
+        onClick: flow.requestConnectLink,
+        variant: phase === "skipped" ? "primary" : "secondary",
+        icon: flow.requesting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <CalendarPlus className="h-3.5 w-3.5" />
+        ),
+        disabled: disabled || flow.requesting,
+      })
+    }
   }
 
   return (
@@ -390,13 +364,15 @@ export function CalendarConnectCard({
       tokens={tokens}
     >
       <StatusRow phase={phase} connectionId={calendar.connectionId} tokens={tokens} />
-      {phase === "connected" && (
+      {phase === "connected" ? (
         <AgendaPreviewBlock
           projectId={projectId}
           connectionId={calendar.connectionId}
           disabled={disabled}
           tokens={tokens}
         />
+      ) : (
+        <ConnectFlowPanel flow={flow} disabled={disabled} tokens={tokens} />
       )}
     </CardShell>
   )

@@ -13,7 +13,7 @@
  * (a `StepId` from the deterministic step-engine) and resolves the card to show
  * via {@link getCardForStep}. Direct lookup by key uses {@link getCardDescriptor}.
  *
- * CARD DRIVE MODES — three ways a card reaches the screen:
+ * CARD DRIVE MODES — four ways a card reaches the screen:
  *  1. ACTIVE-STEP-DRIVEN (8 cards): resolved by `getCardForStep` from the
  *     step-engine. Each carries a `stepId` and appears in {@link STEP_TO_CARD}:
  *     `agent_persona`, `services`, `business_hours`, `pricing`, `handoff`
@@ -21,12 +21,18 @@
  *     `calendar_connect`, `activation_mode`, `preview_summary`, plus
  *     `source_progress` (→ `source_ingestion`) and `silenced_contacts` (both
  *     OPTIONAL steps). They are the only descriptors `getCardForStep` may return.
- *  2. TRANSIENT (1 card): `quick_reply_chips` — a quick-answer prompt with NO
+ *  2. REOPENED (FR-17, jornada-builder-v2): "Ajustar" on a `preview_summary`
+ *     section resolves that section's card BY KEY via {@link getCardDescriptor}
+ *     and re-renders it in the pinned slot (ActiveStepCard) pre-filled with the
+ *     current builderState, temporarily substituting the active-step card.
+ *     Re-submit goes through the normal card-submit endpoint; the step-engine
+ *     is unaffected (the confirmation was already true and stays true).
+ *  3. TRANSIENT (1 card): `quick_reply_chips` — a quick-answer prompt with NO
  *     `stepId` and no sentinel; it routes as a normal chat turn. Its descriptor
  *     stays registered for direct lookup, but it is EXPLICITLY excluded from the
  *     active-step mapping (see {@link STEP_TO_CARD}) so it can never surface in
  *     the pinned slot — chips-parsing was never wired through that path.
- *  3. INLINE / LEGACY (3 cards): `agent_approval`, `tool_selection`, `channel`
+ *  4. INLINE / LEGACY (3 cards): `agent_approval`, `tool_selection`, `channel`
  *     keep their inline rendering inside `ToolCallCard` (chat-panel.tsx) for
  *     backward compat — they are NOT in this registry at all.
  *
@@ -213,6 +219,9 @@ const STEP_TO_CARD: Partial<Record<StepId, CardDescriptor>> = (() => {
  * legacy keys (agent_approval/tool_selection/channel), which render inline in
  * ToolCallCard and are not in this registry. `quick_reply_chips` and
  * `source_progress` ARE registered, so they resolve here.
+ *
+ * This is ALSO the reopen lookup (drive mode 2 / FR-17): ActiveStepCard
+ * resolves the card reopened by the summary's "Ajustar" through this function.
  */
 export function getCardDescriptor(
   cardKey: CardKey,

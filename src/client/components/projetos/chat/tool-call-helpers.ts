@@ -115,14 +115,8 @@ export function toolHelpText(key: string): string {
       "No WhatsApp, a IA sinaliza a transferência e pausa ou encaminha a conversa conforme a integração. É ideal para casos sensíveis, dúvidas jurídicas ou pedido de advogado.",
     notify_team:
       "Envia um aviso interno sem necessariamente parar a IA. Útil para urgências ou oportunidades que precisam de atenção rápida.",
-    qualified_handoff:
-      "Ativa qualificação e transferência: a IA registra o lead, pausa a conversa e deixa um humano assumir no painel.",
-    team_alert:
-      "Cria um alerta interno. Enviar o resumo para outro WhatsApp ainda precisa de ferramenta custom por webhook.",
-    appointment_intent:
-      "Registra intenção de agenda para a equipe confirmar. Não consulta calendário real ainda.",
-    pricing_log:
-      "Registra valores enviados. Para advocacia, use apenas quando essa regra comercial estiver clara.",
+    // Capacidades de handoff/agenda/preço saíram do catálogo do picker — são
+    // DERIVADAS das decisões dos cards na saga (deploy/enabled-tools-derivation.ts).
     lead_only:
       "Marca o lead como qualificado, mas mantém a IA conversando.",
   }

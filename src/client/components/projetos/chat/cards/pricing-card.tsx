@@ -328,7 +328,6 @@ export function PricingCard({
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
   tokens,
 }: CardComponentProps<PricingCardPayload>) {
   const [rows, setRows] = React.useState<DraftRow[]>(() =>
@@ -433,6 +432,8 @@ export function PricingCard({
       title="Tabela de preços"
       reason="Liste os preços que o agente pode informar nas conversas. Valores em reais (R$); escolha abaixo como o agente divulga cada valor."
       tokens={tokens}
+      // FR-20 (jornada-builder-v2) — passo OBRIGATÓRIO: sem "Agora não"/dismiss.
+      // "Confirmar sem preços" / estilo "none" já cobrem quem não divulga valor.
       actions={[
         {
           label: confirmLabel,
@@ -441,16 +442,6 @@ export function PricingCard({
           icon: <Check className="h-3.5 w-3.5" />,
           disabled,
         },
-        ...(onDismiss
-          ? [
-              {
-                label: "Agora não",
-                onClick: onDismiss,
-                variant: "secondary" as const,
-                disabled,
-              },
-            ]
-          : []),
       ]}
     >
       <div className="flex flex-col gap-3">

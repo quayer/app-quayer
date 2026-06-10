@@ -198,7 +198,7 @@ flowchart TD
 | `get_agent_status` | 7 | Verifica blockers (plano, BYOK, canal) | ❌ |
 | `publish_agent` | 7 | Publica (ativa produção) | ✅ "Agente publicado" |
 
-**Fonte:** [TOOL_STAGE_MAP](../../src/client/components/projetos/preview/tabs/overview/helpers/tool-stage-map.ts) — mapeia tool → label mostrado no Overview.
+**Fonte (atualizado 2026-06-10):** a tabela acima descreve o modelo HISTÓRICO de derivação por tool calls (`TOOL_STAGE_MAP`), substituído pela fonte única do step-engine: o Overview agora consome `GET /builder/projects/:id/readiness` via [use-project-readiness.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/use-project-readiness.ts) + [readiness-adapters.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/readiness-adapters.ts) — steps/percentual/blockers idênticos aos do chat.
 
 ---
 
@@ -380,7 +380,7 @@ journey
 Baseado no código:
 - `prompt-tab.tsx` tem TODO: wire `POST /api/v1/builder/projects/:id/rename`
 - Deep-linking de tabs ainda não é feito (local state, não URL)
-- Checklist de "Plano ativo" e "BYOK configurado" ainda `met: false` hard-coded em [derive-readiness.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/derive-readiness.ts)
+- ~~Checklist de "Plano ativo" e "BYOK configurado" hard-coded~~ — RESOLVIDO 2026-06-10: o Overview consome os `blockers[]` reais do readiness (plan/byok/agent/prompt/version/channel); `derive-readiness.ts` foi deletado.
 - Histórico de versões no Deploy Tab carrega vazio (`setVersions([])` stub)
 - `agent-cloner` (v1.5) e Instagram/campanhas (v2) — roadmap
 
@@ -395,5 +395,5 @@ Baseado no código:
 - **System prompt:** [whatsapp-agent-system-prompt.ts](../../src/server/ai-module/builder/prompts/whatsapp-agent-system-prompt.ts)
 - **Tools registry:** [tools/index.ts](../../src/server/ai-module/builder/tools/index.ts)
 - **Deploy saga:** [deploy-flow.orchestrator.ts](../../src/server/ai-module/builder/deploy/deploy-flow.orchestrator.ts)
-- **Stage derivation:** [derive-stages.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/derive-stages.ts)
+- **Progresso (fonte única):** [use-project-readiness.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/use-project-readiness.ts) + [readiness-adapters.ts](../../src/client/components/projetos/preview/tabs/overview/helpers/readiness-adapters.ts)
 - **Arquitetura existente:** [BUILDER_AGENT_ARCHITECTURE.md](./BUILDER_AGENT_ARCHITECTURE.md)

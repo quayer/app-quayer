@@ -5,13 +5,19 @@ import type { AppTokens } from "@/client/hooks/use-app-tokens"
 export function ProgressHeader({
   doneCount,
   totalCount,
+  pct,
   tokens,
 }: {
   doneCount: number
   totalCount: number
+  /**
+   * Percentual canônico vindo do readiness (`completenessPct`). Quando
+   * presente, a barra usa ELE (fonte única — FR-18) em vez da razão local.
+   */
+  pct?: number
   tokens: AppTokens
 }) {
-  const pct = totalCount > 0 ? (doneCount / totalCount) * 100 : 0
+  const barPct = pct ?? (totalCount > 0 ? (doneCount / totalCount) * 100 : 0)
 
   return (
     <div className="flex flex-col gap-2">
@@ -36,7 +42,7 @@ export function ProgressHeader({
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{
-            width: `${pct}%`,
+            width: `${barPct}%`,
             backgroundColor: tokens.brand,
           }}
         />

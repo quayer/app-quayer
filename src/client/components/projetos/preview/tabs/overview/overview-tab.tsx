@@ -1,12 +1,16 @@
 "use client"
 
 /**
- * OverviewTab — Dynamic Mission Control dashboard for the Builder workspace.
+ * OverviewTab — Mission Control do workspace do Builder.
+ *
+ * FR-18 (spec jornada-builder-v2): o progresso e a prontidão vêm de UMA fonte
+ * — `GET /builder/projects/:id/readiness` (step-engine determinístico) — via
+ * `useProjectReadiness`. Nada aqui re-deriva progresso de tool-calls.
  *
  * Fluxo de estados:
- *   1. Sem mensagens          → EmptyState (instrução para iniciar conversa)
- *   2. Mensagens mas sem agent → progresso derivado das mensagens (StageList)
- *   3. Com agent              → Overview completo
+ *   1. Sem mensagens e sem agent → EmptyState (instrução para iniciar conversa)
+ *   2. Readiness carregando      → skeletons
+ *   3. Readiness disponível      → checklist da jornada + blockers reais
  */
 
 import * as React from "react"
@@ -19,6 +23,7 @@ import type {
   WorkspaceProject,
 } from "@/client/components/projetos/types"
 import { Skeleton } from "@/client/components/ui/skeleton"
+import { canOpenDeploy } from "../../deploy-gate"
 import { AgentIdentityHeader } from "./components/agent-identity-header"
 import { DeployReadinessCard } from "./components/deploy-readiness-card"
 import { EmptyState } from "./components/empty-state"
@@ -28,7 +33,7 @@ import { ProgressHeader } from "./components/progress-header"
 import { QuickActions } from "./components/quick-actions"
 import { StageList } from "./components/stage-list"
 import { deriveFirstMessage } from "./helpers/derive-first-message"
-import { useOverviewDerivations } from "./hooks/use-overview-derivations"
+import { useProjectReadiness } from "./hooks/use-project-readiness"
 
 // ── Main tab ─────────────────────────────────────────────────────────────────
 
@@ -44,8 +49,12 @@ export function OverviewTab({
   messages = [],
 }: OverviewTabProps) {
   const { tokens } = useAppTokens()
-  const { stages, readiness, readinessMet } = useOverviewDerivations(project, messages)
+  const { readiness, stages, checklist, isLoading } = useProjectReadiness(
+    project.id,
+    messages,
+  )
   const firstMessage = deriveFirstMessage(project, messages)
+  const deployGate = canOpenDeploy(project)
 
   const [showCelebration, setShowCelebration] = useState(false)
   const prevAgentRef = useRef(project.aiAgent)
@@ -108,26 +117,41 @@ export function OverviewTab({
         />
       )}
 
-      {/* -- Seção 3: Progresso dinâmico de etapas -- */}
-      {stages.length > 0 && (
+      {/* -- Seções 3 + 3b: progresso da jornada + prontidão (fonte única) -- */}
+      {isLoading && (
+        <div className="flex flex-col gap-3" aria-busy="true">
+          <Skeleton className="h-6 w-full rounded-md" />
+          <Skeleton className="h-[200px] w-full rounded-xl" />
+          <Skeleton className="h-[160px] w-full rounded-xl" />
+        </div>
+      )}
+
+      {readiness && (
         <>
           <ProgressHeader
             doneCount={doneCount}
             totalCount={stages.length}
+            pct={readiness.completenessPct}
             tokens={tokens}
           />
           <StageList stages={stages} tokens={tokens} />
+
+          <DeployReadinessCard
+            items={checklist}
+            isDeployReady={readiness.isDeployReady}
+            deployGate={deployGate}
+            onTabChange={onTabChange}
+            tokens={tokens}
+          />
         </>
       )}
 
-      {/* -- Seção 3b: Prontidão para deploy (pré-requisitos antes de publicar) -- */}
-      {aiAgent && (
-        <DeployReadinessCard
-          readiness={readiness}
-          readinessMet={readinessMet}
-          onTabChange={onTabChange}
-          tokens={tokens}
-        />
+      {/* Degradação honesta (NFR-06): falhou o readiness → avisa, sem inventar */}
+      {!isLoading && !readiness && (
+        <p className="text-[13px]" style={{ color: tokens.textTertiary }}>
+          Não foi possível carregar o progresso agora — ele atualiza sozinho
+          quando você voltar a esta aba.
+        </p>
       )}
 
       {/* -- Seção 4: Ações rápidas (contextuais ao estado do projeto) -- */}
@@ -135,6 +159,7 @@ export function OverviewTab({
         hasAgent={!!aiAgent}
         hasWhatsAppConnection={project.hasWhatsAppConnection}
         status={status}
+        deployGate={deployGate}
         onTabChange={onTabChange}
         tokens={tokens}
       />

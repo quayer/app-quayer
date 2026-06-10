@@ -74,23 +74,20 @@ function clean(value: string): string | undefined {
  * AgentPersonaCard — wizard de persona (Passo A: voz + identidade; Passo B:
  * saudação + live preview + "Sugerir nova" determinístico).
  *
- * Pré-preenche de `value.persona`; submete `{ persona: { ... } }` (+ speechMode
- * opcional). Desabilitado enquanto o chat está streamando (`disabled`).
+ * Pré-preenche de `value.persona` com fallbacks da jornada-builder-v2 (FR-02/
+ * FR-05): nome cai para `value.project.name` e a saudação abre JÁ SUGERIDA
+ * (valor inicial via `suggestGreeting`, não placeholder) quando vazia. Submete
+ * `{ persona: { ... } }` (+ speechMode opcional). Passo obrigatório — sem
+ * dismiss (FR-20). Desabilitado enquanto o chat está streamando (`disabled`).
  */
 export function AgentPersonaCard({
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
   tokens,
 }: CardComponentProps<AgentPersonaPayload>) {
   const persona = value.persona
 
-  const [step, setStep] = React.useState<WizardStep>("voice")
-  const [name, setName] = React.useState(persona.name ?? "")
-  const [tone, setTone] = React.useState(persona.tone ?? "")
-  const [style, setStyle] = React.useState(persona.style ?? "")
-  const [greeting, setGreeting] = React.useState(persona.greeting ?? "")
   // `persona.speechMode` is the OPTIONAL G7 field. Read it defensively from the
   // opaque persona object so this card stays green whether or not the Integrate
   // coupled change (personaStateSchema.speechMode) has landed yet — the payload
@@ -99,8 +96,6 @@ export function AgentPersonaCard({
     const raw = (persona as { speechMode?: unknown }).speechMode
     return isSpeechMode(raw) ? raw : DEFAULT_SPEECH_MODE
   }, [persona])
-  const [speechMode, setSpeechMode] =
-    React.useState<SpeechMode>(initialSpeechMode)
 
   // Nicho derivado (read-only) do texto livre — mesmas entradas que o
   // keyword-suggestions lê. Apenas alimenta o template determinístico.
@@ -111,6 +106,30 @@ export function AgentPersonaCard({
         .join(" "),
     [value.project.objective, value.proposal.description],
   )
+
+  const [step, setStep] = React.useState<WizardStep>("voice")
+  // FR-02/FR-05 (jornada-builder-v2) — nunca abrir vazio o que o usuário já
+  // informou: o nome cai para `project.name` (texto livre) quando a persona
+  // ainda não tem nome próprio confirmado.
+  const [name, setName] = React.useState(
+    persona.name ?? value.project.name ?? "",
+  )
+  const [tone, setTone] = React.useState(persona.tone ?? "")
+  const [style, setStyle] = React.useState(persona.style ?? "")
+  // FR-05 — saudação SUGERIDA já preenchida como VALOR inicial (não placeholder)
+  // quando não há greeting persistido: o usuário edita por exceção. Usa o mesmo
+  // helper determinístico do botão "Sugerir nova".
+  const [greeting, setGreeting] = React.useState<string>(() => {
+    const persisted = persona.greeting ?? ""
+    if (persisted.trim().length > 0) return persisted
+    return suggestGreeting({
+      speechMode: initialSpeechMode,
+      businessName: persona.name ?? value.project.name,
+      niche,
+    })
+  })
+  const [speechMode, setSpeechMode] =
+    React.useState<SpeechMode>(initialSpeechMode)
 
   /** "Sugerir nova" — regera a saudação DETERMINÍSTICA a partir do contexto. */
   const suggestNewGreeting = React.useCallback(() => {
@@ -144,6 +163,7 @@ export function AgentPersonaCard({
   const canConfirm = Boolean(clean(name) || clean(greeting))
 
   // Footer actions differ per step: A navigates forward, B confirms + back.
+  // FR-20 (jornada-builder-v2) — passo OBRIGATÓRIO: sem "Agora não"/dismiss.
   const actions =
     step === "voice"
       ? [
@@ -154,16 +174,6 @@ export function AgentPersonaCard({
             icon: <ArrowRight className="h-3.5 w-3.5" />,
             disabled,
           },
-          ...(onDismiss
-            ? [
-                {
-                  label: "Agora não",
-                  onClick: onDismiss,
-                  variant: "secondary" as const,
-                  disabled,
-                },
-              ]
-            : []),
         ]
       : [
           {

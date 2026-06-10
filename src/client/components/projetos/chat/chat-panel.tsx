@@ -10,6 +10,7 @@ import { MessageInput } from "@/client/components/ds/message-input"
 import { ActiveStepCard } from "./active-step-card"
 import { EmptyState, MessageBubble, StreamingBubble } from "./message-bubbles"
 import { useChatStream } from "./use-chat-stream"
+import { parseBuilderState } from "@/server/ai-module/builder/cards/builder-state"
 
 import type { ChatMessage } from "../types"
 
@@ -59,11 +60,26 @@ export function ChatPanel({
     readiness,
     stableSubmitCard,
     handleCardDismiss,
+    reopenedCardKey,
+    reopenCard,
+    closeReopenedCard,
     handleSubmit,
     handleRetry,
   } = useChatStream({ projectId, initialMessages, onMessagesChange })
 
   const isEmpty = messages.length === 0 && !streamingText && !error
+
+  // Prefill do ToolSelectionCard inline (reabrir mostra a decisão atual, não os
+  // recommended). Deriva do builderState carregado junto do readiness.
+  const toolSelectionPrefill = React.useMemo(() => {
+    const candidate = (readiness as { builderState?: unknown } | undefined)
+      ?.builderState
+    const parsed = parseBuilderState(candidate)
+    return {
+      selectedCapabilityKeys: parsed.selectedCapabilityKeys ?? [],
+      selectedToolKeys: parsed.selectedToolKeys ?? [],
+    }
+  }, [readiness])
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -86,6 +102,7 @@ export function ChatPanel({
                 onDraft={setInput}
                 onSubmitCard={stableSubmitCard}
                 isStreaming={isStreaming}
+                toolSelectionPrefill={toolSelectionPrefill}
               />
             ))}
 
@@ -97,6 +114,7 @@ export function ChatPanel({
                 tokens={tokens}
                 onDraft={setInput}
                 onSubmitCard={stableSubmitCard}
+                toolSelectionPrefill={toolSelectionPrefill}
               />
             )}
 
@@ -135,13 +153,19 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* ───── Pinned active-step card (driven by readiness) ───── */}
+      {/* ───── Pinned active-step card (driven by readiness) ─────
+          FR-17: o mesmo slot hospeda cards REABERTOS via "Ajustar" do resumo
+          (reopenCard); a reabertura substitui o card do passo ativo até fechar
+          (silencioso) ou re-submeter com sucesso. */}
       <ActiveStepCard
         projectId={projectId}
         readiness={readiness}
         disabled={isStreaming}
         onSubmit={stableSubmitCard}
         onDismiss={handleCardDismiss}
+        reopenedCardKey={reopenedCardKey}
+        onAdjust={reopenCard}
+        onCloseReopened={closeReopenedCard}
         tokens={tokens}
       />
 

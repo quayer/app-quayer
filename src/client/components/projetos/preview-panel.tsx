@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Lock } from "lucide-react"
+import { toast } from "sonner"
 import {
   Tabs,
   TabsList,
@@ -48,7 +49,9 @@ export function PreviewPanel({
   // Tabs desbloqueadas para fallback e renderização de conteúdo
   const unlockedTabs = useMemo(() => tabs.filter((t) => !t.locked), [tabs])
 
-  // Fallback: se a URL aponta para tab bloqueada ou inexistente → overview
+  // Fallback de DEEP-LINK: se a URL (?tab=) aponta para tab bloqueada ou
+  // inexistente → overview. Cliques nunca caem aqui — tab travada não dispara
+  // onTabChange; o clique mostra o motivo via toast/title (FR-20).
   const safeActiveTab: PreviewTab = useMemo(() => {
     const found = tabs.find((t) => t.value === activeTab)
     if (!found || found.locked) return "overview"
@@ -103,11 +106,18 @@ export function PreviewPanel({
           >
             {tabs.map((tab) =>
               tab.locked ? (
+                // Travada porém CLICÁVEL: o clique explica o porquê (toast +
+                // title) em vez de não fazer nada / cair na overview (FR-20).
+                // O motivo vem do registry (gate único `canOpenDeploy` para a
+                // tab Publicar; regra `requiresAgent` para as demais).
                 <button
                   key={tab.value}
                   type="button"
-                  disabled
-                  title="Disponível após o Builder criar o agente"
+                  aria-disabled="true"
+                  title={tab.lockedReason ?? undefined}
+                  onClick={() => {
+                    if (tab.lockedReason) toast.info(tab.lockedReason)
+                  }}
                   className="inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium cursor-not-allowed select-none"
                   style={{ color: tokens.textTertiary, opacity: 0.55 }}
                 >

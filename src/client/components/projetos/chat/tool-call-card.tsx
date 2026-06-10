@@ -46,6 +46,7 @@ export function ToolCallCard({
   isStreaming = false,
   onDraft,
   onSubmitCard,
+  toolSelectionPrefill,
 }: {
   toolName: string
   args: unknown
@@ -62,6 +63,12 @@ export function ToolCallCard({
    *  so the deterministic confirmation sentinel flips (instead of posting free
    *  text, which never advanced the journey). */
   onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
+  /** Seleção persistida no builderState — reabre o picker com a decisão atual
+   *  em vez dos recommended. */
+  toolSelectionPrefill?: {
+    selectedCapabilityKeys: string[]
+    selectedToolKeys: string[]
+  }
 }) {
   if (toolName === "propose_agent_creation" && !streaming) {
     const proposal = getAgentProposal(args, result)
@@ -225,6 +232,8 @@ export function ToolCallCard({
           tokens={tokens}
           onSubmitCard={onSubmitCard}
           disabled={isStreaming}
+          selectedCapabilityKeys={toolSelectionPrefill?.selectedCapabilityKeys}
+          selectedToolKeys={toolSelectionPrefill?.selectedToolKeys}
         />
       )
     }

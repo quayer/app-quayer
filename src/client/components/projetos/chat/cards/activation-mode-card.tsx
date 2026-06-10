@@ -14,6 +14,14 @@
  * The four modes mirror `prisma/schema.prisma AIAgentConfig.activationMode`:
  *   all | all_except_blacklist | keyword_trigger | whitelist_only
  *
+ * Jornada-builder-v2 (FR-14, parcial): quando o modo selecionado é
+ * `all_except_blacklist`, a edição de contatos em silêncio renderiza INLINE
+ * (módulo compartilhado `./silenced-contacts/contact-rows.tsx`). No confirmar,
+ * havendo a prop OPCIONAL `onSubmitCard`, o card submete `activation_mode` e —
+ * se houver contatos preenchidos — encadeia `silenced_contacts` na sequência.
+ * Fallback retro-compatível: sem `onSubmitCard`, submete só `activation_mode`
+ * via `onSubmit` (o step-engine ainda apresenta o passo de silêncio depois).
+ *
  * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md (card catalog).
  */
 
@@ -25,7 +33,11 @@ import type {
 } from "@/server/ai-module/builder/cards/card-submit.schemas"
 import { CardShell } from "./card-shell"
 import { suggestKeywordsForProject } from "./keyword-suggestions"
-import type { CardComponentProps } from "./types"
+import {
+  SilencedContactRowsFields,
+  useSilencedContactRows,
+} from "./silenced-contacts/contact-rows"
+import type { CardComponentProps, CardKey } from "./types"
 
 /**
  * The submit payload this card produces. Mirrors `activationModePayloadSchema`
@@ -121,16 +133,30 @@ function normalizeKeywords(keywords: readonly string[]): string[] {
   return out
 }
 
+/** Props do card — contrato base + o submit multi-card OPCIONAL (FR-14). */
+export interface ActivationModeCardProps
+  extends CardComponentProps<ActivationModeCardPayload> {
+  /**
+   * Submit por cardKey (FR-14): permite encadear `silenced_contacts` logo após
+   * `activation_mode` quando o usuário preencheu contatos inline. OPCIONAL e
+   * retro-compatível — sem a prop, o confirmar usa só `onSubmit` (1 cardKey).
+   */
+  onSubmitCard?: (cardKey: CardKey, payload: Record<string, unknown>) => void
+}
+
 /**
  * ActivationModeCard — radio over the four activation modes; the keyword chip
- * editor appears only for `keyword_trigger`. Submits `{ mode, keywords }`.
+ * editor appears only for `keyword_trigger`; the silenced-contacts editor
+ * appears inline only for `all_except_blacklist`. Submits `{ mode, keywords }`
+ * (+ chained `silenced_contacts` via `onSubmitCard` when contacts were filled).
  */
 export function ActivationModeCard({
   value,
   disabled = false,
   onSubmit,
+  onSubmitCard,
   tokens,
-}: CardComponentProps<ActivationModeCardPayload>) {
+}: ActivationModeCardProps) {
   const initialMode = React.useMemo<ActivationModeValue>(() => {
     const persisted = value.activation.mode
     return persisted && isActivationMode(persisted) ? persisted : DEFAULT_MODE
@@ -170,6 +196,12 @@ export function ActivationModeCard({
   )
 
   const isKeywordMode = mode === "keyword_trigger"
+  const isBlacklistMode = mode === "all_except_blacklist"
+
+  // FR-14 — editor inline de contatos em silêncio (módulo compartilhado com o
+  // silenced-contacts-card). Hook SEMPRE chamado (Rules of Hooks); a UI só
+  // renderiza no modo "todos exceto bloqueados".
+  const contactsEditor = useSilencedContactRows(value)
 
   // Sugestões de keyword derivadas do TEXTO LIVRE do projeto (helper PURO).
   // value.project / value.proposal são lidos read-only — sem mutação de state.
@@ -195,17 +227,47 @@ export function ActivationModeCard({
   }, [])
 
   const handleConfirm = React.useCallback(() => {
-    onSubmit({
+    const activationPayload: ActivationModeCardPayload = {
       mode,
       // Keywords only matter for keyword_trigger; send [] otherwise so the
       // server doesn't carry stale triggers for a non-keyword mode.
       keywords: isKeywordMode ? normalizeKeywords(keywords) : [],
-    })
-  }, [isKeywordMode, keywords, mode, onSubmit])
+    }
 
-  // Block confirm if keyword mode is selected but no keyword was provided.
+    // FR-14 — modo "todos exceto bloqueados": valida os contatos inline (aborta
+    // com erro inline em telefone inválido) e, havendo `onSubmitCard`, encadeia
+    // o submit de `silenced_contacts` quando o usuário preencheu alguém. Lista
+    // vazia NÃO é submetida — dá para preencher depois (o passo opcional segue
+    // disponível na jornada).
+    if (isBlacklistMode) {
+      const contacts = contactsEditor.buildContacts()
+      if (contacts === null) return
+      if (onSubmitCard) {
+        onSubmitCard("activation_mode", { ...activationPayload })
+        if (contacts.length > 0) {
+          onSubmitCard("silenced_contacts", { contacts, acknowledged: true })
+        }
+        return
+      }
+    }
+
+    onSubmit(activationPayload)
+  }, [
+    contactsEditor,
+    isBlacklistMode,
+    isKeywordMode,
+    keywords,
+    mode,
+    onSubmit,
+    onSubmitCard,
+  ])
+
+  // Block confirm if keyword mode is selected but no keyword was provided, or
+  // if the inline silenced-contacts editor carries an invalid phone.
   const confirmDisabled =
-    disabled || (isKeywordMode && normalizeKeywords(keywords).length === 0)
+    disabled ||
+    (isKeywordMode && normalizeKeywords(keywords).length === 0) ||
+    (isBlacklistMode && contactsEditor.hasInvalidPhone)
 
   // Render de um modo (radio) — compartilhado entre os comuns e os avançados
   // para manter EXATAMENTE o mesmo visual/comportamento de seleção dos 4.
@@ -300,6 +362,33 @@ export function ActivationModeCard({
           </div>
         )}
       </div>
+
+      {/* FR-14 — contatos em silêncio vivem DENTRO do ajuste de ativação,
+          só no modo "todos exceto bloqueados". Preencher é opcional. */}
+      {isBlacklistMode && (
+        <div className="mt-4">
+          <p
+            className="text-[12px] font-medium"
+            style={{ color: tokens.textPrimary }}
+          >
+            Contatos em silêncio
+          </p>
+          <p
+            className="mt-1 text-[11px] leading-relaxed"
+            style={{ color: tokens.textTertiary }}
+          >
+            Pessoas que o agente nunca responde (sócio, fornecedor, família).
+            É opcional — você pode preencher agora ou deixar para depois.
+          </p>
+          <div className="mt-2">
+            <SilencedContactRowsFields
+              editor={contactsEditor}
+              disabled={disabled}
+              tokens={tokens}
+            />
+          </div>
+        </div>
+      )}
 
       {isKeywordMode && (
         <div className="mt-4">

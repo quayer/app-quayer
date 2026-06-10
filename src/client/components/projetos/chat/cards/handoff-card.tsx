@@ -250,7 +250,6 @@ export function HandoffCard({
   value,
   disabled = false,
   onSubmit,
-  onDismiss,
   tokens,
 }: CardComponentProps<HandoffPayload>) {
   const handoff = value.handoff
@@ -502,6 +501,8 @@ export function HandoffCard({
       title="Passagem para humano"
       reason="Defina como o agente passa o atendimento para uma pessoa: quem recebe, o que perguntar antes e se também marca na agenda."
       tokens={tokens}
+      // FR-20 (jornada-builder-v2) — passo OBRIGATÓRIO: sem "Agora não"/dismiss.
+      // Quem não quer handoff escolhe o modo "Só conversa" e confirma.
       actions={[
         {
           label: "Confirmar",
@@ -510,16 +511,6 @@ export function HandoffCard({
           icon: <Check className="h-3.5 w-3.5" />,
           disabled: !canConfirm,
         },
-        ...(onDismiss
-          ? ([
-              {
-                label: "Agora não",
-                onClick: onDismiss,
-                variant: "secondary" as const,
-                disabled,
-              },
-            ] as const)
-          : []),
       ]}
     >
       <div className="flex flex-col gap-5">

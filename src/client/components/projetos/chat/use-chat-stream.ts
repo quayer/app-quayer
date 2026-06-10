@@ -213,6 +213,22 @@ export function useChatStream({
     refetchReadinessRef.current = refetchReadiness
   }, [refetchReadiness])
 
+  // ── Reopen de card confirmado (FR-17 — jornada-builder-v2) ─────
+  // "Ajustar" no resumo final reabre o card da seção correspondente no slot
+  // pinado, pré-preenchido com o builderState ATUAL (a confirmação já era true
+  // e continua true após o re-submit — o step-engine não muda). Fechar a
+  // reabertura NUNCA envia mensagem ao chat: só limpa este estado.
+  const [reopenedCardKey, setReopenedCardKey] =
+    React.useState<CardKey | null>(null)
+
+  const reopenCard = React.useCallback((cardKey: CardKey) => {
+    setReopenedCardKey(cardKey)
+  }, [])
+
+  const closeReopenedCard = React.useCallback(() => {
+    setReopenedCardKey(null)
+  }, [])
+
   /**
    * Consume the SSE body of a chat/card POST: drains the reader, accumulates
    * text + tool calls, and on `finish` pushes the assistant message + flips the
@@ -369,6 +385,9 @@ export function useChatStream({
           },
         )
         await consumeStream(response, "Falha ao enviar card")
+        // FR-17: um re-submit bem-sucedido do card REABERTO fecha a reabertura
+        // (submits de outros cards não tocam nela; erro mantém aberto p/ retry).
+        setReopenedCardKey((prev) => (prev === cardKey ? null : prev))
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro desconhecido")
       } finally {
@@ -485,6 +504,9 @@ export function useChatStream({
     readiness,
     stableSubmitCard,
     handleCardDismiss,
+    reopenedCardKey,
+    reopenCard,
+    closeReopenedCard,
     handleSubmit,
     handleRetry,
   }

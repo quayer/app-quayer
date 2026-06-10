@@ -14,4 +14,6 @@ export interface Stage {
 export interface ReadinessItem {
   label: string
   met: boolean
+  /** CTA/mensagem do blocker real (só presente quando `met === false`). */
+  detail?: string
 }
