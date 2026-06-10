@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/client/components/ui/button"
 import { Fingerprint, Loader2 } from "lucide-react"
 import { startAuthentication } from "@simplewebauthn/browser"
-import { useToast } from "@/client/hooks/use-toast"
+import { toast } from "sonner"
 import { ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
 
 interface PasskeyButtonProps {
@@ -22,15 +22,12 @@ export function PasskeyButton({
   className
 }: PasskeyButtonProps) {
   const router = useRouter()
-  const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
 
   const checkBrowserSupport = (): boolean => {
     if (typeof window === 'undefined' || !window.PublicKeyCredential) {
-      toast({
-        title: "Navegador não suportado",
+      toast.error("Navegador não suportado", {
         description: "Use Chrome, Edge, Safari ou Firefox atualizado.",
-        variant: "destructive",
       })
       return false
     }
@@ -40,7 +37,7 @@ export function PasskeyButton({
   const handlePasskeyLogin = async () => {
     if (!checkBrowserSupport()) return
     if (!email) {
-      toast({ title: "Email necessário", description: "Digite seu email primeiro.", variant: "destructive" })
+      toast.error("Email necessário", { description: "Digite seu email primeiro." })
       return
     }
 
@@ -84,21 +81,19 @@ export function PasskeyButton({
       const verifyData = await verifyRes.json()
       const result = verifyData.data ?? verifyData
 
-      toast({ title: "Login realizado!", description: "Autenticado com Passkey." })
+      toast.success("Login realizado!", { description: "Autenticado com Passkey." })
 
       router.push('/')
     } catch (err: unknown) {
       const error = err as { name?: string; message?: string }
       if (error?.name === 'NotAllowedError') {
-        toast({ title: "Cancelado", description: "Autenticação com passkey cancelada.", variant: "destructive" })
+        toast.error("Cancelado", { description: "Autenticação com passkey cancelada." })
       } else if (error?.message?.includes('Nenhuma passkey registrada')) {
-        toast({
-          title: "Sem Passkey cadastrada",
+        toast.error("Sem Passkey cadastrada", {
           description: "Faça login com email e cadastre uma Passkey em Configurações > Segurança.",
-          variant: "destructive",
         })
       } else {
-        toast({ title: "Erro", description: error.message || "Erro na autenticação com Passkey", variant: "destructive" })
+        toast.error("Erro", { description: error.message || "Erro na autenticação com Passkey" })
       }
     } finally {
       setIsLoading(false)
@@ -107,7 +102,7 @@ export function PasskeyButton({
 
   const handlePasskeyRegister = async () => {
     // Registration is handled in settings/passkey-manager.tsx
-    toast({ title: "Registrar Passkey", description: "Acesse Configurações > Segurança para registrar uma Passkey." })
+    toast("Registrar Passkey", { description: "Acesse Configurações > Segurança para registrar uma Passkey." })
   }
 
   return (

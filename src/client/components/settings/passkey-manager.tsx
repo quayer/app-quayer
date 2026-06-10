@@ -18,7 +18,7 @@ import {
   AlertCircle
 } from "lucide-react"
 // Removido: import { api } - usando fetch com credentials: include
-import { useToast } from "@/client/hooks/use-toast"
+import { toast } from "sonner"
 import { ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
 import { startRegistration } from "@simplewebauthn/browser"
 import { useAuth } from "@/lib/auth/auth-provider"
@@ -50,7 +50,6 @@ interface PasskeyManagerProps {
 
 export function PasskeyManager({ className }: PasskeyManagerProps) {
   const { user } = useAuth()
-  const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(true)
   const [isRegistering, setIsRegistering] = useState(false)
   const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([])
@@ -107,10 +106,8 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
 
   const checkBrowserSupport = (): boolean => {
     if (!window.PublicKeyCredential) {
-      toast({
-        title: "Navegador não suportado",
+      toast.error("Navegador não suportado", {
         description: "Seu navegador não suporta autenticação com Passkey. Use Chrome, Edge, Safari ou Firefox atualizado.",
-        variant: "destructive",
       })
       return false
     }
@@ -121,11 +118,7 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
   const handleRegisterPasskey = async () => {
     if (!checkBrowserSupport()) return
     if (!user?.email) {
-      toast({
-        title: "Erro",
-        description: "Usuário não autenticado",
-        variant: "destructive",
-      })
+      toast.error("Erro", { description: "Usuário não autenticado" })
       return
     }
 
@@ -143,10 +136,8 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
 
       if (!optionsResponse.ok) {
         const errorData = await optionsResponse.json().catch(() => ({}))
-        toast({
-          title: "Erro",
+        toast.error("Erro", {
           description: errorData.error || errorData.message || 'Erro ao obter opções de registro',
-          variant: "destructive",
         })
         return
       }
@@ -174,8 +165,7 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
         throw new Error(errorData.error || errorData.message || 'Registro falhou')
       }
 
-      toast({
-        title: "Passkey registrada!",
+      toast.success("Passkey registrada!", {
         description: "Você agora pode fazer login usando sua Passkey",
       })
 
@@ -186,22 +176,16 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
       console.error('[Passkey Register] Error:', error)
 
       if (error.name === 'NotAllowedError') {
-        toast({
-          title: "Registro cancelado",
+        toast.error("Registro cancelado", {
           description: "Você cancelou o registro da Passkey",
-          variant: "destructive",
         })
       } else if (error.name === 'InvalidStateError') {
-        toast({
-          title: "Passkey já registrada",
+        toast.error("Passkey já registrada", {
           description: "Este dispositivo já possui uma Passkey registrada para esta conta",
-          variant: "destructive",
         })
       } else {
-        toast({
-          title: "Erro no registro",
+        toast.error("Erro no registro", {
           description: error.message || "Não foi possível registrar a Passkey",
-          variant: "destructive",
         })
       }
     } finally {
@@ -230,17 +214,14 @@ export function PasskeyManager({ className }: PasskeyManagerProps) {
         throw new Error(errorData.error || errorData.message || 'Erro ao remover passkey')
       }
 
-      toast({
-        title: "Passkey removida",
+      toast.success("Passkey removida", {
         description: "A Passkey foi removida com sucesso",
       })
 
       await loadPasskeys()
     } catch (error: any) {
-      toast({
-        title: "Erro",
+      toast.error("Erro", {
         description: error.message || "Não foi possível remover a Passkey",
-        variant: "destructive",
       })
     } finally {
       setIsDeleting(false)

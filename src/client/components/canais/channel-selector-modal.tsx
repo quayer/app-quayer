@@ -2,7 +2,8 @@
 
 /**
  * ChannelSelectorModal — pop-up org-level para conectar um novo canal pela
- * página /canais. Substitui o CreateInstanceModal legado (quebrado).
+ * página /canais. Substitui o CreateInstanceModal legado (quebrado, deletado
+ * em Jun/2026 — ver docs/deprecated/WHATSAPP_LEGACY_UI.md).
  *
  * Mostra 3 opções mutuamente exclusivas:
  *   1. WhatsApp Business (UAZAPI) — instrução + CTA de QR Code.

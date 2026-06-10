@@ -28,8 +28,8 @@
  * runtime Next) não arrasta o caminho de envio inteiro pro bundle.
  */
 
-import type { ConnectionOptions } from 'bullmq'
 import { Queue, Worker } from 'bullmq'
+import { parseRedisUrl } from '@/lib/redis/parse-redis-url'
 import {
   withTrace,
   getTraceId,
@@ -73,19 +73,6 @@ export type OutboundRetryJobPayload = OutboundRequest & { attempt: number }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** parseRedisUrl — idêntico ao de jobs/index.ts e source-enrich.queue (cópia
- *  local para a fila não acoplar ao registry / evitar imports circulares). */
-function parseRedisUrl(url: string): ConnectionOptions {
-  const u = new URL(url)
-  const password = u.password ? decodeURIComponent(u.password) : undefined
-  return {
-    host: u.hostname,
-    port: Number(u.port || '6379'),
-    password,
-    db: u.pathname && u.pathname !== '/' ? Number(u.pathname.slice(1)) : undefined,
-  }
-}
 
 /**
  * Reconstrói as deps reais e re-executa `sendAgentResponse`. Usado tanto pelo

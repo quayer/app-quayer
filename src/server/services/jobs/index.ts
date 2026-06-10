@@ -22,9 +22,9 @@
  * de outros apps no mesmo cluster.
  */
 
-import type { ConnectionOptions } from 'bullmq'
 import { Queue, Worker } from 'bullmq'
 
+import { parseRedisUrl } from '@/lib/redis/parse-redis-url'
 import { database } from '@/server/services/database'
 
 import {
@@ -84,24 +84,6 @@ export const REGISTERED_JOBS = {
     registerWorker: registerOutboundRetryWorker,
   },
 } as const
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function parseRedisUrl(url: string): ConnectionOptions {
-  // BullMQ aceita objeto IORedis-compatível. Repassar como url-string em
-  // alguns wrappers cobra parse manual; usamos o IORedis options diretamente
-  // para evitar surpresas.
-  const u = new URL(url)
-  const password = u.password ? decodeURIComponent(u.password) : undefined
-  return {
-    host: u.hostname,
-    port: Number(u.port || '6379'),
-    password,
-    db: u.pathname && u.pathname !== '/' ? Number(u.pathname.slice(1)) : undefined,
-  }
-}
 
 /**
  * Registra o worker que processa a fila session-close.

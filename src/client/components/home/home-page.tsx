@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Bot, Sparkles } from "lucide-react"
 import { Logo } from "@/client/components/ds/logo"
 import { MessageInput } from "@/client/components/ds/message-input"
-import { EmptyState } from "@/client/components/custom/empty-state"
+import { EmptyState } from "@/client/components/ds/empty-state"
 import {
   PROJECT_STATUS_LABEL,
   getProjectStatusStyle,
