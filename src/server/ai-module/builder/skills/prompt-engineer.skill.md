@@ -29,7 +29,7 @@ O modo e selecionado automaticamente com base na quantidade de informacao fornec
 
 ## 2. Geracao
 
-Usa a tool `generate_prompt_anatomy` para gerar o system prompt com duas secoes:
+Usa a tool `generate_prompt_anatomy` para gerar o system prompt. A tool injeta automaticamente os dados ja coletados nos cards (ferramentas selecionadas, horario, handoff, ativacao, identidade) e gera as 10 secoes obrigatorias da anatomia canonica (Papel, Objetivo, Tom de voz, Comunicacao, Ferramentas, Regras criticas, Fluxo, Gatilhos/Fallback, Limitacoes, Encerramento). Dados ainda nao coletados recebem defaults marcados com [REVISAR] — avise o criador para revisa-los. A organizacao conceitual:
 
 ### Secoes visiveis (editaveis pelo criador)
 - Identidade e nome do agente
@@ -54,7 +54,7 @@ Quatro validadores executados em sequencia:
 3. **Ambiguity Validator**: Detecta instrucoes vagas, contraditorias ou ambiguas que podem causar comportamento inconsistente.
 4. **Journey Validator**: Simula jornadas de usuario (saudacao, pergunta fora do escopo, tentativa de jailbreak) e verifica se o prompt lida com cada cenario.
 
-Se algum validador falhar, o Builder aplica auto-correcao e re-executa. Maximo de 2 rounds de auto-correcao. Apos isso, reporta os problemas ao criador para intervencao manual.
+A validacao roda DENTRO de `generate_prompt_anatomy`, com 1 retry automatico alimentando os erros do validador de volta ao gerador (maximo 2 tentativas). O resultado FINAL volta em `validation`. Se `validation.pass` for false, NUNCA reporte o prompt como pronto/aprovado: liste as pendencias de `validation.issues` ao criador e corrija (ex.: via `edit_prompt_section`) antes de propor a criacao.
 
 ## 4. Teste
 

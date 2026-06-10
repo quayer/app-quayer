@@ -19,12 +19,22 @@ import type { BuilderToolExecutionContext } from './create-agent.tool'
 // Section catalogue
 // ---------------------------------------------------------------------------
 
+// Covers the full 10-section anatomy (templates/prompt-section-checklist.ts)
+// plus legacy headings ("Regras de conduta", "Formato de resposta") so old
+// prompts remain editable.
 const SECTION_HEADING: Record<string, RegExp> = {
-  papel:      /^#\s+(papel|identidade|persona)\b/im,
-  objetivo:   /^#\s+(objetivo|goal|miss[aã]o)\b/im,
-  regras:     /^#\s+(regras?(\s+de\s+conduta|\s+cr[ií]ticas?)?|rules?)\b/im,
-  limitacoes: /^#\s+(limita[cç][oõ]es?|restri[cç][oõ]es?|restrictions?)\b/im,
-  formato:    /^#\s+(formato(\s+de\s+resposta)?|format(o)?)\b/im,
+  papel:        /^#\s+(papel|identidade|persona)\b/im,
+  objetivo:     /^#\s+(objetivo|goal|miss[aã]o)\b/im,
+  tom:          /^#\s+tom(\s+de\s+voz)?\b/im,
+  comunicacao:  /^#\s+comunica[cç][aã]o\b/im,
+  ferramentas:  /^#\s+(ferramentas?|tools?)\b/im,
+  regras:       /^#\s+(regras?(\s+de\s+conduta|\s+cr[ií]ticas?)?|rules?)\b/im,
+  fluxo:        /^#\s+(fluxo|etapas?)\b/im,
+  gatilhos:     /^#\s+(gatilhos?|fallback)\b/im,
+  limitacoes:   /^#\s+(limita[cç][oõ]es?|restri[cç][oõ]es?|restrictions?)\b/im,
+  encerramento: /^#\s+encerramento\b/im,
+  horario:      /^#\s+hor[aá]rio(\s+de\s+atendimento)?\b/im,
+  formato:      /^#\s+(formato(\s+de\s+resposta)?|format(o)?)\b/im,
 }
 
 export type PromptSection = keyof typeof SECTION_HEADING
@@ -78,7 +88,10 @@ function applyRemove(body: string, target: string): string {
 
 export const editPromptSectionInputSchema = z.object({
   agentId:     z.string().uuid().describe('AIAgentConfig.id to edit'),
-  section:     z.enum(['papel', 'objetivo', 'regras', 'limitacoes', 'formato']),
+  section:     z.enum([
+    'papel', 'objetivo', 'tom', 'comunicacao', 'ferramentas', 'regras',
+    'fluxo', 'gatilhos', 'limitacoes', 'encerramento', 'horario', 'formato',
+  ]),
   operation:   z.enum(['add', 'replace', 'remove'])
     .describe('"add" appends; "replace" overwrites section body; "remove" deletes lines containing `target`'),
   content:     z.string().max(10_000).optional().describe('Required for add/replace'),
@@ -96,7 +109,8 @@ export function editPromptSectionTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: true },
     tool: tool({
       description:
-        'Edits a single named section (papel/objetivo/regras/limitacoes/formato) of the active ' +
+        'Edits a single named section (papel/objetivo/tom/comunicacao/ferramentas/regras/fluxo/' +
+        'gatilhos/limitacoes/encerramento/horario/formato) of the active ' +
         'agent prompt without touching the others. Operations: add/replace/remove. ' +
         'Runs full validation after the edit — errors block persistence. ' +
         'Success creates a new draft BuilderPromptVersion (not published).',

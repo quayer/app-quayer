@@ -34,9 +34,12 @@ export {
   promptWriterSubAgent,
   promptWriterInputSchema,
   parsePromptSections,
+  builderStateToPromptWriterContext,
+  promptWriterBuilderContextSchema,
   type PromptWriterInput,
   type PromptWriterOutput,
   type PromptWriterSections,
+  type PromptWriterBuilderContext,
 } from './prompt-writer'
 
 export {

@@ -32,9 +32,17 @@
  */
 
 import type { ValidationIssue, ValidationResult } from './index'
+import {
+  REQUIRED_PROMPT_SECTIONS,
+  OPTIONAL_PROMPT_SECTIONS,
+} from '../templates/prompt-section-checklist'
 
 // ---------------------------------------------------------------------------
 // Section definitions
+//
+// SINGLE SOURCE OF TRUTH: `templates/prompt-section-checklist.ts` — shared with
+// the PromptWriter template so the writer always generates every section this
+// validator demands. Do NOT add sections here; add them to the checklist.
 // ---------------------------------------------------------------------------
 
 interface SectionDef {
@@ -44,105 +52,24 @@ interface SectionDef {
   severity: 'error' | 'warning'
 }
 
-const REQUIRED_SECTIONS: SectionDef[] = [
-  {
-    name: 'Papel/Identidade',
-    description:
-      'Define who the agent is and what it does NOT do (responsabilidades + limites)',
-    pattern:
-      /\b(papel|persona|identity|identidade|voc[eê]\s+[eé]\s+[ao]?\s*\w+|voc[eê]\s+atua\s+como)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Objetivo/Goal/Missão',
-    description: 'Main goal + success criteria or end condition',
-    pattern: /\b(objetivo|goal|miss[aã]o|prop[oó]sito|finalidade)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Tom de voz',
-    description:
-      'Personality, style, and language rules — must include prohibited phrases or examples (bom/ruim)',
-    pattern:
-      /\b(tom(\s+de\s+voz)?|persona(lidade)?|estilo\s+de\s+comunica[cç][aã]o|exemplo\s+(bom|ruim|correto|errado|certo)|linguagem\s+(proibida?|informal|formal)|evite?\s+dizer|n[aã]o\s+use\s+(express[oõ]es?|frases?))\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Comunicação operacional',
-    description:
-      'Operational limits: one question per turn, max message length, retry protocol',
-    pattern:
-      /\b(uma\s+pergunta\s+por\s+vez|one\s+question\s+at\s+a\s+time|m[aá]ximo\s+de\s+\d\s+linhas?|at\s+most\s+\d\s+lines?|no\s+m[aá]ximo\s+\d\s+linhas?|retry\s+progressivo|tentativa\s+\d|reformule?\s+a\s+pergunta)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Ferramentas/Tools',
-    description: 'Tool list with "when to use" — at minimum a list of tool names',
-    pattern:
-      /\b(ferramentas?|tools?|integra[cç][oõ]es?|quando\s+usar|use\s+when|use\s+this\s+tool)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Regras críticas / SEMPRE-NUNCA',
-    description: 'Explicit SEMPRE/NUNCA or ALWAYS/NEVER rules section',
-    pattern:
-      /\b(regras?\s+cr[ií]ticas?|sempre\b.{0,60}\bnunca\b|nunca\b.{0,60}\bsempre\b|always\b.{0,60}\bnever\b|never\b.{0,60}\balways\b)\b/is,
-    severity: 'error',
-  },
-  {
-    name: 'Fluxo/Etapas',
-    description:
-      'Numbered stages (linear flow) OR explicit think steps (dynamic flow) — both forms are valid',
-    pattern:
-      /\b(etapa\s+\d|passo\s+\d|step\s+\d|fase\s+\d|execute\s+.think.|think\s+before|<think>|>> TOOL:\s*think)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Gatilhos/Fallback',
-    description:
-      'Expected signals (acceptance synonyms, out-of-scope) + retry protocol',
-    pattern:
-      /\b(gatilho|trigger|retry|tenta\s+novamente|reformule?|fallback|fora\s+do\s+escopo|out.of.scope|n[aã]o\s+entendeu?)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Limitações/Restrições',
-    description:
-      'Scope boundaries — can be a dedicated section OR embedded NUNCA/PROIBIDO/fora-do-escopo markers throughout the prompt',
-    pattern:
-      /\b(limita[cç][oõ]es?|restri[cç][oõ]es?|n[aã]o\s+(responde|trata|atende|faz)\b|fora\s+do\s+escopo|o\s+que\s+n[aã]o|out\s+of\s+scope|proibido|PROIBIDO)\b/i,
-    severity: 'error',
-  },
-  {
-    name: 'Encerramento/FIM',
-    description: 'Explicit end condition on every branch (FIM, PARAR, END, handoff)',
-    pattern:
-      /\b(fim\b|parar\b|encerr[ae]|stop\b|end\s+conversation|transfer[eê]ncia\s+conclu[ií]da)\b/i,
-    severity: 'error',
-  },
-]
+const REQUIRED_SECTIONS: SectionDef[] = REQUIRED_PROMPT_SECTIONS.map(
+  (section) => ({
+    name: section.name,
+    description: section.description,
+    pattern: section.detectPattern,
+    severity: 'error' as const,
+  }),
+)
 
-// ---------------------------------------------------------------------------
 // Optional — detected but only warns
-// ---------------------------------------------------------------------------
-
-const OPTIONAL_SECTIONS: SectionDef[] = [
-  {
-    name: 'Horário de atendimento',
-    description:
-      'Operating hours definition — recommended when agent has a `humano` transfer tool',
-    pattern:
-      /\b(hor[aá]rio\s+de\s+(atendimento|funcionamento)|atendemos?\s+(das?|de)\s+\d|fora\s+do\s+hor[aá]rio|\$now\.hour|\$now\.weekday)\b/i,
-    severity: 'warning',
-  },
-  {
-    name: 'Resumo de handoff',
-    description: 'Structured summary format sent to human agent before transfer',
-    pattern:
-      /\b(resumo|handoff|transfer[eê]ncia|antes\s+de\s+acionar|antes\s+de\s+chamar).{0,200}(nome|cnpj|interesse|objetivo)\b/is,
-    severity: 'warning',
-  },
-]
+const OPTIONAL_SECTIONS: SectionDef[] = OPTIONAL_PROMPT_SECTIONS.map(
+  (section) => ({
+    name: section.name,
+    description: section.description,
+    pattern: section.detectPattern,
+    severity: 'warning' as const,
+  }),
+)
 
 // ---------------------------------------------------------------------------
 // Capability profiles — replaces the false Tipo1/Tipo2 binary

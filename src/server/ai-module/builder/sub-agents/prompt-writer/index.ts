@@ -21,3 +21,10 @@ export {
   buildUserMessage,
   type BuildUserMessageInput,
 } from './prompt-writer.prompt'
+
+export {
+  promptWriterBuilderContextSchema,
+  builderStateToPromptWriterContext,
+  formatBuilderContextBlock,
+  type PromptWriterBuilderContext,
+} from './builder-context'

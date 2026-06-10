@@ -4,10 +4,11 @@
  * These tests mock `runLLMSubAgent` so the suite never hits a real LLM
  * provider. The focus is:
  *   - Input validation (Zod → INVALID_INPUT)
- *   - Successful section parsing on well-formed markdown
+ *   - Successful section parsing on well-formed 10-section markdown
  *   - Failure surface for missing sections (PARSE_ERROR)
  *   - Forwarding of upstream LLM errors (TIMEOUT, etc.)
- *   - Deterministic helpers: buildUserMessage + parsePromptSections
+ *   - Deterministic helpers: buildUserMessage + parsePromptSections +
+ *     builderStateToPromptWriterContext (builderState → writer context)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -30,6 +31,9 @@ import {
   type PromptWriterInput,
 } from './prompt-writer.sub-agent'
 import { buildUserMessage, SUB_LLM_SYSTEM } from './prompt-writer.prompt'
+import { builderStateToPromptWriterContext } from './builder-context'
+import { parseBuilderState } from '../../cards/builder-state'
+import { REQUIRED_PROMPT_SECTIONS } from '../../templates/prompt-section-checklist'
 
 const mockedRunLLM = vi.mocked(runLLMSubAgent)
 
@@ -50,23 +54,41 @@ const baseInput: PromptWriterInput = {
   attachedTools: [],
 }
 
+/** Well-formed 10-section markdown matching the canonical template headings. */
 const wellFormedMarkdown = `# Papel
-Você é um atendente virtual da Barbearia X.
+Você é um atendente virtual da Barbearia X. Você NÃO faz diagnósticos capilares.
 
 # Objetivo
-Agendar cortes e responder dúvidas rápidas.
+Agendar cortes e responder dúvidas rápidas. Missão cumprida quando o corte está agendado.
 
-# Regras de conduta
-- Seja educado e direto.
-- Use emojis com moderação.
-- Confirme horário antes de finalizar.
+# Tom de voz
+Tom descontraído e jovem. Exemplo bom: "Bora marcar?" Exemplo ruim: "Prezado cliente". Linguagem proibida: "Infelizmente".
+
+# Comunicação
+Uma pergunta por vez. No máximo 3 linhas por mensagem. Retry progressivo: reformule a pergunta antes de escalar.
+
+# Ferramentas
+- listar_servicos: quando o cliente perguntar preços
+- criar_agendamento: quando o cliente confirmar horário
+
+# Regras críticas
+SEMPRE confirmar nome antes de agendar.
+NUNCA inventar horários disponíveis.
+
+# Fluxo de atendimento
+Etapa 1: saudar o cliente
+Etapa 2: identificar o serviço desejado
+Etapa 3: confirmar dados e agendar
+
+# Gatilhos e fallback
+Fora do escopo: reclamações → acionar humano. Fallback: se não entender, reformule a pergunta.
 
 # Limitações
 - Não prometa preços sem confirmar.
 - Se a pergunta fugir do escopo, use transfer_to_human.
 
-# Formato de resposta
-Respostas curtas, em pt-BR, até 3 frases, tom informal e acolhedor.`
+# Encerramento
+Após agendar, confirmar e encerrar: "Até logo!" FIM.`
 
 const llmSuccess = (text: string): SubAgentResult<RunLLMSubAgentSuccess> => ({
   success: true,
@@ -83,7 +105,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('promptWriterSubAgent.run — happy path', () => {
-  it('parses a well-formed 5-section markdown into typed sections', async () => {
+  it('parses a well-formed 10-section markdown into typed sections', async () => {
     mockedRunLLM.mockResolvedValueOnce(llmSuccess(wellFormedMarkdown))
 
     const result = await promptWriterSubAgent.run(baseInput, baseContext)
@@ -94,9 +116,16 @@ describe('promptWriterSubAgent.run — happy path', () => {
     expect(result.data.prompt).toBe(wellFormedMarkdown)
     expect(result.data.sections.papel).toContain('Barbearia X')
     expect(result.data.sections.objetivo).toContain('Agendar cortes')
-    expect(result.data.sections.regras).toContain('- Seja educado')
+    expect(result.data.sections.tom).toContain('Exemplo bom')
+    expect(result.data.sections.comunicacao).toContain('Uma pergunta por vez')
+    expect(result.data.sections.ferramentas).toContain('listar_servicos')
+    expect(result.data.sections.regras).toContain('SEMPRE confirmar')
+    expect(result.data.sections.fluxo).toContain('Etapa 1')
+    expect(result.data.sections.gatilhos).toContain('Fallback')
     expect(result.data.sections.limitacoes).toContain('transfer_to_human')
-    expect(result.data.sections.formato).toContain('pt-BR')
+    expect(result.data.sections.encerramento).toContain('FIM')
+    // Legacy frontend alias — mirrors comunicacao.
+    expect(result.data.sections.formato).toBe(result.data.sections.comunicacao)
   })
 
   it('calls runLLMSubAgent with the canonical system prompt and temperature', async () => {
@@ -108,7 +137,7 @@ describe('promptWriterSubAgent.run — happy path', () => {
     const [params] = mockedRunLLM.mock.calls[0]
     expect(params.systemPrompt).toBe(SUB_LLM_SYSTEM)
     expect(params.temperature).toBe(0.4)
-    expect(params.maxOutputTokens).toBe(2000)
+    expect(params.maxOutputTokens).toBe(3000)
     expect(params.timeoutMs).toBe(60_000)
   })
 })
@@ -119,9 +148,9 @@ describe('promptWriterSubAgent.run — happy path', () => {
 
 describe('promptWriterSubAgent.run — parse error', () => {
   it('returns PARSE_ERROR when a required section header is missing', async () => {
-    // Drop the "Formato de resposta" section entirely.
+    // Drop the "Encerramento" section entirely.
     const truncated = wellFormedMarkdown.replace(
-      /# Formato de resposta[\s\S]*$/,
+      /# Encerramento[\s\S]*$/,
       '',
     )
     mockedRunLLM.mockResolvedValueOnce(llmSuccess(truncated))
@@ -131,23 +160,14 @@ describe('promptWriterSubAgent.run — parse error', () => {
     expect(result.success).toBe(false)
     if (result.success) return
     expect(result.code).toBe('PARSE_ERROR')
-    expect(result.error).toMatch(/Formato de resposta/i)
+    expect(result.error).toMatch(/Encerramento/i)
   })
 
   it('returns PARSE_ERROR when a section body is empty', async () => {
-    const emptyBody = `# Papel
-Atendente.
-
-# Objetivo
-Agendar.
-
-# Regras de conduta
-- Seja educado.
-
-# Limitações
-
-# Formato de resposta
-Curto e direto.`
+    const emptyBody = wellFormedMarkdown.replace(
+      /# Limitações[\s\S]*?(?=# Encerramento)/,
+      '# Limitações\n\n',
+    )
 
     mockedRunLLM.mockResolvedValueOnce(llmSuccess(emptyBody))
 
@@ -226,9 +246,18 @@ describe('promptWriterSubAgent.run — input validation', () => {
     expect(result.code).toBe('INVALID_INPUT')
   })
 
-  it('schema accepts well-formed input', () => {
-    const parsed = promptWriterInputSchema.safeParse(baseInput)
-    expect(parsed.success).toBe(true)
+  it('schema accepts well-formed input, with optional builderContext + validatorFeedback', () => {
+    expect(promptWriterInputSchema.safeParse(baseInput).success).toBe(true)
+    expect(
+      promptWriterInputSchema.safeParse({
+        ...baseInput,
+        builderContext: {
+          hours: { preset: 'comercial', outOfHours: 'silent' },
+          handoff: { mode: 'roleta', steps: ['nome'], memberNames: ['Ana'] },
+        },
+        validatorFeedback: ['Seção obrigatória ausente: Encerramento/FIM'],
+      }).success,
+    ).toBe(true)
   })
 })
 
@@ -283,21 +312,6 @@ describe('buildUserMessage — niche insights', () => {
     expect(msg).toContain('Nunca diagnosticar por texto sem exame presencial')
   })
 
-  it('omits empty insight categories', () => {
-    const msg = buildUserMessage({
-      brief: 'Clínica veterinária que atende cães e gatos 24h.',
-      nicho: 'veterinaria',
-      objetivo: 'Agendar consultas de emergência',
-      nicheInsights: {
-        regulations: ['Resolução CFMV 1138/2016'],
-      },
-    })
-
-    expect(msg).toContain('### Regulamentações')
-    expect(msg).not.toContain('### Alertas')
-    expect(msg).not.toContain('### Vocabulário do setor')
-  })
-
   it('skips the insights block entirely when nicheInsights is omitted', () => {
     const msg = buildUserMessage({
       brief: 'Clínica veterinária que atende cães e gatos 24h.',
@@ -310,63 +324,187 @@ describe('buildUserMessage — niche insights', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 7. parsePromptSections unit tests
+// 7. Builder context + validator feedback blocks
+// ---------------------------------------------------------------------------
+
+describe('buildUserMessage — builder context & validator feedback', () => {
+  it('marks every group as NÃO INFORMADO when no builderContext is given', () => {
+    const msg = buildUserMessage({
+      brief: 'Atendimento de barbearia X, agenda cortes.',
+      nicho: 'barbearia',
+      objetivo: 'Qualificar leads e agendar corte',
+    })
+
+    expect(msg).toContain('## Dados já coletados do negócio')
+    expect(msg).toContain('Horário de atendimento: NÃO INFORMADO')
+    expect(msg).toContain('Handoff para humanos: NÃO INFORMADO')
+    expect(msg).toContain('[REVISAR]')
+  })
+
+  it('renders collected hours, handoff and activation data', () => {
+    const msg = buildUserMessage({
+      brief: 'Atendimento de barbearia X, agenda cortes.',
+      nicho: 'barbearia',
+      objetivo: 'Qualificar leads e agendar corte',
+      builderContext: {
+        persona: { name: 'Lia', tone: 'descontraído' },
+        hours: { preset: 'comercial', outOfHours: 'silent' },
+        handoff: {
+          mode: 'roleta',
+          steps: ['Perguntar o nome', 'Perguntar o serviço'],
+          memberNames: ['Ana', 'Beto'],
+          openingMessage: 'Oi {nome}, sou da equipe!',
+        },
+        activation: { mode: 'keyword', keywords: ['corte', 'agendar'] },
+      },
+    })
+
+    expect(msg).toContain('Nome: Lia')
+    expect(msg).toContain('Preset: comercial')
+    expect(msg).toContain('ficar em silêncio até reabrir')
+    expect(msg).toContain('modo roleta')
+    expect(msg).toContain('Perguntar o nome')
+    expect(msg).toContain('Time: Ana, Beto')
+    expect(msg).toContain('Oi {nome}, sou da equipe!')
+    expect(msg).toContain('Palavras-chave de ativação: corte, agendar')
+    expect(msg).not.toContain('Horário de atendimento: NÃO INFORMADO')
+  })
+
+  it('appends the validator-correction block only on retry', () => {
+    const base = {
+      brief: 'Atendimento de barbearia X, agenda cortes.',
+      nicho: 'barbearia',
+      objetivo: 'Qualificar leads e agendar corte',
+    }
+
+    expect(buildUserMessage(base)).not.toContain(
+      '## Correções exigidas pelo validador',
+    )
+
+    const retry = buildUserMessage({
+      ...base,
+      validatorFeedback: ['Seção obrigatória ausente: Encerramento/FIM'],
+    })
+    expect(retry).toContain('## Correções exigidas pelo validador')
+    expect(retry).toContain('Seção obrigatória ausente: Encerramento/FIM')
+  })
+
+  it('system prompt instructs all 10 checklist sections', () => {
+    for (const section of REQUIRED_PROMPT_SECTIONS) {
+      expect(SUB_LLM_SYSTEM).toContain(`# ${section.heading}`)
+      expect(SUB_LLM_SYSTEM).toContain(`{{${section.key}}}`)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. builderStateToPromptWriterContext (builderState → writer context)
+// ---------------------------------------------------------------------------
+
+describe('builderStateToPromptWriterContext', () => {
+  it('collapses an empty state to all-undefined groups', () => {
+    const context = builderStateToPromptWriterContext(parseBuilderState(null))
+    expect(context.persona).toBeUndefined()
+    expect(context.services).toBeUndefined()
+    expect(context.hours).toBeUndefined()
+    expect(context.handoff).toBeUndefined()
+    expect(context.activation).toBeUndefined()
+  })
+
+  it('projects collected card data (hours, handoff members, activation)', () => {
+    const state = parseBuilderState({
+      persona: { name: 'Lia', tone: 'informal' },
+      services: { offered: ['corte'], notOffered: ['coloração'] },
+      hours: { preset: 'comercial', timezone: 'America/Sao_Paulo' },
+      handoff: {
+        mode: 'roleta',
+        alsoSchedule: true,
+        steps: ['nome'],
+        members: [
+          { name: 'Ana', position: 0 },
+          { userId: 'u2', position: 1 }, // sem nome → filtrado de memberNames
+        ],
+        openingMessage: 'Oi!',
+      },
+      activation: { mode: 'always', keywords: [] },
+    })
+
+    const context = builderStateToPromptWriterContext(state)
+    expect(context.persona?.name).toBe('Lia')
+    expect(context.services?.notOffered).toEqual(['coloração'])
+    expect(context.hours?.preset).toBe('comercial')
+    expect(context.handoff?.mode).toBe('roleta')
+    expect(context.handoff?.alsoSchedule).toBe(true)
+    expect(context.handoff?.memberNames).toEqual(['Ana'])
+    expect(context.handoff?.openingMessage).toBe('Oi!')
+    expect(context.activation?.mode).toBe('always')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 9. parsePromptSections unit tests
 // ---------------------------------------------------------------------------
 
 describe('parsePromptSections', () => {
-  it('extracts all five sections from valid markdown', () => {
+  it('extracts all ten sections from valid markdown', () => {
     const { sections, missing } = parsePromptSections(wellFormedMarkdown)
 
     expect(missing).toEqual([])
     expect(sections.papel).toContain('Barbearia X')
-    expect(sections.objetivo).toContain('Agendar cortes')
-    expect(sections.regras).toContain('Seja educado')
-    expect(sections.limitacoes).toContain('transfer_to_human')
-    expect(sections.formato).toContain('pt-BR')
+    expect(sections.tom).toContain('Exemplo bom')
+    expect(sections.comunicacao).toContain('Uma pergunta por vez')
+    expect(sections.ferramentas).toContain('criar_agendamento')
+    expect(sections.fluxo).toContain('Etapa 3')
+    expect(sections.gatilhos).toContain('acionar humano')
+    expect(sections.encerramento).toContain('FIM')
+    expect(sections.formato).toBe(sections.comunicacao)
   })
 
   it('accepts deeper header levels (##, ###)', () => {
     const withDeepHeaders = wellFormedMarkdown
       .replace(/^# Papel/m, '## Papel')
-      .replace(/^# Formato de resposta/m, '### Formato de resposta')
+      .replace(/^# Encerramento/m, '### Encerramento')
 
     const { missing } = parsePromptSections(withDeepHeaders)
     expect(missing).toEqual([])
   })
 
-  it('accepts "Limitacoes" without diacritics (tolerant regex)', () => {
-    const noDiacritic = wellFormedMarkdown.replace(
-      /# Limitações/,
-      '# Limitacoes',
-    )
-    const { missing } = parsePromptSections(noDiacritic)
+  it('accepts "Limitacoes" without diacritics and heading suffixes (tolerant regex)', () => {
+    const variants = wellFormedMarkdown
+      .replace(/# Limitações/, '# Limitacoes')
+      .replace(/# Comunicação/, '# Comunicacao operacional')
+      .replace(/# Regras críticas/, '# Regras de conduta')
+    const { missing } = parsePromptSections(variants)
     expect(missing).toEqual([])
   })
 
+  it('does not leak an extra optional section into the previous body', () => {
+    const withHours = wellFormedMarkdown.replace(
+      /# Encerramento/,
+      '# Horário de atendimento\nAtendemos das 9 às 18.\n\n# Encerramento',
+    )
+    const { sections, missing } = parsePromptSections(withHours)
+    expect(missing).toEqual([])
+    expect(sections.limitacoes).not.toContain('Atendemos das 9 às 18')
+  })
+
   it('reports missing section names when a header is absent', () => {
-    const dropped = wellFormedMarkdown.replace(/# Regras de conduta[\s\S]*?(?=#)/, '')
+    const dropped = wellFormedMarkdown.replace(
+      /# Regras críticas[\s\S]*?(?=#)/,
+      '',
+    )
 
     const { missing } = parsePromptSections(dropped)
-    expect(missing).toContain('Regras de conduta')
+    expect(missing).toContain('Regras críticas')
   })
 
   it('reports missing section when body is empty after trim', () => {
-    const emptyBody = `# Papel
-A.
-
-# Objetivo
-B.
-
-# Regras de conduta
-- ok
-
-# Limitações
-
-
-# Formato de resposta
-C.`
+    const emptyBody = wellFormedMarkdown.replace(
+      /# Gatilhos e fallback[\s\S]*?(?=# Limitações)/,
+      '# Gatilhos e fallback\n\n\n',
+    )
 
     const { missing } = parsePromptSections(emptyBody)
-    expect(missing).toContain('Limitações')
+    expect(missing).toContain('Gatilhos e fallback')
   })
 })

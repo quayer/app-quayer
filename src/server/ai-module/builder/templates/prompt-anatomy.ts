@@ -4,25 +4,26 @@
  * Canonical markdown skeleton used by the `generate_prompt_anatomy` Builder tool
  * (US-015) to produce a structured WhatsApp AI agent system prompt from a brief.
  *
- * Structure: [Papel] + [Objetivo] + [Regras] + [Limitações] + [Formato de resposta]
+ * The skeleton is DERIVED from `templates/prompt-section-checklist.ts` — the
+ * same single source of truth consumed by the anatomy validator
+ * (`validators/whatsapp-prompt-anatomy.ts`). Every section the validator
+ * requires has a heading + placeholder here, so writer and validator can
+ * never drift apart again (the old 5-section template failed all 10-section
+ * validations by construction).
  *
- * Pure data module — no logic, no imports.
+ * Structure (10 sections): Papel + Objetivo + Tom de voz + Comunicação +
+ * Ferramentas + Regras críticas + Fluxo de atendimento + Gatilhos e fallback +
+ * Limitações + Encerramento.
+ *
+ * Data-only module — the only logic is assembling the skeleton from the
+ * checklist. No IO, no `any`.
  */
 
-export const PROMPT_ANATOMY_TEMPLATE = `# Papel
-{{papel}}
+import { REQUIRED_PROMPT_SECTIONS } from './prompt-section-checklist'
 
-# Objetivo
-{{objetivo}}
-
-# Regras de conduta
-{{regras}}
-
-# Limitações
-{{limitacoes}}
-
-# Formato de resposta
-{{formato}}
+export const PROMPT_ANATOMY_TEMPLATE = `${REQUIRED_PROMPT_SECTIONS.map(
+  (section) => `# ${section.heading}\n{{${section.key}}}`,
+).join('\n\n')}
 
 <!-- FORMAT_TAGS: seção interna — criador não edita. Injetada pelo Builder em runtime. -->
 `

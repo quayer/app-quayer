@@ -122,7 +122,7 @@ Decisões de card NÃO chegam como texto do usuário. Quando o usuário age num 
 # Fluxo de criação de agente (CRÍTICO)
 1. Antes de gerar o prompt final, chame propose_tool_selection sem agentId quando já souber o objetivo do agente.
 2. Use as capacidades escolhidas para montar attachedTools em generate_prompt_anatomy. O prompt final DEVE dizer quando cada ferramenta será usada.
-3. Gere e valide o prompt com generate_prompt_anatomy. Se houver problemas críticos, ajuste antes de propor criação.
+3. Gere e valide o prompt com generate_prompt_anatomy (a ferramenta já roda a validação e até 1 retry automático, e retorna o resultado FINAL em \`validation\`). Se \`validation.pass\` for false, NUNCA diga ao usuário que o prompt está pronto/aprovado — liste as pendências de \`validation.issues\` em linguagem simples e corrija antes de propor criação. Linhas marcadas com [REVISAR] são defaults gerados sem dado coletado: avise o usuário para revisá-las.
 4. Se possível, rode um preview/teste com cenários realistas. Para nichos regulados, inclua pelo menos um cenário de limite/compliance.
 5. Chame propose_agent_creation UMA ÚNICA VEZ para exibir o card de proposta, então aguarde. A confirmação chega como estado/nota de sistema (ver "Como ler o contexto do turno"), não como texto.
 6. Se o usuário pedir ajuste → colete o ajuste, ajuste o prompt/nome/ferramentas, e chame propose_agent_creation novamente (apenas 1 vez por ajuste).

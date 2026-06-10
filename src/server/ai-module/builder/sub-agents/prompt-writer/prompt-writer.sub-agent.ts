@@ -1,20 +1,27 @@
 /**
  * PromptWriter Sub-Agent
  *
- * Specialized sub-agent that generates a 5-section WhatsApp AI agent system
- * prompt (Papel + Objetivo + Regras de conduta + Limitações + Formato de
- * resposta) from a structured brief.
+ * Specialized sub-agent that generates the FULL 10-section WhatsApp AI agent
+ * system prompt (Papel + Objetivo + Tom de voz + Comunicação + Ferramentas +
+ * Regras críticas + Fluxo + Gatilhos + Limitações + Encerramento) from a
+ * structured brief plus the data already collected via Builder cards.
  *
- * Extracted from the inline logic in `tools/generate-prompt-anatomy.tool.ts`
- * so the same capability can be reused by other Builder tools and composed
- * with sibling sub-agents (NicheResearcher, Validator).
+ * Section list is the shared checklist (`templates/prompt-section-checklist.ts`)
+ * — the SAME source consumed by the anatomy validator, so writer output and
+ * validator expectations can never drift.
  *
  * Behavior:
  *   1. Zod-validate input (returns INVALID_INPUT on failure).
  *   2. Call the sub-LLM via `runLLMSubAgent` (60s timeout, temp 0.4).
- *   3. Parse the returned markdown into five named sections; missing or
+ *   3. Parse the returned markdown into the ten named sections; missing or
  *      empty sections yield PARSE_ERROR.
  *   4. On LLM failure, forward the original error/code untouched.
+ *
+ * Input extras (all optional):
+ *   - `builderContext`    — builderState projection (tools, hours, handoff,
+ *     activation, identity, services) so the prompt reflects collected data.
+ *   - `validatorFeedback` — error list from a failed validation; used by the
+ *     caller's self-correction retry (see generate-prompt-anatomy.tool.ts).
  *
  * Flags: isReadOnly=true, isConcurrencySafe=false (LLM quota contention).
  */
@@ -22,6 +29,11 @@
 import { z } from 'zod'
 import { runLLMSubAgent } from '../base'
 import type { SubAgent, SubAgentContext, SubAgentResult } from '../types'
+import {
+  REQUIRED_PROMPT_SECTIONS,
+  type PromptSectionKey,
+} from '../../templates/prompt-section-checklist'
+import { promptWriterBuilderContextSchema } from './builder-context'
 import { SUB_LLM_SYSTEM, buildUserMessage } from './prompt-writer.prompt'
 
 // ---------------------------------------------------------------------------
@@ -41,6 +53,10 @@ export const promptWriterInputSchema = z.object({
       warnings: z.array(z.string()).optional(),
     })
     .optional(),
+  /** builderState projection — data already collected via cards. */
+  builderContext: promptWriterBuilderContextSchema.optional(),
+  /** Validator errors from a failed attempt (self-correction retry). */
+  validatorFeedback: z.array(z.string()).max(30).optional(),
 })
 
 export type PromptWriterInput = z.infer<typeof promptWriterInputSchema>
@@ -49,11 +65,13 @@ export type PromptWriterInput = z.infer<typeof promptWriterInputSchema>
 // Output shape
 // ---------------------------------------------------------------------------
 
-export interface PromptWriterSections {
-  papel: string
-  objetivo: string
-  regras: string
-  limitacoes: string
+/**
+ * One string per canonical checklist section, PLUS the legacy `formato` alias
+ * (mirror of `comunicacao`) kept so the frontend prompt-insights tab — which
+ * narrows on the old 5-key shape — keeps rendering without changes.
+ */
+export type PromptWriterSections = Record<PromptSectionKey, string> & {
+  /** @deprecated alias of `comunicacao` — legacy frontend compatibility. */
   formato: string
 }
 
@@ -68,46 +86,42 @@ export interface PromptWriterOutput {
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical section headers (case-insensitive). Order matters — this is also
- * the order we emit in the parsed output. The regex accepts any leading `#`
- * depth (`#`, `##`, `###`) and trailing whitespace, matching the template
- * in `templates/prompt-anatomy.ts`.
+ * Canonical section headers, derived from the shared checklist. Order matters
+ * — this is also the order we emit in the parsed output. Each `headingPattern`
+ * accepts any leading `#` depth (`#`, `##`, `###`), missing diacritics, and
+ * heading-suffix variations (e.g. "Comunicação operacional").
  */
 const SECTION_HEADERS: ReadonlyArray<{
-  key: keyof PromptWriterSections
+  key: PromptSectionKey
   label: string
   regex: RegExp
-}> = [
-  { key: 'papel', label: 'Papel', regex: /^#+\s+Papel\s*$/i },
-  { key: 'objetivo', label: 'Objetivo', regex: /^#+\s+Objetivo\s*$/i },
-  {
-    key: 'regras',
-    label: 'Regras de conduta',
-    regex: /^#+\s+Regras de conduta\s*$/i,
-  },
-  {
-    key: 'limitacoes',
-    label: 'Limitações',
-    regex: /^#+\s+Limita[cç][oõ]es\s*$/i,
-  },
-  {
-    key: 'formato',
-    label: 'Formato de resposta',
-    regex: /^#+\s+Formato de resposta\s*$/i,
-  },
-]
+}> = REQUIRED_PROMPT_SECTIONS.map((section) => ({
+  key: section.key,
+  label: section.heading,
+  regex: section.headingPattern,
+}))
 
 export interface ParseResult {
   sections: PromptWriterSections
   missing: string[]
 }
 
+function emptySections(): PromptWriterSections {
+  const out = {} as Record<PromptSectionKey, string>
+  for (const header of SECTION_HEADERS) out[header.key] = ''
+  return { ...out, formato: '' }
+}
+
 /**
- * Parse a markdown prompt into the five canonical sections.
+ * Parse a markdown prompt into the ten canonical sections.
  *
  * Scans line-by-line for the known headers in any order, captures the content
  * between each header and the next (or EOF), and trims each block. Sections
  * that are missing or whose body is empty after trim end up in `missing`.
+ *
+ * Extra headers the writer is allowed to add (e.g. "# Horário de atendimento")
+ * also terminate the previous section's body, so optional sections never leak
+ * into a canonical one.
  *
  * Returns a `ParseResult`; never throws. Callers decide how to treat a
  * non-empty `missing` list (we map it to PARSE_ERROR in `run`).
@@ -116,26 +130,29 @@ export function parsePromptSections(markdown: string): ParseResult {
   const lines = markdown.split(/\r?\n/)
 
   // Find every header line in document order along with its section key.
+  // Unknown headings (key=null) still act as section terminators.
   interface HeaderHit {
     lineIndex: number
-    key: keyof PromptWriterSections
+    key: PromptSectionKey | null
   }
   const hits: HeaderHit[] = []
+  const anyHeading = /^#{1,3}\s+\S/
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    for (const header of SECTION_HEADERS) {
-      if (header.regex.test(line)) {
-        hits.push({ lineIndex: i, key: header.key })
-        break
-      }
+    const known = SECTION_HEADERS.find((header) => header.regex.test(line))
+    if (known) {
+      hits.push({ lineIndex: i, key: known.key })
+    } else if (anyHeading.test(line)) {
+      hits.push({ lineIndex: i, key: null })
     }
   }
 
-  const captured: Partial<PromptWriterSections> = {}
+  const captured: Partial<Record<PromptSectionKey, string>> = {}
 
   for (let i = 0; i < hits.length; i++) {
     const hit = hits[i]
+    if (hit.key === null) continue
     const start = hit.lineIndex + 1
     const end = i + 1 < hits.length ? hits[i + 1].lineIndex : lines.length
     const body = lines.slice(start, end).join('\n').trim()
@@ -147,13 +164,7 @@ export function parsePromptSections(markdown: string): ParseResult {
   }
 
   const missing: string[] = []
-  const sections: PromptWriterSections = {
-    papel: '',
-    objetivo: '',
-    regras: '',
-    limitacoes: '',
-    formato: '',
-  }
+  const sections = emptySections()
 
   for (const header of SECTION_HEADERS) {
     const body = captured[header.key]
@@ -163,6 +174,9 @@ export function parsePromptSections(markdown: string): ParseResult {
       sections[header.key] = body
     }
   }
+
+  // Legacy alias — keep the frontend's 5-key narrowing intact.
+  sections.formato = sections.comunicacao
 
   return { sections, missing }
 }
@@ -204,13 +218,13 @@ export const promptWriterSubAgent: SubAgent<
 
     const validInput = parsed.data
 
-    // 2. Sub-LLM call
+    // 2. Sub-LLM call (10 sections ≈ 700 palavras → ~3000 output tokens)
     const llm = await runLLMSubAgent(
       {
         systemPrompt: SUB_LLM_SYSTEM,
         userMessage: buildUserMessage(validInput),
         temperature: 0.4,
-        maxOutputTokens: 2000,
+        maxOutputTokens: 3000,
         timeoutMs: 60_000,
       },
       context,
