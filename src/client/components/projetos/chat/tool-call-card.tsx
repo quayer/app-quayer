@@ -1,0 +1,286 @@
+"use client"
+
+/**
+ * ToolCallCard — renders an inline tool-call entry in the conversation: the
+ * legacy interactive cards (agent proposal / tool selection / channel / QR) or
+ * the compact status chip fallback. Structural extraction from chat-panel.tsx
+ * (no behavior change).
+ */
+
+import * as React from "react"
+import {
+  Check,
+  ImageIcon,
+  Keyboard,
+  Languages,
+  Loader2,
+  Mic,
+  Pencil,
+  Sparkles,
+  Timer,
+  Volume2,
+} from "lucide-react"
+
+import { Button } from "@/client/components/ui/button"
+import { useAppTokens } from "@/client/hooks/use-app-tokens"
+
+import type { CardKey } from "./cards/types"
+import {
+  getAgentProposal,
+  getChannelSelection,
+  getQrResult,
+  getToolSelection,
+  toolLabel,
+  toolResultSummary,
+} from "./tool-call-helpers"
+import { ToolSelectionCard } from "./tool-selection-card"
+import { ChannelSelectionCard } from "./channel-selection-card"
+import { WhatsAppQrCard } from "./whatsapp-qr-card"
+
+export function ToolCallCard({
+  toolName,
+  args,
+  result,
+  tokens,
+  streaming = false,
+  isStreaming = false,
+  onDraft,
+  onSubmitCard,
+}: {
+  toolName: string
+  args: unknown
+  result?: unknown
+  tokens: ReturnType<typeof useAppTokens>["tokens"]
+  /** This specific tool call is still streaming (no result yet). */
+  streaming?: boolean
+  /** The chat as a whole is streaming — disables interactive card actions. */
+  isStreaming?: boolean
+  /** Pre-fill the composer (the "Ajustar" free-form draft path). */
+  onDraft: (content: string) => void
+  /** Card-action protocol submit — the 3 legacy inline cards
+   *  (agent_approval / tool_selection / channel) post their typed payload here
+   *  so the deterministic confirmation sentinel flips (instead of posting free
+   *  text, which never advanced the journey). */
+  onSubmitCard: (cardKey: CardKey, payload: Record<string, unknown>) => void
+}) {
+  if (toolName === "propose_agent_creation" && !streaming) {
+    const proposal = getAgentProposal(args, result)
+
+    return (
+      <div
+        className="max-w-[95%] rounded-lg border p-4"
+        style={{
+          backgroundColor: tokens.bgSurface,
+          borderColor: tokens.divider,
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
+            style={{
+              backgroundColor: tokens.brandSubtle,
+              color: tokens.brand,
+            }}
+          >
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p
+              className="text-[13px] font-semibold"
+              style={{ color: tokens.textPrimary }}
+            >
+              {proposal.name}
+            </p>
+            <p
+              className="mt-1 text-[13px] leading-relaxed"
+              style={{ color: tokens.textSecondary }}
+            >
+              {proposal.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {[
+            {
+              icon: ImageIcon,
+              title: "Mídia",
+              detail: "imagem, áudio, documento e vídeo",
+              state: "ativo",
+            },
+            {
+              icon: Timer,
+              title: "Buffer",
+              detail: "concatenação de mensagens",
+              state: "ativo",
+            },
+            {
+              icon: Keyboard,
+              title: "Digitando",
+              detail: "presença antes da resposta",
+              state: "ativo",
+            },
+            {
+              icon: Languages,
+              title: "Idioma",
+              detail: "detecção opcional",
+              state: "opcional",
+            },
+            {
+              icon: Volume2,
+              title: "Áudio",
+              detail: "callback com ElevenLabs",
+              state: "opcional",
+            },
+            {
+              icon: Mic,
+              title: "Custos",
+              detail: "leitura de mídia pode ser desligada",
+              state: "controle",
+            },
+          ].map((item) => {
+            const Icon = item.icon
+            return (
+              <div
+                key={item.title}
+                className="flex min-w-0 items-start gap-2 rounded-md border px-3 py-2"
+                style={{
+                  borderColor: tokens.divider,
+                  backgroundColor: tokens.bgBase,
+                }}
+              >
+                <Icon
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                  style={{ color: tokens.brand }}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="text-[12px] font-medium"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      {item.title}
+                    </span>
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        backgroundColor: tokens.brandSubtle,
+                        color: tokens.brandText,
+                      }}
+                    >
+                      {item.state}
+                    </span>
+                  </div>
+                  <p
+                    className="mt-0.5 text-[11px] leading-snug"
+                    style={{ color: tokens.textTertiary }}
+                  >
+                    {item.detail}
+                  </p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 gap-1.5 text-[12px]"
+            // Card-action protocol: flips the `agent_approval` sentinel so the
+            // meta-agent may proceed with create_agent. (Was: free-text onSend,
+            // which never advanced the deterministic journey.)
+            onClick={() =>
+              onSubmitCard("agent_approval", { action: "confirm" })
+            }
+            disabled={isStreaming}
+          >
+            <Check className="h-3.5 w-3.5" />
+            Criar agente
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-[12px]"
+            // Free-form draft path kept as-is: the user tweaks before confirming.
+            onClick={() => onDraft("Quero ajustar antes: ")}
+            disabled={isStreaming}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Ajustar
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolName === "propose_tool_selection" && !streaming) {
+    const selection = getToolSelection(result)
+    if (selection) {
+      return (
+        <ToolSelectionCard
+          selection={selection}
+          tokens={tokens}
+          onSubmitCard={onSubmitCard}
+          disabled={isStreaming}
+        />
+      )
+    }
+  }
+
+  if (toolName === "select_channel" && !streaming) {
+    const selection = getChannelSelection(result)
+    if (selection) {
+      return (
+        <ChannelSelectionCard
+          selection={selection}
+          tokens={tokens}
+          onSubmitCard={onSubmitCard}
+          disabled={isStreaming}
+        />
+      )
+    }
+  }
+
+  if (toolName === "create_whatsapp_instance" && !streaming) {
+    const qr = getQrResult(result)
+    if (qr) {
+      return <WhatsAppQrCard data={qr} tokens={tokens} />
+    }
+  }
+
+  const label = toolLabel(toolName)
+  const summary = result !== undefined ? toolResultSummary(result) : null
+  const hasError =
+    result !== null &&
+    typeof result === "object" &&
+    ((result as Record<string, unknown>).success === false ||
+      typeof (result as Record<string, unknown>).error === "string")
+
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px]"
+      style={{
+        backgroundColor: tokens.bgSurface,
+        border: `1px solid ${tokens.divider}`,
+        color: tokens.textSecondary,
+      }}
+    >
+      {streaming ? (
+        <Loader2 className="h-3 w-3 shrink-0 animate-spin" style={{ color: tokens.brand }} />
+      ) : hasError ? (
+        <span className="h-3 w-3 shrink-0 text-[10px]">✗</span>
+      ) : (
+        <span className="h-3 w-3 shrink-0 text-[10px]" style={{ color: tokens.brand }}>✓</span>
+      )}
+      <span style={{ color: tokens.textPrimary }}>{label}</span>
+      {summary && (
+        <span className="ml-1 truncate" style={{ color: hasError ? tokens.dangerText : tokens.textTertiary }}>
+          — {summary}
+        </span>
+      )}
+    </div>
+  )
+}
