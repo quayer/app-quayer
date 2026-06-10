@@ -6,6 +6,11 @@ test.describe.configure({ mode: 'serial' })
 test.describe('signup OTP happy path', () => {
   // @smoke — runs in PR fast lane via `npx playwright test --grep @smoke`
   test('signup via OTP happy path @smoke', async ({ page }) => {
+    // Homol roda com SIGNUP_ENABLED=false — sem form, o fluxo não existe lá.
+    test.skip(
+      process.env.E2E_SIGNUP_ENABLED === 'false',
+      'signup desabilitado neste ambiente (SIGNUP_ENABLED=false)',
+    )
     const email = generateTestEmail()
     const name = 'Test User ' + Math.random().toString(36).slice(2, 6)
 

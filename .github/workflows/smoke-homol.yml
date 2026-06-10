@@ -32,6 +32,8 @@ jobs:
         env:
           HOMOL_TEST_EMAIL: ${{ secrets.HOMOL_TEST_EMAIL }}
           HOMOL_TEST_PASSWORD: ${{ secrets.HOMOL_TEST_PASSWORD }}
+          # Homol roda com SIGNUP_ENABLED=false — specs de signup pulam (ver smoke-prod.spec.ts)
+          E2E_SIGNUP_ENABLED: 'false'
         run: npx playwright test --project=homol
 
       - name: Upload playwright report
