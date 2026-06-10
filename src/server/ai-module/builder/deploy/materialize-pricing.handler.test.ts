@@ -170,8 +170,8 @@ beforeEach(() => {
   }))
   mockPriceItemUpdate.mockResolvedValue({ id: 'updated' })
   mockPriceItemDelete.mockResolvedValue({ id: 'deleted' })
-  // Default: agente ainda não tem priceListId (link deve acontecer).
-  mockAgentFindFirst.mockResolvedValue({ priceListId: null })
+  // Default: agente ainda não tem priceListId (link deve acontecer) nem tools.
+  mockAgentFindFirst.mockResolvedValue({ priceListId: null, enabledTools: [] })
   mockAgentUpdate.mockResolvedValue({ id: AGENT_ID })
 
   // Default builderState: 1 item simples.
@@ -300,7 +300,7 @@ describe('materializePricing — M2 step', () => {
     it(
       'liga AIAgentConfig.priceListId = list.id quando o agente ainda não aponta para ela',
       async () => {
-        mockAgentFindFirst.mockResolvedValue({ priceListId: null })
+        mockAgentFindFirst.mockResolvedValue({ priceListId: null, enabledTools: [] })
         await materializePricing(baseContext())
         expect(mockAgentUpdate).toHaveBeenCalledTimes(1)
         const arg = mockAgentUpdate.mock.calls[0]?.[0] as {
@@ -325,9 +325,12 @@ describe('materializePricing — M2 step', () => {
     )
 
     it(
-      'NÃO re-liga quando o agente já aponta para a mesma list (idempotente)',
+      'NÃO re-liga quando o agente já aponta para a mesma list E get_pricing já está anexada (idempotente)',
       async () => {
-        mockAgentFindFirst.mockResolvedValue({ priceListId: LIST_ID })
+        mockAgentFindFirst.mockResolvedValue({
+          priceListId: LIST_ID,
+          enabledTools: ['get_pricing'],
+        })
         await materializePricing(baseContext())
         expect(mockAgentUpdate).not.toHaveBeenCalled()
       },
@@ -563,7 +566,10 @@ describe('materializePricing — M2 step', () => {
         // 2ª run: agora o DB já tem o item criado → vira UPDATE no-op (sem create).
         vi.clearAllMocks()
         mockPriceListUpsert.mockResolvedValue({ id: LIST_ID })
-        mockAgentFindFirst.mockResolvedValue({ priceListId: LIST_ID })
+        mockAgentFindFirst.mockResolvedValue({
+          priceListId: LIST_ID,
+          enabledTools: ['get_pricing'],
+        })
         mockPriceItemUpdate.mockResolvedValue({ id: 'item-corte' })
         mockReadBuilderStateByProject.mockResolvedValue(state)
         mockPriceItemFindMany.mockResolvedValue([
@@ -608,6 +614,71 @@ describe('materializePricing — M2 step', () => {
         expect(typeof result.deactivated).toBe('number')
       },
     )
+  })
+
+  describe('derivação de get_pricing/send_pricing em enabledTools (FR-09/FR-10)', () => {
+    it(
+      "ANEXA get_pricing quando há itens ativos E disclosureStyle!=='none' (no MESMO update do priceListId)",
+      async () => {
+        mockReadBuilderStateByProject.mockResolvedValue(
+          stateWithPricing({ items: [{ name: 'Corte', priceCents: 5000 }] }),
+        )
+        mockAgentFindFirst.mockResolvedValue({ priceListId: null, enabledTools: [] })
+        await materializePricing(baseContext())
+        expect(mockAgentUpdate).toHaveBeenCalledTimes(1)
+        const arg = mockAgentUpdate.mock.calls[0]?.[0] as {
+          data: { priceListId?: string; enabledTools?: { set: string[] } }
+        }
+        expect(arg.data.priceListId).toBe(LIST_ID)
+        expect(arg.data.enabledTools?.set).toContain('get_pricing')
+      },
+    )
+
+    it(
+      "REMOVE get_pricing E send_pricing quando disclosureStyle==='none' — preservando tools custom",
+      async () => {
+        mockReadBuilderStateByProject.mockResolvedValue(
+          stateWithPricing({
+            disclosureStyle: 'none',
+            items: [{ name: 'Corte', priceCents: 5000 }],
+          }),
+        )
+        mockAgentFindFirst.mockResolvedValue({
+          priceListId: LIST_ID,
+          enabledTools: ['minha_tool_custom', 'get_pricing', 'send_pricing'],
+        })
+        await materializePricing(baseContext())
+        const arg = mockAgentUpdate.mock.calls[0]?.[0] as {
+          data: { enabledTools?: { set: string[] } }
+        }
+        expect(arg.data.enabledTools?.set).toEqual(['minha_tool_custom'])
+      },
+    )
+
+    it('REMOVE get_pricing quando a lista está vazia (catálogo sem itens ativos)', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(stateWithPricing({ items: [] }))
+      mockAgentFindFirst.mockResolvedValue({
+        priceListId: LIST_ID,
+        enabledTools: ['get_pricing'],
+      })
+      await materializePricing(baseContext())
+      const arg = mockAgentUpdate.mock.calls[0]?.[0] as {
+        data: { enabledTools?: { set: string[] } }
+      }
+      expect(arg.data.enabledTools?.set).toEqual([])
+    })
+
+    it('IDEMPOTENTE: nada muda quando get_pricing já anexada e link já feito (zero UPDATE)', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithPricing({ items: [{ name: 'Corte', priceCents: 5000 }] }),
+      )
+      mockAgentFindFirst.mockResolvedValue({
+        priceListId: LIST_ID,
+        enabledTools: ['custom_x', 'get_pricing'],
+      })
+      await materializePricing(baseContext())
+      expect(mockAgentUpdate).not.toHaveBeenCalled()
+    })
   })
 
   describe('compensação no rollback (no-op self-contained)', () => {

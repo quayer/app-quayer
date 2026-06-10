@@ -10,6 +10,12 @@
  * dentro de um `$transaction` (match-by-name lowercase: update / create /
  * deactivate — NUNCA hard-delete).
  *
+ * FR-09/FR-10 (jornada-builder-v2): a tool `get_pricing` é DERIVADA aqui — itens
+ * ativos + disclosureStyle!=='none' → garante `get_pricing` em
+ * `AIAgentConfig.enabledTools`; 'none'/lista vazia → REMOVE `get_pricing` e
+ * `send_pricing` (set-merge via `enabled-tools-derivation`, preserva tools
+ * custom; mesmo UPDATE do priceListId — 1 escrita, idempotente).
+ *
  * Folha da saga (sem editar nada existente além dos couplings do orchestrator/
  * contract/rollback, feitos em outra fatia). Carrega o builderState LAZY via
  * `readBuilderStateByProject` + `parseBuilderState` (fail-open: nunca lança no
@@ -32,6 +38,10 @@ import {
   sanitizePricingItemsForRuntime,
   reconcilePricingItems,
 } from './pricing-reconcile'
+import {
+  derivePricingToolChanges,
+  reconcileEnabledTools,
+} from './enabled-tools-derivation'
 import type { DeployContext } from './deploy.contract'
 
 /** Estilos de divulgação válidos espelhando o card (G4). */
@@ -121,18 +131,41 @@ export async function materializePricing(
     select: { id: true },
   })
 
-  // 3. Liga a PriceList ao agente (org-scoped: o agente já foi validado como da org
-  //    via o project no orchestrator). Só escreve quando muda — idempotente.
+  // 3. Liga a PriceList ao agente E DERIVA a tool `get_pricing` (FR-09/FR-10):
+  //    itens ativos + disclosureStyle!=='none' → garante `get_pricing` em
+  //    enabledTools; 'none'/lista vazia → REMOVE `get_pricing` e `send_pricing`
+  //    (que ecoaria qualquer valor dito pelo LLM — perigosa sob "não falar
+  //    preços"). O set-merge PRESERVA tools custom/desconhecidas. Tudo num
+  //    ÚNICO update, só quando algo muda — idempotente. Org-scoped: o agente já
+  //    foi validado como da org via o project no orchestrator; reconfirmado aqui.
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
-      select: { priceListId: true },
+      select: { priceListId: true, enabledTools: true },
     })
-    if (agent && agent.priceListId !== list.id) {
-      await database.aIAgentConfig.update({
-        where: { id: ctx.aiAgentId },
-        data: { priceListId: list.id },
-      })
+    if (agent) {
+      const agentData: {
+        priceListId?: string
+        enabledTools?: { set: string[] }
+      } = {}
+      if (agent.priceListId !== list.id) {
+        agentData.priceListId = list.id
+      }
+      const tools = reconcileEnabledTools(agent.enabledTools, [
+        derivePricingToolChanges({
+          activeItemCount: desired.length,
+          disclosureStyle: style,
+        }),
+      ])
+      if (tools.changed) {
+        agentData.enabledTools = { set: tools.next }
+      }
+      if (Object.keys(agentData).length > 0) {
+        await database.aIAgentConfig.update({
+          where: { id: ctx.aiAgentId },
+          data: agentData,
+        })
+      }
     }
   }
 

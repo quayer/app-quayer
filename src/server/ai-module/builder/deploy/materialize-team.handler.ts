@@ -51,11 +51,23 @@
  * (delegate ausente), a reconciliação degrada para no-op (NÃO lança; o Department em
  * si já foi criado).
  *
+ * FR-09/FR-10/FR-11 (jornada-builder-v2): as TOOLS do agente são DERIVADAS aqui
+ * (set-merge via `enabled-tools-derivation`, preserva tools custom, mesmo UPDATE
+ * atômico do agente):
+ *   - modo solo/roleta/departamentos → garante `transfer_to_human` (+ `create_lead`
+ *     quando há roteiro de qualificação — o que o antigo `qualified_handoff` anexava);
+ *     modo 'nenhum' → remove `transfer_to_human`; modo AUSENTE → neutro (opt-in FR-08);
+ *   - `alsoSchedule` + conexão de agenda ATIVA (probe espelha resolveCalendarAccess)
+ *     → garante as 4 tools de calendário e remove o fallback; SEM conexão → fallback
+ *     `schedule_appointment` (log claro); sem alsoSchedule → remove todas.
+ *
  * Toca tabelas:
  *   - Department        (UPSERT por @@unique([organizationId, slug]))
  *   - department_members (reconciliação: findMany + create/update/deactivate)
+ *   - organization_providers (READ — probe de conexão de agenda, fail-open)
  *   - AIAgentConfig     (UPDATE departmentId — vínculo estruturado autoritativo —
- *                        + systemPrompt — bloco de roleta entre marcadores como hint)
+ *                        + systemPrompt — bloco de roleta entre marcadores como hint —
+ *                        + enabledTools — derivação determinística FR-09/FR-10)
  *
  * REGRAS: TS strict, zero `any`; tudo org-scoped por `ctx.organizationId`;
  * idempotente (rodar 2x converge ao mesmo estado).
@@ -70,6 +82,12 @@ import {
   sanitizeTeamMembersForRuntime,
   reconcileTeamMembers,
 } from './team-reconcile'
+import {
+  deriveCalendarToolChanges,
+  deriveHandoffToolChanges,
+  hasActiveCalendarConnection,
+  reconcileEnabledTools,
+} from './enabled-tools-derivation'
 import type { DeployContext } from './deploy.contract'
 
 // ==========================================
@@ -392,7 +410,12 @@ export async function materializeTeam(
   if (ctx.aiAgentId) {
     const agent = await database.aIAgentConfig.findFirst({
       where: { id: ctx.aiAgentId, organizationId: ctx.organizationId },
-      select: { systemPrompt: true, departmentId: true, businessHours: true },
+      select: {
+        systemPrompt: true,
+        departmentId: true,
+        businessHours: true,
+        enabledTools: true,
+      },
     })
     if (agent) {
       // ATOMICIDADE: acumula todas as mudanças do agente num ÚNICO update — antes
@@ -403,6 +426,7 @@ export async function materializeTeam(
         systemPrompt?: string
         departmentId?: string | null
         businessHours?: Prisma.InputJsonValue
+        enabledTools?: { set: string[] }
       } = {}
 
       if (isRoulette) {
@@ -447,6 +471,32 @@ export async function materializeTeam(
         if (JSON.stringify(currentHours) !== JSON.stringify(nextHours)) {
           agentData.businessHours = nextHours as Prisma.InputJsonValue
         }
+      }
+
+      // FR-09/FR-10/FR-11 — DERIVA as tools do agente das decisões do usuário
+      // (nunca re-decididas em outra superfície): handoff.mode → transfer_to_human
+      // (+create_lead com roteiro); alsoSchedule + conexão REAL → tools de
+      // calendário; sem conexão → fallback schedule_appointment. Set-merge
+      // preserva tools custom; entra no MESMO update atômico acima.
+      const calendarConnected = handoff.alsoSchedule
+        ? await hasActiveCalendarConnection(ctx.organizationId, ctx.projectId)
+        : false
+      if (handoff.alsoSchedule && !calendarConnected) {
+        console.warn(
+          '[deploy/materialize_team] handoff.alsoSchedule sem conexão de agenda ativa — ' +
+            'anexando schedule_appointment (registro de intenção) como FALLBACK. ' +
+            'Conecte o Google Calendar e re-publique para habilitar as tools reais de agenda.',
+        )
+      }
+      const tools = reconcileEnabledTools(agent.enabledTools, [
+        deriveHandoffToolChanges({ mode: handoff.mode, steps: handoff.steps }),
+        deriveCalendarToolChanges({
+          alsoSchedule: handoff.alsoSchedule,
+          hasActiveConnection: calendarConnected,
+        }),
+      ])
+      if (tools.changed) {
+        agentData.enabledTools = { set: tools.next }
       }
 
       if (Object.keys(agentData).length > 0) {

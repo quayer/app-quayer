@@ -1,11 +1,26 @@
 /**
- * propose_tool_selection — Builder tool (Wave 2.2)
+ * propose_tool_selection — Builder tool (Wave 2.2; enxugado em FR-09/FR-10)
  *
  * Presents the catalog of real builtin tools so the user can multi-select
  * which capabilities to attach to the freshly-built agent. Purely
  * presentational: the card's "Aplicar" button posts a follow-up user
  * message listing the chosen tool keys, which the LLM then translates
  * into sequential `attach_tool_to_agent` calls.
+ *
+ * DERIVAÇÃO DETERMINÍSTICA (FR-09/FR-10 da spec jornada-builder-v2): as
+ * capacidades que DERIVAM de decisões já tomadas pelo usuário foram REMOVIDAS
+ * deste catálogo — re-decidi-las aqui produzia agentes publicados em estado
+ * contraditório (roleta sem transfer_to_human; catálogo de preços órfão;
+ * "Agenda Google" sem conexão). Hoje elas são anexadas/removidas pela saga de
+ * deploy (`deploy/enabled-tools-derivation.ts`):
+ *   - qualified_handoff / department_dispatch / team_alert → derivadas de
+ *     `handoff.mode` (materialize_team);
+ *   - pricing_log (send_pricing) → derivada do card de preços + disclosureStyle
+ *     (materialize_pricing anexa get_pricing, a tool que lê o catálogo REAL);
+ *   - appointment_intent / google_calendar → derivadas de `handoff.alsoSchedule`
+ *     + conexão real de agenda (materialize_team).
+ * Permanece apenas o ORTOGONAL `lead_only` (qualificar lead sem passar o
+ * bastão), que nenhuma decisão de card implica por si só.
  *
  * The catalog is curated (friendly Portuguese labels + 1-line reasons)
  * rather than derived directly from BUILTIN_TOOL_NAMES so that we
@@ -46,74 +61,10 @@ interface ToolCatalogEntry {
  * instead of shipping a dead checkbox.
  */
 const RAW_CATALOG: ToolCatalogEntry[] = [
-  {
-    key: 'qualified_handoff',
-    title: 'Qualificar e encaminhar',
-    description:
-      'Coleta dados mínimos, registra o lead e pausa a IA para humano continuar.',
-    toolKeys: ['create_lead', 'transfer_to_human'],
-    icon: 'headphones',
-    recommended: true,
-    note:
-      'Ideal para SDR: depois da qualificação, a conversa fica pronta para um atendente humano assumir no painel.',
-  },
-  {
-    key: 'department_dispatch',
-    title: 'Encaminhar para departamento (roleta)',
-    description:
-      'Coloca a conversa na fila de um departamento e distribui automaticamente para o próximo atendente disponível (rodízio justo).',
-    // Capacidade servida pela tool unificada transfer_to_human (routing:'department').
-    toolKeys: ['transfer_to_human'],
-    icon: 'headphones',
-    recommended: false,
-    note:
-      'Diferente de "Qualificar e encaminhar": aqui o sistema escolhe QUAL pessoa do departamento recebe (round-robin) e atribui a conversa a ela. Requer departamentos cadastrados com membros.',
-  },
-  {
-    key: 'team_alert',
-    title: 'Avisar responsável',
-    description:
-      'Cria um alerta interno com resumo do lead sem necessariamente pausar a IA.',
-    // Capacidade servida pela tool unificada transfer_to_human (pauseAI:false).
-    toolKeys: ['transfer_to_human'],
-    icon: 'bell',
-    recommended: false,
-    note:
-      'Hoje a notificação aparece no sistema. Enviar esse resumo para outro WhatsApp exige uma ferramenta custom via webhook.',
-  },
-  {
-    key: 'appointment_intent',
-    title: 'Coletar pedido de agenda',
-    description:
-      'Registra data, horário e motivo quando o cliente pede consulta ou reunião.',
-    toolKeys: ['schedule_appointment'],
-    icon: 'calendar',
-    recommended: false,
-    note:
-      'Registro simples de intenção (sem checar agenda). Para checar/criar/cancelar no Google Calendar, use "Agenda Google" abaixo.',
-  },
-  {
-    key: 'google_calendar',
-    title: 'Agenda Google (consultar e marcar)',
-    description:
-      'Consulta horários livres, cria eventos (com Google Meet) e cancela direto no Google Calendar conectado.',
-    toolKeys: ['check_availability', 'create_event', 'cancel_event'],
-    icon: 'calendar',
-    recommended: false,
-    note:
-      'Requer conectar a agenda do profissional pelo link de conexão (aba Publicar → canais). Sem conexão, o agente avisa que a agenda não está conectada.',
-  },
-  {
-    key: 'pricing_log',
-    title: 'Registrar preços enviados',
-    description:
-      'Registra propostas ou valores mencionados pelo agente para rastreio.',
-    toolKeys: ['send_pricing'],
-    icon: 'tag',
-    recommended: false,
-    note:
-      'Use só quando divulgar preço automaticamente fizer sentido para o negócio (em serviços sob consulta, ex. advocacia, costuma não fazer).',
-  },
+  // NOTA: handoff (qualified_handoff/department_dispatch/team_alert), agenda
+  // (appointment_intent/google_calendar) e preços (pricing_log) saíram do
+  // catálogo — são DERIVADAS deterministicamente das decisões dos cards na
+  // saga de deploy (ver header + deploy/enabled-tools-derivation.ts).
   {
     key: 'lead_only',
     title: 'Só qualificar lead',
@@ -139,7 +90,7 @@ export function proposeToolSelectionTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: true, isConcurrencySafe: true },
     tool: tool({
       description:
-        'Presents the user with a multi-select picker of available capabilities (schedule, pricing, lead qualification, human handoff, team notifications) so they can choose which tools to attach to the agent. Use at the "tools" stage after the prompt is approved, before testing. The agent is resolved automatically from the active project — do NOT provide agentId. Does NOT mutate — the user picks and the card triggers follow-up attach_tool_to_agent calls.',
+        'Presents the user with a multi-select picker of the few OPTIONAL capabilities that are not derived from other decisions (today: lead qualification only). Handoff, calendar and pricing capabilities are NOT offered here — they are attached/removed deterministically at deploy time from the handoff card, the real calendar connection and the pricing card. Use at the "tools" stage after the prompt is approved, before testing. The agent is resolved automatically from the active project — do NOT provide agentId. Does NOT mutate — the user picks and the card triggers follow-up attach_tool_to_agent calls.',
       inputSchema: z.object({
         agentId: z
           .string()

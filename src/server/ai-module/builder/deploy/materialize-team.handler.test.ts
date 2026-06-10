@@ -38,6 +38,8 @@ const mockMemberUpdate = vi.hoisted(() => vi.fn())
 const mockMemberDelete = vi.hoisted(() => vi.fn())
 const mockAgentFindFirst = vi.hoisted(() => vi.fn())
 const mockAgentUpdate = vi.hoisted(() => vi.fn())
+// Probe de conexão de agenda (enabled-tools-derivation → organizationProvider).
+const mockProviderFindFirst = vi.hoisted(() => vi.fn())
 
 const mockTransaction = vi.hoisted(() =>
   vi.fn(async (arg: unknown) => {
@@ -61,6 +63,9 @@ const databaseMock = vi.hoisted(() => ({
   aIAgentConfig: {
     findFirst: mockAgentFindFirst,
     update: mockAgentUpdate,
+  },
+  organizationProvider: {
+    findFirst: mockProviderFindFirst,
   },
   $transaction: mockTransaction,
 }))
@@ -156,8 +161,15 @@ beforeEach(() => {
   mockMemberCreate.mockImplementation(async () => ({ id: 'created' }))
   mockMemberUpdate.mockResolvedValue({ id: 'updated' })
   mockMemberDelete.mockResolvedValue({ id: 'deleted' })
-  mockAgentFindFirst.mockResolvedValue({ systemPrompt: null })
+  mockAgentFindFirst.mockResolvedValue({
+    systemPrompt: null,
+    departmentId: null,
+    businessHours: null,
+    enabledTools: [],
+  })
   mockAgentUpdate.mockResolvedValue({ id: AGENT_ID })
+  // Default: sem credencial de agenda (probe → false; só consultado com alsoSchedule).
+  mockProviderFindFirst.mockResolvedValue(null)
 
   mockReadBuilderStateByProject.mockResolvedValue(
     stateWithHandoff({ members: [{ userId: 'u-1', name: 'Ana', position: 0 }] }),
@@ -365,8 +377,9 @@ describe('materializeTeam — M1 step', () => {
         mockAgentUpdate.mock.calls[0]?.[0] as { data: { systemPrompt: string } }
       ).data.systemPrompt
 
-      // 2ª run com o prompt já igual E o vínculo estruturado já gravado
-      // (departmentId === DEPT_ID) → nenhum dos dois caminhos de update deve disparar.
+      // 2ª run com o prompt já igual, o vínculo estruturado já gravado
+      // (departmentId === DEPT_ID) E a tool derivada já anexada → nenhum
+      // caminho de update deve disparar.
       vi.clearAllMocks()
       mockDepartmentUpsert.mockResolvedValue({ id: DEPT_ID })
       mockMemberFindMany.mockResolvedValue([])
@@ -376,6 +389,7 @@ describe('materializeTeam — M1 step', () => {
       mockAgentFindFirst.mockResolvedValue({
         systemPrompt: written,
         departmentId: DEPT_ID,
+        enabledTools: ['transfer_to_human'],
       })
       await materializeTeam(baseContext())
       expect(mockAgentUpdate).not.toHaveBeenCalled()
@@ -419,6 +433,129 @@ describe('materializeTeam — M1 step', () => {
         return a.data.departmentId === null
       })
       expect(deptClear).toBeTruthy()
+    })
+  })
+
+  describe('derivação de enabledTools (FR-09/FR-10/FR-11)', () => {
+    /** Lê o set de enabledTools do (único) update do agente, se houver. */
+    function writtenTools(): string[] | undefined {
+      const call = mockAgentUpdate.mock.calls.find((c) => {
+        const a = c[0] as { data: { enabledTools?: { set: string[] } } }
+        return a.data.enabledTools !== undefined
+      })
+      return (call?.[0] as { data: { enabledTools?: { set: string[] } } } | undefined)
+        ?.data.enabledTools?.set
+    }
+
+    it("modo 'roleta' → ANEXA transfer_to_human preservando tools custom", async () => {
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['minha_tool_custom'],
+      })
+      await materializeTeam(baseContext())
+      const set = writtenTools()
+      expect(set).toContain('transfer_to_human')
+      expect(set).toContain('minha_tool_custom')
+    })
+
+    it("modo com ROTEIRO de qualificação → anexa também create_lead (antigo qualified_handoff)", async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ mode: 'solo', steps: ['Nome?', 'Orçamento?'], members: [] }),
+      )
+      await materializeTeam(baseContext())
+      const set = writtenTools()
+      expect(set).toContain('transfer_to_human')
+      expect(set).toContain('create_lead')
+    })
+
+    it("modo 'nenhum' → REMOVE transfer_to_human mas PRESERVA create_lead (ortogonal/lead_only)", async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ mode: 'nenhum', members: [] }),
+      )
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['create_lead', 'transfer_to_human'],
+      })
+      await materializeTeam(baseContext())
+      const set = writtenTools()
+      expect(set).toEqual(['create_lead'])
+    })
+
+    it('modo AUSENTE → NEUTRO: não anexa nem remove (zero update quando nada mais mudou)', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ mode: undefined, members: [] }),
+      )
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['transfer_to_human'],
+      })
+      await materializeTeam(baseContext())
+      expect(mockAgentUpdate).not.toHaveBeenCalled()
+    })
+
+    it('alsoSchedule + conexão ATIVA → anexa as 4 tools reais de calendário e remove o fallback', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ alsoSchedule: true, members: [] }),
+      )
+      mockProviderFindFirst.mockResolvedValue({ id: 'prov-1' })
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['schedule_appointment'],
+      })
+      await materializeTeam(baseContext())
+      const set = writtenTools()
+      expect(set).toContain('check_availability')
+      expect(set).toContain('create_event')
+      expect(set).toContain('cancel_event')
+      expect(set).toContain('calendar_list_slots')
+      expect(set).not.toContain('schedule_appointment')
+    })
+
+    it('alsoSchedule SEM conexão → anexa schedule_appointment (fallback) e remove as 4 reais', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ alsoSchedule: true, members: [] }),
+      )
+      mockProviderFindFirst.mockResolvedValue(null)
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['check_availability', 'create_event', 'cancel_event', 'calendar_list_slots'],
+      })
+      await materializeTeam(baseContext())
+      const set = writtenTools()
+      expect(set).toContain('schedule_appointment')
+      expect(set).not.toContain('check_availability')
+      expect(set).not.toContain('create_event')
+      expect(set).not.toContain('cancel_event')
+      expect(set).not.toContain('calendar_list_slots')
+    })
+
+    it('SEM alsoSchedule → remove TODAS as tools de agenda (reais + fallback), sem consultar o probe', async () => {
+      mockAgentFindFirst.mockResolvedValue({
+        systemPrompt: null,
+        departmentId: null,
+        enabledTools: ['schedule_appointment', 'check_availability', 'custom_x'],
+      })
+      await materializeTeam(baseContext())
+      expect(mockProviderFindFirst).not.toHaveBeenCalled()
+      const set = writtenTools()
+      expect(set).toContain('custom_x')
+      expect(set).not.toContain('schedule_appointment')
+      expect(set).not.toContain('check_availability')
+    })
+
+    it('probe de conexão FALHANDO → degrada para o fallback schedule_appointment (não lança)', async () => {
+      mockReadBuilderStateByProject.mockResolvedValue(
+        stateWithHandoff({ alsoSchedule: true, members: [] }),
+      )
+      mockProviderFindFirst.mockRejectedValue(new Error('db down'))
+      await expect(materializeTeam(baseContext())).resolves.toBeDefined()
+      const set = writtenTools()
+      expect(set).toContain('schedule_appointment')
     })
   })
 

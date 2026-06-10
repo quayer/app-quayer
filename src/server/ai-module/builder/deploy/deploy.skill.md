@@ -4,6 +4,23 @@ Publicação de um `BuilderProject` envolve três módulos distintos. Não é um
 
 ---
 
+## Derivação determinística de enabledTools (FR-09/FR-10/FR-11)
+
+As capacidades técnicas do agente publicado **derivam** das decisões do usuário — nunca são re-decididas no card de tools (`propose-tool-selection` só oferece o ortogonal `lead_only`). Helpers em `enabled-tools-derivation.ts` (set-merge que **preserva tools custom**, 1 UPDATE por step, idempotente):
+
+| Decisão | Step da saga | Efeito em `AIAgentConfig.enabledTools` |
+|---|---|---|
+| Pricing com itens ativos + `disclosureStyle !== 'none'` | `materialize_pricing` | garante `get_pricing` |
+| `disclosureStyle === 'none'` ou lista vazia | `materialize_pricing` | remove `get_pricing` e `send_pricing` |
+| `handoff.mode` solo/roleta/departamentos | `materialize_team` | garante `transfer_to_human` (+ `create_lead` com roteiro de qualificação) |
+| `handoff.mode === 'nenhum'` | `materialize_team` | remove `transfer_to_human` (nunca `create_lead`) |
+| `handoff.mode` ausente | `materialize_team` | neutro (opt-in FR-08; não clobbera anexos manuais) |
+| `alsoSchedule` + conexão de agenda ATIVA (probe espelha `resolveCalendarAccess`) | `materialize_team` | garante `check_availability`/`create_event`/`cancel_event`/`calendar_list_slots`, remove o fallback |
+| `alsoSchedule` SEM conexão | `materialize_team` | fallback `schedule_appointment` (log claro), remove as 4 reais |
+| sem `alsoSchedule` | `materialize_team` | remove todas as tools de agenda |
+
+---
+
 ## O que acontece no deploy
 
 Quando o usuário clica "Publicar" no wizard do frontend, o backend orquestra:
