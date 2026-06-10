@@ -36,6 +36,9 @@ export {
   sanitizeMessage,
 } from './sanitize';
 
+// PII masking (dependency-free — safe for webhook hot paths)
+export { maskPhone } from './mask';
+
 // Caching
 export {
   getCachedContact,
