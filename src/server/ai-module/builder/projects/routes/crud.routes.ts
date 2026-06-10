@@ -67,6 +67,53 @@ export const updateAgentSettingsParamsSchema = z.object({
 export const updateAgentSettingsBodySchema = z.record(z.unknown())
 
 // ---------------------------------------------------------------------------
+// Derivação de nome do projeto (FR-04 — jornada-builder-v2)
+// ---------------------------------------------------------------------------
+
+/** URLs (http(s)://… ou www.…) removidas da 1ª linha antes de derivar o nome. */
+const URL_IN_NAME_PATTERN = /(?:https?:\/\/|www\.)\S+/gi
+
+/** Tamanho máximo do nome derivado (corte no limite de palavra). */
+const DERIVED_NAME_MAX = 40
+
+/** Fallback quando a 1ª linha não rende um nome útil. */
+const DERIVED_NAME_FALLBACK = 'Novo agente'
+
+/** Conta caracteres "úteis" (letras/dígitos unicode) de uma string. */
+function usefulChars(value: string): number {
+  return (value.match(/[\p{L}\p{N}]/gu) ?? []).length
+}
+
+/**
+ * Deriva um nome curto e legível a partir do prompt inicial (FR-04): 1ª linha
+ * SEM URLs, cortada em ~40 chars no limite de palavra. Se sobrarem menos de 3
+ * caracteres úteis (letras/dígitos), cai para 'Novo agente' — nunca a primeira
+ * linha bruta do prompt na navegação.
+ */
+export function deriveProjectName(prompt: string): string {
+  const firstLine = prompt.split('\n')[0] ?? ''
+  const withoutUrls = firstLine
+    .replace(URL_IN_NAME_PATTERN, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (usefulChars(withoutUrls) < 3) return DERIVED_NAME_FALLBACK
+  if (withoutUrls.length <= DERIVED_NAME_MAX) return withoutUrls
+
+  // Corte no limite de palavra: olha 1 char além do máximo para não descartar
+  // uma palavra que termina exatamente no limite.
+  const slice = withoutUrls.slice(0, DERIVED_NAME_MAX + 1)
+  const lastSpace = slice.lastIndexOf(' ')
+  const cut = (
+    lastSpace > 0 ? slice.slice(0, lastSpace) : withoutUrls.slice(0, DERIVED_NAME_MAX)
+  )
+    .replace(/[\s\p{P}]+$/gu, '')
+    .trim()
+
+  return usefulChars(cut) >= 3 ? cut : DERIVED_NAME_FALLBACK
+}
+
+// ---------------------------------------------------------------------------
 // Tipagem mínima do usuário autenticado — evita `any` espalhado.
 // ---------------------------------------------------------------------------
 
@@ -182,10 +229,9 @@ export const crudRoutes = {
       const { prompt, type } = request.body
 
       try {
-        // Deriva um nome legível a partir da primeira linha do prompt.
-        const firstLine = prompt.split('\n')[0]?.trim() ?? 'Novo projeto'
-        const name =
-          firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine
+        // FR-04 — nome curto e legível (1ª linha sem URLs, ~40 chars no limite
+        // de palavra), nunca a primeira linha bruta do prompt.
+        const name = deriveProjectName(prompt)
 
         const { project, conversation } =
           await builderProjectRepository.createWithInitialMessage({

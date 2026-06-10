@@ -559,12 +559,26 @@ function applyHandoff(
  * G10 — valores de `status` que significam "o usuário optou por seguir SEM agenda"
  * (escape hatch "Continuar sem agenda" após N tentativas de conexão falharem). O
  * schema mantém `status` como string opcional (≤120), então 'skipped' já cabe sem
- * mudança de contrato — aqui só ramificamos a COPY do ACK.
+ * mudança de contrato. Junto com CALENDAR_CONNECTED_STATUSES, gateia o flip do
+ * sentinel `confirmations.calendar` (FR-11) além de ramificar a copy do ACK.
  */
 const CALENDAR_SKIPPED_STATUSES: ReadonlySet<string> = new Set([
   'skipped',
   'skip',
   'none',
+])
+
+/**
+ * FR-11 (jornada-builder-v2) — valores de `status` que significam conexão REAL.
+ * Espelha 1:1 o conjunto `connected` do `resolvePhase` do card
+ * (calendar-connect-card.tsx): FE e BE concordam sobre o que é "conectado".
+ */
+const CALENDAR_CONNECTED_STATUSES: ReadonlySet<string> = new Set([
+  'connected',
+  'active',
+  'ok',
+  'ready',
+  'linked',
 ])
 
 function applyCalendarConnect(
@@ -579,15 +593,32 @@ function applyCalendarConnect(
       status: payload.status,
     },
   }
-  // O flip de `confirmations.calendar` acontece SEMPRE (inclusive no skip): é esse
-  // sentinel que destrava o passo `calendar` em nextPendingStep, então o escape
-  // hatch nunca prende o usuário — a jornada avança.
-  const next = applyConfirmation(patchBuilderState(state, patch), 'calendar')
+  const patched = patchBuilderState(state, patch)
+
+  const normalizedStatus = (payload.status ?? '').trim().toLowerCase()
+  const isSkipped = CALENDAR_SKIPPED_STATUSES.has(normalizedStatus)
+  const isConnected = CALENDAR_CONNECTED_STATUSES.has(normalizedStatus)
+
+  // FR-11 — o flip de `confirmations.calendar` SÓ acontece com conexão REAL ou
+  // pulo EXPLÍCITO. Qualquer outro status (vazio, connecting, error, …) persiste
+  // o progresso mas NÃO confirma: o passo `calendar` continua pendente em
+  // nextPendingStep e o ACK é honesto — nunca "conectado" sem conectar.
+  if (!isConnected && !isSkipped) {
+    return {
+      next: patched,
+      cardInstruction:
+        'O usuário INICIOU a conexão da agenda via card, mas a conexão AINDA NÃO foi concluída ' +
+        `(status atual: ${payload.status ? `"${payload.status}"` : 'nenhum'} — aguardando conexão da agenda). ` +
+        'NÃO confirme a agenda como conectada e NÃO prometa agendamentos: oriente o usuário a concluir a autorização do calendário. ' +
+        'O card de conexão continua disponível até conectar de fato ou o usuário optar por seguir sem agenda.',
+    }
+  }
+
+  const next = applyConfirmation(patched, 'calendar')
 
   // G10 — escape hatch: o usuário seguiu sem conectar a agenda. O agente deve
   // qualificar + avisar a equipe, NUNCA prometer agendamento.
-  const normalizedStatus = (payload.status ?? '').trim().toLowerCase()
-  if (CALENDAR_SKIPPED_STATUSES.has(normalizedStatus)) {
+  if (isSkipped) {
     return {
       next,
       cardInstruction:
@@ -597,11 +628,10 @@ function applyCalendarConnect(
     }
   }
 
-  const statusLabel = payload.status ? `status "${payload.status}"` : 'conectado'
   return {
     next,
     cardInstruction:
-      `O usuário CONECTOU a agenda via card (${statusLabel}). ` +
+      `O usuário CONECTOU a agenda via card (status "${payload.status ?? 'connected'}"). ` +
       'Use a agenda conectada para agendamentos e siga para o próximo passo. ' +
       'Não reabra o card de conexão de agenda.',
   }
@@ -702,7 +732,8 @@ function resolveAcceptedProposal(
  *
  * Owned-field mapping (only fields with a canonical home are committed):
  *   - businessName    → project.name
- *   - audience        → project.objective  (the only free-text "who it serves" slot)
+ *   - audience        → project.objective  (ONLY when objective is still empty —
+ *                       FR-02: never overwrite what the user already typed)
  *   - tone            → persona.tone
  *   - services        → services.offered    (UNIONed with already-confirmed list)
  *   - address         → identity.address     (Onda E)
@@ -723,10 +754,20 @@ function applySourceProgress(
   // sparse proposal never clobbers unrelated owned values with empties.
   const patch: DeepPartial<BuilderState> = {}
 
-  if (accepted.businessName || accepted.audience) {
+  // FR-02 (jornada-builder-v2) — `audience` é só um PROXY de objetivo: preenche
+  // `project.objective` apenas quando ele ainda está vazio. Um objetivo que o
+  // usuário já informou em texto livre NUNCA é sobrescrito pelo aceite da fonte.
+  const objectiveAlreadySet =
+    typeof state.project.objective === 'string' &&
+    state.project.objective.trim().length > 0
+  const applyAudience = Boolean(accepted.audience) && !objectiveAlreadySet
+
+  if (accepted.businessName || applyAudience) {
     patch.project = {
       ...(accepted.businessName ? { name: accepted.businessName } : {}),
-      ...(accepted.audience ? { objective: accepted.audience } : {}),
+      ...(applyAudience && accepted.audience
+        ? { objective: accepted.audience }
+        : {}),
     }
   }
   if (accepted.tone) {
@@ -760,7 +801,7 @@ function applySourceProgress(
     const noun = accepted.services.length === 1 ? 'serviço' : 'serviços'
     bits.push(`${accepted.services.length} ${noun}`)
   }
-  if (accepted.audience) bits.push('público-alvo')
+  if (applyAudience) bits.push('público-alvo')
   if (accepted.tone) bits.push(`tom "${accepted.tone}"`)
   if (accepted.address) bits.push(`endereço "${accepted.address}"`)
   if (accepted.description) bits.push('descrição do negócio')

@@ -14,7 +14,10 @@
  *   3. both — patches both fields; applied echoes both
  *   4. preserves unrelated builderState (confirmations, persona, …) on write
  *   5. guard — conversation not found (cross-org/missing) → success=false
- *   6. schema — refine rejects an empty input ({}, no objective nor name)
+ *   6. schema — refine rejects an empty input (no field at all)
+ *   7. tone only — patches builderState.persona.tone (FR-02; confirmation stays
+ *      on the persona card) without touching project/identity
+ *   8. address + description — patch builderState.identity.* (FR-03)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -83,6 +86,7 @@ function getExecute(t: ReturnType<typeof setProjectBasicsTool>) {
 function writtenState(): {
   project: { name?: string; objective?: string }
   persona: { tone?: string }
+  identity: { address?: string; description?: string }
   confirmations: { persona: boolean }
 } {
   expect(mockConvUpdateMany).toHaveBeenCalledOnce()
@@ -191,6 +195,61 @@ describe('setProjectBasicsTool — handler', () => {
   })
 
   // -------------------------------------------------------------------------
+  // 7. tone only (FR-02 — captura livre; confirmação continua no card)
+  // -------------------------------------------------------------------------
+  it('tone only: writes persona.tone without touching project/identity nor builder_projects', async () => {
+    const execute = getExecute(setProjectBasicsTool(CTX))
+
+    const result = (await execute({ tone: 'descontraído' })) as {
+      success: boolean
+      applied: { tone?: string }
+    }
+
+    expect(result.success).toBe(true)
+    expect(result.applied).toEqual({ tone: 'descontraído' })
+
+    const state = writtenState()
+    expect(state.persona.tone).toBe('descontraído')
+    // project preserved from existing state; identity untouched.
+    expect(state.project.name).toBe('Nome antigo')
+    expect(state.identity).toEqual({})
+    // tone NEVER flips the persona confirmation (the card owns it).
+    expect(state.confirmations.persona).toBe(true) // preserved, not flipped here
+    expect(mockProjectUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // 8. address + description (FR-03 — identidade sem site)
+  // -------------------------------------------------------------------------
+  it('address + description: writes identity.* and echoes both in applied', async () => {
+    const execute = getExecute(setProjectBasicsTool(CTX))
+
+    const result = (await execute({
+      address: 'Rua das Flores, 123, Centro, São Paulo',
+      description: 'Barbearia clássica especializada em cortes masculinos.',
+    })) as {
+      success: boolean
+      applied: { address?: string; description?: string }
+    }
+
+    expect(result.success).toBe(true)
+    expect(result.applied).toEqual({
+      address: 'Rua das Flores, 123, Centro, São Paulo',
+      description: 'Barbearia clássica especializada em cortes masculinos.',
+    })
+
+    const state = writtenState()
+    expect(state.identity.address).toBe('Rua das Flores, 123, Centro, São Paulo')
+    expect(state.identity.description).toBe(
+      'Barbearia clássica especializada em cortes masculinos.',
+    )
+    // Unrelated subtrees preserved; no builder_projects mirror without `name`.
+    expect(state.project.name).toBe('Nome antigo')
+    expect(state.persona.tone).toBe('cordial')
+    expect(mockProjectUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
   // 5. guard — conversation not found
   // -------------------------------------------------------------------------
   it('returns success=false when the conversation is not found in the org', async () => {
@@ -212,27 +271,47 @@ describe('setProjectBasicsTool — handler', () => {
 })
 
 describe('setProjectBasicsInputSchema', () => {
-  it('rejects an empty input (neither objective nor name)', () => {
+  it('rejects an empty input (no field at all)', () => {
     const parsed = setProjectBasicsInputSchema.safeParse({})
     expect(parsed.success).toBe(false)
   })
 
-  it('accepts objective-only and name-only inputs (trimmed)', () => {
+  it('accepts single-field inputs (trimmed)', () => {
     expect(
       setProjectBasicsInputSchema.safeParse({ objective: '  vender mais  ' }),
     ).toMatchObject({ success: true, data: { objective: 'vender mais' } })
     expect(
       setProjectBasicsInputSchema.safeParse({ name: 'Loja X' }),
     ).toMatchObject({ success: true, data: { name: 'Loja X' } })
+    expect(
+      setProjectBasicsInputSchema.safeParse({ tone: ' descontraído ' }),
+    ).toMatchObject({ success: true, data: { tone: 'descontraído' } })
+    expect(
+      setProjectBasicsInputSchema.safeParse({ address: 'Rua A, 1' }),
+    ).toMatchObject({ success: true, data: { address: 'Rua A, 1' } })
+    expect(
+      setProjectBasicsInputSchema.safeParse({ description: 'Loja de bairro.' }),
+    ).toMatchObject({ success: true, data: { description: 'Loja de bairro.' } })
   })
 
-  it('rejects over-limit values (objective > 300, name > 80)', () => {
+  it('rejects over-limit values (objective > 300, name > 80, tone > 120, address > 300, description > 500)', () => {
     expect(
       setProjectBasicsInputSchema.safeParse({ objective: 'x'.repeat(301) })
         .success,
     ).toBe(false)
     expect(
       setProjectBasicsInputSchema.safeParse({ name: 'x'.repeat(81) }).success,
+    ).toBe(false)
+    expect(
+      setProjectBasicsInputSchema.safeParse({ tone: 'x'.repeat(121) }).success,
+    ).toBe(false)
+    expect(
+      setProjectBasicsInputSchema.safeParse({ address: 'x'.repeat(301) })
+        .success,
+    ).toBe(false)
+    expect(
+      setProjectBasicsInputSchema.safeParse({ description: 'x'.repeat(501) })
+        .success,
     ).toBe(false)
   })
 })

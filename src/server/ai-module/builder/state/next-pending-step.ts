@@ -334,7 +334,9 @@ export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
   'proposal.name': 'livre',
   'proposal.description': 'livre',
   'persona.name': 'card',
-  'persona.tone': 'card',
+  // FR-02 (jornada-builder-v2) — o TOM é capturável em texto livre via
+  // set_project_basics; a CONFIRMAÇÃO da persona continua no card de persona.
+  'persona.tone': 'livre',
   'persona.style': 'card',
   'persona.greeting': 'card',
   'services.offered': 'card',
@@ -346,6 +348,10 @@ export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
   'handoff.steps': 'card',
   'handoff.members': 'card',
   'calendar.connectionId': 'card',
+  // FR-03 (jornada-builder-v2) — usuário sem site informa endereço/descrição
+  // direto na conversa (set_project_basics) OU via accept do source_progress.
+  'identity.address': 'livre',
+  'identity.description': 'livre',
   'activation.mode': 'card',
   'activation.keywords': 'card',
   'silencedContacts.contacts': 'card',

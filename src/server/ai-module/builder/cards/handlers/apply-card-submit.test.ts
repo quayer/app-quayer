@@ -341,4 +341,144 @@ describe('applyCardSubmit — source_progress (Onda E: address + description)', 
     expect(next.identity.description).toBeUndefined()
     expect(next.confirmations.source).toBe(true)
   })
+
+  it('FR-02: NÃO sobrescreve project.objective já preenchido com o audience da fonte', async () => {
+    const USER_OBJECTIVE = 'Qualificar leads e agendar visitas ao decorado'
+    seedConversation(
+      patchBuilderState(stateWithProposal(), {
+        project: { objective: USER_OBJECTIVE },
+      }),
+    )
+    const res = await submitAccept()
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    // O objetivo digitado pelo usuário sobrevive ao aceite da fonte.
+    expect(next.project.objective).toBe(USER_OBJECTIVE)
+    // O resto do proposal continua aplicado normalmente.
+    expect(next.project.name).toBe('Vibra Residencial')
+    expect(next.persona.tone).toBe('acolhedor e direto')
+    expect(next.identity.address).toBe(VIBRA_ADDRESS)
+    expect(next.confirmations.source).toBe(true)
+    // ACK honesto: não anuncia "público-alvo" que não foi aplicado.
+    if (res.ok) expect(res.cardInstruction).not.toMatch(/público-alvo/)
+  })
+
+  it('FR-02: audience ainda preenche objective quando ele está vazio', async () => {
+    seedConversation(stateWithProposal())
+    const res = await submitAccept()
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.project.objective).toBe('compradores de imóveis na Vila Gomes')
+    if (res.ok) expect(res.cardInstruction).toMatch(/público-alvo/)
+  })
+})
+
+/**
+ * FR-11 (jornada-builder-v2) — calendar_connect: o flip de `confirmations.calendar`
+ * SÓ acontece com conexão REAL (status no conjunto conectado, espelho do
+ * resolvePhase do card) ou pulo EXPLÍCITO ('skipped'). Qualquer outro status
+ * (vazio do clique "Conectar agenda", connecting, error) persiste o progresso em
+ * `calendar.*` mas NÃO confirma — e o ACK avisa que está aguardando a conexão.
+ */
+describe('applyCardSubmit — calendar_connect (FR-11: flip só com conexão real ou pulo)', () => {
+  const PROJECT_ID = 'proj-1'
+  const ORG_ID = 'org-1'
+  const CONV_ID = 'conv-1'
+
+  function seedConversation(builderState: unknown): void {
+    mockFindUnique.mockResolvedValue({
+      id: CONV_ID,
+      organizationId: ORG_ID,
+      builderState,
+    })
+    mockUpdateMany.mockResolvedValue({ count: 1 })
+  }
+
+  function writtenState(): BuilderState {
+    expect(mockUpdateMany).toHaveBeenCalledTimes(1)
+    const arg = mockUpdateMany.mock.calls[0][0] as {
+      data: { builderState: BuilderState }
+    }
+    return arg.data.builderState
+  }
+
+  async function submitCalendar(payload: {
+    connectionId?: string
+    status?: string
+  }) {
+    return applyCardSubmit({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      body: { cardKey: 'calendar_connect', ...payload },
+    })
+  }
+
+  beforeEach(() => {
+    mockFindUnique.mockReset()
+    mockUpdateMany.mockReset()
+  })
+
+  it('status "connected": persiste calendar.* e flipa confirmations.calendar', async () => {
+    seedConversation(null)
+    const res = await submitCalendar({
+      connectionId: 'conn-1',
+      status: 'connected',
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.calendar.connectionId).toBe('conn-1')
+    expect(next.calendar.status).toBe('connected')
+    expect(next.confirmations.calendar).toBe(true)
+    if (res.ok) expect(res.cardInstruction).toMatch(/CONECTOU a agenda/)
+  })
+
+  it('status ausente (clique "Conectar agenda"): NÃO flipa e ACK avisa que aguarda conexão', async () => {
+    seedConversation(null)
+    const res = await submitCalendar({})
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.confirmations.calendar).toBe(false)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/aguardando conexão da agenda/i)
+      expect(res.cardInstruction).not.toMatch(/CONECTOU a agenda/)
+    }
+  })
+
+  it('status "connecting": persiste o progresso mas NÃO confirma', async () => {
+    seedConversation(null)
+    const res = await submitCalendar({
+      connectionId: 'conn-1',
+      status: 'connecting',
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.calendar.connectionId).toBe('conn-1')
+    expect(next.calendar.status).toBe('connecting')
+    expect(next.confirmations.calendar).toBe(false)
+  })
+
+  it('status "error": NÃO confirma', async () => {
+    seedConversation(null)
+    await submitCalendar({ status: 'error' })
+
+    const next = writtenState()
+    expect(next.calendar.status).toBe('error')
+    expect(next.confirmations.calendar).toBe(false)
+  })
+
+  it('status "skipped" (pulo explícito): flipa e ACK orienta a não prometer agendamento', async () => {
+    seedConversation(null)
+    const res = await submitCalendar({ status: 'skipped' })
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.calendar.status).toBe('skipped')
+    expect(next.confirmations.calendar).toBe(true)
+    if (res.ok) expect(res.cardInstruction).toMatch(/CONTINUAR SEM AGENDA/)
+  })
 })
