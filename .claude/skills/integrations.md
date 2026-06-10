@@ -136,21 +136,19 @@ src/features/webhooks/
 
 ---
 
-## Frontend — Página de Integrações
+## Frontend — Página de Canais (Jun/2026)
 
 ```
-src/app/integracoes/           # Hub principal
-src/app/admin/integracoes/     # Visão admin (todas as orgs)
-src/components/integrations/   # Componentes reutilizáveis
-src/components/whatsapp/       # Componentes WhatsApp
+src/app/canais/                          # Página de canais WhatsApp
+src/client/components/canais/            # CanaisPage, ConnectionCard, ChannelSelectorModal
+src/client/components/whatsapp/          # details-modal (único sobrevivente)
 ```
 
-**Estrutura da página:**
-- Lista de instâncias com badges de status
-- Filtros: all / connected / disconnected
-- Modal criar instância
-- OrgSheet com tabs: Detalhes, Instâncias, Webhooks
-- Admin view: visão global de todas as orgs/instâncias
+**LEGADO REMOVIDO** (ver `docs/deprecated/WHATSAPP_LEGACY_UI.md` e
+`docs/deprecated/ADMIN_SURFACE_REMOVED.md`): `src/app/integracoes/`,
+`src/app/admin/integracoes/`, `src/client/components/integrations/` e os
+modais stubados de `whatsapp/` (create/edit/connection) foram deletados —
+restaurar via git apenas quando o controller de instâncias voltar.
 
 ---
 

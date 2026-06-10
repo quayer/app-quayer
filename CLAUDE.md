@@ -146,7 +146,7 @@ src/
 │   │   ├── layout/          → AppShell, BuilderSidebar
 │   │   ├── auth/, settings/, whatsapp/
 │   │   ├── ds/, ui/         → design system + shadcn
-│   │   └── custom/, providers/
+│   │   └── providers/
 │   └── hooks/
 │
 ├── lib/                     # Cross-cutting
@@ -254,6 +254,8 @@ infra/               → IaC (Caddyfile, supabase, n8n, prod compose)
 - `authProcedure({ required: true })` em rotas protegidas
 - Testes: Playwright (E2E), Vitest (unit)
 - **Sem código morto:** se uma feature for removida, deletar arquivos. Git preserva o histórico.
+- **Tamanho de arquivo:** respeitar `docs/FILE_SIZE_GUIDELINES.md` (componente ≤300, route ≤400, service ≤500 linhas). Arquivo acima do máximo: extrair módulo em vez de engordar.
+- **Auditoria de sessão (builder/runtime):** usar `.claude/skills/session-monitoring.md`.
 
 ---
 
