@@ -134,6 +134,10 @@ export function useChatStream({
 
   // ── Refs / scroll ──────────────────────────────────────────────
   const scrollRef = React.useRef<HTMLDivElement | null>(null)
+  /** Inner CONTENT wrapper (messages + active-step card) inside `scrollRef`.
+   *  Observed by the ResizeObserver below: with the card rendered IN the
+   *  conversation flow, content can grow without the viewport resizing. */
+  const contentRef = React.useRef<HTMLDivElement | null>(null)
   const autoScrollRef = React.useRef(true)
 
   const handleScroll = React.useCallback(() => {
@@ -157,18 +161,23 @@ export function useChatStream({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Re-anchor the bottom whenever the scroll VIEWPORT itself resizes — e.g. the
-  // pinned active-step card mounting (readiness refetch on SSE finish) or
-  // growing (status poll) shrinks the flex-1 messages area without touching
-  // [messages, streamingText, streamingToolCalls], so the deps-effect above
-  // never fires. Only re-anchors while the user is already pinned to bottom.
+  // Re-anchor the bottom whenever the conversation CONTENT grows. The
+  // active-step card renders INSIDE the scroll flow (single scroll — founder
+  // feedback), so it mounting (readiness refetch on SSE finish), growing
+  // (status poll delivering a proposal) or images loading change the CONTENT
+  // height without resizing the viewport and without touching
+  // [messages, streamingText, streamingToolCalls] — the deps-effect above
+  // never fires for those. We observe BOTH the content wrapper (content
+  // growth) and the scroll viewport (window/layout resizes shrink the visible
+  // area). Only re-anchors while the user is already pinned to bottom —
+  // scrolling up >100px flips `autoScrollRef` off (see handleScroll).
   React.useEffect(() => {
-    const el = scrollRef.current
-    if (!el || typeof ResizeObserver === "undefined") return
+    if (typeof ResizeObserver === "undefined") return
     const observer = new ResizeObserver(() => {
       if (autoScrollRef.current) scrollToBottom()
     })
-    observer.observe(el)
+    if (scrollRef.current) observer.observe(scrollRef.current)
+    if (contentRef.current) observer.observe(contentRef.current)
     return () => observer.disconnect()
   }, [scrollToBottom])
 
@@ -200,8 +209,8 @@ export function useChatStream({
   )
 
   // ── Readiness (deterministic step-engine — single source of truth) ──
-  // Drives the pinned active-step card below the conversation. Invalidated on
-  // SSE finish + after a card submit (no polling — per the spec).
+  // Drives the active-step card at the END of the conversation flow.
+  // Invalidated on SSE finish + after a card submit (no polling — per the spec).
   const { data: readinessEnvelope, refetch: refetchReadiness } =
     READINESS_QUERY.useQuery({ params: { id: projectId } })
   const readiness = readinessEnvelope?.data
@@ -214,8 +223,8 @@ export function useChatStream({
   }, [refetchReadiness])
 
   // ── Reopen de card confirmado (FR-17 — jornada-builder-v2) ─────
-  // "Ajustar" no resumo final reabre o card da seção correspondente no slot
-  // pinado, pré-preenchido com o builderState ATUAL (a confirmação já era true
+  // "Ajustar" no resumo final reabre o card da seção correspondente no slot do
+  // fim do fluxo, pré-preenchido com o builderState ATUAL (a confirmação já era true
   // e continua true após o re-submit — o step-engine não muda). Fechar a
   // reabertura NUNCA envia mensagem ao chat: só limpa este estado.
   const [reopenedCardKey, setReopenedCardKey] =
@@ -361,7 +370,7 @@ export function useChatStream({
    * `cardKey`, so we merge `{ cardKey, ...payload }` before POSTing (matches the
    * `cardSubmitBodySchema` discriminated union). Readiness is invalidated on
    * SSE finish (inside consumeStream) AND defensively here in finally — so the
-   * pinned active-step card always re-resolves after a submit.
+   * active-step card always re-resolves after a submit.
    */
   const submitCard = React.useCallback(
     async (cardKey: CardKey, payload: Record<string, unknown>) => {
@@ -499,6 +508,7 @@ export function useChatStream({
     error,
     lastUserMessage,
     scrollRef,
+    contentRef,
     handleScroll,
     textareaRef,
     readiness,

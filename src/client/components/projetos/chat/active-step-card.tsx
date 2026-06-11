@@ -1,9 +1,9 @@
 "use client"
 
 /**
- * ActiveStepCard — the pinned slot that renders the card for the CURRENT
- * journey step, driven by the deterministic readiness snapshot. Structural
- * extraction from chat-panel.tsx (no behavior change).
+ * ActiveStepCard — renders the card for the CURRENT journey step as the LAST
+ * item of the conversation flow, INSIDE the messages scroll container (single
+ * scroll — founder feedback), driven by the deterministic readiness snapshot.
  *
  * FR-17 (jornada-builder-v2): the slot ALSO hosts "reopened" cards — when the
  * user taps "Ajustar" on a section of the final summary, the corresponding
@@ -57,7 +57,7 @@ type AdjustableCardProps = CardComponentProps & {
  * ToolCallCard: tools/channel/agent_approval).
  *
  * REOPEN PRECEDENCE (FR-17): when `reopenedCardKey` is set, the reopened card
- * SUBSTITUTES the active-step card in this single pinned slot — no stacking
+ * SUBSTITUTES the active-step card in this single in-flow slot — no stacking
  * (the simplest rule). The active step resumes the moment the reopen closes
  * (close button below, the card's own dismiss, or a successful re-submit —
  * handled in use-chat-stream). Closing never sends a chat message. Re-submit
@@ -124,45 +124,45 @@ export function ActiveStepCard({
   const value = resolveBuilderState(readiness)
 
   return (
-    // max-h + scroll próprio: o card pinado vive FORA do scroll de mensagens
-    // (irmão flex entre mensagens e composer); sem o teto, um card alto (ex.:
-    // Fontes do negócio) esmaga a área flex-1 da conversa.
-    <div className="max-h-[45vh] overflow-y-auto overscroll-contain px-4 pb-1 pt-2 md:px-6">
-      <div className="mx-auto w-full max-w-2xl">
-        {isReopen && (
-          <div className="mb-1 flex items-center justify-between px-1">
-            <span
-              className="text-[11px] font-medium"
-              style={{ color: tokens.textSecondary }}
-            >
-              Ajustando: {descriptor.title}
-            </span>
-            <button
-              type="button"
-              onClick={onCloseReopened}
-              aria-label="Fechar ajuste"
-              className="flex items-center gap-1 rounded text-[11px] font-medium transition-colors hover:underline"
-              style={{ color: tokens.textSecondary }}
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-              Fechar
-            </button>
-          </div>
-        )}
-        <CardComponent
-          projectId={projectId}
-          cardKey={descriptor.cardKey}
-          value={value}
-          disabled={disabled}
-          onSubmit={handleSubmit}
-          // Reopened cards' own dismiss button ("Agora não") must close
-          // SILENTLY — never the "pular passo" chat turn of the active step.
-          onDismiss={isReopen ? onCloseReopened : onDismiss}
-          onAdjust={onAdjust}
-          onSubmitCard={onSubmit}
-          tokens={tokens}
-        />
-      </div>
+    // ÚLTIMO item do fluxo da conversa, DENTRO do container de scroll das
+    // mensagens (um único scroll — feedback do founder). Mesma coluna
+    // max-w-2xl das bolhas; mt-5 espelha o gap-5 do fluxo. O card cresce
+    // naturalmente (sem max-h/scroll próprio) e o auto-scroll re-ancora via
+    // ResizeObserver do conteúdo em use-chat-stream.
+    <div className="mx-auto mt-5 w-full max-w-2xl">
+      {isReopen && (
+        <div className="mb-1 flex items-center justify-between px-1">
+          <span
+            className="text-[11px] font-medium"
+            style={{ color: tokens.textSecondary }}
+          >
+            Ajustando: {descriptor.title}
+          </span>
+          <button
+            type="button"
+            onClick={onCloseReopened}
+            aria-label="Fechar ajuste"
+            className="flex items-center gap-1 rounded text-[11px] font-medium transition-colors hover:underline"
+            style={{ color: tokens.textSecondary }}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+            Fechar
+          </button>
+        </div>
+      )}
+      <CardComponent
+        projectId={projectId}
+        cardKey={descriptor.cardKey}
+        value={value}
+        disabled={disabled}
+        onSubmit={handleSubmit}
+        // Reopened cards' own dismiss button ("Agora não") must close
+        // SILENTLY — never the "pular passo" chat turn of the active step.
+        onDismiss={isReopen ? onCloseReopened : onDismiss}
+        onAdjust={onAdjust}
+        onSubmitCard={onSubmit}
+        tokens={tokens}
+      />
     </div>
   )
 }

@@ -55,6 +55,7 @@ export function ChatPanel({
     error,
     lastUserMessage,
     scrollRef,
+    contentRef,
     handleScroll,
     textareaRef,
     readiness,
@@ -84,92 +85,103 @@ export function ChatPanel({
   // ── Render ─────────────────────────────────────────────────────
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Messages scrollable area */}
+      {/* Messages scrollable area — UM ÚNICO scroll: mensagens, streaming,
+          erro E o active-step card vivem todos dentro deste container. */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 py-6 md:px-6"
       >
-        {isEmpty ? (
-          <EmptyState tokens={tokens} />
-        ) : (
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-            {messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                tokens={tokens}
-                onDraft={setInput}
-                onSubmitCard={stableSubmitCard}
-                isStreaming={isStreaming}
-                toolSelectionPrefill={toolSelectionPrefill}
-              />
-            ))}
-
-            {/* Streaming assistant bubble */}
-            {(streamingText || streamingToolCalls.length > 0) && (
-              <StreamingBubble
-                text={streamingText}
-                toolCalls={streamingToolCalls}
-                tokens={tokens}
-                onDraft={setInput}
-                onSubmitCard={stableSubmitCard}
-                toolSelectionPrefill={toolSelectionPrefill}
-              />
-            )}
-
-            {/* Inline error */}
-            {error && (
-              <div
-                className="flex items-start gap-3 rounded-lg border p-3"
-                style={{
-                  borderColor: tokens.danger,
-                  backgroundColor: tokens.dangerSubtle,
-                }}
-                role="alert"
-              >
-                <AlertCircle
-                  className="mt-0.5 h-4 w-4 shrink-0"
-                  style={{ color: tokens.dangerText }}
+        {/* Content wrapper observado pelo ResizeObserver de auto-scroll (em
+            use-chat-stream): crescimento de CONTEÚDO (card montando, proposta
+            chegando via poll, imagens carregando) re-ancora o fundo enquanto o
+            usuário está pinado. min-h-full mantém o EmptyState centralizado. */}
+        <div ref={contentRef} className="flex min-h-full flex-col">
+          {isEmpty ? (
+            <div className="flex flex-1 flex-col justify-center">
+              <EmptyState tokens={tokens} />
+            </div>
+          ) : (
+            <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+              {messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  tokens={tokens}
+                  onDraft={setInput}
+                  onSubmitCard={stableSubmitCard}
+                  isStreaming={isStreaming}
+                  toolSelectionPrefill={toolSelectionPrefill}
                 />
-                <div className="flex-1 text-[13px]" style={{ color: tokens.textPrimary }}>
-                  <p className="font-medium">{error}</p>
-                  {lastUserMessage && (
-                    <Button
-                      type="button"
-                      onClick={handleRetry}
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 h-7 gap-1.5 text-[11px]"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Tentar novamente
-                    </Button>
-                  )}
+              ))}
+
+              {/* Streaming assistant bubble */}
+              {(streamingText || streamingToolCalls.length > 0) && (
+                <StreamingBubble
+                  text={streamingText}
+                  toolCalls={streamingToolCalls}
+                  tokens={tokens}
+                  onDraft={setInput}
+                  onSubmitCard={stableSubmitCard}
+                  toolSelectionPrefill={toolSelectionPrefill}
+                />
+              )}
+
+              {/* Inline error */}
+              {error && (
+                <div
+                  className="flex items-start gap-3 rounded-lg border p-3"
+                  style={{
+                    borderColor: tokens.danger,
+                    backgroundColor: tokens.dangerSubtle,
+                  }}
+                  role="alert"
+                >
+                  <AlertCircle
+                    className="mt-0.5 h-4 w-4 shrink-0"
+                    style={{ color: tokens.dangerText }}
+                  />
+                  <div className="flex-1 text-[13px]" style={{ color: tokens.textPrimary }}>
+                    <p className="font-medium">{error}</p>
+                    {lastUserMessage && (
+                      <Button
+                        type="button"
+                        onClick={handleRetry}
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-7 gap-1.5 text-[11px]"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Tentar novamente
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+
+          {/* ───── Active-step card (driven by readiness) ─────
+              ÚLTIMO item do fluxo da conversa, DENTRO do scroll de mensagens
+              (feedback do founder: um único scroll). FR-17: o mesmo slot
+              hospeda cards REABERTOS via "Ajustar" do resumo (reopenCard); a
+              reabertura substitui o card do passo ativo até fechar (silencioso)
+              ou re-submeter com sucesso. */}
+          <ActiveStepCard
+            projectId={projectId}
+            readiness={readiness}
+            disabled={isStreaming}
+            onSubmit={stableSubmitCard}
+            onDismiss={handleCardDismiss}
+            reopenedCardKey={reopenedCardKey}
+            onAdjust={reopenCard}
+            onCloseReopened={closeReopenedCard}
+            tokens={tokens}
+          />
+        </div>
       </div>
 
-      {/* ───── Pinned active-step card (driven by readiness) ─────
-          FR-17: o mesmo slot hospeda cards REABERTOS via "Ajustar" do resumo
-          (reopenCard); a reabertura substitui o card do passo ativo até fechar
-          (silencioso) ou re-submeter com sucesso. */}
-      <ActiveStepCard
-        projectId={projectId}
-        readiness={readiness}
-        disabled={isStreaming}
-        onSubmit={stableSubmitCard}
-        onDismiss={handleCardDismiss}
-        reopenedCardKey={reopenedCardKey}
-        onAdjust={reopenCard}
-        onCloseReopened={closeReopenedCard}
-        tokens={tokens}
-      />
-
-      {/* ───── Composer ───── */}
+      {/* ───── Composer (fixo, fora do scroll) ───── */}
       <div className="px-4 pb-4 pt-2 md:px-6">
         <div className="mx-auto w-full max-w-2xl">
           <MessageInput
