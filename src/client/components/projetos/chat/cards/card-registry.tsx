@@ -50,6 +50,7 @@ import {
   ListChecks,
   ShieldOff,
   Sparkles,
+  Store,
   Tag,
   UserRound,
   Wrench,
@@ -70,6 +71,7 @@ import { PreviewSummaryCard } from "./preview-summary-card"
 import { QuickReplyChipsCard } from "./quick-reply-chips-card"
 import { SourceProgressCard } from "./source-progress-card"
 import { SilencedContactsCard } from "./silenced-contacts-card"
+import { BusinessIdentityCard } from "./business-identity-card"
 
 /**
  * The `CardKey`s this registry renders — the 11 catalog cards. Excludes the 3
@@ -87,6 +89,7 @@ export type RegisteredW3CardKey =
   | "quick_reply_chips"
   | "source_progress"
   | "silenced_contacts"
+  | "business_identity"
 
 /**
  * The registry. Heterogeneous by design — each component narrows `TPayload`
@@ -185,6 +188,18 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Contatos em silêncio",
     icon: <ShieldOff className="h-4 w-4" />,
     component: SilencedContactsCard as ComponentType<CardComponentProps>,
+  },
+  business_identity: {
+    // Jornada v2 (T38, FR-03) — ACTIVE-STEP card da fase "Conhecer". Surfa como
+    // step `business_identity` quando o projeto v2 não tem fonte colada: o usuário
+    // conta rápido sobre o negócio (nome + endereço? + descrição?) em vez de
+    // colar um site/IG. O engine v2 dá isDone via confirmations.businessIdentity
+    // OU confirmed('source').
+    cardKey: "business_identity",
+    stepId: "business_identity",
+    title: "Conte sobre o negócio",
+    icon: <Store className="h-4 w-4" />,
+    component: BusinessIdentityCard as ComponentType<CardComponentProps>,
   },
 }
 

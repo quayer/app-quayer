@@ -36,6 +36,9 @@ export type FieldOwnership = 'card' | 'livre'
  *  - Campo `card` → peça para o usuário usar o card (não colete por texto).
  *  - Conduza APENAS o passo do banner no turno; registre respostas de outros
  *    passos via tool sem anunciar e volte ao passo ativo.
+ *  - Fase Conhecer (objetivo/identidade, texto-livre): ofereça `quick_reply_chips`
+ *    com opções comuns para o usuário tocar em vez de digitar — o chip vira um
+ *    turno normal; nunca trave a resposta livre.
  */
 export const BUILDER_JOURNEY_RULES = `Regras da jornada (texto-livre):
 - Se a mensagem do usuário já preenche o campo "livre" do PRÓXIMO PASSO, registre-a chamando a tool correspondente — não re-pergunte o que ele acabou de responder.
@@ -44,6 +47,7 @@ export const BUILDER_JOURNEY_RULES = `Regras da jornada (texto-livre):
 - Campos marcados como "card" são preenchidos na interface, não por texto. Quando o passo for de um campo "card", peça ao usuário para usar o card exibido — não colete o valor por texto livre nem invente o conteúdo.
 - Uma pergunta por vez. Assuma defaults razoáveis e confirme depois, mas só marque um passo como concluído quando o estado realmente tiver o valor.
 - Conduza APENAS o passo do PRÓXIMO PASSO neste turno. Se o usuário responder algo de OUTRO passo, registre com a tool adequada (ex.: set_project_basics para objetivo/nome) SEM anunciar, e volte ao passo ativo — não puxe perguntas de passos futuros.
+- Na fase Conhecer (perguntas de objetivo/identidade em texto livre), ofereça quick_reply_chips com 2-4 respostas comuns para o usuário tocar em vez de digitar — o chip escolhido vira um turno normal. Os chips são atalho, nunca obrigatórios: o usuário pode sempre responder por texto livre.
 - Quando o passo ativo for source_ingestion (card "Fontes do negócio"), resposta CURTA ancorada no card — sem novas perguntas de outros passos no mesmo turno.`
 
 /**

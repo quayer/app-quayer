@@ -289,6 +289,21 @@ export const silencedContactsPayloadSchema = z.object({
 })
 
 /**
+ * Jornada v2 (T19, FR-03) — business_identity: o usuário conta sobre o negócio
+ * SEM colar uma fonte (nome + endereço + descrição). É o caminho ALTERNATIVO ao
+ * accept do `source_progress` (que satisfaz a identidade pelo site/IG). `name` é
+ * obrigatório (espelha `project.name`/`builder_projects.name`); `address` e
+ * `description` são opcionais e têm lar canônico em `identity.*`. Todos
+ * re-sanitizados (trim/clamp) server-side. → confirmation `businessIdentity`.
+ */
+export const businessIdentityPayloadSchema = z.object({
+  cardKey: z.literal('business_identity'),
+  name: z.string().min(1).max(80),
+  address: z.string().min(1).max(300).optional(),
+  description: z.string().min(1).max(500).optional(),
+})
+
+/**
  * Registry of per-card payload schemas. ADD a card here (W3) and the cardKey
  * enum + discriminated union below pick it up automatically. Keyed by the
  * literal `cardKey` each schema carries in its discriminator field.
@@ -308,6 +323,7 @@ export const CARD_PAYLOAD_SCHEMAS = {
   quick_reply_chips: quickReplyChipsPayloadSchema,
   source_progress: sourceProgressPayloadSchema,
   silenced_contacts: silencedContactsPayloadSchema,
+  business_identity: businessIdentityPayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -353,6 +369,7 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   quickReplyChipsPayloadSchema,
   sourceProgressPayloadSchema,
   silencedContactsPayloadSchema,
+  businessIdentityPayloadSchema,
 ])
 export type CardSubmitBody = z.infer<typeof cardSubmitBodySchema>
 
@@ -380,4 +397,7 @@ export type SilencedContactItemPayload = z.infer<
 >
 export type SilencedContactsPayload = z.infer<
   typeof silencedContactsPayloadSchema
+>
+export type BusinessIdentityPayload = z.infer<
+  typeof businessIdentityPayloadSchema
 >

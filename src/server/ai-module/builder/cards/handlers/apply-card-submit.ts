@@ -44,6 +44,8 @@ import {
   type SourceProgressPayload,
   type SilencedContactsPayload,
 } from '../card-submit.schemas'
+import { trackJourneyEvent } from '@/server/services/journey-events'
+import { applyBusinessIdentity } from './apply/journey-v2'
 
 // ---------------------------------------------------------------------------
 // Args / result
@@ -926,12 +928,31 @@ export async function applyCardSubmit(
       // `accept: true` is guaranteed by the Zod literal — copy proposed (with
       // optional per-field edits) into the owned fields + flip `source`.
       application = applySourceProgress(current, body.edited)
+      // T20 (FR-03) — a fonte aceita SATISFAZ a identidade do negócio (caminho
+      // equivalente ao card business_identity). Fire-and-forget, nunca lança.
+      await trackJourneyEvent({
+        organizationId,
+        projectId,
+        journeyVersion: current.journeyVersion,
+        event: 'identity_done',
+      })
       break
     case 'silenced_contacts':
       // `acknowledged: true` is guaranteed by the Zod literal — replace the
       // silenced-contacts list wholesale + flip `silencedContacts`. Empty is OK.
       application = applySilencedContacts(current, body.contacts)
       break
+    case 'business_identity':
+      // Journey v2 (T19/FR-03): owns its OWN transactional write (builderState +
+      // builder_projects.name mirror) and emits `identity_done`. Return early —
+      // the generic write below is for the pure (state) => application handlers.
+      return applyBusinessIdentity({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
     default: {
       // Exhaustiveness guard — a new registered card without a handler branch
       // becomes a compile error here.
