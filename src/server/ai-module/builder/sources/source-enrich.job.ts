@@ -2,16 +2,21 @@
  * Builder Module — Source-enrich JOB HANDLER (Orayon Uplift, W4 source-ingestion)
  *
  * The ASYNC worker body for the `quayer:source-enrich` queue. Given a set of
- * already-created `KnowledgeSource` ids (one per pasted site/IG), for EACH source:
- *   1. `ingestSource()` — extract → chunk → embed → pgvector (RAG). Reused as-is;
- *      it now also returns the raw `extractedText` so we synthesize from the SAME
- *      fetch (no second network round-trip, no re-entry into the SSRF guard).
+ * already-created `KnowledgeSource` ids (one per pasted site/IG), every source is
+ * enriched CONCURRENTLY (fan-out capped at `SOURCE_ENRICH_CONCURRENCY`), and per
+ * source the work is itself parallel — a single FETCH (the floor) then THREE
+ * mutually-independent steps via `Promise.allSettled` (all consume the SAME
+ * fetched text/HTML; see specs/source-ingestion-parallel/plan.md):
+ *   1. embed + persist chunks → pgvector (RAG) — `embedAndPersistSource`.
  *   2. LLM synthesis (source-synthesis.prompt + the niche-researcher
  *      `runLLMSubAgent` pattern + BYOK org-key resolution) → a `SourceProposal`
  *      `{ businessName, services[], audience, differentiators[], tone, address, description }`.
- * Then it PATCHes `builderState.sourceIngestion.proposed` (PROPOSED values only —
- * never owned fields, never `*_confirmed` sentinels) and updates each source's
- * `builderState.sourceIngestion.sources[].status`, all scoped by `organizationId`.
+ *   3. Onda D image extraction (website-first; gated/fail-open).
+ * Each source PATCHes `builderState.sourceIngestion` INCREMENTALLY the instant it
+ * settles: its `sources[].status` + images mirror, plus its `proposed` (PROPOSED
+ * values only — never owned fields, never `*_confirmed` sentinels) as soon as a
+ * grounded synthesis lands, all scoped by `organizationId`. The card (poll 2s)
+ * sees real progress and the user can "Aceitar" the moment a proposal exists.
  *
  * ANTI-HALLUCINATION: synthesis writes ONLY `proposed`. The owned builderState
  * fields + `confirmations.source` flip to TRUE only when the user clicks
@@ -19,15 +24,19 @@
  * agent). The ONE exception in the other direction: when a NON-EMPTY proposal
  * lands AFTER an accept (link pasted post-accept), the atomic patch flips
  * `confirmations.source` back to FALSE (`reopenOnProposal`) so the card
- * resurfaces for review instead of the proposal landing silently. Cross-batch,
- * the persisted `proposed` is MERGED (same first-wins/union semantics as the
- * intra-batch fold below), never overwritten.
+ * resurfaces for review instead of the proposal landing silently. Cross-source
+ * AND cross-batch, the persisted `proposed` is MERGED (first-wins scalars / union
+ * lists — `mergeProposal` at the write boundary), never overwritten, so the N
+ * concurrent per-source PATCHes are safe by construction.
  *
- * FAIL-SAFE (mirrors session-close.job): NEVER throws. Per-source ingestion
- * errors are already persisted to `KnowledgeSource.error`/`status` by
- * `ingestSource`; we mirror that status into builderState and keep going.
- * Synthesis failures degrade gracefully (the source stays `ready` for RAG, just
- * no proposed fields from it). The aggregate result is always returned.
+ * FAIL-SAFE (mirrors session-close.job): NEVER throws. The fetch + embed/persist
+ * seam (`fetchSource`/`embedAndPersistSource`) persists per-source errors to
+ * `KnowledgeSource.error`/`status`; we mirror that status into builderState and
+ * keep going. Synthesis/image failures degrade gracefully (the source stays
+ * `ready` for RAG, just no proposed fields/images from it) — `allSettled` ensures
+ * one step's failure never sinks the others. The aggregate result is always
+ * returned, and `enrichSource` itself never throws (so the `Promise.all` fan-out
+ * can't be sunk by one bad source).
  *
  * Runs ON THE WORKER, never inline in the SSE turn (see source-enrich.queue.ts).
  *
@@ -37,8 +46,15 @@
  * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md (§5 source-ingestion + decisions).
  */
 
+import pLimit from 'p-limit'
+
 import { database } from '@/server/services/database'
-import { ingestSource } from '@/server/ai-module/ai-agents/knowledge/knowledge-ingestion.service'
+import { logger } from '@/server/services/logger'
+import {
+  fetchSource,
+  embedAndPersistSource,
+  type FetchSourceResult,
+} from '@/server/ai-module/ai-agents/knowledge/knowledge-ingestion.service'
 import { runLLMSubAgent } from '../sub-agents/base'
 import type { SubAgentContext } from '../sub-agents/types'
 import type { SourceProposal } from '../cards/builder-state'
@@ -71,6 +87,14 @@ const SYNTHESIS_TEMPERATURE = 0.2
 const SYNTHESIS_MAX_TOKENS = 1500
 /** Per-source synthesis timeout (ms). The whole job is async — be patient but bounded. */
 const SYNTHESIS_TIMEOUT_MS = 25_000
+
+/**
+ * Quantas fontes enriquecemos EM PARALELO no mesmo job (S03/M1 fan-out). Para 1
+ * URL é no-op; para N fontes corta ~N× o wall-clock. Capado em 5 para não
+ * estourar rate-limit do provider LLM/embedding em picos (o retry×3 da fila
+ * cobre falhas transitórias) — ver specs/source-ingestion-parallel/plan.md §M1.
+ */
+const SOURCE_ENRICH_CONCURRENCY = 5
 
 // Hosts treated as Instagram (mirrors url-extractor / text-extraction). We only
 // use this to pick the synthesis copy ('perfil de Instagram' vs 'site'); the
@@ -107,16 +131,30 @@ export interface EnrichSourceResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Enrich a SINGLE source: ingest into RAG, then synthesize a proposal from the
- * extracted text. Fail-safe — any failure is captured into the returned result
- * (and persisted to `KnowledgeSource.error` by `ingestSource`), never thrown.
+ * Enrich a SINGLE source. Fail-safe — any failure is captured into the returned
+ * result (and persisted to `KnowledgeSource.error` by the ingestion seam), NEVER
+ * thrown (so `Promise.all` over sources can't be sunk by one bad source).
+ *
+ * STRUCTURE (S02/M1 intra-source concurrency — see specs/source-ingestion-parallel):
+ *   1. FETCH (await, sequential — it's the floor: one page over the network).
+ *   2. The THREE post-fetch steps run CONCURRENTLY via `Promise.allSettled`, as
+ *      they're mutually independent (all consume the SAME fetched text/HTML,
+ *      none depends on another's output):
+ *        a. embed + persist chunks into pgvector (RAG);
+ *        b. LLM synthesis of the proposal;
+ *        c. Onda D image extraction (website-first; gated/short-circuits).
+ *      `allSettled` (not `all`) so one step's failure never sinks the others —
+ *      the per-step fail-open behavior is preserved (each step swallows its own
+ *      error into its branch of the result). Wall-clock per source goes from
+ *      `fetch + embed + synth` to `fetch + max(embed, synth, images)`.
  *
  * @param sourceId        KnowledgeSource id (already created, org-owned).
- * @param conversationId  BuilderProjectConversation id (synthesis ctx + later PATCH).
- * @param organizationId  Tenant boundary — passed to `ingestSource` as
+ * @param conversationId  BuilderProjectConversation id (synthesis ctx + PATCH).
+ * @param organizationId  Tenant boundary — passed to `fetchSource` as
  *                        `expectedOrganizationId` and to the LLM context.
  * @param userId          For BYOK org-key resolution (credentialResolver).
  * @param projectId       For BYOK org-key resolution (credentialResolver).
+ * @param traceId         Correlation id (from the BullMQ carrier) for the timer log.
  */
 export async function enrichSource(
   sourceId: string,
@@ -124,22 +162,32 @@ export async function enrichSource(
   organizationId: string,
   userId: string,
   projectId: string,
+  traceId?: string,
 ): Promise<EnrichSourceResult> {
-  // 1. Ingest into RAG. ingestSource is itself fail-safe: it marks the source
-  //    ready|error and persists the error — it only throws when the source/table
-  //    is missing, which we catch here so the job never dies.
-  let ingest: Awaited<ReturnType<typeof ingestSource>>
+  const t0 = Date.now()
+
+  // ── ETAPA 1 — FETCH (sequencial; piso do wall-clock). fetchSource é fail-safe:
+  //    uma falha de fetch já marca status=error na fonte; só relança fonte
+  //    ausente/cross-org (que devem matar a fonte deste lote, nunca o job).
+  let fetched: FetchSourceResult
   try {
-    ingest = await ingestSource(sourceId, {
+    fetched = await fetchSource(sourceId, {
       expectedOrganizationId: organizationId,
     })
   } catch (err) {
     const message = errorMessage(err)
-    console.error(
-      '[source-enrich.job] ingestSource threw for source',
+    logger.warn('[source-enrich.job] fetch failed for source', {
+      traceId,
       sourceId,
-      message,
-    )
+      error: message,
+    })
+    logStepTimings(traceId, sourceId, {
+      fetchMs: Date.now() - t0,
+      embedMs: 0,
+      synthMs: 0,
+      imagesMs: 0,
+      totalMs: Date.now() - t0,
+    })
     return {
       sourceId,
       status: 'error',
@@ -147,59 +195,120 @@ export async function enrichSource(
       error: message,
     }
   }
+  const fetchMs = Date.now() - t0
 
-  if (ingest.status === 'error') {
-    // Error already persisted to KnowledgeSource by ingestSource.
-    return {
-      sourceId,
-      status: 'error',
-      images: { imagesStatus: 'error', imagesCount: 0 },
-      error: ingest.error,
-    }
-  }
-
-  // Resolve source metadata ONCE (org-scoped) — reused by the image hook below
-  // and the synthesis copy further down (single query for both).
+  // Resolve source metadata ONCE (org-scoped) — reused by the image hook and the
+  // synthesis copy (single query for both). Cheap; kept before the fan-out.
   const meta = await resolveSourceMeta(sourceId, organizationId)
+  const text = fetched.text
+  const grounded = text.replace(/\s/g, '').length >= SOURCE_TEXT_MIN_CHARS
 
-  // ── Onda D — extração de imagens (website-first; FAIL-OPEN ABSOLUTO) ─────────
-  // Roda APÓS a ingestão OK e NÃO depende do texto (imagens != texto). Gate:
-  // só sites (`type==='url'`; NÃO instagram) e `imagesEnabled`. O pipeline já é
-  // fail-open e short-circuita sem storage/imagesEnabled, mas envolvemos em
-  // try/catch que SÓ loga para que nenhuma falha de imagem mude o status da
-  // fonte, derrube o job, ou bloqueie a síntese/RAG/texto. `await` (em vez de
-  // void) evita promise órfã no worker; a síntese de texto NÃO espera por isso
-  // do ponto de vista de resultado — o retorno `EnrichSourceResult` é intocado.
-  // O espelho imagesStatus/imagesCount SEMPRE settla: caminhos gateados (sem
-  // html / instagram / opt-out) reportam ready com 0 — assim o poll do card para.
-  let images: SourceImagesMirror = { imagesStatus: 'ready', imagesCount: 0 }
-  if (ingest.extractedHtml && meta.type === 'url' && meta.imagesEnabled) {
-    try {
-      const imagesResult = await extractImagesForSource({
-        sourceId,
-        collectionId: meta.collectionId,
-        organizationId,
-        userId,
-        projectId,
-        html: ingest.extractedHtml,
-        baseUrl: meta.value,
-      })
-      images = { imagesStatus: 'ready', imagesCount: imagesResult.persisted }
-    } catch (err) {
-      console.warn(
-        '[source-enrich.job] image extraction failed (fail-open)',
-        sourceId,
-        errorMessage(err),
-      )
-      images = { imagesStatus: 'error', imagesCount: 0 }
-    }
+  // ── ETAPA 2 — as TRÊS etapas pós-fetch EM PARALELO (allSettled, fail-open por
+  //    etapa). Cada step retorna seu próprio resultado tipado; nenhuma lança.
+  const embedStart = Date.now()
+  let embedMs = 0
+  let synthMs = 0
+  let imagesMs = 0
+
+  const [embedSettled, synthSettled, imagesSettled] = await Promise.allSettled([
+    // (a) embed + persist — etapa 2 isolada de ingestSource. Fail-safe: devolve
+    //     {status:'error'} em vez de lançar; marca a fonte error internamente.
+    embedAndPersistSource(fetched.source, text).finally(() => {
+      embedMs = Date.now() - embedStart
+    }),
+    // (b) síntese — SÓ quando há texto aterrável (caso contrário pula sem custo
+    //     de LLM). Devolve a proposta (ou undefined p/ ungrounded/falha).
+    synthesizeProposal({
+      sourceId,
+      conversationId,
+      meta,
+      text,
+      grounded,
+      ctx: { organizationId, userId, projectId },
+      traceId,
+    }).finally(() => {
+      synthMs = Date.now() - embedStart
+    }),
+    // (c) Onda D — extração de imagens (website-first; FAIL-OPEN ABSOLUTO). NÃO
+    //     depende do texto (imagens != texto). Gate: só sites (`type==='url'`;
+    //     NÃO instagram) e `imagesEnabled`. O pipeline já é fail-open e
+    //     short-circuita sem storage/imagesEnabled; o espelho SEMPRE settla
+    //     (caminhos gateados reportam ready com 0) para o poll do card parar.
+    extractImagesMirror({
+      sourceId,
+      meta,
+      organizationId,
+      userId,
+      projectId,
+      html: fetched.extractedHtml,
+      traceId,
+    }).finally(() => {
+      imagesMs = Date.now() - embedStart
+    }),
+  ])
+
+  // allSettled NUNCA rejeita; mas as branches são fail-open por construção
+  // (cada uma resolve um valor de erro). Defensivo: um rejected improvável
+  // (bug interno) vira o pior caso da etapa, sem derrubar enrichSource.
+  const embed: { status: 'ready' | 'error'; error?: string } =
+    embedSettled.status === 'fulfilled'
+      ? embedSettled.value
+      : { status: 'error', error: errorMessage(embedSettled.reason) }
+  const proposal: SourceProposal | undefined =
+    synthSettled.status === 'fulfilled' ? synthSettled.value : undefined
+  const images: SourceImagesMirror =
+    imagesSettled.status === 'fulfilled'
+      ? imagesSettled.value
+      : { imagesStatus: 'error', imagesCount: 0 }
+
+  logStepTimings(traceId, sourceId, {
+    fetchMs,
+    embedMs,
+    synthMs,
+    imagesMs,
+    totalMs: Date.now() - t0,
+  })
+
+  // O status da FONTE é o da ingestão RAG (embed/persist). Síntese/imagens são
+  // best-effort: falham fail-open sem mudar o status (espelha o comportamento
+  // serial anterior, onde só ingestSource decidia ready|error).
+  return {
+    sourceId,
+    status: embed.status,
+    images,
+    ...(proposal ? { proposal } : {}),
+    ...(embed.error ? { error: embed.error } : {}),
   }
+}
 
-  // 2. Synthesize a proposal from the SAME extracted text (no re-fetch).
-  const text = ingest.extractedText ?? ''
-  if (text.replace(/\s/g, '').length < SOURCE_TEXT_MIN_CHARS) {
-    // Too thin to ground anything — the source is in RAG; just no proposal.
-    return { sourceId, status: 'ready', images }
+// ---------------------------------------------------------------------------
+// Post-fetch steps (each NEVER throws — fail-open per step)
+// ---------------------------------------------------------------------------
+
+/** Args do passo de síntese (etapa 2b). */
+interface SynthesizeArgs {
+  sourceId: string
+  conversationId: string
+  meta: SourceMeta
+  text: string
+  /** Já calculado pelo caller (texto >= SOURCE_TEXT_MIN_CHARS sem espaços). */
+  grounded: boolean
+  ctx: SubAgentContext
+  traceId?: string
+}
+
+/**
+ * Síntese do proposal a partir do MESMO texto extraído (sem re-fetch). NUNCA
+ * lança — uma falha/parse-error/ungrounded degrada para `undefined` (a fonte
+ * segue em RAG; só não contribui campos propostos). Texto magro pula o LLM.
+ */
+async function synthesizeProposal(
+  args: SynthesizeArgs,
+): Promise<SourceProposal | undefined> {
+  const { sourceId, conversationId, meta, text, grounded, ctx, traceId } = args
+  if (!grounded) {
+    // Texto fino demais para aterrar qualquer campo — pula o LLM (sem custo).
+    return undefined
   }
 
   const synthInput: SourceSynthesisInput = {
@@ -208,47 +317,125 @@ export async function enrichSource(
     text,
   }
 
-  const ctx: SubAgentContext = { organizationId, userId, projectId }
-
-  const llm = await runLLMSubAgent(
-    {
-      systemPrompt: SOURCE_SYNTHESIS_SYSTEM,
-      userMessage: buildSourceSynthesisUserMessage(synthInput),
-      temperature: SYNTHESIS_TEMPERATURE,
-      maxOutputTokens: SYNTHESIS_MAX_TOKENS,
-      timeoutMs: SYNTHESIS_TIMEOUT_MS,
-    },
-    ctx,
-  )
-
-  if (!llm.success) {
-    // Graceful degradation — the source is ingested (RAG works); we just have
-    // no proposed fields from it. Not an ingestion error.
-    console.warn(
-      '[source-enrich.job] synthesis failed for source',
-      sourceId,
-      `(conversation ${conversationId})`,
-      llm.error,
+  try {
+    const llm = await runLLMSubAgent(
+      {
+        systemPrompt: SOURCE_SYNTHESIS_SYSTEM,
+        userMessage: buildSourceSynthesisUserMessage(synthInput),
+        temperature: SYNTHESIS_TEMPERATURE,
+        maxOutputTokens: SYNTHESIS_MAX_TOKENS,
+        timeoutMs: SYNTHESIS_TIMEOUT_MS,
+      },
+      ctx,
     )
-    return { sourceId, status: 'ready', images, error: llm.error }
-  }
 
-  const parsed = parseSourceSynthesisJSON(llm.data.text)
-  if (!parsed.ok) {
-    console.warn(
-      '[source-enrich.job] could not parse synthesis JSON for source',
+    if (!llm.success) {
+      // Graceful degradation — a fonte está ingerida (RAG funciona); só não há
+      // campos propostos dela. Não é erro de ingestão.
+      logger.warn('[source-enrich.job] synthesis failed for source', {
+        traceId,
+        sourceId,
+        conversationId,
+        error: llm.error,
+      })
+      return undefined
+    }
+
+    const parsed = parseSourceSynthesisJSON(llm.data.text)
+    if (!parsed.ok) {
+      logger.warn('[source-enrich.job] could not parse synthesis JSON', {
+        traceId,
+        sourceId,
+        error: parsed.message,
+      })
+      return undefined
+    }
+
+    // `ungrounded` (sem campos) é resposta VÁLIDA — nenhuma proposta.
+    if (parsed.ungrounded) return undefined
+    return parsed.value
+  } catch (err) {
+    // Defensivo: runLLMSubAgent não deveria lançar, mas garante fail-open para a
+    // proteção do allSettled (uma síntese morta nunca derruba embed/imagens).
+    logger.warn('[source-enrich.job] synthesis threw (fail-open)', {
+      traceId,
       sourceId,
-      parsed.message,
-    )
-    return { sourceId, status: 'ready', images, error: parsed.message }
+      error: errorMessage(err),
+    })
+    return undefined
   }
+}
 
-  // `ungrounded` (no fields) is a VALID answer — return ready with no proposal.
-  if (parsed.ungrounded) {
-    return { sourceId, status: 'ready', images }
+/** Args do passo de extração de imagens (etapa 2c). */
+interface ExtractImagesArgs {
+  sourceId: string
+  meta: SourceMeta
+  organizationId: string
+  userId: string
+  projectId: string
+  /** HTML cru do MESMO fetch ('' quando não é site servindo HTML). */
+  html: string
+  traceId?: string
+}
+
+/**
+ * Onda D — extração de imagens (website-first; FAIL-OPEN ABSOLUTO). NUNCA lança:
+ * qualquer falha vira `imagesStatus:'error'`. Caminhos gateados (sem html /
+ * instagram / opt-out / sem storage) reportam `ready` com 0 para o poll do card
+ * parar. O espelho SEMPRE settla.
+ */
+async function extractImagesMirror(
+  args: ExtractImagesArgs,
+): Promise<SourceImagesMirror> {
+  const { sourceId, meta, organizationId, userId, projectId, html, traceId } =
+    args
+  if (!(html.length > 0 && meta.type === 'url' && meta.imagesEnabled)) {
+    return { imagesStatus: 'ready', imagesCount: 0 }
   }
+  try {
+    const imagesResult = await extractImagesForSource({
+      sourceId,
+      collectionId: meta.collectionId,
+      organizationId,
+      userId,
+      projectId,
+      html,
+      baseUrl: meta.value,
+    })
+    return { imagesStatus: 'ready', imagesCount: imagesResult.persisted }
+  } catch (err) {
+    logger.warn('[source-enrich.job] image extraction failed (fail-open)', {
+      traceId,
+      sourceId,
+      error: errorMessage(err),
+    })
+    return { imagesStatus: 'error', imagesCount: 0 }
+  }
+}
 
-  return { sourceId, status: 'ready', images, proposal: parsed.value }
+// ---------------------------------------------------------------------------
+// Step timers (S01/M4 — observability; one structured line per source)
+// ---------------------------------------------------------------------------
+
+interface StepTimings {
+  fetchMs: number
+  embedMs: number
+  synthMs: number
+  imagesMs: number
+  totalMs: number
+}
+
+/** Log estruturado com os deltas de cada etapa (sem URLs/segredos). */
+function logStepTimings(
+  traceId: string | undefined,
+  sourceId: string,
+  timings: StepTimings,
+): void {
+  logger.info('[source-enrich.job] step timings', {
+    traceId,
+    sourceId,
+    ...timings,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -256,84 +443,88 @@ export async function enrichSource(
 // ---------------------------------------------------------------------------
 
 /**
- * Process a full enrich job: enrich every source, merge the proposals, and PATCH
- * `builderState.sourceIngestion.{proposed,sources[].status}` once, org-scoped.
+ * Process a full enrich job: enrich every source CONCURRENTLY (fan-out, capped at
+ * `SOURCE_ENRICH_CONCURRENCY`) and PATCH the conversation's
+ * `builderState.sourceIngestion` INCREMENTALLY — each source's status/images
+ * mirror + its grounded `proposed` are written via the race-safe atomic patch AS
+ * SOON AS that source settles. The card (poll 2s) reflects real progress and the
+ * user can "Aceitar" the moment a proposal exists (S03/S04 — M1/M3).
  *
  * Matches the `RunSourceEnrich` contract from source-enrich.queue.ts so the
- * worker (and the dev sync fallback) can call it directly.
+ * worker (and the dev sync fallback) can call it directly. The `traceId` (from
+ * the BullMQ carrier) is threaded into the per-source step-timing logs.
  */
 export async function runSourceEnrich(
   payload: SourceEnrichJobPayload,
+  traceId?: string,
 ): Promise<SourceEnrichResult> {
   const { organizationId, userId, projectId, conversationId, sourceIds } =
     payload
 
-  let processed = 0
+  const limit = pLimit(SOURCE_ENRICH_CONCURRENCY)
+
+  // S03 — fan out: each source is enriched under the concurrency limiter and, AS
+  // IT SETTLES, patches ITS OWN slice of builderState (S04 incremental). The
+  // atomic patch is race-safe (read+merge+write of the subtree) AND its merge is
+  // first-wins/union, so N concurrent calls are safe by construction. enrichSource
+  // never throws, so Promise.all can't be sunk by one bad source.
+  const outcomes = await Promise.all(
+    sourceIds.map((sourceId) =>
+      limit(async () => {
+        const outcome = await enrichSource(
+          sourceId,
+          conversationId,
+          organizationId,
+          userId,
+          projectId,
+          traceId,
+        )
+
+        // S04 — incremental PATCH the instant this source settles: its status +
+        // images mirror, and (only when grounded) its proposal. Fail-safe — a
+        // lost mirror never loses the ingestion (persisted in pgvector +
+        // KnowledgeSource); the merge is first-wins so this never clobbers a
+        // proposal an earlier source already wrote.
+        const proposal =
+          outcome.proposal && hasAnyProposalField(outcome.proposal)
+            ? outcome.proposal
+            : undefined
+        try {
+          await patchSourceIngestion(
+            conversationId,
+            organizationId,
+            proposal,
+            new Map<string, 'ready' | 'error'>([
+              [sourceId, outcome.status],
+            ]),
+            new Map<string, SourceImagesMirror>([[sourceId, outcome.images]]),
+          )
+        } catch (err) {
+          logger.error(
+            '[source-enrich.job] failed to PATCH builderState.sourceIngestion',
+            { traceId, conversationId, sourceId, error: errorMessage(err) },
+          )
+        }
+
+        return outcome
+      }),
+    ),
+  )
+
+  // Reduce the resolved outcomes into the aggregate result (no racy mid-loop
+  // mutation — collect then fold).
   let ingested = 0
   let errors = 0
-
-  // Accumulate per-source outcomes; merge into one proposal at the end.
-  const merged: SourceProposal = {}
-  const statusBySourceId = new Map<string, 'ready' | 'error'>()
-  const imagesBySourceId = new Map<string, SourceImagesMirror>()
-
-  for (const sourceId of sourceIds) {
-    processed += 1
-    let outcome: EnrichSourceResult
-    try {
-      outcome = await enrichSource(
-        sourceId,
-        conversationId,
-        organizationId,
-        userId,
-        projectId,
-      )
-    } catch (err) {
-      // enrichSource is fail-safe, but stay defensive: one bad source must not
-      // abort the batch.
-      console.error(
-        '[source-enrich.job] unexpected error enriching source',
-        sourceId,
-        errorMessage(err),
-      )
-      outcome = {
-        sourceId,
-        status: 'error',
-        images: { imagesStatus: 'error', imagesCount: 0 },
-        error: errorMessage(err),
-      }
-    }
-
-    statusBySourceId.set(sourceId, outcome.status)
-    imagesBySourceId.set(sourceId, outcome.images)
+  let proposalWritten = false
+  for (const outcome of outcomes) {
     if (outcome.status === 'ready') ingested += 1
     else errors += 1
-
-    if (outcome.proposal) mergeProposal(merged, outcome.proposal)
+    if (outcome.proposal && hasAnyProposalField(outcome.proposal)) {
+      proposalWritten = true
+    }
   }
 
-  const proposalWritten = hasAnyProposalField(merged)
-
-  // Single org-scoped PATCH of the conversation's builderState. Fail-safe — a
-  // failure here only loses the proposal/status mirror, never the ingestion
-  // (which is already persisted in pgvector + KnowledgeSource).
-  try {
-    await patchSourceIngestion(
-      conversationId,
-      organizationId,
-      proposalWritten ? merged : undefined,
-      statusBySourceId,
-      imagesBySourceId,
-    )
-  } catch (err) {
-    console.error(
-      '[source-enrich.job] failed to PATCH builderState.sourceIngestion',
-      conversationId,
-      errorMessage(err),
-    )
-  }
-
-  return { processed, ingested, errors, proposalWritten }
+  return { processed: outcomes.length, ingested, errors, proposalWritten }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +576,9 @@ async function patchSourceIngestion(
     },
   )
   if (!patched) {
-    console.warn(
-      '[source-enrich.job] conversation not found for org (skipped PATCH)',
+    logger.warn('[source-enrich.job] conversation not found for org (skipped PATCH)', {
       conversationId,
-    )
+    })
   }
 }
 

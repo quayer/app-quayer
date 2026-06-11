@@ -24,14 +24,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mocks (hoisted ANTES de qualquer import que os toque)
 // ---------------------------------------------------------------------------
 
-/** Shape mínimo do IngestResult que o job consome (status/extractedText/...). */
-interface IngestResultLike {
+/** Shape mínimo da `source` resolvida que o fetch devolve (1ª etapa). */
+interface SourceRowLike {
+  id: string
+  collectionId: string
+  organizationId: string
+  type: string
+  source: string
+}
+
+/** Shape do FetchSourceResult que o job consome (source/text/extractedHtml). */
+interface FetchResultLike {
+  source: SourceRowLike
+  text: string
+  extractedHtml: string
+}
+
+/** Shape do IngestResult (etapa 2 — embed+persist) que o job consome. */
+interface EmbedResultLike {
   sourceId: string
   status: 'ready' | 'error'
   chunkCount: number
   error?: string
-  extractedText?: string
-  extractedHtml?: string
 }
 
 type LLMResult =
@@ -42,18 +56,27 @@ type LLMResult =
 const EXTRACTED_TEXT =
   'Vibra Residencial: apartamentos de 2 quartos no Butantã, lazer completo com piscina e coworking, a minutos da estação. Unidades a partir de R$ 333.333.'
 
-const mockIngestSource = vi.hoisted(() =>
-  vi.fn<(...args: unknown[]) => Promise<IngestResultLike>>(async () => ({
-    sourceId: 'src-1',
-    status: 'ready',
-    chunkCount: 3,
-    extractedText: EXTRACTED_TEXT,
-    // sem extractedHtml → caminho de imagens fica gateado (irrelevante aqui)
-  })),
+const SOURCE_ROW: SourceRowLike = {
+  id: 'src-1',
+  collectionId: 'col-1',
+  organizationId: 'org-1',
+  type: 'url',
+  source: 'https://vibraresidencial.com.br',
+}
+
+// ETAPA 1 — fetch (devolve source resolvida + texto/HTML do mesmo fetch). Sem
+// extractedHtml ('') → caminho de imagens gateado (irrelevante aqui).
+const mockFetchSource = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<FetchResultLike>>(),
+)
+// ETAPA 2 — embed+persist (marca ready|error; roda em paralelo com a síntese).
+const mockEmbedAndPersistSource = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<EmbedResultLike>>(),
 )
 
 vi.mock('@/server/ai-module/ai-agents/knowledge/knowledge-ingestion.service', () => ({
-  ingestSource: mockIngestSource,
+  fetchSource: mockFetchSource,
+  embedAndPersistSource: mockEmbedAndPersistSource,
 }))
 
 const mockRunLLMSubAgent = vi.hoisted(() =>
@@ -145,11 +168,17 @@ function finalState() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockIngestSource.mockResolvedValue({
+  // ETAPA 1 — fetch devolve a source resolvida + o texto do MESMO fetch.
+  mockFetchSource.mockResolvedValue({
+    source: SOURCE_ROW,
+    text: EXTRACTED_TEXT,
+    extractedHtml: '',
+  })
+  // ETAPA 2 — embed+persist OK (a fonte assenta ready) por default.
+  mockEmbedAndPersistSource.mockResolvedValue({
     sourceId: 'src-1',
     status: 'ready',
     chunkCount: 3,
-    extractedText: EXTRACTED_TEXT,
   })
   mockSourceFindFirst.mockResolvedValue({
     source: 'https://vibraresidencial.com.br',

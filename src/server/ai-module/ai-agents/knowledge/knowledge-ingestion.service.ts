@@ -73,6 +73,21 @@ interface SourceRow {
   source: string
 }
 
+/**
+ * Resultado do FETCH (1ª etapa da ingestão, isolada). Carrega a `source` já
+ * resolvida + org-validada (para a etapa de embed/persist não reconsultar) e o
+ * texto/HTML crus do MESMO fetch. Usado pelo Builder source-enrich.job para
+ * rodar embed+persist EM PARALELO com a síntese/imagens (todas consomem este
+ * mesmo texto) — sem 2º round-trip nem reentrada no guard SSRF.
+ */
+export interface FetchSourceResult {
+  source: SourceRow
+  /** Texto limpo extraído (pode ser ''; o gate de chunks trata vazio). */
+  text: string
+  /** HTML cru do MESMO fetch (só `type='url'` servindo HTML; '' caso contrário). */
+  extractedHtml: string
+}
+
 function sourceDelegate() {
   const d = (database as unknown as Record<string, unknown>)['knowledgeSource'] as
     | {
@@ -114,13 +129,46 @@ async function persistChunks(
 }
 
 /**
- * Executa a ingestão completa de uma fonte. Marca processing → ready|error e
- * persiste o erro na própria fonte. Só lança se a fonte/tabela não existir.
+ * Marca status=error na fonte (best-effort). Compartilhado pelas duas etapas
+ * (fetch e embed/persist) extraídas de `ingestSource`. Se ESTE write falhar a
+ * fonte fica presa em "pending" para sempre na UI ("fonte eternamente na fila")
+ * — loga alto, nunca silencia.
  */
-export async function ingestSource(
+async function markSourceError(
+  delegate: NonNullable<ReturnType<typeof sourceDelegate>>,
+  sourceId: string,
+  message: string,
+): Promise<void> {
+  await delegate
+    .update({
+      where: { id: sourceId },
+      data: { status: 'error', error: message.slice(0, 1000), updatedAt: new Date() },
+    })
+    .catch((statusErr: unknown) => {
+      console.error(
+        '[KnowledgeIngestion] falha ao gravar status=error (fonte ficará pending!)',
+        sourceId,
+        statusErr instanceof Error ? statusErr.message : String(statusErr),
+      )
+    })
+}
+
+/**
+ * ETAPA 1 — FETCH. Resolve+org-valida a fonte, marca `processing` e extrai o
+ * texto/HTML crus (1 round-trip; SSRF-guarded em `safeFetch`). Devolve a `source`
+ * resolvida para a etapa de embed/persist não reconsultar. SÓ lança quando a
+ * fonte/tabela não existe ou é de outra org (mesmos casos que `ingestSource`);
+ * uma falha de fetch é marcada `status=error` na fonte E relançada para o caller
+ * registrar o resultado de erro (espelha o try/catch original).
+ *
+ * Isolada de `ingestSource` para o Builder source-enrich.job poder rodar a etapa
+ * 2 (embed/persist) EM PARALELO com a síntese/imagens — todas consomem o `text`
+ * deste fetch, nenhuma depende da saída da outra.
+ */
+export async function fetchSource(
   sourceId: string,
   opts: IngestOptions = {},
-): Promise<IngestResult> {
+): Promise<FetchSourceResult> {
   const delegate = sourceDelegate()
   if (!delegate) throw new Error('knowledge_sources indisponível (migration não aplicada?)')
 
@@ -141,24 +189,44 @@ export async function ingestSource(
   try {
     // Onda D — para fontes do tipo 'url' capturamos o HTML cru do MESMO fetch
     // (sem 2º round-trip nem reentrada no guard SSRF) para o image-pipeline.
-    // pdf/text não têm HTML → `extractedHtml` fica undefined.
-    let text: string
-    let extractedHtml: string | undefined
+    // pdf/text não têm HTML → `extractedHtml` fica ''.
     if (source.type === 'url') {
       const extracted = await extractUrlTextWithHtml(source.source)
-      text = extracted.text
-      extractedHtml = extracted.html.length > 0 ? extracted.html : undefined
-    } else {
-      text = await extractText(source, opts)
+      return { source, text: extracted.text, extractedHtml: extracted.html }
     }
+    const text = await extractText(source, opts)
+    return { source, text, extractedHtml: '' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[KnowledgeIngestion] falha no fetch', sourceId, message)
+    await markSourceError(delegate, sourceId, message)
+    throw err
+  }
+}
+
+/**
+ * ETAPA 2 — EMBED + PERSIST. Chunkifica o `text` já extraído (etapa 1), embeda em
+ * lote e persiste no pgvector, marcando `ready` (ou `error` quando não há texto).
+ * Idempotente por fonte (apaga chunks antigos antes de inserir). Fail-safe: marca
+ * a fonte `error` e devolve o resultado de erro em vez de lançar.
+ */
+export async function embedAndPersistSource(
+  source: SourceRow,
+  text: string,
+  opts: Pick<IngestOptions, 'chunkSize' | 'chunkOverlap'> = {},
+): Promise<IngestResult> {
+  const delegate = sourceDelegate()
+  if (!delegate) throw new Error('knowledge_sources indisponível (migration não aplicada?)')
+
+  try {
     const chunks = chunkText(text, { size: opts.chunkSize, overlap: opts.chunkOverlap })
 
     if (chunks.length === 0) {
       await delegate.update({
-        where: { id: sourceId },
+        where: { id: source.id },
         data: { status: 'error', error: 'Nenhum texto extraível', chunkCount: 0, updatedAt: new Date() },
       })
-      return { sourceId, status: 'error', chunkCount: 0, error: 'sem texto' }
+      return { sourceId: source.id, status: 'error', chunkCount: 0, error: 'sem texto' }
     }
 
     const embeddings = await embedTexts(
@@ -168,33 +236,63 @@ export async function ingestSource(
     await persistChunks(source, chunks, embeddings)
 
     await delegate.update({
-      where: { id: sourceId },
+      where: { id: source.id },
       data: { status: 'ready', chunkCount: chunks.length, error: null, updatedAt: new Date() },
     })
-    return {
-      sourceId,
-      status: 'ready',
-      chunkCount: chunks.length,
-      extractedText: text,
-      extractedHtml,
-    }
+    return { sourceId: source.id, status: 'ready', chunkCount: chunks.length }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('[KnowledgeIngestion] falha ao ingerir', sourceId, message)
-    await delegate
-      .update({
-        where: { id: sourceId },
-        data: { status: 'error', error: message.slice(0, 1000), updatedAt: new Date() },
-      })
-      .catch((statusErr: unknown) => {
-        // Se ESTE write falha, a fonte fica presa em "pending" para sempre na UI
-        // (sintoma de "fonte eternamente na fila") — loga alto, nunca silencia.
-        console.error(
-          '[KnowledgeIngestion] falha ao gravar status=error (fonte ficará pending!)',
-          sourceId,
-          statusErr instanceof Error ? statusErr.message : String(statusErr),
-        )
-      })
+    console.error('[KnowledgeIngestion] falha ao embedar/persistir', source.id, message)
+    await markSourceError(delegate, source.id, message)
+    return { sourceId: source.id, status: 'error', chunkCount: 0, error: message }
+  }
+}
+
+/**
+ * Executa a ingestão completa de uma fonte: FETCH (etapa 1) → EMBED+PERSIST
+ * (etapa 2), composta das funções isoladas acima para os outros callers (upload
+ * de PDF, knowledge-source routes) seguirem com a MESMA semântica de antes.
+ * Marca processing → ready|error e persiste o erro na própria fonte. Só lança se
+ * a fonte/tabela não existir.
+ *
+ * O Builder `quayer:source-enrich` job NÃO usa esta composição — ele chama
+ * `fetchSource` + `embedAndPersistSource` diretamente para paralelizar a etapa 2
+ * com a síntese/imagens.
+ */
+export async function ingestSource(
+  sourceId: string,
+  opts: IngestOptions = {},
+): Promise<IngestResult> {
+  // ETAPA 1 — fetch. Falha de fetch já marca status=error na fonte; aqui só
+  // convertemos o throw no MESMO resultado de erro que o caller espera.
+  let fetched: FetchSourceResult
+  try {
+    fetched = await fetchSource(sourceId, opts)
+  } catch (err) {
+    // `fetchSource` relança apenas: (a) fonte/tabela ausente ou cross-org (que
+    // SEMPRE devem lançar, como antes), ou (b) falha de fetch (já persistida como
+    // status=error). Distinguimos: se a fonte existe e foi marcada error, devolve
+    // o resultado de erro; senão, propaga (fonte inexistente / cross-org).
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      message.includes('não encontrada') ||
+      message.includes('outra organização') ||
+      message.includes('indisponível')
+    ) {
+      throw err
+    }
     return { sourceId, status: 'error', chunkCount: 0, error: message }
+  }
+
+  // ETAPA 2 — embed + persist. Onda D: propaga o HTML cru do mesmo fetch.
+  const result = await embedAndPersistSource(fetched.source, fetched.text, {
+    chunkSize: opts.chunkSize,
+    chunkOverlap: opts.chunkOverlap,
+  })
+  if (result.status === 'error') return result
+  return {
+    ...result,
+    extractedText: fetched.text,
+    extractedHtml: fetched.extractedHtml.length > 0 ? fetched.extractedHtml : undefined,
   }
 }
