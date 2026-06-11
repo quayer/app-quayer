@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
 import { PanelLeft } from "lucide-react"
@@ -88,6 +88,20 @@ export function AppShellClient({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [router, pathname])
+
+  // Entrar no WORKSPACE de um projeto (e só nele) auto-minimiza a sidebar —
+  // chat + painel ganham a tela inteira (ex.: mandou mensagem na home e caiu
+  // no projeto recém-criado). Decisão de sessão: NÃO persiste no localStorage,
+  // então a preferência global do usuário (⌘B/botão, que persistem) fica intacta
+  // e reabrir a sidebar não briga com novas navegações dentro do workspace.
+  const isProjectWorkspace = /^\/projetos\/[^/]+/.test(pathname ?? "")
+  const wasProjectWorkspaceRef = useRef(false)
+  useEffect(() => {
+    const was = wasProjectWorkspaceRef.current
+    wasProjectWorkspaceRef.current = isProjectWorkspace
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isProjectWorkspace && !was) setCollapsed(true)
+  }, [isProjectWorkspace])
 
   const toggle = () => {
     setCollapsed((prev) => {
