@@ -12,6 +12,8 @@
 > **Jun/06 (Fase E — catálogo de mídia):** novo `media_assets` — catálogo de mídia ENVIÁVEL pelo agente (foto/vídeo/PDF; áudio fora). FK→`KnowledgeCollection` (`collectionId = ragCollectionId = kb:projectId`). Origens: `upload` (dono sobe), `gallery` (espelha `KnowledgeImage`), `pricing` (espelha `PriceItem.imageUrl`) — as duas últimas materializadas pelo passo de saga `materialize_media`. A tool de RETRIEVAL `buscar_media` devolve URLs reais ao LLM; o envio é do pipeline outbound (tag de mídia). Modelo no Domain "RAG & Observability".
 >
 > **Jun/11 (Jornada v2 — funil):** novo `builder_journey_events` — log de eventos repetíveis do funil de progresso do usuário no Builder. **Sem FK** (como `BuilderToolCall.messageId`; tabela de alta escrita, limpeza por retenção): `projectId` + `organizationId` por tenant, `journeyVersion` (1\|2, congelado no evento), `event` (`@db.VarChar(60)`, vocabulário fechado em TS — `journey-events.ts`), `metadata` Json tipado sem campos livres de PII (NFR-02/LGPD). Índices `(organizationId,event,createdAt)` (funil por org) + `(projectId,createdAt)` (linha do tempo por projeto). Modelo no Domain "Builder IA".
+>
+> **Jun/11 (Integration Builder Wave 1 — T03):** enum `IntegrationStatus` (draft|validated|active|paused|error) + novos `custom_integrations` e `integration_test_calls`. `CustomIntegration` é **1:1 com `AgentTool`** via `agentToolId String? @unique` (FK **SetNull**): a nulabilidade é deliberada — DELETAR uma CustomIntegration faz **soft delete** (seta `deletedAt`) na CustomIntegration E **hard delete** do `AgentTool`, o que libera o nome snake_case (`@@unique([organizationId, name])` do AgentTool) para reuso enquanto a linha soft-deletada sobrevive para auditoria com `agentToolId = null`. Paridade por construção: `status='active'` ⇄ `AgentTool.isActive=true` (o runtime `getCustomTools` filtra `isActive`, então playground = produção). Credenciais ficam em `CustomIntegration.credentials` (Json?), cada valor cifrado individualmente via `lib/crypto` — **NUNCA** no `builderState`. FKs `organizationId`/`builderProjectId` são Cascade; `integration_test_calls` (outcome/httpStatus/durationMs, **sem payloads**) é Cascade no delete da integração. Índices: `custom_integrations (organizationId,status)`, `(builderProjectId)`, `(organizationId,deletedAt)`; `integration_test_calls (integrationId,createdAt)`. Modelos no Domain "Builder IA".
 
 ---
 
@@ -354,6 +356,55 @@ erDiagram
 
 ---
 
+## Domain 3.1: Integration Builder (Wave 1 — custom tools)
+
+> **Adicionado Jun/11 (T03).** Integrações HTTP customizadas que o dono cria pelo Builder e viram `AgentTool`s do runtime. Ver `src/server/ai-module/builder/integrations/`.
+
+```mermaid
+erDiagram
+    Organization ||--o{ CustomIntegration : "tem (Cascade)"
+    BuilderProject ||--o{ CustomIntegration : "tem (Cascade)"
+    AgentTool |o--o| CustomIntegration : "agentToolId UNIQUE 1:1 (SetNull)"
+    CustomIntegration ||--o{ IntegrationTestCall : "audita (Cascade)"
+
+    CustomIntegration {
+        uuid id PK
+        string organizationId FK "Cascade, indexed"
+        string builderProjectId FK "Cascade, indexed"
+        string agentToolId FK "nullable UNIQUE — 1:1 AgentTool, SetNull; null após hard-delete do AgentTool"
+        string templateSlug "nullable — rd-station|generic-webhook|null"
+        string displayName
+        enum status "IntegrationStatus: draft|validated|active|paused|error"
+        string triggerDescription "nullable — gatilho em linguagem natural (FR-09)"
+        json requestSpec "espec declarativa (método/url/auth/templates/testPayload)"
+        json credentialFields "metadata NÃO-secreta (key/label/whereToGet/regex)"
+        json credentials "nullable — APENAS valores, cada um cifrado lib/crypto (NFR-01)"
+        json research "nullable — snapshot da investigação (FR-02)"
+        datetime lastTestAt "nullable"
+        string lastTestStatus "nullable"
+        string lastTestErrorClass "nullable — classe do erro, NUNCA payload"
+        datetime lastErrorAt "nullable"
+        string lastErrorCode "nullable — writeback de falha em produção (FR-10)"
+        datetime deletedAt "nullable — soft delete (auditoria sobrevive)"
+        datetime createdAt
+        datetime updatedAt
+    }
+    IntegrationTestCall {
+        uuid id PK
+        string integrationId FK "Cascade"
+        string organizationId
+        string requestedById
+        string outcome "success|auth_error|not_found|timeout|schema_error|network|redirect|blocked"
+        int httpStatus "nullable"
+        int durationMs
+        datetime createdAt
+    }
+```
+
+> `CustomIntegration` (`custom_integrations`) é **1:1 com `AgentTool`** via `agentToolId String? @unique` (FK **`onDelete: SetNull`**). A nulabilidade + SetNull são **deliberadas**: DELETAR uma CustomIntegration faz **soft delete** (seta `deletedAt`) na própria CustomIntegration E **hard delete** do `AgentTool` — isso libera o nome (`AgentTool.@@unique([organizationId, name])`, snake_case) para reuso, enquanto a linha soft-deletada da CustomIntegration sobrevive para auditoria com `agentToolId = null`. **Paridade por construção:** `status='active'` ⇄ `AgentTool.isActive=true` — o runtime `getCustomTools` filtra `isActive`, então o que toca no playground == o que toca em produção. Credenciais ficam em `CustomIntegration.credentials` (`Json?`), **cada valor cifrado individualmente** via `lib/crypto` (NFR-01) e **NUNCA** no `builderState`. FKs `organizationId`/`builderProjectId` são **Cascade**. `IntegrationTestCall` (`integration_test_calls`) é auditoria de teste **sem payloads** (só `outcome`/`httpStatus`/`durationMs`), **Cascade** no delete da integração. Índices: `custom_integrations (organizationId,status)`, `(builderProjectId)`, `(organizationId,deletedAt)`; `integration_test_calls (integrationId,createdAt)`.
+
+---
+
 ## Domain 4: Tokens & Security (summary)
 
 | Table | Key Relation | Purpose |
@@ -410,6 +461,7 @@ erDiagram
 | **2026-06-07** | **`20260606100000_department_member_connection`** | **`department_members.connectionId TEXT?` — F0 do épico QR/warm-transfer: o membro pode ter uma instância WhatsApp PRÓPRIA (pareada por QR). Quando setado, o handoff `routing:department` faz WARM TRANSFER: a conexão do membro manda a 1ª mensagem ao cliente (atende no app dele). Scalar SEM FK (espelha `lastAssignedMemberId`), resolvido por findUnique, fail-open. Aditivo, nullable, sem data-loss. Pareamento (UI no Builder) = próximo passo.** |
 | **2026-06-09** | **`20260609000000_department_warm_transfer_opening`** | **`Department.warmTransferOpeningMessage TEXT?` — B1b do warm transfer: a mensagem de abertura passou a ser EDITÁVEL no card `handoff_pairing` (`builderState.team.openingMessage`). `materialize_team` a grava no Department (clear-on-empty); o `dispatch_to_agent` lê fail-open e o `warm-transfer` interpola `{nome}` antes de enviar ao cliente pela conexão do membro. NULL = texto default de `warm-transfer.ts`. Tabela `Department` é PascalCase (sem @@map). Aditivo, nullable, sem data-loss.** |
 | **2026-06-11** | **`add_builder_journey_events`** | **Jornada v2 (Onda 0): novo `builder_journey_events` — log de eventos repetíveis do funil de progresso do usuário no Builder. SEM FK (alta escrita, retenção): `projectId` + `organizationId` (tenant), `journeyVersion INT` (1\|2 congelado), `event VARCHAR(60)` (vocabulário fechado em `journey-events.ts`), `metadata JSONB?` (tipado sem PII — NFR-02/LGPD). Índices `(organizationId,event,createdAt)` (funil) + `(projectId,createdAt)` (timeline). Aditivo, sem data-loss.** |
+| **2026-06-11** | **`add_custom_integrations`** | **Integration Builder Wave 1 (T03): enum `IntegrationStatus` (draft\|validated\|active\|paused\|error) + novos `custom_integrations` e `integration_test_calls`. `custom_integrations.agentToolId` é `String? UNIQUE` (FK→`AgentTool`, **SetNull**): DELETE da CustomIntegration = soft-delete (`deletedAt`) + **hard-delete do AgentTool** (libera o nome `@@unique(organizationId,name)`), a linha soft-deletada sobrevive com `agentToolId = null`. `status='active'` ⇄ `AgentTool.isActive=true` (paridade playground↔produção via `getCustomTools`). `credentials JSONB?` = valores cifrados 1-a-1 (`lib/crypto`, NFR-01), nunca no builderState. FKs org/builderProject Cascade; `integration_test_calls` (outcome/httpStatus/durationMs, sem payloads) Cascade. Índices `(organizationId,status)`, `(builderProjectId)`, `(organizationId,deletedAt)` + `(integrationId,createdAt)`. Aditivo, sem data-loss.** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 

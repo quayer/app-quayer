@@ -21,18 +21,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockEval = vi.fn()
 const mockIncr = vi.fn()
 const mockPexpire = vi.fn()
+const mockPttl = vi.fn()
 
 vi.mock('@/server/services/redis', () => ({
   getRedis: () => ({
     eval: mockEval,
     incr: mockIncr,
     pexpire: mockPexpire,
+    pttl: mockPttl,
   }),
 }))
 
 import {
   checkRateLimit,
+  checkFixedWindowQuota,
   RATE_LIMITS,
+  FIXED_WINDOW_QUOTAS,
   type CheckRateLimitInput,
 } from './rate-limit.service'
 
@@ -244,5 +248,121 @@ describe('checkRateLimit — input inválido (Zod)', () => {
 
     expect(result.allowed).toBe(true)
     expect(mockEval).not.toHaveBeenCalled()
+  })
+})
+
+// ── T49 — Fixed-window quota (checkFixedWindowQuota) ─────────────────────────
+//
+// Quota de janela FIXA (INCR+PEXPIRE), separada do token bucket de runtime.
+// integrationTest: limit 30, windowMs 1h. Sem refill contínuo — a contagem só
+// cresce dentro da janela; o reset acontece quando a chave expira (INCR volta
+// a 1, re-ancorando o TTL via PEXPIRE). Fail-OPEN em erro de Redis.
+//
+// Não toca os buckets de runtime (rl:*): usa namespace `quota:fixed:*` e a
+// função `checkFixedWindowQuota`. Os describe blocks acima (instance/contact/
+// org) permanecem verdes.
+
+describe('checkFixedWindowQuota — fixed-window por org (T49)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('30 permitidos, 31º recusado na mesma janela (contagem só cresce, sem refill)', async () => {
+    const { limit } = FIXED_WINDOW_QUOTAS.integrationTest // 30
+    const ATTEMPTS = limit + 1 // 31
+
+    // PEXPIRE/PTTL no-ops controlados — o foco é a contagem por INCR.
+    mockPexpire.mockResolvedValue(1)
+    // PTTL devolve um TTL positivo qualquer (janela ainda viva).
+    mockPttl.mockResolvedValue(FIXED_WINDOW_QUOTAS.integrationTest.windowMs)
+
+    // INCR monotônico: 1, 2, 3, ... — modela uma janela FIXA onde a contagem
+    // SÓ cresce (nenhum decremento/refill dentro da janela).
+    let counter = 0
+    mockIncr.mockImplementation(() => {
+      counter += 1
+      return Promise.resolve(counter)
+    })
+
+    const results: Array<{ allowed: boolean; remaining: number }> = []
+    for (let i = 0; i < ATTEMPTS; i++) {
+      results.push(await checkFixedWindowQuota('integrationTest', 'org-T49'))
+    }
+
+    // Contagens 1..30 permitidas; 31ª recusada.
+    for (let i = 0; i < limit; i++) {
+      expect(results[i].allowed).toBe(true)
+    }
+    expect(results[limit].allowed).toBe(false) // 31ª (count=31) recusada
+
+    // O `remaining` decresce monotonicamente até 0 e nunca sobe (sem refill).
+    expect(results[0].remaining).toBe(limit - 1) // count=1 → 29 restantes
+    expect(results[limit - 1].remaining).toBe(0) // count=30 → 0 restantes
+    expect(results[limit].remaining).toBe(0) // count=31 → clamp em 0
+
+    // Garante monotonicidade: cada `remaining` é <= o anterior (nunca reabastece).
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].remaining).toBeLessThanOrEqual(results[i - 1].remaining)
+    }
+
+    // 31 chamadas → 31 INCR (recusa é puramente por contagem, não por tempo).
+    expect(mockIncr).toHaveBeenCalledTimes(ATTEMPTS)
+    expect(mockIncr).toHaveBeenCalledWith('quota:fixed:integrationTest:org-T49')
+  })
+
+  it('PEXPIRE ancora o TTL apenas na 1ª chamada da janela (count === 1)', async () => {
+    mockPttl.mockResolvedValue(FIXED_WINDOW_QUOTAS.integrationTest.windowMs)
+    mockPexpire.mockResolvedValue(1)
+
+    // count=1 (primeira chamada da janela) → deve setar PEXPIRE.
+    mockIncr.mockResolvedValueOnce(1)
+    await checkFixedWindowQuota('integrationTest', 'org-window')
+    expect(mockPexpire).toHaveBeenCalledTimes(1)
+    expect(mockPexpire).toHaveBeenCalledWith(
+      'quota:fixed:integrationTest:org-window',
+      FIXED_WINDOW_QUOTAS.integrationTest.windowMs,
+    )
+
+    // count=2 (chamada subsequente, ainda na janela) → NÃO re-seta PEXPIRE.
+    mockIncr.mockResolvedValueOnce(2)
+    await checkFixedWindowQuota('integrationTest', 'org-window')
+    expect(mockPexpire).toHaveBeenCalledTimes(1) // continua 1, não re-ancorou
+  })
+
+  it('expiração da janela libera de novo: INCR volta a 1 → allowed + PEXPIRE re-ancora', async () => {
+    mockPttl.mockResolvedValue(FIXED_WINDOW_QUOTAS.integrationTest.windowMs)
+    mockPexpire.mockResolvedValue(1)
+
+    const { limit } = FIXED_WINDOW_QUOTAS.integrationTest
+
+    // Janela 1 estourada: INCR já passou do limite → recusado.
+    mockIncr.mockResolvedValueOnce(limit + 1) // 31
+    const blocked = await checkFixedWindowQuota('integrationTest', 'org-expiry')
+    expect(blocked.allowed).toBe(false)
+    expect(mockPexpire).not.toHaveBeenCalled() // count != 1 → não ancora
+
+    // Chave expirou → próxima INCR começa nova janela em 1 → liberado de novo.
+    mockIncr.mockResolvedValueOnce(1)
+    const released = await checkFixedWindowQuota('integrationTest', 'org-expiry')
+    expect(released.allowed).toBe(true)
+    expect(released.remaining).toBe(limit - 1) // janela nova, 29 restantes
+    // A 1ª chamada da nova janela re-ancora o TTL via PEXPIRE.
+    expect(mockPexpire).toHaveBeenCalledTimes(1)
+    expect(mockPexpire).toHaveBeenCalledWith(
+      'quota:fixed:integrationTest:org-expiry',
+      FIXED_WINDOW_QUOTAS.integrationTest.windowMs,
+    )
+  })
+
+  it('fail-open quando redis.incr lança: allowed=true (Redis degradado não bloqueia)', async () => {
+    mockIncr.mockRejectedValue(new Error('ECONNREFUSED'))
+
+    const result = await checkFixedWindowQuota('integrationTest', 'org-redis-down')
+
+    expect(result.allowed).toBe(true)
+    expect(result.remaining).toBe(FIXED_WINDOW_QUOTAS.integrationTest.limit)
+    expect(result.resetMs).toBe(FIXED_WINDOW_QUOTAS.integrationTest.windowMs)
+    // PTTL nem chega a ser chamado quando INCR já falhou.
+    expect(mockPttl).not.toHaveBeenCalled()
   })
 })

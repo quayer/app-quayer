@@ -197,6 +197,30 @@ export const sourceIngestionStateSchema = z.object({
 })
 
 /**
+ * Integration Builder W1 (T06) — proposta de integração externa proposta na
+ * conversa, espelhando o idiom de `sourceIngestion.proposed` (PROPOSED only).
+ *
+ * 🚨 CRÍTICO (NFR-03 transparência + segurança): VALORES de credenciais NUNCA
+ * são gravados no builderState — esta subárvore guarda APENAS a proposta + uma
+ * referência (`draftIntegrationId`) ao rascunho. As credenciais reais vivem
+ * cifradas em `CustomIntegration.credentials`.
+ */
+export const integrationProposalSchema = z.object({
+  platform: z.string(), // human label of the platform, e.g. "RD Station"
+  templateSlug: z.string().optional(),
+  triggerDescription: z.string().optional(), // when the agent uses it (natural language)
+  whatDataSent: z.string().optional(), // plain-language: what data is sent (NFR-03 transparency)
+  sources: z
+    .array(z.object({ title: z.string().optional(), url: z.string() }))
+    .optional(), // cited sources (investigator path, W3)
+})
+
+export const integrationStateSchema = z.object({
+  proposed: integrationProposalSchema.optional(),
+  draftIntegrationId: z.string().optional(),
+})
+
+/**
  * Identidade do negócio (Onda E) — campos OWNED sem card próprio: endereço físico
  * e descrição curta (1-2 frases) do negócio/empreendimento. Hoje são gravados
  * EXCLUSIVAMENTE pelo accept do `source_progress` (apply-card-submit), seguindo o
@@ -382,6 +406,13 @@ export const builderStateSchema = z.object({
   calendar: calendarStateSchema.default({}),
   activation: activationStateSchema.default({ keywords: [] }),
   sourceIngestion: sourceIngestionStateSchema.default({ sources: [] }),
+  // Integration Builder W1 (T06, plan §2) — proposta de integração externa.
+  // OPCIONAL e SEM default: states legados/vazios parseiam para `integration:
+  // undefined` (mantém válidos) e o subtree fica AUSENTE até W2 escrever. NÃO é
+  // um passo de jornada (sem ConfirmationKey, sem QUAYER_STEPS). 🚨 NUNCA guarda
+  // valores de credenciais — só proposta + draftIntegrationId (ref ao rascunho);
+  // credenciais reais vivem cifradas em CustomIntegration.credentials.
+  integration: integrationStateSchema.optional(),
   // Onda E — identidade do negócio (address/description) gravada no accept do
   // source_progress. Additivo: legados parseiam para {}.
   identity: identityStateSchema.default({}),

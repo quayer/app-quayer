@@ -18,9 +18,12 @@
 
 import { tool, type Tool } from 'ai'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { database } from '@/server/services/database'
 import { decrypt } from '@/lib/crypto'
 import type { ToolExecutionContext } from './builtin-tools'
+import { runIntegrationCall } from './integration-executor'
+import { requestSpecSchema } from '../../builder/integrations/integration.schemas'
 
 // ---------------------------------------------------------------------------
 // JSONSchema → Zod converter (tight, minimal)
@@ -139,25 +142,60 @@ export async function getCustomTools(
       type: 'CUSTOM',
       isActive: true,
       name: { in: enabledTools },
-      webhookUrl: { not: null },
+      // Either the v1 webhook path (webhookUrl set) OR a declarative integration
+      // that is ACTIVE. An active integration mirrors isActive=true (FR-08), so a
+      // backing integration with no webhookUrl is still surfaced to the LLM.
+      OR: [
+        { webhookUrl: { not: null } },
+        { customIntegration: { status: 'active', deletedAt: null } },
+      ],
     },
     select: {
+      id: true,
       name: true,
       description: true,
       parameters: true,
       webhookUrl: true,
       webhookSecret: true,
       webhookTimeout: true,
+      // Integration Builder backing row (inverse 1:1). Selected so an active
+      // integration can delegate to the shared declarative executor.
+      customIntegration: {
+        select: {
+          id: true,
+          status: true,
+          deletedAt: true,
+          requestSpec: true,
+          credentials: true,
+          organizationId: true,
+        },
+      },
     },
   })
 
   const out: Record<string, Tool> = {}
 
   for (const row of rows) {
+    const inputSchema = jsonSchemaToZod(row.parameters) as z.ZodType<any>
+
+    // --- Integration Builder path -------------------------------------------
+    // A row backed by an ACTIVE integration delegates to the shared declarative
+    // executor (`runIntegrationCall`) instead of the v1 webhook POST. This file
+    // serves both the playground and the production runtime, so wiring it here
+    // gives FR-08 parity by construction.
+    const integration = row.customIntegration
+    if (integration && integration.status === 'active' && integration.deletedAt === null) {
+      out[row.name] = tool({
+        description: row.description,
+        inputSchema,
+        execute: buildIntegrationExecute(integration),
+      })
+      continue
+    }
+
+    // --- v1 webhook path ----------------------------------------------------
     const webhookUrl = row.webhookUrl
     if (!webhookUrl) continue // safety, already filtered in query
-
-    const inputSchema = jsonSchemaToZod(row.parameters) as z.ZodType<any>
 
     out[row.name] = tool({
       description: row.description,
@@ -225,6 +263,109 @@ export async function getCustomTools(
   }
 
   return out
+}
+
+// ---------------------------------------------------------------------------
+// Integration Builder execute (declarative integration → shared executor)
+// ---------------------------------------------------------------------------
+
+/**
+ * The CustomIntegration fields selected alongside an AgentTool row. Derived from
+ * the generated Prisma payload so it stays in lockstep with the relation select
+ * above (the client was regenerated with the `customIntegration` inverse relation).
+ */
+type IntegrationRow = Prisma.CustomIntegrationGetPayload<{
+  select: {
+    id: true
+    status: true
+    deletedAt: true
+    requestSpec: true
+    credentials: true
+    organizationId: true
+  }
+}>
+
+/** Neutral pt-BR hint surfaced to the LLM on any integration failure (never a technical error). */
+const INTEGRATION_USER_FACING_HINT =
+  'Não consegui concluir essa ação agora. Tente novamente em instantes ou siga sem ela.'
+
+/**
+ * Decrypt the integration's stored credential values per call (never cached) into
+ * a `Record<string,string>` keyed by credential field `key`. Each value was stored
+ * CIFRADO (one per `lib/crypto.encrypt`); fail-open per value for legacy plaintext.
+ */
+function decryptCredentials(raw: Prisma.JsonValue | null): Record<string, string> {
+  const creds: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return creds
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== 'string') continue
+    try {
+      creds[key] = decrypt(value)
+    } catch {
+      creds[key] = value
+    }
+  }
+  return creds
+}
+
+/**
+ * Build the `execute` for an AgentTool backed by an ACTIVE integration. Delegates
+ * to the shared `runIntegrationCall` executor (same code path as the test/test-call
+ * route → FR-08 parity). NEVER throws — every failure becomes a SAFE tool result.
+ */
+function buildIntegrationExecute(
+  integration: IntegrationRow,
+): (input: unknown) => Promise<unknown> {
+  return async (input: unknown) => {
+    // Parse the persisted spec. A malformed spec is a config error, not a turn
+    // failure → return the safe hint (never throw).
+    const specParsed = requestSpecSchema.safeParse(integration.requestSpec)
+    if (!specParsed.success) {
+      return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
+    }
+
+    // Per-call decrypt; never cache plaintext.
+    const credentials = decryptCredentials(integration.credentials)
+    const params =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {}
+
+    const result = await runIntegrationCall(specParsed.data, credentials, params, {
+      mode: 'production',
+      integrationId: integration.id,
+      organizationId: integration.organizationId,
+    })
+
+    if (result.outcome !== 'success') {
+      // Fail-open writeback (refined further in T31/Onda 4). A writeback failure
+      // must NOT sink the turn → wrapped in try/catch.
+      try {
+        await database.customIntegration.update({
+          where: { id: integration.id },
+          data: {
+            status: 'error',
+            lastErrorAt: new Date(),
+            lastErrorCode: result.httpStatus ? String(result.httpStatus) : result.outcome,
+          },
+        })
+      } catch {
+        // swallow — observability writeback is best-effort, never load-bearing.
+      }
+      return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
+    }
+
+    // Success: hand the (capped) response body back so the LLM can use it.
+    let data: unknown = result.bodySnippet ?? null
+    if (typeof data === 'string' && data.length > 0) {
+      try {
+        data = JSON.parse(data)
+      } catch {
+        // keep the raw string if it isn't JSON
+      }
+    }
+    return { success: true, data }
+  }
 }
 
 /**

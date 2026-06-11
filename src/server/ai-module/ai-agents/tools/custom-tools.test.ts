@@ -1,10 +1,16 @@
 /**
- * custom-tools — X-Webhook-Secret deve ir DECIFRADO no header.
+ * custom-tools — X-Webhook-Secret deve ir DECIFRADO no header (v1 webhook) +
+ * exposição de tools backed por uma CustomIntegration ACTIVE (T20/T45).
  *
  * Bug original (achado no /plan do integration-builder, 2026-06-10):
  * create-custom-tool grava `encrypt(secret)` e o executor enviava o
  * ciphertext cru — o webhook do cliente nunca validava. O executor agora
  * decifra na hora do envio, com fail-open para rows legadas em claro.
+ *
+ * T45 estende o suite: rows SEM webhookUrl mas COM uma integração ACTIVE são
+ * expostas à LLM e delegam o execute ao `runIntegrationCall`; o filtro
+ * active/paused é aplicado no WHERE (cláusula OR), então validamos o SHAPE da
+ * query além da delegação do execute.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -14,11 +20,17 @@ vi.mock('@/server/services/database', () => ({
   database: { agentTool: { findMany: vi.fn() } },
 }))
 
+vi.mock('./integration-executor', () => ({
+  runIntegrationCall: vi.fn(),
+}))
+
 import { database } from '@/server/services/database'
 import { encrypt } from '@/lib/crypto'
+import { runIntegrationCall } from './integration-executor'
 import { getCustomTools } from './custom-tools'
 
 const findMany = database.agentTool.findMany as ReturnType<typeof vi.fn>
+const runIntegrationCallMock = runIntegrationCall as ReturnType<typeof vi.fn>
 
 function mockRow(webhookSecret: string | null) {
   return {
@@ -28,6 +40,41 @@ function mockRow(webhookSecret: string | null) {
     webhookUrl: 'https://example.com/hook',
     webhookSecret,
     webhookTimeout: 5000,
+    // Default: nenhuma integração backing (v1 webhook puro). O source acessa
+    // `row.customIntegration`, então o mock precisa entregar a relação.
+    customIntegration: null,
+  }
+}
+
+/**
+ * Linha SEM webhookUrl backed por uma CustomIntegration. O filtro active/paused
+ * é do WHERE no DB; aqui controlamos `status`/`deletedAt` para refletir o que o
+ * filtro deixaria passar e validar a delegação do execute.
+ */
+function mockIntegrationRow(
+  status: string,
+  opts: { deletedAt?: Date | null } = {},
+) {
+  return {
+    id: 'tool-int-1',
+    name: 'tool_integracao',
+    description: 'tool backed por integração',
+    parameters: { type: 'object', properties: {} },
+    webhookUrl: null,
+    webhookSecret: null,
+    webhookTimeout: 5000,
+    customIntegration: {
+      id: 'int-1',
+      status,
+      deletedAt: opts.deletedAt ?? null,
+      requestSpec: {
+        method: 'GET',
+        url: 'https://api.example.com/data',
+        auth: { type: 'bearer', credentialKey: 'api_key' },
+      },
+      credentials: null,
+      organizationId: 'org-1',
+    },
   }
 }
 
@@ -63,6 +110,19 @@ describe('getCustomTools — X-Webhook-Secret', () => {
     expect(headers['X-Webhook-Secret']).toBe('segredo-do-cliente')
   })
 
+  it('v1 webhook: header carrega o plaintext DECIFRADO, nunca o ciphertext', async () => {
+    // Cobre explicitamente o fix do webhookSecret v1 (T45 critério 4): o valor
+    // gravado é cifrado; o header de saída deve ser o plaintext, não o cipher.
+    const plaintext = 'token-secreto-v1'
+    const ciphertext = encrypt(plaintext)
+    expect(ciphertext).not.toBe(plaintext) // pré-condição: realmente cifrado
+
+    const headers = await executeAndCaptureHeaders(ciphertext)
+
+    expect(headers['X-Webhook-Secret']).toBe(plaintext)
+    expect(headers['X-Webhook-Secret']).not.toBe(ciphertext)
+  })
+
   it('fail-open: row legada em claro vai como está', async () => {
     const headers = await executeAndCaptureHeaders('segredo-legado-em-claro')
     expect(headers['X-Webhook-Secret']).toBe('segredo-legado-em-claro')
@@ -71,5 +131,85 @@ describe('getCustomTools — X-Webhook-Secret', () => {
   it('sem segredo: header ausente', async () => {
     const headers = await executeAndCaptureHeaders(null)
     expect(headers['X-Webhook-Secret']).toBeUndefined()
+  })
+})
+
+describe('getCustomTools — backing por CustomIntegration (T20/T45)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('WHERE inclui o OR webhookUrl|customIntegration ACTIVE', async () => {
+    findMany.mockResolvedValue([])
+    await getCustomTools(['tool_integracao'], ctx)
+
+    const where = findMany.mock.calls[0]?.[0]?.where as {
+      OR?: Array<Record<string, unknown>>
+    }
+    expect(where.OR).toEqual([
+      { webhookUrl: { not: null } },
+      { customIntegration: { status: 'active', deletedAt: null } },
+    ])
+  })
+
+  it('row SEM webhookUrl mas COM integração ACTIVE é exposta à LLM', async () => {
+    findMany.mockResolvedValue([mockIntegrationRow('active')])
+
+    const tools = await getCustomTools(['tool_integracao'], ctx)
+
+    expect(tools['tool_integracao']).toBeDefined()
+  })
+
+  it('execute da row de integração delega ao runIntegrationCall', async () => {
+    runIntegrationCallMock.mockResolvedValue({
+      outcome: 'success',
+      bodySnippet: '{"ok":true}',
+    })
+    findMany.mockResolvedValue([mockIntegrationRow('active')])
+
+    const tools = await getCustomTools(['tool_integracao'], ctx)
+    const tool = tools['tool_integracao']
+    expect(tool).toBeDefined()
+
+    const result = await (
+      tool as { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    ).execute({ foo: 'bar' }, { toolCallId: 't1', messages: [] })
+
+    expect(runIntegrationCallMock).toHaveBeenCalledTimes(1)
+    const callArgs = runIntegrationCallMock.mock.calls[0]
+    // params (3º arg) repassados; opts.mode='production' + integrationId.
+    expect(callArgs?.[2]).toEqual({ foo: 'bar' })
+    expect(callArgs?.[3]).toMatchObject({ mode: 'production', integrationId: 'int-1' })
+    expect(result).toEqual({ success: true, data: { ok: true } })
+  })
+
+  it('row SEM webhookUrl E SEM integração NÃO é exposta', async () => {
+    // O filtro do DB já tiraria essa row; replicamos um row que (por defeito de
+    // dados) chega sem webhookUrl e sem integração — o source faz `continue`.
+    const orphan = {
+      ...mockIntegrationRow('active'),
+      webhookUrl: null,
+      customIntegration: null,
+    }
+    findMany.mockResolvedValue([orphan])
+
+    const tools = await getCustomTools(['tool_integracao'], ctx)
+
+    expect(tools['tool_integracao']).toBeUndefined()
+    expect(runIntegrationCallMock).not.toHaveBeenCalled()
+  })
+
+  it('integração PAUSED não delega ao executor (não vira tool de integração)', async () => {
+    // O WHERE do DB exige status 'active'; se uma row paused vazar (sem
+    // webhookUrl), o guard `status === 'active'` no source impede a delegação.
+    const paused = mockIntegrationRow('paused')
+    findMany.mockResolvedValue([paused])
+
+    const tools = await getCustomTools(['tool_integracao'], ctx)
+
+    // Sem webhookUrl e integração não-active → row é pulada (continue).
+    expect(tools['tool_integracao']).toBeUndefined()
+    expect(runIntegrationCallMock).not.toHaveBeenCalled()
   })
 })

@@ -62,6 +62,7 @@ export default defineConfig({
             'src/server/ai-module/builder/chat/handlers/**/*.test.ts',
             'src/server/ai-module/builder/tools/**/*.test.ts',
             'src/server/ai-module/builder/templates/**/*.test.ts',
+            'src/server/ai-module/builder/integrations/**/*.test.ts',
             'src/server/ai-module/builder/prompts/**/*.test.ts',
             'src/server/ai-module/builder/projects/**/*.test.ts',
             'src/server/ai-module/builder/validators/**/*.test.ts',

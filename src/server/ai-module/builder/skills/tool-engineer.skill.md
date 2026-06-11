@@ -14,6 +14,15 @@ allowed_tools:
 
 # Skill: Tool Engineer
 
+<!--
+Doc-freshness:
+  Atualizado: 2026-06-11
+  Revisar em: quando mudar o contrato de webhook/headers do runtime custom-tools
+  Relacionados:
+    - src/server/ai-module/ai-agents/tools/custom-tools.ts
+    - src/server/ai-module/builder/tools/create-custom-tool.tool.ts
+-->
+
 Pipeline para configurar tools em agentes Quayer: catalogo oficial → cenario
 custom (webhook) → retorno para prompt-engineer. Skill prescritiva — siga
 contratos e checklists. Builder LLM NAO improvisa URLs, nomes ou shapes.
@@ -55,7 +64,7 @@ nao estiver disponivel, pergunte ao criador — nao invente.
 | `name` | sim | `snake_case`, 2-64 chars, regex `^[a-z][a-z0-9_]*$`. Unico por organizacao. Exemplos: `check_inventory`, `send_invoice`, `create_calendar_event` |
 | `description` | sim | 10-500 chars. Explica **quando** o agente deve chamar e **qual pergunta do cliente final** isso resolve. Ruim: "Chama API X". Bom: "Consulta estoque de um SKU no Shopify quando cliente pergunta 'tem em estoque?'" |
 | `webhookUrl` | sim | HTTPS, porta 443, hostname publico. Bloqueados: `localhost`, `127.*`, `10.*`, `172.16-31.*`, `192.168.*`, `169.254.*`, `.internal`, `.local`, IPv6 loopback/link-local/unique-local. Usar a URL fornecida pelo criador apos confirmacao — NUNCA inventar URL nem usar URL generica de doc |
-| `webhookSecret` | nao | Se presente, enviado no header `X-Webhook-Secret` em cada call |
+| `webhookSecret` | nao | Se presente, enviado no header `X-Webhook-Secret` em cada call. O valor e gravado CIFRADO no DB e o runtime envia o segredo **DECIFRADO** (fail-open para rows legadas em claro) — ver 2.2 |
 | `parameters` | sim | JSONSchema valido. Shape: `{ type: 'object', properties: { ... }, required: [...] }`. Cada property precisa `type` e `description` |
 
 ### 2.2. Runtime constraints
@@ -68,7 +77,13 @@ desenhar o endpoint do lado dele:
 - **Metodo**: `POST` com body JSON. O runtime nao emite GET/PUT/DELETE.
 - **Headers**:
   - `Content-Type: application/json`
-  - `X-Webhook-Secret: <secret>` quando `webhookSecret` estiver configurado
+  - `X-Webhook-Secret: <secret>` quando `webhookSecret` estiver configurado.
+    O header carrega o segredo **DECIFRADO** (texto em claro), nao o
+    ciphertext armazenado no DB. O runtime aplica `decrypt()` antes de
+    enviar, com fail-open para rows legadas ja em claro. **Mudanca de
+    comportamento v1:** antes o header carregava o valor CIFRADO, o que
+    quebrava qualquer validacao HMAC/igualdade do lado do receptor — o
+    endpoint do criador deve comparar contra o segredo em claro.
 - **Timeout**: default 10s. Se o endpoint demora mais, o turno falha.
 - **Response**: espera JSON. Body maior que 8KB e truncado antes de voltar
   para o LLM.
@@ -79,6 +94,14 @@ desenhar o endpoint do lado dele:
 - **Idempotencia**: runtime NAO retenta automaticamente em 5xx. Se o
   endpoint do criador precisar idempotencia, o desenho e responsabilidade
   dele (ex: aceitar `requestId` no body).
+
+> **Nota de operacao (v1 — decrypt do X-Webhook-Secret):** antes de
+> publicar essa mudanca, o operador deve verificar em homol/prod se existe
+> alguma row de `AgentTool` com `webhookSecret` nao-nulo (provavelmente
+> zero). Se existirem rows com segredo em claro (legado), o fail-open as
+> mantem funcionando; rows ja cifradas passam a enviar o valor decifrado
+> correto. Ver `src/server/ai-module/ai-agents/tools/custom-tools.ts`
+> (~linhas 179-188).
 
 ### 2.3. Pipeline concreta (seguir em ordem)
 

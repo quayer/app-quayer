@@ -36,6 +36,7 @@ import type {
   WorkspaceProject,
 } from "@/client/components/projetos/types"
 import { NumberSettingInput, SectionTitle, SwitchCard } from "./advanced-controls"
+import { IntegrationsSection } from "./integrations-section"
 import { useAdvancedSettings } from "./use-advanced-settings"
 
 interface AdvancedTabProps {
@@ -324,6 +325,8 @@ export function AdvancedTab({ project, onTabChange }: AdvancedTabProps) {
           </AlertDescription>
         </Alert>
       </section>
+
+      <IntegrationsSection projectId={project.id} />
     </div>
   )
 }

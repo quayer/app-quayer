@@ -118,6 +118,7 @@ model Organization {
   // Builder (home-chat-builder)
   builderProjects      BuilderProject[]
   builderConversations BuilderProjectConversation[]
+  customIntegrations   CustomIntegration[]
 
   // Departamentos / roleta
   departments       Department[]
@@ -454,13 +455,13 @@ model Invitation {
 // ══════════════════════════════════════════════════════════════════════════════
 
 model Department {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   organizationId String
   name           String
   slug           String
   description    String?
-  type           String   @default("support") // support, sales, custom
-  isActive       Boolean  @default(true)
+  type           String  @default("support") // support, sales, custom
+  isActive       Boolean @default(true)
 
   // Round-robin (roleta) — ponteiro do último atendente sorteado. A próxima
   // escolha é o primeiro membro ATIVO após este, em ordem circular por
@@ -474,8 +475,8 @@ model Department {
   // warm-transfer.ts. Materializada por materialize_team de builderState.team.openingMessage.
   warmTransferOpeningMessage String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   lastAssignedUser User?              @relation("DepartmentLastAssigned", fields: [lastAssignedUserId], references: [id], onDelete: SetNull)
@@ -979,13 +980,13 @@ model ChatSession {
   closedAt  DateTime?
 
   // Relacionamentos
-  connection    Connection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department    Department?    @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
-  assignedAgent    User?       @relation("SessionAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
-  assignedCustomer User?       @relation("SessionAssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
-  aiAgentConfig AIAgentConfig? @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
-  messages      Message[]
+  connection       Connection     @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department       Department?    @relation(fields: [assignedDepartmentId], references: [id], onDelete: SetNull)
+  assignedAgent    User?          @relation("SessionAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  assignedCustomer User?          @relation("SessionAssignedCustomer", fields: [assignedCustomerId], references: [id], onDelete: SetNull)
+  aiAgentConfig    AIAgentConfig? @relation(fields: [aiAgentConfigId], references: [id], onDelete: SetNull)
+  messages         Message[]
 
   @@index([contactPhone])
   @@index([connectionId])
@@ -1313,8 +1314,8 @@ model OrganizationProvider {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  builderProject BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  builderProject   BuilderProject? @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
   agentCredentials AIAgentConfig[] @relation("AgentCredential") // agentes que escolheram esta chave
 
   @@unique([organizationId, category, provider, builderProjectId, priority])
@@ -1338,7 +1339,7 @@ enum CalendarConnectionStatus {
 }
 
 model CalendarConnection {
-  id               String @id @default(uuid())
+  id               String  @id @default(uuid())
   organizationId   String
   builderProjectId String? // null = nível org; set = link específico do projeto
 
@@ -1479,8 +1480,8 @@ model AIAgentConfig {
   sessions       ChatSession[]
   promptVersions AgentPromptVersion[]
   deployments    AgentDeployment[]
-  ragCollection  KnowledgeCollection? @relation(fields: [ragCollectionId], references: [id], onDelete: SetNull)
-  priceList      PriceList?           @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+  ragCollection  KnowledgeCollection?  @relation(fields: [ragCollectionId], references: [id], onDelete: SetNull)
+  priceList      PriceList?            @relation(fields: [priceListId], references: [id], onDelete: SetNull)
   credential     OrganizationProvider? @relation("AgentCredential", fields: [organizationProviderId], references: [id], onDelete: SetNull)
 
   // Builder (home-chat-builder)
@@ -1612,20 +1613,20 @@ model KnowledgeImage {
 // igual ao RAG/galeria. storageKey = path no bucket (assina on-read); externalUrl
 // quando a mídia já é uma URL pública externa.
 model MediaAsset {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   organizationId String // tenant boundary explícito (carimbo)
   collectionId   String // = ragCollectionId do agente (kb:projectId)
   mediaType      String // 'image' | 'video' | 'document'
   storageKey     String? // path no BUCKETS.MEDIA (assina on-read) — uploads + materializados
   externalUrl    String? // URL pública externa (ex: foto de preço hospedada fora)
   mimeType       String?
-  caption        String?  @db.Text // legenda/título (usada na tag de mídia)
-  tags           String[] @default([]) // palavras-chave p/ o filtro simples (sem vetor)
+  caption        String?   @db.Text // legenda/título (usada na tag de mídia)
+  tags           String[]  @default([]) // palavras-chave p/ o filtro simples (sem vetor)
   category       String?
-  source         String   @default("upload") // 'upload' | 'gallery' | 'pricing'
+  source         String    @default("upload") // 'upload' | 'gallery' | 'pricing'
   sourceRef      String? // id de origem (KnowledgeImage.id / PriceItem.id) p/ materialize idempotente
   sizeBytes      Int?
-  position       Int      @default(0)
+  position       Int       @default(0)
   confirmedAt    DateTime? // curadoria (NULL = pendente); o runtime só envia confirmedAt IS NOT NULL
   deletedAt      DateTime? // soft-delete (runtime/listas filtram deletedAt IS NULL)
 
@@ -1647,18 +1648,18 @@ model MediaAsset {
 // Tabela de LOG: sem FK (alta escrita, desacoplada); limpeza por retenção/job.
 // Escrita é fire-and-forget — gravar decisão NUNCA pode derrubar o agente.
 model AgentRuntimeDecision {
-  id              String  @id @default(uuid())
-  organizationId  String
-  sessionId       String
-  agentConfigId   String
-  promptVersionId String?
-  configHash      String?
+  id                     String  @id @default(uuid())
+  organizationId         String
+  sessionId              String
+  agentConfigId          String
+  promptVersionId        String?
+  configHash             String?
   // Idempotência durável de turno: sha256(sessionId:inboundMessageId:configHash).
   // Nullable + @unique → Postgres permite N nulls (turnos sem id de webhook, ex.:
   // playground/builder, não participam). Um 2º dispatch do MESMO turno colide aqui
   // (P2002) e é short-circuitado ANTES do LLM — sem resposta duplicada.
   decisionIdempotencyKey String? @unique
-  executionMode   String // 'sync' | 'stream' | 'playground'
+  executionMode          String // 'sync' | 'stream' | 'playground'
 
   // Modelo & provider (used pode diferir de primary se houve fallback)
   modelPrimary      String
@@ -1687,11 +1688,11 @@ model AgentRuntimeDecision {
   toolIterations  Int      @default(0)
 
   // Tokens & custo
-  inputTokens  Int   @default(0)
-  outputTokens Int   @default(0)
-  cachedTokens Int   @default(0)
-  totalTokens  Int   @default(0)
-  totalCost    Float @default(0)
+  inputTokens     Int   @default(0)
+  outputTokens    Int   @default(0)
+  cachedTokens    Int   @default(0)
+  totalTokens     Int   @default(0)
+  totalCost       Float @default(0)
   // Custo de serviços EXTERNOS do turno (STT/TTS/embedding), ex.: {"stt":0.0086}.
   // Separado de totalCost (LLM) — o custo real de um turno com áudio era subestimado.
   extServiceCosts Json?
@@ -1714,15 +1715,15 @@ model AgentRuntimeDecision {
 // fase 2 (molde do Google Calendar). O agente aponta AIAgentConfig.priceListId.
 
 model PriceList {
-  id             String  @id @default(uuid())
-  organizationId String
-  name           String
-  description    String?
-  currency       String  @default("BRL")
+  id              String  @id @default(uuid())
+  organizationId  String
+  name            String
+  description     String?
+  currency        String  @default("BRL")
   // M2 (materialização do pricing) — espelham o card de preço (Onda B):
-  disclosureStyle String @default("exact") // como o agente FALA o preço: exact|from|average|none
-  minTicketCents Int? // valor mínimo de atendimento (centavos), opcional
-  isActive       Boolean @default(true)
+  disclosureStyle String  @default("exact") // como o agente FALA o preço: exact|from|average|none
+  minTicketCents  Int? // valor mínimo de atendimento (centavos), opcional
+  isActive        Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1737,16 +1738,16 @@ model PriceList {
 }
 
 model PriceItem {
-  id          String   @id @default(uuid())
-  priceListId String
-  name        String
-  priceCents  Int // preço em centavos (evita float) — piso da faixa quando 'average'
+  id            String   @id @default(uuid())
+  priceListId   String
+  name          String
+  priceCents    Int // preço em centavos (evita float) — piso da faixa quando 'average'
   priceMaxCents Int? // M2 — teto da faixa quando disclosureStyle='average' (> priceCents)
-  imageUrl    String? // M2 — foto do catálogo visual do item (URL)
-  description String?
-  aliases     String[] @default([]) // sinônimos p/ busca (ex: "corte", "cabelo")
-  category    String?
-  isActive    Boolean  @default(true)
+  imageUrl      String? // M2 — foto do catálogo visual do item (URL)
+  description   String?
+  aliases       String[] @default([]) // sinônimos p/ busca (ex: "corte", "cabelo")
+  category      String?
+  isActive      Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1804,10 +1805,82 @@ model AgentTool {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Integration Builder: lado oposto do FK unique de CustomIntegration (nullable).
+  customIntegration CustomIntegration?
+
   @@unique([organizationId, name])
   @@index([organizationId])
   @@index([type])
   @@map("agent_tools")
+}
+
+// ── Integration Builder (ferramentas personalizadas investigadas/templated) ──
+// 1:1 com AgentTool (catálogo runtime, intocado): status==='active' ⇄
+// AgentTool.isActive faz FR-08 valer por construção (getCustomTools filtra
+// isActive). Credenciais cifradas individualmente (lib/crypto encrypt); NUNCA
+// no builderState. agentToolId nullable + SetNull: no DELETE da integração o
+// AgentTool é hard-deletado (libera o nome do @@unique), e a CustomIntegration
+// soft-deletada sobrevive para auditoria com agentToolId=null.
+enum IntegrationStatus {
+  draft
+  validated
+  active
+  paused
+  error
+}
+
+model CustomIntegration {
+  id                 String            @id @default(uuid())
+  organizationId     String // multi-tenant — toda query filtra por ele
+  builderProjectId   String
+  agentToolId        String?           @unique // FK runtime; null após delete do AgentTool
+  templateSlug       String? // 'rd-station' | 'generic-webhook' | null (investigada)
+  displayName        String
+  status             IntegrationStatus @default(draft)
+  triggerDescription String? // gatilho em linguagem natural (FR-09)
+  requestSpec        Json // espec declarativa da chamada (método/url/auth/templates/testPayload)
+  credentialFields   Json // metadata NÃO-secreta (key/label/whereToGet/regex)
+  credentials        Json? // APENAS valores, cada um cifrado (NFR-01)
+  research           Json? // snapshot da investigação (endpoints + fontes — FR-02)
+  lastTestAt         DateTime?
+  lastTestStatus     String?
+  lastTestErrorClass String? // classe do erro, NUNCA payload
+  lastErrorAt        DateTime?
+  lastErrorCode      String? // writeback de falha em produção (FR-10)
+  createdById        String
+  validatedById      String?
+  activatedById      String?
+  validatedAt        DateTime?
+  activatedAt        DateTime?
+  deletedAt          DateTime? // soft delete (auditoria sobrevive)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  builderProject BuilderProject        @relation(fields: [builderProjectId], references: [id], onDelete: Cascade)
+  agentTool      AgentTool?            @relation(fields: [agentToolId], references: [id], onDelete: SetNull)
+  testCalls      IntegrationTestCall[]
+
+  @@index([organizationId, status])
+  @@index([builderProjectId])
+  @@index([organizationId, deletedAt])
+  @@map("custom_integrations")
+}
+
+model IntegrationTestCall {
+  id             String   @id @default(uuid())
+  integrationId  String
+  organizationId String
+  requestedById  String
+  outcome        String // success|auth_error|not_found|timeout|schema_error|network|redirect|blocked
+  httpStatus     Int?
+  durationMs     Int
+  createdAt      DateTime @default(now())
+
+  integration CustomIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId, createdAt])
+  @@map("integration_test_calls")
 }
 
 // ── Agent Deployments ─────────────────────────────────────────────────────────
@@ -1853,13 +1926,14 @@ model BuilderProject {
   updatedAt      DateTime             @updatedAt
   archivedAt     DateTime?
 
-  organization     Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user             User                        @relation(fields: [userId], references: [id])
-  aiAgent          AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
-  conversation     BuilderProjectConversation?
-  deployments      BuilderDeployment[]
-  projectProviders OrganizationProvider[]
+  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                User                        @relation(fields: [userId], references: [id])
+  aiAgent             AIAgentConfig?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  conversation        BuilderProjectConversation?
+  deployments         BuilderDeployment[]
+  projectProviders    OrganizationProvider[]
   calendarConnections CalendarConnection[]
+  customIntegrations  CustomIntegration[]
 
   @@index([organizationId, type, status])
   @@index([userId, updatedAt(sort: Desc)])

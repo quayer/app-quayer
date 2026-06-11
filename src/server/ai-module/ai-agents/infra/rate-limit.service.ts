@@ -22,6 +22,23 @@ export const RATE_LIMITS = {
   org:      { maxTokens: 1000, windowMs: 3_600_000 }, // 1000/h
 } as const
 
+// ── Quotas de janela fixa (separadas do token bucket de runtime) ─────────────
+//
+// Registry DEDICADO de quotas fixed-window (INCR+PEXPIRE), independente do
+// token bucket de runtime em RATE_LIMITS. NÃO roteia pelo refill contínuo do
+// bucket — é contagem bruta por janela, por org. Mantém os buckets do runtime
+// (instance/contact/org) intocados.
+//
+// Onda 3 adicionará `integrationResearch` aqui — há espaço reservado; não
+// adicionar agora.
+
+export const FIXED_WINDOW_QUOTAS = {
+  /** Teste de integração: 30 requisições por hora por org — POST /:id/test. */
+  integrationTest: { limit: 30, windowMs: 60 * 60 * 1000 }, // 30/h/org
+} as const
+
+export type FixedWindowQuotaScope = keyof typeof FIXED_WINDOW_QUOTAS
+
 // ── Input Zod schema ─────────────────────────────────────────────────────────
 
 const CheckRateLimitInputSchema = z.object({
@@ -184,5 +201,64 @@ export async function checkRateLimit(
 
     // Falha de conexão ou outro erro Redis → fail-open
     return { allowed: true, retryAfterMs: 0 }
+  }
+}
+
+// ── Quota fixed-window por org (separada do token bucket) ─────────────────────
+
+export interface FixedWindowQuotaResult {
+  allowed: boolean
+  /** Quantas requisições restam na janela atual (clamped a >= 0). */
+  remaining: number
+  /** Ms restantes até a janela resetar (TTL da chave). */
+  resetMs: number
+}
+
+/**
+ * Verifica e consome 1 unidade da quota fixed-window por org+escopo.
+ *
+ * Usa o mesmo idiom INCR+PEXPIRE de `checkWithIncrFallback` (contagem bruta
+ * por janela, sem refill contínuo): a 1ª chamada na janela ancora o TTL via
+ * PEXPIRE; chamadas seguintes só incrementam até a chave expirar.
+ *
+ * Chave: `quota:fixed:<scope>:<orgId>` — namespace distinto dos buckets de
+ * runtime (`rl:<scope>:<key>`), garantindo que instance/contact/org não sejam
+ * afetados.
+ *
+ * Fail-OPEN: qualquer erro de Redis retorna allowed=true (um Redis degradado
+ * NÃO pode bloquear chamadas de teste legítimas). Nunca lança exceção.
+ *
+ * @param scope - escopo da quota fixed-window (ex: 'integrationTest')
+ * @param orgId - organizationId (chave discriminante)
+ * @returns { allowed, remaining, resetMs }
+ */
+export async function checkFixedWindowQuota(
+  scope: FixedWindowQuotaScope,
+  orgId: string,
+): Promise<FixedWindowQuotaResult> {
+  const { limit, windowMs } = FIXED_WINDOW_QUOTAS[scope]
+  const redisKey = `quota:fixed:${scope}:${orgId}`
+
+  try {
+    const redis = getRedis()
+
+    // Reusa o idiom INCR+PEXPIRE do fallback para a decisão allowed/remaining.
+    const count = await redis.incr(redisKey)
+    if (count === 1) {
+      // Primeira chamada na janela — ancora o TTL.
+      await redis.pexpire(redisKey, windowMs)
+    }
+
+    const allowed = count <= limit
+    const remaining = Math.max(0, limit - count)
+
+    // TTL restante da chave para informar quando a janela reseta.
+    const pttl = await redis.pttl(redisKey)
+    const resetMs = pttl > 0 ? pttl : windowMs
+
+    return { allowed, remaining, resetMs }
+  } catch {
+    // Redis degradado → fail-OPEN (não bloquear chamadas de teste legítimas).
+    return { allowed: true, remaining: limit, resetMs: windowMs }
   }
 }
