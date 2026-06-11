@@ -284,10 +284,21 @@ export function ImagesPreviewPanel({
   /** Confirma as fotos ainda pendentes para uso pelo agente. */
   const handleApprovePending = React.useCallback(() => {
     if (disabled) return
+    const approvedCount = pendingApproveCount
     void approvePendingImages().then((ok) => {
-      if (ok) onRefetch()
+      if (!ok) return
+      onRefetch()
+      if (typeof window !== "undefined" && approvedCount > 0) {
+        window.dispatchEvent(
+          new CustomEvent("builder:local-receipt", {
+            detail: {
+              message: `✓ ${approvedCount} ${approvedCount === 1 ? "foto aprovada" : "fotos aprovadas"} para o agente`,
+            },
+          }),
+        )
+      }
     })
-  }, [approvePendingImages, disabled, onRefetch])
+  }, [approvePendingImages, disabled, onRefetch, pendingApproveCount])
 
   // ── Lightbox (escopado ao grupo da fonte da imagem aberta) ─────────────────
   const openImage = React.useMemo(

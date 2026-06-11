@@ -23,6 +23,10 @@ import * as React from "react"
 import type { CardKey } from "./cards/types"
 import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
+import {
+  parseBuilderState,
+  type SourceProposal,
+} from "@/server/ai-module/builder/cards/builder-state"
 
 import type { ChatMessage } from "../types"
 
@@ -51,6 +55,94 @@ function createId(): string {
     return crypto.randomUUID()
   }
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : []
+}
+
+function mergeSourceProposal(
+  base: SourceProposal | undefined,
+  edited: unknown,
+): SourceProposal {
+  if (!isRecord(edited)) return base ?? {}
+  return {
+    ...(base ?? {}),
+    ...(typeof edited.businessName === "string"
+      ? { businessName: edited.businessName }
+      : {}),
+    ...(Array.isArray(edited.services)
+      ? { services: asStringArray(edited.services) }
+      : {}),
+    ...(typeof edited.audience === "string" ? { audience: edited.audience } : {}),
+    ...(Array.isArray(edited.differentiators)
+      ? { differentiators: asStringArray(edited.differentiators) }
+      : {}),
+    ...(typeof edited.tone === "string" ? { tone: edited.tone } : {}),
+    ...(typeof edited.address === "string" ? { address: edited.address } : {}),
+    ...(typeof edited.description === "string"
+      ? { description: edited.description }
+      : {}),
+  }
+}
+
+function sourceReceipt(payload: Record<string, unknown>, readiness?: Readiness) {
+  const state = parseBuilderState(
+    (readiness as { builderState?: unknown } | undefined)?.builderState,
+  )
+  const accepted = mergeSourceProposal(
+    state.sourceIngestion.proposed,
+    payload.edited,
+  )
+  const parts: string[] = []
+  if (accepted.businessName) parts.push(accepted.businessName)
+  if (accepted.services?.length) {
+    parts.push(
+      `${accepted.services.length} ${accepted.services.length === 1 ? "serviço" : "serviços"}`,
+    )
+  }
+  if (accepted.differentiators?.length) {
+    parts.push(
+      `${accepted.differentiators.length} diferenciais`,
+    )
+  }
+  if (accepted.address) parts.push("endereço")
+  if (accepted.description) parts.push("descrição")
+
+  return parts.length > 0
+    ? `Enviando ao agente: ${parts.join(" · ")}`
+    : "Enviando dados do site ao agente"
+}
+
+function cardSubmitReceipt(
+  cardKey: CardKey,
+  payload: Record<string, unknown>,
+  readiness?: Readiness,
+): string | null {
+  switch (cardKey) {
+    case "source_progress":
+      return sourceReceipt(payload, readiness)
+    case "agent_review":
+      return "Enviando revisão: personalidade, serviços e horário da equipe"
+    case "business_hours":
+      return "Enviando horário da equipe"
+    case "services":
+      return "Enviando serviços ao agente"
+    case "agent_persona":
+      return "Enviando persona do agente"
+    case "pricing":
+      return "Enviando regras de preço"
+    case "handoff":
+      return "Enviando transferência para humano"
+    default:
+      return null
+  }
 }
 
 /**
@@ -409,6 +501,18 @@ export function useChatStream({
       setStreamingToolCalls([])
 
       try {
+        const receipt = cardSubmitReceipt(cardKey, payload, readiness)
+        if (receipt) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: createId(),
+              role: "system_banner" as const,
+              content: receipt,
+              createdAt: new Date().toISOString(),
+            },
+          ])
+        }
         const response = await fetchWithAuthRetry(
           `/api/v1/builder/projects/${projectId}/cards/${cardKey}/submit`,
           {
@@ -433,7 +537,7 @@ export function useChatStream({
         void refetchReadinessRef.current?.()
       }
     },
-    [consumeStream, isStreaming, projectId],
+    [consumeStream, isStreaming, projectId, readiness],
   )
 
   // Keep `submitCard` in a ref (mirroring `refetchReadinessRef`) so the card
@@ -500,28 +604,42 @@ export function useChatStream({
   // for info lines) so the chat reflects the change with no reload. We also
   // refetch readiness so the journey/banner re-resolve off the persisted flip.
   React.useEffect(() => {
-    const handleCapabilityToggled = (event: Event) => {
-      const detail = (event as CustomEvent<{ message?: string }>).detail
-      const line = detail?.message?.trim()
-      if (!line) return
+    const appendSystemBanner = (message: string) => {
       setMessages((prev) => [
         ...prev,
         {
           id: createId(),
           role: "system_banner" as const,
-          content: line,
+          content: message,
           createdAt: new Date().toISOString(),
         },
       ])
+    }
+
+    const handleCapabilityToggled = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      const line = detail?.message?.trim()
+      if (!line) return
+      appendSystemBanner(line)
       void refetchReadinessRef.current?.()
     }
 
+    const handleLocalReceipt = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      const line = detail?.message?.trim()
+      if (!line) return
+      appendSystemBanner(line)
+    }
+
     window.addEventListener("builder:capability-toggled", handleCapabilityToggled)
-    return () =>
+    window.addEventListener("builder:local-receipt", handleLocalReceipt)
+    return () => {
       window.removeEventListener(
         "builder:capability-toggled",
         handleCapabilityToggled,
       )
+      window.removeEventListener("builder:local-receipt", handleLocalReceipt)
+    }
   }, [])
 
   // ── Auto-trigger initial message ───────────────────────────────
