@@ -23,6 +23,13 @@ interface FakeBlocker {
   redirect?: string
 }
 
+interface FakePhase {
+  id: string
+  title: string
+  steps: Array<{ id: string; title: string; done: boolean }>
+  status: 'done' | 'active' | 'pending'
+}
+
 interface FakeReadiness {
   step?: { id?: string; title?: string; ask?: string }
   requiredMissing?: string[]
@@ -31,6 +38,11 @@ interface FakeReadiness {
   blockers?: FakeBlocker[]
   fieldOwnership?: Record<string, 'card' | 'livre'>
   steps?: Array<{ id: string; title: string; done: boolean }>
+  journey?: {
+    version: 2
+    activePhaseId: string
+    phases: FakePhase[]
+  }
 }
 
 /** Cast helper — the banner accepts `Readiness | undefined`. */
@@ -95,6 +107,82 @@ describe('buildJourneyBanner — PRÓXIMO PASSO', () => {
       'estado x',
     )
     expect(out).not.toContain('Campos obrigatórios faltando:')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PRÓXIMO PASSO — v2-aware active phase line ("Fase 2 de 4 — Revisar")
+// ---------------------------------------------------------------------------
+
+const PHASES: FakePhase[] = [
+  { id: 'conhecer', title: 'Conhecer', steps: [], status: 'done' },
+  { id: 'revisar', title: 'Revisar', steps: [], status: 'active' },
+  { id: 'testar', title: 'Testar', steps: [], status: 'pending' },
+  { id: 'lancar', title: 'Lançar', steps: [], status: 'pending' },
+]
+
+const V2: FakeReadiness = {
+  ...FULL,
+  journey: { version: 2, activePhaseId: 'revisar', phases: PHASES },
+}
+
+describe('buildJourneyBanner — PRÓXIMO PASSO (journey v2)', () => {
+  it('prepends the active phase line under the header when journey is present', () => {
+    const out = buildJourneyBanner(asReadiness(V2), 'estado x')
+    expect(out).toContain('# PRÓXIMO PASSO')
+    expect(out).toContain('Fase 2 de 4 — Revisar')
+    // The phase line sits between the header and the step title.
+    const header = out.indexOf('# PRÓXIMO PASSO')
+    const phase = out.indexOf('Fase 2 de 4 — Revisar')
+    const title = out.indexOf('Definir a persona do agente')
+    expect(header).toBeLessThan(phase)
+    expect(phase).toBeLessThan(title)
+  })
+
+  it('still renders the step title and ask alongside the phase line', () => {
+    const out = buildJourneyBanner(asReadiness(V2), 'estado x')
+    expect(out).toContain('Definir a persona do agente')
+    expect(out).toContain('Qual o nome e o tom de voz do seu agente?')
+  })
+
+  it('renders the v1 banner verbatim when journey is absent (no phase line)', () => {
+    const out = buildJourneyBanner(asReadiness(FULL), 'estado x')
+    expect(out).not.toContain('Fase ')
+    expect(out).not.toContain('— Revisar')
+  })
+
+  it('reflects a different active phase index', () => {
+    const out = buildJourneyBanner(
+      asReadiness({
+        ...FULL,
+        journey: { version: 2, activePhaseId: 'lancar', phases: PHASES },
+      }),
+      'estado x',
+    )
+    expect(out).toContain('Fase 4 de 4 — Lançar')
+  })
+
+  it('omits the phase line when the active phase id is unknown', () => {
+    const out = buildJourneyBanner(
+      asReadiness({
+        ...FULL,
+        journey: { version: 2, activePhaseId: 'inexistente', phases: PHASES },
+      }),
+      'estado x',
+    )
+    expect(out).toContain('# PRÓXIMO PASSO')
+    expect(out).not.toContain('Fase ')
+  })
+
+  it('omits the phase line when there are no phases', () => {
+    const out = buildJourneyBanner(
+      asReadiness({
+        ...FULL,
+        journey: { version: 2, activePhaseId: 'revisar', phases: [] },
+      }),
+      'estado x',
+    )
+    expect(out).not.toContain('Fase ')
   })
 })
 

@@ -94,3 +94,69 @@ describe('parseBuilderState — journeyVersion out-of-contract falls back to 1',
     ).toBe(1)
   })
 })
+
+describe('confirmations — v2 sentinels (T05) default false', () => {
+  const V2_SENTINELS = [
+    'businessIdentity',
+    'testDrive',
+    'knowledge',
+    'media',
+    'publishedNextSteps',
+    'channelPlatform',
+    'whatsappConnectedOnce',
+  ] as const
+
+  it('an empty {} resolves all 7 v2 sentinels to false', () => {
+    const { confirmations } = parseBuilderState({})
+    for (const key of V2_SENTINELS) {
+      expect(confirmations[key]).toBe(false)
+    }
+  })
+
+  it('DEFAULT_BUILDER_STATE carries all 7 v2 sentinels false', () => {
+    for (const key of V2_SENTINELS) {
+      expect(DEFAULT_BUILDER_STATE.confirmations[key]).toBe(false)
+    }
+  })
+
+  it('backfills the 7 sentinels false on a legacy state without them', () => {
+    const legacy = { confirmations: { persona: true } }
+    const { confirmations } = parseBuilderState(legacy)
+    expect(confirmations.persona).toBe(true)
+    for (const key of V2_SENTINELS) {
+      expect(confirmations[key]).toBe(false)
+    }
+  })
+})
+
+describe('channel namespace (T86) — optional, no default', () => {
+  it('an empty {} resolves channel to undefined', () => {
+    expect(parseBuilderState({}).channel).toBeUndefined()
+  })
+
+  it('DEFAULT_BUILDER_STATE has no channel', () => {
+    expect(DEFAULT_BUILDER_STATE.channel).toBeUndefined()
+  })
+
+  it('a legacy JSONB state without channel parses fine (channel undefined)', () => {
+    const legacy = { project: { name: 'Loja' }, confirmations: {} }
+    expect(parseBuilderState(legacy).channel).toBeUndefined()
+  })
+
+  it('preserves a populated channel namespace', () => {
+    const parsed = parseBuilderState({
+      channel: { platforms: ['whatsapp', 'instagram'], whatsappMode: 'qr' },
+    })
+    expect(parsed.channel).toEqual({
+      platforms: ['whatsapp', 'instagram'],
+      whatsappMode: 'qr',
+    })
+  })
+
+  it('drops an out-of-contract channel without throwing (NEVER throws contract)', () => {
+    // Invalid platform value → the whole state would fail safeParse, so
+    // parseBuilderState falls back to DEFAULT (channel undefined).
+    const parsed = parseBuilderState({ channel: { platforms: ['telegram'] } })
+    expect(parsed.channel).toBeUndefined()
+  })
+})

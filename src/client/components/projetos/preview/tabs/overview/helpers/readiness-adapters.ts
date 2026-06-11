@@ -13,7 +13,7 @@ import type {
   Readiness,
   ReadinessBlockerCheck,
 } from "@/server/ai-module/builder/state/readiness.types"
-import type { ReadinessItem, Stage } from "../types"
+import type { JourneyPhaseView, ReadinessItem, Stage } from "../types"
 
 /** Structural check — o suficiente para confiar no shape de `Readiness`. */
 function isReadiness(value: unknown): value is Readiness {
@@ -54,6 +54,39 @@ export function stepsToStages(readiness: Readiness): Stage[] {
     number: index + 1,
     title: step.title,
     status: step.done ? "done" : step.id === activeId ? "active" : "pending",
+  }))
+}
+
+/**
+ * Visão por FASES (Journey v2) → linhas do StageList agrupadas por fase. Só
+ * existe quando `readiness.journey` está presente (projetos `journeyVersion: 2`);
+ * em v1 o adaptador devolve `null` e a Overview cai no `stepsToStages` plano,
+ * render byte-idêntico ao atual (NFR-03).
+ *
+ * Cada fase carrega os próprios steps já mapeados para o view-model do
+ * StageRow (done/active/pending); o `number` reinicia em 1 por fase (cada bloco
+ * é uma sub-lista visual). O status da FASE vem direto do servidor — o engine
+ * v2 (`journey-v2.ts`) já resolve a monotonicidade/condicionais (FR-30); o
+ * adaptador NUNCA re-deriva, só reflete (mesma garantia de fonte única do
+ * `stepsToStages`).
+ */
+export function journeyToPhases(readiness: Readiness): JourneyPhaseView[] | null {
+  const journey = readiness.journey
+  if (!journey) return null
+  const activeId = readiness.step.id
+  return journey.phases.map((phase) => ({
+    id: phase.id,
+    title: phase.title,
+    status: phase.status,
+    stages: phase.steps.map((step, index) => ({
+      number: index + 1,
+      title: step.title,
+      status: step.done
+        ? "done"
+        : step.id === activeId
+          ? "active"
+          : "pending",
+    })),
   }))
 }
 

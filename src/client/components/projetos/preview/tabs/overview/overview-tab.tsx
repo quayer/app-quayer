@@ -29,6 +29,7 @@ import { DeployReadinessCard } from "./components/deploy-readiness-card"
 import { EmptyState } from "./components/empty-state"
 import { FirstMessagePreviewCard } from "./components/first-message-preview"
 import { MetricsCard } from "./components/metrics-card"
+import { PhaseList } from "./components/phase-list"
 import { ProgressHeader } from "./components/progress-header"
 import { QuickActions } from "./components/quick-actions"
 import { StageList } from "./components/stage-list"
@@ -49,10 +50,8 @@ export function OverviewTab({
   messages = [],
 }: OverviewTabProps) {
   const { tokens } = useAppTokens()
-  const { readiness, stages, checklist, isLoading } = useProjectReadiness(
-    project.id,
-    messages,
-  )
+  const { readiness, stages, phases, checklist, isLoading } =
+    useProjectReadiness(project.id, messages)
   // Greeting canônico vem do readiness (builderState.persona.greeting) — o
   // mesmo hook acima, com refetch por activity-signal (pós-submit do card).
   const firstMessage = deriveFirstMessage(project, readiness)
@@ -162,7 +161,13 @@ export function OverviewTab({
             pct={readiness.completenessPct}
             tokens={tokens}
           />
-          <StageList stages={stages} tokens={tokens} />
+          {/* v2: render por fases (Journey "Configure por exceção"); v1: lista
+              plana intocada (render byte-idêntico, NFR-03). */}
+          {phases ? (
+            <PhaseList phases={phases} tokens={tokens} />
+          ) : (
+            <StageList stages={stages} tokens={tokens} />
+          )}
 
           <DeployReadinessCard
             items={checklist}

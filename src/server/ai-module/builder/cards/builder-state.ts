@@ -231,6 +231,21 @@ export const silencedContactsStateSchema = z.object({
   acknowledged: z.boolean().default(false),
 })
 
+/**
+ * Jornada v2 (T86, FR-24/25, plan §2.2 item 4) — canal em 2 níveis.
+ *
+ * `platforms` é a lista de canais escolhidos no card `channel_platform` (T91);
+ * `whatsappMode` é o nível 2 do WhatsApp (QR pareado vs. Cloud API) — IG não tem
+ * nível 2. A pré-seleção de modo vive na UI (T96), não no schema. O engine v2
+ * (T15) lê `state.channel?.platforms` para surfar os passos de conexão de forma
+ * condicional. 100% aditivo: states legados sem `channel` parseiam para undefined
+ * (o namespace é OPCIONAL no top-level, sem default) e seguem válidos.
+ */
+export const channelStateSchema = z.object({
+  platforms: z.array(z.enum(['whatsapp', 'instagram'])).optional(),
+  whatsappMode: z.enum(['qr', 'cloud']).optional(),
+})
+
 // ==========================================
 // Confirmation sentinels (server-resolved booleans)
 // ==========================================
@@ -258,6 +273,24 @@ export const confirmationsSchema = z.object({
   // G1 — passo OPCIONAL: vira true quando o usuário confirma a lista de contatos
   // silenciados (mesmo vazia). Nunca bloqueia a jornada nem isDeployReady.
   silencedContacts: z.boolean().default(false),
+  // ──────────────────────────────────────────────────────────────────────────
+  // Jornada v2 (T05, plan §2.2 item 3 + §5) — 7 sentinels novos. Como TODOS os
+  // sentinels deste schema, são resolvidos EXCLUSIVAMENTE server-side via
+  // `applyConfirmation`: NUNCA chegam pelo body de uma request (o handler de
+  // card-submit os ignora na entrada e só o passo correspondente os flipa).
+  // Cada um default false → um state vazio/legado reporta "tudo pendente".
+  // ──────────────────────────────────────────────────────────────────────────
+  businessIdentity: z.boolean().default(false),
+  testDrive: z.boolean().default(false),
+  knowledge: z.boolean().default(false),
+  media: z.boolean().default(false),
+  publishedNextSteps: z.boolean().default(false),
+  channelPlatform: z.boolean().default(false),
+  // FR-30 — sentinel-ESPELHO de monotonicidade do WhatsApp: uma vez que uma
+  // conexão UAZ foi estabelecida com sucesso, este flag fica true para sempre e
+  // a jornada nunca regride o passo de conexão. Flipado fail-open pelo webhook
+  // UAZ (T35, onda 5); como os demais, jamais vem do body.
+  whatsappConnectedOnce: z.boolean().default(false),
 })
 
 // ==========================================
@@ -300,6 +333,9 @@ export const builderStateSchema = z.object({
     contacts: [],
     acknowledged: false,
   }),
+  // T86 — canal em 2 níveis (FR-24/25). OPCIONAL e SEM default: um state vazio/
+  // legado parseia para `channel: undefined`; o engine v2 lê `state.channel?.platforms`.
+  channel: channelStateSchema.optional(),
   confirmations: confirmationsSchema.default({}),
 })
 
@@ -325,6 +361,7 @@ export type SourceIngestionState = z.infer<typeof sourceIngestionStateSchema>
 export type IdentityState = z.infer<typeof identityStateSchema>
 export type SilencedContactItem = z.infer<typeof silencedContactItemSchema>
 export type SilencedContactsState = z.infer<typeof silencedContactsStateSchema>
+export type ChannelState = z.infer<typeof channelStateSchema>
 export type BuilderConfirmations = z.infer<typeof confirmationsSchema>
 export type BuilderState = z.infer<typeof builderStateSchema>
 

@@ -134,6 +134,7 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 ## Feature flags — Builder Jornada v2 (2026-06-11)
 
 - `BUILDER_JOURNEY_V2` — **não é segredo.** Flag de rollout da Jornada do Builder v2 (mesmo molde dos defaults de RAG/STT acima — sem rotação). Valores: `off` (default — todos na v1), `on` (todos na v2) ou `percentage:N` (N% na v2, `0–100`, bucketing estável por usuário). Override por requisição via cookie `builder-v2-override` (`on|off`), que força a variante da sessão atual ignorando o flag global — usado em QA/dogfooding sem mexer no env. Documentado em `.env.example` (seção FEATURE FLAGS).
+- `BUILDER_V2_FORCE_RENDER_V1` — **não é segredo.** Kill-switch de **render** (NFR-08): quando ligado, o `readiness-resolver` força o engine v1 MESMO para projetos já em `journeyVersion:2` — degrada SÓ o que aparece na UI (steps v2 sem equivalente v1 ficam ocultos), com **zero escrita de estado** (camada read-only). É o freio de emergência da v2 sem precisar reverter o rollout (`BUILDER_JOURNEY_V2`) nem migrar dados; desligar volta à v2 no request seguinte. Valores: `true`/`1` (ligado, case-insensitive); qualquer outro/ausente = desligado (default). Documentado em `.env.example` (seção FEATURE FLAGS).
 
 ## Google Calendar (connect-link — Wave 4b)
 

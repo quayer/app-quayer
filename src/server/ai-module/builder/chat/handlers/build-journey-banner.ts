@@ -34,7 +34,15 @@ function renderNextStep(readiness: Readiness): string {
   const step = readiness.step
   const title = step?.title?.trim() || 'Definir próximo passo'
   const ask = step?.ask?.trim()
-  const lines = [`# PRÓXIMO PASSO`, title]
+  const lines = [`# PRÓXIMO PASSO`]
+
+  // v2-aware: surface the active phase ("Fase 2 de 4 — Revisar") right under
+  // the header. Additive — absent for v1 (`readiness.journey === undefined`),
+  // leaving the v1 render byte-for-byte unchanged.
+  const phaseLine = renderActivePhaseLine(readiness.journey)
+  if (phaseLine) lines.push(phaseLine)
+
+  lines.push(title)
   if (ask) lines.push('', ask)
 
   const missing = (readiness.requiredMissing ?? []).filter(
@@ -86,6 +94,26 @@ function renderState(stateSummary?: string): string {
 function clampPct(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+/**
+ * v2-aware phase line ("Fase 2 de 4 — Revisar"). Returns `undefined` when the
+ * project is v1 (no `journey`) or the active phase can't be resolved, so the v1
+ * banner stays untouched. Tolerant of a missing/unknown `activePhaseId`.
+ */
+function renderActivePhaseLine(journey: Readiness['journey']): string | undefined {
+  if (!journey) return undefined
+  const phases = journey.phases ?? []
+  const total = phases.length
+  if (total === 0) return undefined
+
+  const index = phases.findIndex((p) => p.id === journey.activePhaseId)
+  if (index < 0) return undefined
+
+  const title = phases[index]?.title?.trim()
+  if (!title) return undefined
+
+  return `Fase ${index + 1} de ${total} — ${title}`
 }
 
 // ---------------------------------------------------------------------------

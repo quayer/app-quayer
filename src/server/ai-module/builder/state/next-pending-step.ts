@@ -13,19 +13,16 @@
  * Contract: docs/builder/ORAYON_UPLIFT_SPEC.md.
  */
 
-import type {
-  BuilderState,
-  ConfirmationKey,
-} from '../cards/builder-state'
+import type { BuilderState } from '../cards/builder-state'
 import { CHANNEL_KEYS } from '../cards/card-submit.schemas'
 import type {
   Readiness,
   ReadinessBlocker,
   ReadinessStep,
   StepEngineContext,
-  StepId,
   FieldOwnership,
 } from './readiness.types'
+import { type StepDefinition, confirmed, hasText } from './step-helpers'
 
 // ==========================================
 // Tunables
@@ -47,46 +44,6 @@ const REDIRECT_CHANNEL = '/canais'
 // ==========================================
 // QUAYER_STEPS — the ordered journey
 // ==========================================
-
-/**
- * A step definition. `isDone` is a pure predicate over (state, ctx); `requiredPaths`
- * are the canonical `BuilderState` field paths the step gates on (surfaced as
- * `requiredMissing` while incomplete).
- */
-interface StepDefinition {
-  id: StepId
-  title: string
-  ask: string
-  /** Canonical field paths this step needs filled (for requiredMissing). */
-  requiredPaths: string[]
-  /**
-   * Optional steps never block the journey: they are never surfaced as the
-   * active "next ask" while not-done, and they are excluded from the
-   * `allStepsDone` / `isDeployReady` computation. The user may still complete
-   * them via their inline card at any time.
-   */
-  optional?: boolean
-  /**
-   * Whether this step currently applies given the state (default: always). A
-   * non-applicable step is treated as satisfied/non-blocking and is excluded
-   * from the completeness ratio (so it neither counts as progress nor against
-   * it). Used by the action-gated team/calendar steps.
-   */
-  applies?: (state: BuilderState) => boolean
-  /** True when the step is satisfied. Pure. */
-  isDone: (state: BuilderState, ctx: StepEngineContext) => boolean
-  /** Which paths are still empty given the state (subset of requiredPaths). */
-  missing: (state: BuilderState, ctx: StepEngineContext) => string[]
-}
-
-/** A confirmation sentinel is the canonical "this card was submitted" signal. */
-function confirmed(state: BuilderState, key: ConfirmationKey): boolean {
-  return state.confirmations[key] === true
-}
-
-function hasText(value: string | undefined | null): boolean {
-  return typeof value === 'string' && value.trim().length > 0
-}
 
 /**
  * O passo `calendar` só aplica quando o card de handoff liga "também agenda"

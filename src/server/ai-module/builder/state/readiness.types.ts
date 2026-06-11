@@ -26,8 +26,15 @@ import type { DeployRunnerBlockerCheck } from '../sub-agents'
  * 8-stage flow in `prompts/whatsapp-agent-system-prompt.ts`. The concrete
  * ordered list + per-step gating lives in `next-pending-step.ts` (QUAYER_STEPS);
  * this union is the type contract every layer references.
+ *
+ * The first block is the v1 (`journeyVersion: 1`) vocabulary. The second block
+ * is **additive** — the Journey v2 ("Configure por exceção") step ids consumed
+ * by `journey-v2.ts` (QUAYER_PHASES). Every consumer reads `StepId` via tolerant
+ * lookups (`Partial<Record<StepId, …>>`, `as StepId`) — there is no exhaustive
+ * `switch` over the union, so extending it is safe (risk R3, gate T78).
  */
 export type StepId =
+  // v1 step ids (next-pending-step.ts / QUAYER_STEPS)
   | 'project_identity'
   | 'objective'
   | 'source_ingestion'
@@ -43,6 +50,16 @@ export type StepId =
   | 'channel'
   | 'agent_approval'
   | 'summary'
+  // v2 step ids (journey-v2.ts / QUAYER_PHASES) — additive
+  | 'business_identity'
+  | 'agent_review'
+  | 'test_drive'
+  | 'channel_platform'
+  | 'whatsapp_connect'
+  | 'instagram_connect'
+  | 'published_next_steps'
+  | 'knowledge'
+  | 'media'
 
 /** A step as surfaced in the progress checklist (UI + banner). */
 export interface ReadinessStep {
@@ -50,6 +67,13 @@ export interface ReadinessStep {
   title: string
   done: boolean
 }
+
+/**
+ * The four Journey v2 phases ("Configure por exceção"), in order. Drives the
+ * phased progress UI + the v2-aware banner ("Fase 2 de 4 — Revisar"). Only
+ * populated for `journeyVersion: 2` projects (see `Readiness.journey`).
+ */
+export type PhaseId = 'conhecer' | 'revisar' | 'testar' | 'lancar'
 
 // ==========================================
 // Live signals (resolved server-side, never trusted from a request body)
@@ -138,4 +162,20 @@ export interface Readiness {
    * boundary (`getReadiness`); the pure `nextPendingStep` omits it.
    */
   builderState?: BuilderState
+  /**
+   * Phased journey view — populated ONLY for `journeyVersion: 2` projects (the
+   * resolver's v2 branch). When present, the UI/banner render the 4-phase
+   * "Configure por exceção" journey; the v1 fields above stay ALWAYS populated
+   * for both versions (back-compat). Absent for v1.
+   */
+  journey?: {
+    version: 2
+    activePhaseId: PhaseId
+    phases: Array<{
+      id: PhaseId
+      title: string
+      steps: ReadinessStep[]
+      status: 'done' | 'active' | 'pending'
+    }>
+  }
 }

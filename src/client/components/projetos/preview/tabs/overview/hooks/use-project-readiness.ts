@@ -28,16 +28,22 @@ import type { ChatMessage } from "@/client/components/projetos/types"
 import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
 import {
   blockersToChecklist,
+  journeyToPhases,
   stepsToStages,
   unwrapReadiness,
 } from "../helpers/readiness-adapters"
-import type { ReadinessItem, Stage } from "../types"
+import type { JourneyPhaseView, ReadinessItem, Stage } from "../types"
 
 interface ProjectReadiness {
   /** Snapshot canônico do step-engine; null enquanto carrega ou em erro. */
   readiness: Readiness | null
   /** Checklist da jornada adaptado para o StageList. */
   stages: Stage[]
+  /**
+   * Visão por fases (Journey v2) — `null` em projetos v1, quando a Overview
+   * cai no `stages` plano (render byte-idêntico, NFR-03).
+   */
+  phases: JourneyPhaseView[] | null
   /** Os 6 pre-deploy checks adaptados para a Prontidão. */
   checklist: ReadinessItem[]
   /** True apenas no primeiro load (sem snapshot ainda). */
@@ -94,6 +100,10 @@ export function useProjectReadiness(
     () => (readiness ? stepsToStages(readiness) : []),
     [readiness],
   )
+  const phases = React.useMemo(
+    () => (readiness ? journeyToPhases(readiness) : null),
+    [readiness],
+  )
   const checklist = React.useMemo(
     () => (readiness ? blockersToChecklist(readiness) : []),
     [readiness],
@@ -102,6 +112,7 @@ export function useProjectReadiness(
   return {
     readiness,
     stages,
+    phases,
     checklist,
     isLoading: readiness === null && Boolean(isLoading),
   }
