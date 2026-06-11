@@ -1,6 +1,6 @@
 # ERD — Quayer Database Schema
 
-> Updated: 2026-06-06 | Engine: PostgreSQL (Supabase + pgvector 0.8)
+> Updated: 2026-06-11 | Engine: PostgreSQL (Supabase + pgvector 0.8)
 > Rendered automatically by GitHub (Mermaid)
 >
 > **Mudanças desde 2026-03-14:** CRM/Inbox nukados (Abr/13) — `Contact`, `GroupChat`, `KanbanBoard`, `QuickReply`, `SessionNote` e ~15 tabelas removidas; Builder IA adicionado (`BuilderProject` família, Abr/9 + Abr/12); `UserIdentity` para login federado (Mai/10); role normalizado lowercase (Mai/10); `OTP disabled flags` em UserPreferences (Abr/30). `IpRule`, `ScimToken` foram removidos junto com admin surface.
@@ -10,6 +10,8 @@
 > **Jun/06 (M1 — roleta 6A):** `department_members` ganhou `userId` NULLABLE (FK SetNull — membro pode ser "nome + WhatsApp", não-usuário) + `name` + `whatsapp`. A saga de deploy materializa o `builderState.team` (Onda A) em Department/DepartmentMember (`materialize_team`) e a roleta — re-chaveada por `memberId` — notifica o atendente sorteado por WhatsApp (decisão 6A) com fallback in-app. Domain dedicado "Roleta / Departamentos" no fim.
 >
 > **Jun/06 (Fase E — catálogo de mídia):** novo `media_assets` — catálogo de mídia ENVIÁVEL pelo agente (foto/vídeo/PDF; áudio fora). FK→`KnowledgeCollection` (`collectionId = ragCollectionId = kb:projectId`). Origens: `upload` (dono sobe), `gallery` (espelha `KnowledgeImage`), `pricing` (espelha `PriceItem.imageUrl`) — as duas últimas materializadas pelo passo de saga `materialize_media`. A tool de RETRIEVAL `buscar_media` devolve URLs reais ao LLM; o envio é do pipeline outbound (tag de mídia). Modelo no Domain "RAG & Observability".
+>
+> **Jun/11 (Jornada v2 — funil):** novo `builder_journey_events` — log de eventos repetíveis do funil de progresso do usuário no Builder. **Sem FK** (como `BuilderToolCall.messageId`; tabela de alta escrita, limpeza por retenção): `projectId` + `organizationId` por tenant, `journeyVersion` (1\|2, congelado no evento), `event` (`@db.VarChar(60)`, vocabulário fechado em TS — `journey-events.ts`), `metadata` Json tipado sem campos livres de PII (NFR-02/LGPD). Índices `(organizationId,event,createdAt)` (funil por org) + `(projectId,createdAt)` (linha do tempo por projeto). Modelo no Domain "Builder IA".
 
 ---
 
@@ -330,6 +332,16 @@ erDiagram
         datetime createdAt
     }
 
+    BuilderJourneyEvent {
+        uuid id PK
+        string organizationId "indexed, sem FK"
+        string projectId "BuilderProject.id, sem FK"
+        int journeyVersion "1|2 — congelado no evento"
+        string event "VarChar(60), vocabulário fechado TS (journey-events.ts)"
+        json metadata "nullable, tipado sem PII (NFR-02/LGPD)"
+        datetime createdAt
+    }
+
     BuilderProject ||--|| BuilderProjectConversation : "has"
     BuilderProjectConversation ||--o{ BuilderProjectMessage : "contains"
     BuilderProject ||--o{ BuilderPromptVersion : "versions"
@@ -337,6 +349,8 @@ erDiagram
     BuilderProject ||--o{ BuilderContextSnapshot : "snapshots"
     BuilderProjectMessage ||--o{ BuilderToolCall : "logs"
 ```
+
+> `BuilderJourneyEvent` (`builder_journey_events`, Jornada v2) é **tabela de log SEM FK** (eventos repetíveis do funil de progresso do usuário no Builder; alta escrita, desacoplada, limpeza por retenção — mesmo padrão de `AgentRuntimeDecision`). `projectId` referencia `BuilderProject.id` por convenção (não há constraint física, igual a `BuilderToolCall.messageId`); toda query filtra por `organizationId` (NFR-01). `journeyVersion` (1\|2) é congelado no evento; `event` usa vocabulário fechado em TS (`journey-events.ts`); `metadata` é Json tipado sem campos livres de PII (NFR-02/LGPD). Dois índices: `(organizationId,event,createdAt)` para o funil por org e `(projectId,createdAt)` para a linha do tempo por projeto.
 
 ---
 
@@ -395,6 +409,7 @@ erDiagram
 | **2026-06-07** | **`20260606090000_add_agent_business_hours`** | **`AIAgentConfig.businessHours JSONB?` — horário comercial materializado do `builderState` (card business_hours) pela saga `materialize_team`. O `transfer_to_human` usa `computeBusinessState` p/ devolver `atendimento` (status + `orientacao_resposta`) → o agente diz ao lead QUANDO a equipe responde. Aditivo, nullable, sem data-loss.** |
 | **2026-06-07** | **`20260606100000_department_member_connection`** | **`department_members.connectionId TEXT?` — F0 do épico QR/warm-transfer: o membro pode ter uma instância WhatsApp PRÓPRIA (pareada por QR). Quando setado, o handoff `routing:department` faz WARM TRANSFER: a conexão do membro manda a 1ª mensagem ao cliente (atende no app dele). Scalar SEM FK (espelha `lastAssignedMemberId`), resolvido por findUnique, fail-open. Aditivo, nullable, sem data-loss. Pareamento (UI no Builder) = próximo passo.** |
 | **2026-06-09** | **`20260609000000_department_warm_transfer_opening`** | **`Department.warmTransferOpeningMessage TEXT?` — B1b do warm transfer: a mensagem de abertura passou a ser EDITÁVEL no card `handoff_pairing` (`builderState.team.openingMessage`). `materialize_team` a grava no Department (clear-on-empty); o `dispatch_to_agent` lê fail-open e o `warm-transfer` interpola `{nome}` antes de enviar ao cliente pela conexão do membro. NULL = texto default de `warm-transfer.ts`. Tabela `Department` é PascalCase (sem @@map). Aditivo, nullable, sem data-loss.** |
+| **2026-06-11** | **`add_builder_journey_events`** | **Jornada v2 (Onda 0): novo `builder_journey_events` — log de eventos repetíveis do funil de progresso do usuário no Builder. SEM FK (alta escrita, retenção): `projectId` + `organizationId` (tenant), `journeyVersion INT` (1\|2 congelado), `event VARCHAR(60)` (vocabulário fechado em `journey-events.ts`), `metadata JSONB?` (tipado sem PII — NFR-02/LGPD). Índices `(organizationId,event,createdAt)` (funil) + `(projectId,createdAt)` (timeline). Aditivo, sem data-loss.** |
 
 > Nota: o **Identity Card** (Wave 4.5) NÃO tem migration — vive em `BuilderProject.metadata.identityCard` (Json) + liga os 4 campos já existentes de `AIAgentConfig` (personality/agentTarget/agentBehavior/agentAvatar).
 

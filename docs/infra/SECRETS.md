@@ -1,6 +1,6 @@
 ---
 Criado: 2026-03-01
-Atualizado: 2026-06-10
+Atualizado: 2026-06-11
 Revisar em: novo secret em .env.example ou mudança de workflow de deploy
 Relacionados:
   - .env.example
@@ -130,6 +130,10 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 - `PUBLIC_STORAGE_BASE_URL` — **não é segredo** (ex.: `https://homol.quayer.com/api/v1/files`). Sem ela o driver `local` se declara indisponível (links seriam inúteis). Links são públicos-por-link (keys sha256/uuid não-adivinháveis); se um link vazar, o "revoke" é deletar o arquivo.
 - Com `STORAGE_BACKEND=local`, as `SUPABASE_*` de storage ficam dispensáveis nesse ambiente (mantidas para quem usar o backend `supabase`).
 - `TAVILY_API_KEY` — busca web do sub-agente niche-researcher (`research_niche`). Sem ela o research degrada para conhecimento do LLM (`fromLLMKnowledgeOnly=true`) sem quebrar. Em homol foi copiada do cofre do Orayon.Profissoes (mesma conta). Rotacionar a cada incidente.
+
+## Feature flags — Builder Jornada v2 (2026-06-11)
+
+- `BUILDER_JOURNEY_V2` — **não é segredo.** Flag de rollout da Jornada do Builder v2 (mesmo molde dos defaults de RAG/STT acima — sem rotação). Valores: `off` (default — todos na v1), `on` (todos na v2) ou `percentage:N` (N% na v2, `0–100`, bucketing estável por usuário). Override por requisição via cookie `builder-v2-override` (`on|off`), que força a variante da sessão atual ignorando o flag global — usado em QA/dogfooding sem mexer no env. Documentado em `.env.example` (seção FEATURE FLAGS).
 
 ## Google Calendar (connect-link — Wave 4b)
 

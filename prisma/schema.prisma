@@ -2018,6 +2018,25 @@ enum BuilderToolCallStatus {
   rejected // human-in-the-loop rejected
 }
 
+// ── Builder Journey Events (funil da jornada v2 — NFR-04) ────────────────────
+// Telemetria fire-and-forget por etapa da jornada do Builder. Padrão leve do
+// BuilderToolCall: sem FK relacional (sobrevive a deletes), índices enxutos.
+// Eventos REPETEM (ex.: reconexão de QR) — sem unique; funil agrega por
+// MIN(createdAt) por (projectId, event). metadata NUNCA contém PII/telefone.
+model BuilderJourneyEvent {
+  id             String   @id @default(uuid())
+  organizationId String // multi-tenant (NFR-01) — toda query filtra por ele
+  projectId      String // BuilderProject.id (sem FK, igual BuilderToolCall.messageId)
+  journeyVersion Int // 1 | 2 — congelado no evento
+  event          String   @db.VarChar(60) // vocabulário fechado em TS (journey-events.ts)
+  metadata       Json? // shape tipado sem campos livres de PII (NFR-02/LGPD)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, event, createdAt]) // funil por org
+  @@index([projectId, createdAt]) // linha do tempo por projeto
+  @@map("builder_journey_events")
+}
+
 // ── Builder Context Snapshots (audit trail of context-budget compactions) ────
 // When shouldCompact() triggers, we record what was compacted + summary produced.
 // Enables debugging of context loss bugs and tuning of compaction thresholds.

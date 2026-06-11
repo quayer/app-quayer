@@ -9,6 +9,9 @@
  *     + síntese padrão niche-researcher que escreve SÓ valores PROPOSTOS em
  *     builderState.sourceIngestion.proposed. A fila/worker vivem em
  *     ./source-enrich.queue; aqui só re-exportamos o registrar para o boot.
+ *   - journey-events-purge: cron de retenção (NFR-10) — apaga
+ *     builder_journey_events > 180 dias. Schedule FIXO (sem env), mesmo padrão
+ *     BullMQ repeat do session-close.
  *
  * Como agendar:
  *   - BullMQ "repeat" via registerSessionCloseQueueSchedule (chamado uma
@@ -33,6 +36,10 @@ import {
   type SessionCloseJobConfig,
 } from './session-close.job'
 import {
+  runJourneyEventsPurge,
+  type JourneyEventsPurgeResult,
+} from './journey-events-purge.job'
+import {
   registerSourceEnrichWorker,
   SOURCE_ENRICH_QUEUE,
   SOURCE_ENRICH_JOB_NAME,
@@ -55,6 +62,14 @@ export const SESSION_CLOSE_JOB_NAME = 'session-close-batch'
 
 /** Default schedule: a cada 10min. Override via SESSION_CLOSE_CRON. */
 const DEFAULT_CRON = '*/10 * * * *'
+
+// NFR-10 (Jornada v2): purge de builder_journey_events > 180 dias. Intervalo
+// FIXO (sem env de override, decisão do plan §9) — diário às 03:00. Limpeza de
+// retenção não precisa de granularidade fina; espelha o padrão de schedule do
+// session-close (BullMQ repeat).
+export const JOURNEY_EVENTS_PURGE_QUEUE = 'quayer-journey-events-purge'
+export const JOURNEY_EVENTS_PURGE_JOB_NAME = 'journey-events-purge'
+const JOURNEY_EVENTS_PURGE_CRON = '0 3 * * *'
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -82,6 +97,13 @@ export const REGISTERED_JOBS = {
     // de instância). O Worker lazy-importa o caminho de envio. Boot via
     // registerWorker abaixo.
     registerWorker: registerOutboundRetryWorker,
+  },
+  journeyEventsPurge: {
+    queue: JOURNEY_EVENTS_PURGE_QUEUE,
+    jobName: JOURNEY_EVENTS_PURGE_JOB_NAME,
+    // NFR-10: cron de retenção. Handler puro (utilizável por cron externo sem
+    // BullMQ, igual ao session-close).
+    handler: runJourneyEventsPurge,
   },
 } as const
 
@@ -127,6 +149,48 @@ export async function registerSessionCloseQueueSchedule(
   return queue
 }
 
+/**
+ * Registra o worker que processa a fila journey-events-purge (NFR-10).
+ * Deve ser chamado pelo entrypoint dedicado de workers (não pelo Next runtime).
+ */
+export function registerJourneyEventsPurgeWorker(
+  redisUrl: string,
+): Worker<unknown, JourneyEventsPurgeResult> {
+  const connection = parseRedisUrl(redisUrl)
+
+  return new Worker<unknown, JourneyEventsPurgeResult>(
+    JOURNEY_EVENTS_PURGE_QUEUE,
+    async () => {
+      // runJourneyEventsPurge é fail-open: nunca lança, então o worker não cai.
+      return runJourneyEventsPurge(database)
+    },
+    { connection },
+  )
+}
+
+/**
+ * Agenda o purge recorrente (cron FIXO, sem env). Idempotente: chamar várias
+ * vezes não duplica o repeatable job.
+ */
+export async function registerJourneyEventsPurgeSchedule(
+  redisUrl: string,
+): Promise<Queue> {
+  const connection = parseRedisUrl(redisUrl)
+  const queue = new Queue(JOURNEY_EVENTS_PURGE_QUEUE, { connection })
+
+  await queue.add(
+    JOURNEY_EVENTS_PURGE_JOB_NAME,
+    {},
+    {
+      repeat: { pattern: JOURNEY_EVENTS_PURGE_CRON },
+      removeOnComplete: { age: 3600, count: 100 },
+      removeOnFail: { age: 24 * 3600, count: 50 },
+    },
+  )
+
+  return queue
+}
+
 // ---------------------------------------------------------------------------
 // Boot — sobe todos os workers registrados
 // ---------------------------------------------------------------------------
@@ -148,12 +212,18 @@ export function registerAllWorkers(redisUrl: string): Worker[] {
     // outbound-retry (QH-02): on-demand (enfileirado pelo outbound ao estourar
     // o limite de instância), worker-only.
     registerOutboundRetryWorker(redisUrl),
+    // journey-events-purge (NFR-10): cron de retenção (> 180 dias). Worker do
+    // cron; o schedule é registrado por registerJourneyEventsPurgeSchedule.
+    registerJourneyEventsPurgeWorker(redisUrl),
   ]
 }
 
 // Re-exporta o handler puro para uso por crons externos (Vercel / GH Actions)
 // que não querem subir BullMQ.
 export { runSessionCloseBatch } from './session-close.job'
+
+// NFR-10: re-exporta o handler puro do purge para cron externo sem BullMQ.
+export { runJourneyEventsPurge } from './journey-events-purge.job'
 
 // Re-exporta a camada de fila do source-enrich (producer + worker registrar +
 // constantes) a partir do registry central para o boot importar de um só lugar.

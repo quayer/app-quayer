@@ -19,11 +19,26 @@ import {
   normalizeAgentRuntimeSettings,
   type AgentRuntimeSettings,
 } from '@/lib/agent-runtime-settings'
+import { isBuilderV2Enabled } from '@/lib/feature-flags/builder-v2'
+import { trackJourneyEvent } from '@/server/services/journey-events'
+import {
+  DEFAULT_BUILDER_STATE,
+  parseBuilderState,
+} from '../cards/builder-state'
 
 export const builderProjectRepository = {
   /**
    * US-005: Cria um BuilderProject + conversa vazia + primeira mensagem do
    * usuário em uma única transação.
+   *
+   * Jornada v2 (T10, plan §2.2 item 1): a versão da jornada é decidida AQUI no
+   * backend pelo flag `BUILDER_JOURNEY_V2` (coorte estável por organizationId) e
+   * CONGELADA no `builderState.journeyVersion` da conversa inicial (sem coluna
+   * nova em BuilderProject). O cookie de override `builder-v2-override` (QA) NÃO
+   * está disponível nesta camada de repositório — `isBuilderV2Enabled` é chamado
+   * apenas com o seed por env/org; o override de QA é aplicado nas camadas
+   * superiores que têm acesso ao request. O `journey_started` é emitido com a
+   * versão congelada (fire-and-forget, fora da transação).
    */
   async createWithInitialMessage(params: {
     organizationId: string
@@ -38,7 +53,16 @@ export const builderProjectRepository = {
         'PrismaClient.builderProject delegate indisponível. Rode `npx prisma generate` e reinicie o dev server.',
       )
     }
-    return database.$transaction(async (tx) => {
+
+    const journeyVersion: 1 | 2 = isBuilderV2Enabled(params.organizationId)
+      ? 2
+      : 1
+    const initialBuilderState = {
+      ...DEFAULT_BUILDER_STATE,
+      journeyVersion,
+    }
+
+    const result = await database.$transaction(async (tx) => {
       const project = await tx.builderProject.create({
         data: {
           organizationId: params.organizationId,
@@ -56,6 +80,7 @@ export const builderProjectRepository = {
           organizationId: params.organizationId,
           userId: params.userId,
           stateSummary: null,
+          builderState: initialBuilderState as unknown as Prisma.InputJsonValue,
           lastMessageAt: new Date(),
         },
       })
@@ -70,6 +95,19 @@ export const builderProjectRepository = {
 
       return { project, conversation }
     })
+
+    console.info(
+      `[journey-v2] projeto ${result.project.id} criado com journeyVersion=${journeyVersion} (org ${params.organizationId})`,
+    )
+    // Fire-and-forget: nunca lança, jamais quebra a criação do projeto.
+    void trackJourneyEvent({
+      organizationId: params.organizationId,
+      projectId: result.project.id,
+      journeyVersion,
+      event: 'journey_started',
+    })
+
+    return result
   },
 
   /**
@@ -551,7 +589,14 @@ export const builderProjectRepository = {
   /**
    * Duplicate: clones a BuilderProject in a single transaction.
    * Clones: BuilderProject, AIAgentConfig (if present), latest BuilderPromptVersion (if present).
-   * Does NOT clone: deployments, conversations, messages.
+   * Does NOT clone: deployments, messages.
+   *
+   * Jornada v2 (T11, plan §2.2 item 1): o clone nasce com uma conversa 1:1 nova
+   * (vazia, sem mensagens) cujo `builderState.journeyVersion` é HERDADO da
+   * conversa do projeto-fonte — não o default 1. Sem isto, um clone de projeto
+   * v2 sofreria downgrade silencioso para v1 na criação lazy da conversa. A
+   * versão é congelada criando a conversa aqui (mesmo padrão de
+   * `createWithInitialMessage`) e o `journey_started` é emitido na duplicação.
    * Returns the new project id.
    */
   async duplicate(
@@ -562,10 +607,12 @@ export const builderProjectRepository = {
   ) {
     const database = getDatabase()
 
-    // Fetch original with its aiAgent and latest prompt version
+    // Fetch original with its aiAgent, latest prompt version and the 1:1
+    // conversation (only its builderState — to inherit journeyVersion).
     const original = await database.builderProject.findFirst({
       where: { id: projectId, organizationId },
       include: {
+        conversation: { select: { builderState: true } },
         aiAgent: {
           include: {
             builderPromptVersions: {
@@ -580,7 +627,18 @@ export const builderProjectRepository = {
 
     const clonedName = newName ?? `${original.name} (cópia)`
 
-    return database.$transaction(async (tx) => {
+    // Inherit the journey version from the source conversation's builderState
+    // (legacy/missing rows backfill to 1 via parseBuilderState). Frozen into the
+    // clone's fresh conversation so the engine never downgrades a v2 clone.
+    const journeyVersion: 1 | 2 = parseBuilderState(
+      original.conversation?.builderState ?? null,
+    ).journeyVersion
+    const clonedBuilderState = {
+      ...DEFAULT_BUILDER_STATE,
+      journeyVersion,
+    }
+
+    const newProject = await database.$transaction(async (tx) => {
       // 1. Clone AIAgentConfig if original had one
       let newAiAgentId: string | null = null
       if (original.aiAgent) {
@@ -636,7 +694,7 @@ export const builderProjectRepository = {
       }
 
       // 3. Create the new BuilderProject (status = draft)
-      const newProject = await tx.builderProject.create({
+      const created = await tx.builderProject.create({
         data: {
           organizationId,
           userId,
@@ -648,8 +706,36 @@ export const builderProjectRepository = {
         },
       })
 
-      return newProject
+      // 4. Create the clone's 1:1 conversation seeded with the INHERITED
+      // journeyVersion (no messages). This is the canonical creation point for
+      // the clone's conversation, so the engine never sees the default-1
+      // downgrade for a v2 source.
+      await tx.builderProjectConversation.create({
+        data: {
+          projectId: created.id,
+          organizationId,
+          userId,
+          stateSummary: null,
+          builderState: clonedBuilderState as unknown as Prisma.InputJsonValue,
+          lastMessageAt: new Date(),
+        },
+      })
+
+      return created
     })
+
+    console.info(
+      `[journey-v2] projeto ${newProject.id} duplicado de ${projectId} com journeyVersion=${journeyVersion} herdado (org ${organizationId})`,
+    )
+    // Fire-and-forget: nunca lança, jamais quebra a duplicação.
+    void trackJourneyEvent({
+      organizationId,
+      projectId: newProject.id,
+      journeyVersion,
+      event: 'journey_started',
+    })
+
+    return newProject
   },
 }
 

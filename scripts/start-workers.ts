@@ -32,6 +32,7 @@ import type { Worker } from 'bullmq'
 import {
   registerAllWorkers,
   registerSessionCloseQueueSchedule,
+  registerJourneyEventsPurgeSchedule,
 } from '@/server/services/jobs'
 
 async function main(): Promise<void> {
@@ -55,6 +56,18 @@ async function main(): Promise<void> {
   } catch (err) {
     console.error(
       '[start-workers] falha ao registrar session-close schedule:',
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
+  // Agenda o cron de purge dos builder_journey_events > 180 dias (NFR-10,
+  // intervalo fixo, idempotente). Fail-open: erro aqui não derruba o boot.
+  try {
+    await registerJourneyEventsPurgeSchedule(redisUrl)
+    console.info('[start-workers] journey-events-purge schedule (cron) registrado')
+  } catch (err) {
+    console.error(
+      '[start-workers] falha ao registrar journey-events-purge schedule:',
       err instanceof Error ? err.message : String(err),
     )
   }

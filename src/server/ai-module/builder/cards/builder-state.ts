@@ -265,6 +265,12 @@ export const confirmationsSchema = z.object({
 // ==========================================
 
 export const builderStateSchema = z.object({
+  // Jornada v2 (plan §2.2 item 1) — chave de rollout POR PROJETO, carregada no
+  // próprio BuilderState (sem coluna nova em BuilderProject): o engine puro já
+  // consome o state e a query ops de convergência é viável via JSONB
+  // (`builderState->>'journeyVersion'`). Seedada na criação/duplicação do
+  // projeto; `parseBuilderState` backfilla legados para 1. Additivo e seguro.
+  journeyVersion: z.union([z.literal(1), z.literal(2)]).default(1),
   project: projectStateSchema.default({}),
   proposal: proposalStateSchema.default({}),
   selectedCapabilityKeys: z.array(z.string()).default([]),
