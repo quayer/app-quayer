@@ -8,149 +8,42 @@
  *
  * O endpoint /api/v1/builder/projects/:id/playground/stream recebe
  * `{ message, history }` e retorna SSE com os eventos AgentStreamEvent.
+ * O estado do stream vive em `use-playground-stream.ts` (parser SSE local,
+ * AbortController no unmount, erros traduzidos para PT-BR); as bolhas em
+ * `playground-bubbles.tsx`.
  */
 
 import * as React from "react"
-import { Bot, Play, Send, Trash2, Wrench, Loader2 } from "lucide-react"
+import { Play, Send, Trash2, Loader2 } from "lucide-react"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
-import { Avatar, AvatarFallback } from "@/client/components/ui/avatar"
 import { Button } from "@/client/components/ui/button"
 import { UserBubble } from "@/client/components/projetos/chat/chat-message"
-import { MarkdownContent } from "@/client/components/projetos/chat/markdown-content"
-import { parseSseBuffer } from "@/client/components/projetos/chat/utils/parse-sse-buffer"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
 
-// ── Types ────────────────────────────────────────────────────────────────────
+import { AssistantBubble, EmptyState } from "./playground-bubbles"
+import { usePlaygroundStream } from "./use-playground-stream"
 
 export interface PlaygroundTabProps {
   project: WorkspaceProject
 }
 
-interface PlaygroundMessage {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  toolCalls?: Array<{ toolName: string; args: unknown }>
-}
-
-function createId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID()
-  }
-  return `pg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-type Tokens = ReturnType<typeof useAppTokens>["tokens"]
-
-function AssistantBubble({
-  content,
-  toolCalls,
-  streaming,
-  tokens,
-}: {
-  content: string
-  toolCalls?: Array<{ toolName: string; args: unknown }>
-  streaming?: boolean
-  tokens: Tokens
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback style={{ backgroundColor: tokens.brandSubtle, color: tokens.brand }}>
-          <Bot className="h-4 w-4" />
-        </AvatarFallback>
-      </Avatar>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {content && (
-          <>
-            <MarkdownContent
-              content={content}
-              tokens={tokens}
-              className="max-w-[95%]"
-            />
-            {streaming && (
-              <span
-                className="ml-0.5 inline-block animate-pulse"
-                style={{ color: tokens.brand }}
-                aria-hidden
-              >
-                ▊
-              </span>
-            )}
-          </>
-        )}
-        {toolCalls && toolCalls.length > 0 && (
-          <div className="flex flex-col gap-1">
-            {toolCalls.map((tc, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px]"
-                style={{ backgroundColor: tokens.bgSurface, color: tokens.textSecondary, border: `1px solid ${tokens.divider}` }}
-              >
-                <Wrench className="h-3 w-3 shrink-0" style={{ color: tokens.brand }} />
-                <span className="font-mono" style={{ color: tokens.textPrimary }}>
-                  {tc.toolName}
-                </span>
-                {streaming ? (
-                  <span className="flex items-center gap-1" style={{ color: tokens.textTertiary }}>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    executando
-                  </span>
-                ) : (
-                  <span style={{ color: tokens.textTertiary }}>concluído</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Empty state ───────────────────────────────────────────────────────────────
-
-function EmptyState({ tokens }: { tokens: Tokens }) {
-  return (
-    <div className="mx-auto flex min-h-[320px] max-w-md flex-col items-center justify-center gap-4 text-center">
-      <div
-        className="flex h-14 w-14 items-center justify-center rounded-2xl"
-        style={{ backgroundColor: tokens.brandSubtle, color: tokens.brand }}
-      >
-        <Bot className="h-6 w-6" />
-      </div>
-      <div>
-        <h3 className="text-base font-semibold" style={{ color: tokens.textPrimary }}>
-          Aguardando o Builder
-        </h3>
-        <p className="mx-auto mt-1 max-w-sm text-[13px]" style={{ color: tokens.textSecondary }}>
-          Continue a conversa no chat para o Builder criar seu agente.
-        </p>
-      </div>
-    </div>
-  )
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-
-const MAX_HISTORY = 20
-
 export function PlaygroundTab({ project }: PlaygroundTabProps) {
   const { tokens } = useAppTokens()
 
-  const [messages, setMessages] = React.useState<PlaygroundMessage[]>([])
-  const [input, setInput] = React.useState("")
-  const [isStreaming, setIsStreaming] = React.useState(false)
-  const [streamingText, setStreamingText] = React.useState("")
-  const [streamingToolCalls, setStreamingToolCalls] = React.useState<
-    Array<{ toolName: string; args: unknown }>
-  >([])
-  const [error, setError] = React.useState<string | null>(null)
+  const {
+    messages,
+    input,
+    setInput,
+    isStreaming,
+    streamingText,
+    streamingToolCalls,
+    error,
+    inputRef,
+    sendMessage,
+    clearConversation,
+  } = usePlaygroundStream(project.id, project.aiAgentId)
 
   const scrollRef = React.useRef<HTMLDivElement>(null)
-  const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
   // Auto-scroll on new content
   React.useEffect(() => {
@@ -158,101 +51,6 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, streamingText, streamingToolCalls])
-
-  const clearConversation = React.useCallback(() => {
-    setMessages([])
-    setStreamingText("")
-    setStreamingToolCalls([])
-    setError(null)
-    inputRef.current?.focus()
-  }, [])
-
-  const sendMessage = React.useCallback(
-    async (content: string) => {
-      const trimmed = content.trim()
-      if (!trimmed || isStreaming || !project.aiAgentId) return
-
-      setError(null)
-      setInput("")
-      setIsStreaming(true)
-      setStreamingText("")
-      setStreamingToolCalls([])
-
-      const userMsg: PlaygroundMessage = {
-        id: createId(),
-        role: "user",
-        content: trimmed,
-      }
-      setMessages((prev) => [...prev, userMsg])
-
-      // Build history for the request (last MAX_HISTORY messages, user + assistant only)
-      const historySnapshot = [...messages, userMsg]
-        .slice(-MAX_HISTORY)
-        .map((m) => ({ role: m.role, content: m.content }))
-
-      let accText = ""
-      const toolCallsAcc: Array<{ toolName: string; args: unknown }> = []
-
-      try {
-        const res = await fetch(
-          `/api/v1/builder/projects/${project.id}/playground/stream`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: trimmed, history: historySnapshot.slice(0, -1) }),
-          }
-        )
-
-        if (!res.ok || !res.body) {
-          throw new Error(`Falha na requisição (HTTP ${res.status})`)
-        }
-
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-        let finished = false
-
-        while (!finished) {
-          const { value, done } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const { events, rest } = parseSseBuffer(buffer)
-          buffer = rest
-
-          for (const ev of events) {
-            if (ev.type === "text-delta") {
-              accText += ev.text
-              setStreamingText(accText)
-            } else if (ev.type === "tool-call") {
-              toolCallsAcc.push({ toolName: ev.toolName, args: ev.args })
-              setStreamingToolCalls([...toolCallsAcc])
-            } else if (ev.type === "finish" || ev.type === "error") {
-              if (ev.type === "error") {
-                setError(ev.message || "Erro ao processar mensagem")
-              }
-              const assistantMsg: PlaygroundMessage = {
-                id: createId(),
-                role: "assistant",
-                content: accText,
-                toolCalls: toolCallsAcc.length > 0 ? [...toolCallsAcc] : undefined,
-              }
-              setMessages((prev) => [...prev, assistantMsg])
-              setStreamingText("")
-              setStreamingToolCalls([])
-              finished = true
-            }
-            if (finished) break
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Erro desconhecido")
-      } finally {
-        setIsStreaming(false)
-        inputRef.current?.focus()
-      }
-    },
-    [isStreaming, messages, project.id, project.aiAgentId]
-  )
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -278,8 +76,8 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
         <div
           className="flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider"
           style={{
-            backgroundColor: "rgba(245,158,11,0.12)",
-            color: "#f59e0b",
+            backgroundColor: tokens.warningSubtle,
+            color: tokens.warningText,
           }}
         >
           <Play className="h-3 w-3" />
@@ -338,8 +136,8 @@ export function PlaygroundTab({ project }: PlaygroundTabProps) {
         <div
           className="mx-4 mb-2 rounded-lg px-3 py-2 text-[13px]"
           style={{
-            backgroundColor: "rgba(239,68,68,0.12)",
-            color: "#ef4444",
+            backgroundColor: tokens.dangerSubtle,
+            color: tokens.dangerText,
           }}
         >
           {error}

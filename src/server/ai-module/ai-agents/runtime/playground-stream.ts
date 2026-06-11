@@ -13,6 +13,7 @@ import {
 } from 'ai'
 import { database } from '@/server/services/database'
 import { getModel } from '../services/provider-factory'
+import { credentialResolver } from '@/lib/providers/credential-resolver.service'
 import { getEnabledBuiltinTools } from '../tools/builtin-tools'
 import { getCustomTools } from '../tools/custom-tools'
 import { renderWhatsAppMediaGuide } from '../services/whatsapp-media-guide'
@@ -229,11 +230,27 @@ export async function* processPlaygroundStream(
   const pgProviderKey = `${agentConfig.provider}:${agentConfig.model}`
   const pgIsInCooldown = await isProviderInCooldown(pgProviderKey)
 
-  let pgActiveModel = getModel(agentConfig.provider, agentConfig.model)
+  // BYOK — paridade com o runtime real (prepare-agent-call.ts §5): o playground
+  // deve honrar a chave da org/agente, não a da plataforma. Fail-open: resolve
+  // falhando → env key dentro do provider-factory.
+  let pgApiKey: string | undefined
+  try {
+    const cred = await credentialResolver.resolve('AI', agentConfig.provider, {
+      organizationId: params.organizationId,
+      organizationProviderId:
+        (agentConfig as { organizationProviderId?: string | null }).organizationProviderId ??
+        undefined,
+    })
+    pgApiKey = cred?.credentials?.apiKey
+  } catch (err) {
+    console.warn('[AgentRuntime:playground] BYOK resolve failed, falling back to env:', err)
+  }
+
+  let pgActiveModel = getModel(agentConfig.provider, agentConfig.model, pgApiKey)
   let pgActiveModelName = agentConfig.model
 
   if (pgIsInCooldown && pgFallbackModel) {
-    pgActiveModel = getModel(agentConfig.provider, pgFallbackModel)
+    pgActiveModel = getModel(agentConfig.provider, pgFallbackModel, pgApiKey)
     pgActiveModelName = pgFallbackModel
   }
 
@@ -283,7 +300,7 @@ export async function* processPlaygroundStream(
     } catch (primaryErr: unknown) {
       if (!pgIsInCooldown && pgFallbackModel && isRetriableError(primaryErr)) {
         void setProviderCooldown(pgProviderKey)
-        pgActiveModel = getModel(agentConfig.provider, pgFallbackModel)
+        pgActiveModel = getModel(agentConfig.provider, pgFallbackModel, pgApiKey)
         pgActiveModelName = pgFallbackModel
         result = callStream(pgActiveModel)
       } else {
