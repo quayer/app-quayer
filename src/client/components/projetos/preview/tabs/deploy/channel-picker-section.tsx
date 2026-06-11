@@ -3,8 +3,10 @@
 /**
  * ChannelPickerSection — step 1 of the deploy wizard.
  *
- * Renders the WhatsApp channel attached to the project (when present)
- * and lets the user attach an existing organization channel.
+ * Renders the WhatsApp channel attached to the project (connected OR pending)
+ * and lets the user attach an existing organization channel or provision a new
+ * one. Owns the WhatsApp Business provision state (useWhatsAppProvision) so the
+ * QR survives the selector → pending-view swap when the Connection is created.
  */
 
 import * as React from "react"
@@ -18,6 +20,9 @@ import { Card, CardContent } from "@/client/components/ui/card"
 import { Skeleton } from "@/client/components/ui/skeleton"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import { ChannelSelectorCard } from "./channel-selector-card"
+import { PendingChannel } from "./pending-channel"
+import { readErrorMessage } from "./read-error-message"
+import { useWhatsAppProvision } from "./use-whatsapp-provision"
 
 export interface ProjectChannel {
   id: string
@@ -148,31 +153,6 @@ function EmptyChannel({ tokens }: { tokens: AppTokens }) {
   )
 }
 
-async function readErrorMessage(response: Response, fallback: string): Promise<string> {
-  const text = await response.text().catch(() => "")
-  if (!text) return fallback
-
-  try {
-    const json = JSON.parse(text) as {
-      error?: unknown
-      message?: unknown
-      data?: { error?: unknown; message?: unknown }
-    }
-    const candidate =
-      json.message ??
-      json.error ??
-      json.data?.message ??
-      json.data?.error
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate
-    }
-  } catch {
-    // Response is plain text/HTML; trim it below.
-  }
-
-  return text.trim().slice(0, 240) || fallback
-}
-
 function ChannelOption({
   tokens,
   channel,
@@ -252,7 +232,13 @@ export function ChannelPickerSection({
   const [detaching, setDetaching] = React.useState(false)
   const [attachingId, setAttachingId] = React.useState<string | null>(null)
 
+  // Estado do provisionamento WhatsApp Business vive AQUI (não no painel) para
+  // o QR sobreviver à troca selector → canal pendente após o attach.
+  const whatsapp = useWhatsAppProvision(projectId, onChannelAttached)
+
   const channels = optionsQuery.data?.channels ?? []
+  const isChannelConnected =
+    projectChannel !== null && CONNECTED.has(projectChannel.status.toUpperCase())
 
   const handleDetach = React.useCallback(async () => {
     if (detaching) return
@@ -312,13 +298,12 @@ export function ChannelPickerSection({
     [attachingId, onChannelAttached, optionsQuery, projectId],
   )
 
-  const accent = projectChannel !== null
   return (
     <Card
       className="border p-0 shadow-none"
       style={{
         backgroundColor: tokens.bgSurface,
-        borderColor: accent ? tokens.success : tokens.divider,
+        borderColor: isChannelConnected ? tokens.success : tokens.divider,
       }}
     >
       <CardContent className="p-0">
@@ -341,17 +326,45 @@ export function ChannelPickerSection({
             <Skeleton className="h-4 w-1/2 rounded-md" />
           </div>
         ) : projectChannel !== null ? (
-          <ConnectedChannel
-            tokens={tokens}
-            channel={projectChannel}
-            detaching={detaching}
-            onDetach={handleDetach}
-          />
+          isChannelConnected ? (
+            <ConnectedChannel
+              tokens={tokens}
+              channel={projectChannel}
+              detaching={detaching}
+              onDetach={handleDetach}
+            />
+          ) : (
+            <PendingChannel
+              tokens={tokens}
+              channel={projectChannel}
+              whatsapp={whatsapp}
+              detaching={detaching}
+              onDetach={handleDetach}
+            />
+          )
         ) : (
           <>
             <EmptyChannel tokens={tokens} />
 
-            {optionsQuery.isLoading ? (
+            {optionsQuery.isError ? (
+              <div
+                className="flex flex-col gap-3 border-t px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                style={{ borderColor: tokens.divider }}
+              >
+                <p className="text-[12px]" style={{ color: tokens.dangerText }}>
+                  Não foi possível carregar os canais da organização.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void optionsQuery.refetch()}
+                  disabled={optionsQuery.isFetching}
+                >
+                  {optionsQuery.isFetching ? "Carregando..." : "Tentar novamente"}
+                </Button>
+              </div>
+            ) : optionsQuery.isLoading ? (
               <div className="space-y-2 border-t px-4 py-3" style={{ borderColor: tokens.divider }}>
                 <Skeleton className="h-12 w-full rounded-md" />
                 <Skeleton className="h-12 w-full rounded-md" />
@@ -397,7 +410,7 @@ export function ChannelPickerSection({
               <ChannelSelectorCard
                 tokens={tokens}
                 projectId={projectId}
-                shareToken={null}
+                whatsapp={whatsapp}
                 onChannelConnected={onChannelAttached}
               />
             </div>

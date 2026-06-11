@@ -1,14 +1,15 @@
 "use client"
 
 /**
- * SummaryStep — version status cards + history timeline (step 3)
+ * SummaryStep — version status cards + history timeline (step 4)
  *
  * Displays production/draft status (via VersionStatusCards) plus a
  * collapsible chronological list of every PromptVersion.
  *
- * Pulls the real version history from `api.builder.listVersions` so the
- * "Ver diff" action can surface the content delta between the upcoming
- * version and the one currently live in production.
+ * As versões chegam por PROP do deploy-tab (query única
+ * `["project-versions", projectId]`) — sem fetch próprio, para o pós-publish
+ * invalidar UMA key e atualizar resumo, diff e timeline juntos. O rollback
+ * notifica o orquestrador via `onVersionsChanged` (sem window.location.reload).
  */
 
 import { ChevronDown, Circle, GitCompare, RotateCcw } from "lucide-react"
@@ -42,28 +43,7 @@ import { AskBuilderButton } from "../../shared/ask-builder-button"
 import { TimelineDot, VersionStatusCards } from "./deploy-status-card"
 import type { PromptVersion, Tokens } from "./deploy-status-card"
 import { PromptDiff } from "./prompt-diff"
-
-/**
- * Full version shape returned by `GET /api/v1/builder/projects/:id/versions`.
- * Matches the server contract — kept local to avoid a cross-tab export.
- */
-interface VersionListItem {
-  id: string
-  versionNumber: number
-  content: string
-  description: string | null
-  createdBy: "chat" | "manual" | "rollback"
-  publishedAt: string | null
-  publishedBy: { id: string; name: string } | null
-  createdAt: string
-}
-
-interface ListVersionsClient {
-  useQuery: (args: { params: { id: string } }) => {
-    data?: { versions: VersionListItem[] } | null
-    isLoading: boolean
-  }
-}
+import type { VersionListItem } from "./version-utils"
 
 interface RollbackPromptClient {
   mutate: (
@@ -138,22 +118,6 @@ function VersionTimelineEntry({
               : new Date(version.createdAt).toLocaleString("pt-BR")}
           </p>
         </div>
-
-        {isPublished && (
-          <button
-            type="button"
-            disabled
-            className="ml-3 inline-flex min-h-10 shrink-0 items-center gap-1 rounded-md px-3 text-[11px] font-medium opacity-50 transition-opacity"
-            style={{
-              color: tokens.textTertiary,
-              backgroundColor: tokens.hoverBg,
-            }}
-            title="Restaurar versão"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Restaurar
-          </button>
-        )}
       </div>
     </div>
   )
@@ -161,11 +125,14 @@ function VersionTimelineEntry({
 
 interface SummaryStepProps {
   tokens: Tokens
-  versions: PromptVersion[]
+  /** Lista completa de versões (fonte única do deploy-tab, DESC). */
+  versions: VersionListItem[]
   loading: boolean
-  production: PromptVersion | null
-  draft: PromptVersion | null
+  production: VersionListItem | null
+  draft: VersionListItem | null
   projectId: string
+  /** Invalida a query de versões + readiness no orquestrador (pós-rollback). */
+  onVersionsChanged: () => void | Promise<void>
 }
 
 export function SummaryStep({
@@ -175,39 +142,30 @@ export function SummaryStep({
   production,
   draft,
   projectId,
+  onVersionsChanged,
 }: SummaryStepProps) {
   const [diffOpen, setDiffOpen] = useState(false)
   const [rollbackOpen, setRollbackOpen] = useState(false)
 
-  const listVersions = api.builder.listVersions as unknown as ListVersionsClient
-  const { data: versionsData, isLoading: versionsLoading } = listVersions.useQuery({
-    params: { id: projectId },
-  })
-
   const rollbackPrompt = api.builder.rollbackPrompt as unknown as RollbackPromptClient
 
-  const fullVersions = useMemo<VersionListItem[]>(() => {
-    const rows = versionsData?.versions ?? []
-    return [...rows].sort((a, b) => b.versionNumber - a.versionNumber)
-  }, [versionsData])
+  const fullVersions = useMemo<VersionListItem[]>(
+    () => [...versions].sort((a, b) => b.versionNumber - a.versionNumber),
+    [versions],
+  )
 
   const newest = fullVersions[0] ?? null
-  // The version currently live in prod = the most recent published one that
-  // is not the very newest (so we can offer reverting to it).
-  const prodVersion =
-    fullVersions.find((v) => v.publishedAt !== null) ?? null
-  // A previous prod version exists only when newest itself is published AND
-  // there is an older published version, OR when newest is unpublished and
-  // prodVersion exists as the live one.
-  // For rollback we need: we have at least one published version AND there
-  // is an older published version to go back to.
+  // The version currently live in prod = the most recent published one.
+  const prodVersion = fullVersions.find((v) => v.publishedAt !== null) ?? null
+  // For rollback we need at least one published version AND an older published
+  // version to go back to.
   const prevProdVersion = useMemo<VersionListItem | null>(() => {
     const published = fullVersions.filter((v) => v.publishedAt !== null)
     // published[0] is the latest published, published[1] is the one before it
     return published.length >= 2 ? (published[1] ?? null) : null
   }, [fullVersions])
 
-  // Show rollback when the current prod version is not null and there's a
+  // Show rollback when the current prod version is the newest and there's a
   // previous published version to revert to.
   const canRollback =
     newest !== null &&
@@ -217,25 +175,20 @@ export function SummaryStep({
   const canShowDiff =
     newest !== null && prodVersion !== null && newest.id !== prodVersion.id
 
-  const allVersionsSorted = [...versions].sort(
-    (a, b) => b.versionNumber - a.versionNumber,
-  )
-
-  const isLoading = loading || versionsLoading
-
   function handleRollbackConfirm() {
-    if (!prevProdVersion) return
+    if (!prevProdVersion || rollbackPrompt.isPending) return
     rollbackPrompt.mutate(
       { params: { id: projectId }, body: { targetVersionId: prevProdVersion.id } },
       {
         onSuccess: (data) => {
-          toast.success(`Revertido para v${prevProdVersion.versionNumber} (nova versão v${data.versionNumber})`)
+          toast.success(
+            `Revertido para v${prevProdVersion.versionNumber} (nova versão v${data.versionNumber})`,
+          )
           setRollbackOpen(false)
-          // TODO: substituir por queryClient.invalidateQueries quando cast suportar
-          window.location.reload()
+          void onVersionsChanged()
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : 'Erro ao reverter'
+          const msg = err instanceof Error ? err.message : "Erro ao reverter"
           toast.error(msg)
           setRollbackOpen(false)
         },
@@ -247,7 +200,7 @@ export function SummaryStep({
     <>
       <VersionStatusCards
         tokens={tokens}
-        versions={versions}
+        versions={fullVersions}
         loading={loading}
         production={production}
         draft={draft}
@@ -301,7 +254,7 @@ export function SummaryStep({
           </div>
         </div>
 
-        {versionsLoading ? (
+        {loading ? (
           <div
             className="h-16 w-full animate-pulse rounded-md"
             style={{ backgroundColor: tokens.hoverBg }}
@@ -350,7 +303,7 @@ export function SummaryStep({
               className="text-[11px] font-semibold uppercase tracking-[0.14em]"
               style={{ color: tokens.textTertiary }}
             >
-              Historico de versoes
+              Histórico de versões
             </h3>
             <ChevronDown
               className="h-4 w-4 transition-transform group-data-[state=open]:rotate-180"
@@ -358,7 +311,7 @@ export function SummaryStep({
             />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            {isLoading ? (
+            {loading ? (
               <div className="flex items-center gap-2 py-4">
                 <div
                   className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent"
@@ -374,7 +327,7 @@ export function SummaryStep({
                   Carregando...
                 </p>
               </div>
-            ) : allVersionsSorted.length === 0 ? (
+            ) : fullVersions.length === 0 ? (
               <Card
                 className="border p-0 shadow-none"
                 style={{
@@ -397,12 +350,12 @@ export function SummaryStep({
               </Card>
             ) : (
               <div className="pl-1">
-                {allVersionsSorted.map((v, idx) => (
+                {fullVersions.map((v, idx) => (
                   <VersionTimelineEntry
                     key={v.id}
                     version={v}
                     tokens={tokens}
-                    isLast={idx === allVersionsSorted.length - 1}
+                    isLast={idx === fullVersions.length - 1}
                   />
                 ))}
               </div>
@@ -441,7 +394,7 @@ export function SummaryStep({
         <Dialog open={diffOpen} onOpenChange={setDiffOpen}>
           <DialogContent className="max-w-3xl">
             <DialogHeader>
-              <DialogTitle>Comparar versoes</DialogTitle>
+              <DialogTitle>Comparar versões</DialogTitle>
               <DialogDescription>
                 Revise as mudanças entre a versão em produção e a versão a
                 publicar antes de confirmar.

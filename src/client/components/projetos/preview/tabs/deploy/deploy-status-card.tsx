@@ -36,16 +36,16 @@ export function SuccessCard({
     <Card
       className="border p-0 shadow-none"
       style={{
-        backgroundColor: "rgba(34,197,94,0.08)",
-        borderColor: "rgba(34,197,94,0.25)",
+        backgroundColor: tokens.successSubtle,
+        borderColor: tokens.success,
       }}
     >
       <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
         <div
           className="flex h-12 w-12 items-center justify-center rounded-full"
-          style={{ backgroundColor: "rgba(34,197,94,0.15)" }}
+          style={{ backgroundColor: tokens.successSubtle }}
         >
-          <PartyPopper className="h-6 w-6" style={{ color: "#22c55e" }} />
+          <PartyPopper className="h-6 w-6" style={{ color: tokens.success }} />
         </div>
         <div>
           <p
@@ -103,9 +103,9 @@ export function VersionStatusCards({
           >
             <span
               className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: "#22c55e" }}
+              style={{ backgroundColor: tokens.success }}
             />
-            Producao
+            Produção
           </div>
           {production ? (
             <>
@@ -119,8 +119,8 @@ export function VersionStatusCards({
                 <span
                   className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
                   style={{
-                    backgroundColor: "rgba(34,197,94,0.12)",
-                    color: "#22c55e",
+                    backgroundColor: tokens.successSubtle,
+                    color: tokens.successText,
                   }}
                 >
                   Ativo

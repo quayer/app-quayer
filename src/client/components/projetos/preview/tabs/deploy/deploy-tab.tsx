@@ -4,26 +4,41 @@
  * DeployTab — orchestrator for the publish wizard.
  *
  * Step 1: ChannelPickerSection — pick/create/connect a WhatsApp channel.
- * Step 2: ConnectionStep        — readiness checklist.
- * Step 3: InstanceStep          — publish version action.
+ * Step 2: ConnectionStep        — readiness checklist (step-engine blockers).
+ * Step 3: InstanceStep          — publish version action (gated by readiness).
  * Step 4: SummaryStep           — version history + rollback.
+ *
+ * Fontes únicas:
+ *  - canal:     query ["project-channel", id] com poll contínuo enquanto o
+ *               canal existe mas não conectou (para só em CONNECTED);
+ *  - requisitos: GET /builder/projects/:id/readiness (mesma fonte da Overview);
+ *  - versões:   query ["project-versions", id] — invalidada pós-publish/rollback
+ *               e compartilhada por prop com Instance/SummaryStep.
  */
 
 import * as React from "react"
-import { useEffect, useState, useCallback } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Rocket } from "lucide-react"
+import { api } from "@/igniter.client"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
+import { Button } from "@/client/components/ui/button"
+import { Card, CardContent } from "@/client/components/ui/card"
 import { Skeleton } from "@/client/components/ui/skeleton"
-import { ConnectionStep, useChecklist } from "./connection-step"
+import { unwrapReadiness } from "../overview/helpers/readiness-adapters"
+import { ConnectionStep, deriveChecklist } from "./connection-step"
+import type { ChecklistItem } from "./connection-step"
 import { InstanceStep } from "./instance-step"
 import { SummaryStep } from "./summary-step"
 import { SuccessCard } from "./deploy-status-card"
 import { ChannelPickerSection } from "./channel-picker-section"
-import type { PromptVersion } from "./deploy-status-card"
+import { readErrorMessage } from "./read-error-message"
+import { readinessToChecklist } from "./readiness-checklist"
+import { unwrapVersions } from "./version-utils"
+import type { VersionListItem } from "./version-utils"
 
 interface DeployTabProps {
   project: WorkspaceProject
@@ -107,21 +122,54 @@ function StepIndicator({ step, tokens }: { step: 1 | 2 | 3 | 4; tokens: AppToken
   )
 }
 
+function RetryCard({
+  tokens,
+  message,
+  retrying,
+  onRetry,
+}: {
+  tokens: AppTokens
+  message: string
+  retrying: boolean
+  onRetry: () => void
+}) {
+  return (
+    <Card
+      className="border p-0 shadow-none"
+      style={{ backgroundColor: tokens.bgSurface, borderColor: tokens.danger }}
+    >
+      <CardContent className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <p role="alert" className="text-[12px]" style={{ color: tokens.dangerText }}>
+          {message}
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onRetry}
+          disabled={retrying}
+        >
+          {retrying ? "Carregando..." : "Tentar novamente"}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function DeployTab({ project }: DeployTabProps) {
   const { tokens } = useAppTokens()
   const queryClient = useQueryClient()
-  const [versions, setVersions] = useState<PromptVersion[]>([])
-  const [loading, setLoading] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [publishAsDraft, setPublishAsDraft] = useState(false)
   const [justPublished, setJustPublished] = useState<number | null>(null)
 
   // ── Active channel query ────────────────────────────────────────────────────
-  // Poll the current channel attached to this project's agent so the
-  // checklist item stays in sync without a full page reload.
-  // Stop polling once a channel is connected (data?.channel !== null).
-  const { data: channelData, isLoading: channelLoading } = useQuery<ProjectChannelResponse>({
+  // Poll the current channel attached to this project's agent so the checklist
+  // stays in sync without a full page reload. While a channel exists but has
+  // NOT connected (aguardando scan do QR), keep polling fast; stop only when
+  // it reaches a connected status.
+  const channelQuery = useQuery<ProjectChannelResponse>({
     queryKey: ["project-channel", project.id],
     queryFn: async () => {
       const response = await fetch(`/api/v1/builder/projects/${project.id}/channel`, {
@@ -136,67 +184,92 @@ export function DeployTab({ project }: DeployTabProps) {
     },
     enabled: !!project.aiAgent,
     staleTime: 0,
-    refetchInterval: (query) =>
-      (query.state.data as ProjectChannelResponse | undefined)?.channel != null ? false : 15_000,
+    refetchInterval: (query) => {
+      const channel = (query.state.data as ProjectChannelResponse | undefined)?.channel
+      if (!channel) return 15_000
+      return CONNECTED_CHANNEL_STATUSES.has(channel.status.toUpperCase())
+        ? false
+        : 5_000
+    },
   })
+  const channelLoading = channelQuery.isLoading
 
-  const projectChannel = channelData?.channel ?? null
+  const projectChannel = channelQuery.data?.channel ?? null
+  // Fallback SSR (project.hasWhatsAppConnection) APENAS enquanto a query não
+  // respondeu — quando ela responde channel:null (ex.: pós-desvincular), o
+  // valor SSR está stale e o correto é false.
   const hasConnectedChannel = projectChannel
     ? CONNECTED_CHANNEL_STATUSES.has(projectChannel.status.toUpperCase())
-    : project.hasWhatsAppConnection
+    : channelLoading
+      ? project.hasWhatsAppConnection
+      : false
 
-  // Build a derived project that reflects the live channel state so the
-  // checklist doesn't depend on a SSR-only hasWhatsAppConnection boolean.
-  const liveProject: WorkspaceProject = {
-    ...project,
-    hasWhatsAppConnection: hasConnectedChannel,
-  }
+  // ── Readiness (step-engine) ─────────────────────────────────────────────────
+  // Mesma fonte da Overview: blockers tipados plan/byok/agent/prompt/version/
+  // channel. Substitui a heurística local que ignorava plano/BYOK/versão.
+  const readinessQuery = api.builder.getReadiness.useQuery({
+    params: { id: project.id },
+  })
+  const readiness = useMemo(
+    () => unwrapReadiness(readinessQuery.data),
+    [readinessQuery.data],
+  )
 
-  const { checklist, metCount, allMet, unmetItems } = useChecklist(liveProject)
-
-  // ── Versions loader ─────────────────────────────────────────────────────────
-  // Extracted into a named callback so it can be called imperatively after
-  // a successful publish (Problem 2 fix).
-  const loadVersions = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(
-        `/api/v1/builder/projects/${project.id}/versions`,
-      )
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = (await res.json()) as { data?: { versions?: PromptVersion[] } }
-      setVersions(json.data?.versions ?? [])
-    } catch {
-      // Silently fall back to empty — SummaryStep trata o estado vazio
-      setVersions([])
-    } finally {
-      setLoading(false)
-    }
-  }, [project.id])
-
+  const refetchReadinessRef = useRef(readinessQuery.refetch)
   useEffect(() => {
-    if (!project.aiAgent) return
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      try {
-        const res = await fetch(
-          `/api/v1/builder/projects/${project.id}/versions`,
-        )
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const json = (await res.json()) as { data?: { versions?: PromptVersion[] } }
-        if (!cancelled) setVersions(json.data?.versions ?? [])
-      } catch {
-        // Silently fall back to empty — SummaryStep trata o estado vazio
-        if (!cancelled) setVersions([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [project.id, project.aiAgent])
+    refetchReadinessRef.current = readinessQuery.refetch
+  }, [readinessQuery.refetch])
+
+  // Re-sincroniza o readiness quando o status do canal muda (ex.: QR escaneado
+  // → CONNECTED) para o blocker de canal limpar sem F5.
+  const channelStatus = projectChannel?.status ?? null
+  const prevChannelStatusRef = useRef(channelStatus)
+  useEffect(() => {
+    if (prevChannelStatusRef.current === channelStatus) return
+    prevChannelStatusRef.current = channelStatus
+    void refetchReadinessRef.current()
+  }, [channelStatus])
+
+  // Build a derived project that reflects the live channel state — usado só
+  // como FALLBACK do checklist enquanto o readiness não respondeu.
+  const liveProject = useMemo<WorkspaceProject>(
+    () => ({ ...project, hasWhatsAppConnection: hasConnectedChannel }),
+    [project, hasConnectedChannel],
+  )
+
+  const checklist = useMemo<ChecklistItem[]>(
+    () => (readiness ? readinessToChecklist(readiness) : deriveChecklist(liveProject)),
+    [readiness, liveProject],
+  )
+  const metCount = useMemo(() => checklist.filter((c) => c.met).length, [checklist])
+  const allMet = metCount === checklist.length
+  const unmetItems = useMemo(() => checklist.filter((c) => !c.met), [checklist])
+
+  // ── Versions (fonte única) ──────────────────────────────────────────────────
+  const versionsQuery = useQuery<VersionListItem[]>({
+    queryKey: ["project-versions", project.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/builder/projects/${project.id}/versions`, {
+        credentials: "same-origin",
+      })
+      if (!res.ok) throw new Error(`Erro ${res.status} ao carregar versões`)
+      return unwrapVersions(await res.json())
+    },
+    enabled: !!project.aiAgent,
+  })
+  const versions = useMemo(() => versionsQuery.data ?? [], [versionsQuery.data])
+  const loading = versionsQuery.isLoading
+
+  const handleVersionsChanged = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["project-versions", project.id] })
+    void refetchReadinessRef.current()
+  }, [queryClient, project.id])
+
+  const onChannelAttached = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["project-channel", project.id] })
+    await queryClient.invalidateQueries({ queryKey: ["project-channel-options", project.id] })
+    void refetchReadinessRef.current()
+  }, [queryClient, project.id])
 
   if (!project.aiAgent) {
     return (
@@ -222,12 +295,14 @@ export function DeployTab({ project }: DeployTabProps) {
   const production = published[0] ?? null
   const draft = drafts[0] ?? null
 
-  // Determine current wizard step for the StepIndicator
+  // Determine current wizard step for the StepIndicator, na ordem real da
+  // jornada: sem canal → 1; canal sem requisitos completos → 2; pronto para
+  // publicar → 3; em produção → 4.
   const currentStep: 1 | 2 | 3 | 4 = (() => {
     if (production !== null) return 4
-    if (allMet || draft !== null) return 3
-    if (projectChannel !== null) return 2
-    return 1
+    if (projectChannel === null) return 1
+    if (hasConnectedChannel && allMet && draft !== null) return 3
+    return 2
   })()
 
   const handleOpenConfirm = (asDraft: boolean) => {
@@ -236,10 +311,10 @@ export function DeployTab({ project }: DeployTabProps) {
   }
 
   const handlePublish = async () => {
-    if (!draft) return
+    if (!draft || publishing) return
     setPublishing(true)
     try {
-      // "Salvar como rascunho" é um no-op de servidor: a versão já existe como
+      // "Manter como rascunho" é um no-op de servidor: a versão já existe como
       // rascunho (publishedAt === null). Só confirma na UI.
       if (publishAsDraft) {
         setConfirmOpen(false)
@@ -250,6 +325,7 @@ export function DeployTab({ project }: DeployTabProps) {
       // Rota real da saga (a antiga /projects/publish não existe → era 404).
       const res = await fetch("/api/v1/builder/deploy/publish-version", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: project.id,
@@ -257,14 +333,13 @@ export function DeployTab({ project }: DeployTabProps) {
         }),
       })
       if (!res.ok) {
-        const text = await res.text().catch(() => "")
-        throw new Error(text || `HTTP ${res.status}`)
+        throw new Error(await readErrorMessage(res, `Erro ${res.status} ao publicar`))
       }
       setConfirmOpen(false)
       setJustPublished(draft.versionNumber)
       toast.success(`Versão v${draft.versionNumber} publicada com sucesso.`)
-      // Re-fetch versions from server instead of optimistic update
-      await loadVersions()
+      // Invalida a fonte única — resumo, diff e timeline atualizam juntos.
+      await handleVersionsChanged()
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao publicar"
       toast.error(`Falha ao publicar: ${msg}`)
@@ -294,16 +369,22 @@ export function DeployTab({ project }: DeployTabProps) {
       <StepIndicator step={currentStep} tokens={tokens} />
 
       {/* Step 1 — channel picker */}
-      <ChannelPickerSection
-        tokens={tokens}
-        projectId={project.id}
-        projectChannel={projectChannel}
-        channelLoading={channelLoading}
-        onChannelAttached={async () => {
-          await queryClient.invalidateQueries({ queryKey: ["project-channel", project.id] })
-          await queryClient.invalidateQueries({ queryKey: ["project-channel-options", project.id] })
-        }}
-      />
+      {channelQuery.isError ? (
+        <RetryCard
+          tokens={tokens}
+          message="Não foi possível carregar o canal vinculado ao projeto."
+          retrying={channelQuery.isFetching}
+          onRetry={() => void channelQuery.refetch()}
+        />
+      ) : (
+        <ChannelPickerSection
+          tokens={tokens}
+          projectId={project.id}
+          projectChannel={projectChannel}
+          channelLoading={channelLoading}
+          onChannelAttached={onChannelAttached}
+        />
+      )}
 
       {/* Step 2 — readiness checklist */}
       <ConnectionStep
@@ -314,7 +395,14 @@ export function DeployTab({ project }: DeployTabProps) {
       />
 
       {/* Steps 3 + 4 — publish + history */}
-      {loading ? (
+      {versionsQuery.isError ? (
+        <RetryCard
+          tokens={tokens}
+          message="Não foi possível carregar as versões do agente."
+          retrying={versionsQuery.isFetching}
+          onRetry={() => void versionsQuery.refetch()}
+        />
+      ) : loading ? (
         <>
           <Skeleton className="h-[120px] w-full rounded-lg" />
           <Skeleton className="h-[120px] w-full rounded-lg" />
@@ -350,6 +438,7 @@ export function DeployTab({ project }: DeployTabProps) {
             production={production}
             draft={draft}
             projectId={project.id}
+            onVersionsChanged={handleVersionsChanged}
           />
         </>
       )}

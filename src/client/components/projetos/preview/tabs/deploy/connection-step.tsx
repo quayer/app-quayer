@@ -1,13 +1,14 @@
 "use client"
 
 /**
- * ConnectionStep — readiness checklist (step 1 of deploy wizard)
+ * ConnectionStep — readiness checklist (step 2 of deploy wizard)
  *
- * Derives pre-requisite checklist from project state + renders
- * a summary card with per-item tooltips.
+ * Renders the pre-requisite checklist card with per-item tooltips. The items
+ * come from the step-engine readiness blockers (readiness-checklist.ts) —
+ * `deriveChecklist` is only the degraded fallback while readiness is
+ * unavailable (loading/erro), since the server re-valida tudo no publish.
  */
 
-import { useMemo } from "react"
 import { Check, CheckCircle2, XCircle, AlertTriangle } from "lucide-react"
 import { Card, CardContent } from "@/client/components/ui/card"
 import {
@@ -101,23 +102,6 @@ function ChecklistRow({
   )
 }
 
-export interface ConnectionStepResult {
-  checklist: ChecklistItem[]
-  metCount: number
-  allMet: boolean
-  unmetItems: ChecklistItem[]
-}
-
-export function useChecklist(project: WorkspaceProject): ConnectionStepResult {
-  return useMemo(() => {
-    const checklist = deriveChecklist(project)
-    const metCount = checklist.filter((c) => c.met).length
-    const allMet = metCount === checklist.length
-    const unmetItems = checklist.filter((c) => !c.met)
-    return { checklist, metCount, allMet, unmetItems }
-  }, [project])
-}
-
 export function ConnectionStep({
   tokens,
   checklist,
@@ -146,7 +130,7 @@ export function ConnectionStep({
             className="text-[11px] font-semibold uppercase tracking-[0.14em]"
             style={{ color: tokens.textTertiary }}
           >
-            Pre-requisitos para publicar
+            Pré-requisitos para publicar
           </span>
           <span
             className="rounded-full px-2 py-0.5 text-[10px] font-semibold"

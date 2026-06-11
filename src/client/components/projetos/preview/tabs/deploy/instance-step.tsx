@@ -1,10 +1,12 @@
 "use client"
 
 /**
- * InstanceStep — publish action UI + confirm dialog (step 2 of deploy wizard)
+ * InstanceStep — publish action UI + confirm dialog (step 3 of deploy wizard)
  *
  * Owns the button + AlertDialog. Actual async publish logic lives in
- * deploy-tab.tsx orchestrator; this component just wires user intent.
+ * deploy-tab.tsx orchestrator; this component just wires user intent. O botão
+ * Publicar é GATEADO por `allMet` (blockers do readiness) — coerente com o
+ * copy do ConnectionStep ("não é possível publicar ainda").
  */
 
 import { Rocket, X } from "lucide-react"
@@ -60,16 +62,19 @@ export function InstanceStep({
         <TooltipProvider delayDuration={200}>
           <Tooltip>
             <TooltipTrigger asChild>
+              {/* Gate único: publicar exige TODOS os pré-requisitos do
+                  readiness (plan/byok/agent/prompt/version/channel) — mesma
+                  política do copy "não é possível publicar ainda". */}
               <button
                 type="button"
-                disabled={!draft || publishing}
+                disabled={!draft || publishing || !allMet}
                 onClick={() => onOpenConfirm(false)}
                 className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30 sm:w-auto sm:px-8"
                 style={{
                   backgroundColor: tokens.brand,
                   color: tokens.textInverse,
                   boxShadow:
-                    draft && !publishing
+                    draft && allMet && !publishing
                       ? "0 4px 14px -4px rgba(255,214,10,0.45)"
                       : "none",
                 }}
@@ -96,7 +101,10 @@ export function InstanceStep({
                       key={item.key}
                       className="flex items-center gap-1.5 text-[11px]"
                     >
-                      <X className="h-3 w-3 shrink-0 text-red-400" />
+                      <X
+                        className="h-3 w-3 shrink-0"
+                        style={{ color: tokens.danger }}
+                      />
                       {item.label}
                     </li>
                   ))}
@@ -118,7 +126,7 @@ export function InstanceStep({
               backgroundColor: "transparent",
             }}
           >
-            Publicar como rascunho
+            Manter como rascunho
           </button>
         )}
       </div>
@@ -128,25 +136,20 @@ export function InstanceStep({
           <AlertDialogHeader>
             <AlertDialogTitle>
               {publishAsDraft
-                ? `Salvar v${draft?.versionNumber} como rascunho?`
+                ? `Manter v${draft?.versionNumber} como rascunho?`
                 : `Publicar v${draft?.versionNumber}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {publishAsDraft ? (
                 <>
-                  A versão será salva mas não ativada em produção. Você poderá
-                  publicá-la posteriormente.
+                  Nada será publicado agora. A versão continua salva como
+                  rascunho e você pode publicá-la quando quiser.
                 </>
               ) : (
                 <>
                   Conversas em andamento continuam com v
-                  {production?.versionNumber ?? "\u2014"} ate terminarem. Novas
+                  {production?.versionNumber ?? "\u2014"} até terminarem. Novas
                   conversas começam na versão publicada.
-                  {!allMet && (
-                    <span className="mt-2 block text-amber-500">
-                      Atenção: nem todos os pré-requisitos foram atendidos.
-                    </span>
-                  )}
                 </>
               )}
             </AlertDialogDescription>
@@ -165,7 +168,7 @@ export function InstanceStep({
               {publishing
                 ? "Publicando..."
                 : publishAsDraft
-                  ? "Salvar rascunho"
+                  ? "Manter rascunho"
                   : "Publicar"}
             </AlertDialogAction>
           </AlertDialogFooter>

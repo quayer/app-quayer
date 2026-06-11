@@ -25,6 +25,7 @@ import { Button } from "@/client/components/ui/button"
 import { Input } from "@/client/components/ui/input"
 import { Label } from "@/client/components/ui/label"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import { readErrorMessage } from "./read-error-message"
 
 export type ChannelCredentialKind = "WHATSAPP_CLOUD" | "INSTAGRAM"
 
@@ -61,27 +62,6 @@ interface ChannelCredentialFormProps {
   submitLabel: string
   /** Fires after a successful POST so the wizard can refetch channel state. */
   onConnected: () => void | Promise<void>
-}
-
-async function readErrorMessage(response: Response, fallback: string): Promise<string> {
-  const text = await response.text().catch(() => "")
-  if (!text) return fallback
-
-  try {
-    const json = JSON.parse(text) as {
-      error?: unknown
-      message?: unknown
-      data?: { error?: unknown; message?: unknown }
-    }
-    const candidate = json.message ?? json.error ?? json.data?.message ?? json.data?.error
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate
-    }
-  } catch {
-    // Plain text / HTML response — fall through to the trimmed body.
-  }
-
-  return text.trim().slice(0, 240) || fallback
 }
 
 export function ChannelCredentialForm({
