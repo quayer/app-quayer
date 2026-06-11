@@ -348,3 +348,92 @@ describe('runIntegrationCall — never throws', () => {
     ).resolves.toMatchObject({ outcome: 'network' })
   })
 })
+
+// ---------------------------------------------------------------------------
+// 9. T32 — env-gated E2E allowlist (`INTEGRATION_TEST_ALLOWED_HOSTS`)
+//
+// The allowlist is parsed ONCE per module instance (memoized) and is read ONLY
+// under NODE_ENV==='test'. To exercise BOTH NODE_ENV values within one process
+// we `vi.resetModules()` + dynamic-import a FRESH executor after stubbing env,
+// so the memo is rebuilt against the stubbed NODE_ENV. The top-level `vi.mock`
+// factories (dns, logger) re-apply to the fresh module graph automatically.
+// ---------------------------------------------------------------------------
+
+describe('runIntegrationCall — T32 env-gated test allowlist', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  /** Reset modules, stub env, then dynamic-import a fresh executor + re-stub fetch. */
+  async function loadFreshExecutor(env: Record<string, string>) {
+    vi.resetModules()
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+    // The fresh module graph reuses the hoisted vi.mock('dns')/logger factories.
+    const mod = await import('./integration-executor')
+    // Re-establish the global fetch stub for the fresh module's `global.fetch`.
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    return mod.runIntegrationCall
+  }
+
+  it('NODE_ENV=production: allowlist var is IGNORED — localhost stays blocked (plan §8)', async () => {
+    // Even with the var explicitly set, production must ignore it by construction.
+    const run = await loadFreshExecutor({
+      NODE_ENV: 'production',
+      INTEGRATION_TEST_ALLOWED_HOSTS: 'localhost',
+    })
+    // localhost would resolve to a loopback IP; assert the guard still triggers.
+    dnsLookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }])
+
+    const spec = httpsSpec({ url: 'http://localhost:43117/fixture' })
+    const result = await run(spec, CREDENTIALS, PARAMS, prodOpts())
+
+    // Blocked on the https-only gate before any fetch (var ignored in prod).
+    expect(result.outcome).toBe('blocked')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('NODE_ENV=test + host allowlisted: BYPASSES https + IP guard → 200 yields "success"', async () => {
+    const run = await loadFreshExecutor({
+      NODE_ENV: 'test',
+      INTEGRATION_TEST_ALLOWED_HOSTS: 'localhost,127.0.0.1:43117',
+    })
+    // The fixture is an http loopback server — both guards must be bypassed.
+    dnsLookupMock.mockResolvedValue([{ address: '127.0.0.1', family: 4 }])
+    fetchMock.mockResolvedValue(fakeResponse(200, '{"ok":true}'))
+
+    const spec = httpsSpec({ url: 'http://localhost:43117/fixture' })
+    const result = await run(spec, CREDENTIALS, PARAMS, testOpts())
+
+    expect(result.outcome).toBe('success')
+    expect(result.httpStatus).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // DNS guard skipped entirely for the allowlisted host.
+    expect(dnsLookupMock).not.toHaveBeenCalled()
+  })
+
+  it('NODE_ENV=test but host NOT allowlisted: full guard still applies (http blocked)', async () => {
+    const run = await loadFreshExecutor({
+      NODE_ENV: 'test',
+      INTEGRATION_TEST_ALLOWED_HOSTS: 'localhost',
+    })
+
+    // A different host than the allowlisted one → no bypass; http is blocked.
+    const spec = httpsSpec({ url: 'http://evil.example.com/x' })
+    const result = await run(spec, CREDENTIALS, PARAMS, testOpts())
+
+    expect(result.outcome).toBe('blocked')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('NODE_ENV=test with var UNSET: no bypass — http still blocked', async () => {
+    const run = await loadFreshExecutor({ NODE_ENV: 'test' })
+
+    const spec = httpsSpec({ url: 'http://localhost:43117/fixture' })
+    const result = await run(spec, CREDENTIALS, PARAMS, testOpts())
+
+    expect(result.outcome).toBe('blocked')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

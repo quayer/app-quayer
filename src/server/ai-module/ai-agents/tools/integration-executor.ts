@@ -10,9 +10,11 @@
  * THIS EXECUTOR HAS ITS OWN SSRF POLICY — it does NOT reuse text-extraction's
  * `safeFetch`. The policy, revalidated on EVERY call, is:
  *  - HTTPS ONLY: the URL scheme is re-parsed and re-checked per call; any
- *    non-`https:` scheme is `blocked` (the T32 E2E allowlist is wired as the
- *    `isHostAllowedForTest` hook below, which returns false by default so this
- *    stays https-only until T32 extends it — no restructuring required).
+ *    non-`https:` scheme is `blocked`. The ONLY exception is the T32 E2E
+ *    allowlist (`isHostAllowedForTest`): under `NODE_ENV==='test'` a host listed
+ *    in `INTEGRATION_TEST_ALLOWED_HOSTS` bypasses BOTH the https check and the IP
+ *    guard so an E2E fixture on `http://127.0.0.1:PORT` can be reached. In ANY
+ *    other NODE_ENV the env var is ignored by construction — strictly https-only.
  *  - PER-CALL POST-DNS IP GUARD: the hostname is resolved (`dns.lookup`, ALL
  *    addresses) BEFORE the fetch, and if ANY resolved IP is private / loopback /
  *    link-local / unique-local / cloud-metadata the call is `blocked`. This
@@ -89,14 +91,60 @@ const TIMEOUT_MS = { test: 15_000, production: 10_000 } as const
 // ---------------------------------------------------------------------------
 
 /**
- * T32 hook point: in E2E we will allow specific test hosts (e.g. a localhost
- * fixture server) to bypass the https-only/IP guards. Until T32 wires that
- * allowlist this returns `false` for EVERY host, so the executor is strictly
- * https-only with the full post-DNS IP guard. T32 extends THIS function only —
- * the call sites below need no restructuring.
+ * T32 env-gated E2E allowlist.
+ *
+ * `INTEGRATION_TEST_ALLOWED_HOSTS` is a comma-separated list of hostnames (or
+ * `host:port`) that an E2E fixture server is reachable on (e.g. `localhost`,
+ * `localhost:43117`, `127.0.0.1:43117`). When a host is allowlisted, the
+ * executor BYPASSES the https-only check AND the post-DNS private-IP guard for
+ * THAT host only — letting an E2E test hit a `http://127.0.0.1:PORT` fixture.
+ *
+ * SAFETY BY CONSTRUCTION: the var is read ONLY when `NODE_ENV === 'test'`. In
+ * EVERY other NODE_ENV (production, development, …) {@link isHostAllowedForTest}
+ * short-circuits to `false` BEFORE the var is even consulted — so setting the
+ * var in production has ZERO effect; the executor stays strictly https-only with
+ * the full IP guard. T32 wires THIS function only; the call sites are unchanged.
+ *
+ * NODE_ENV is fixed per-process, so the parsed allowlist is memoized once.
  */
-function isHostAllowedForTest(_host: string): boolean {
-  return false
+
+/** True only when this process is a test process (vitest pins `NODE_ENV='test'`). */
+function isTestEnv(): boolean {
+  return process.env.NODE_ENV === 'test'
+}
+
+/** Lazily-parsed allowlist memo. `null` = not parsed yet (parse-once guard). */
+let allowedTestHostsMemo: ReadonlySet<string> | null = null
+
+/**
+ * Parse `INTEGRATION_TEST_ALLOWED_HOSTS` ONCE into a normalized set. Each entry
+ * is lower-cased and trimmed; blanks are dropped. Entries may be a bare hostname
+ * (`localhost`) or `host:port` (`localhost:43117`) — both forms are stored as
+ * given so either can be matched. Only ever reached under `NODE_ENV==='test'`.
+ */
+function getAllowedTestHosts(): ReadonlySet<string> {
+  if (allowedTestHostsMemo !== null) return allowedTestHostsMemo
+  const raw = process.env.INTEGRATION_TEST_ALLOWED_HOSTS ?? ''
+  const entries = raw
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h.length > 0)
+  allowedTestHostsMemo = new Set(entries)
+  return allowedTestHostsMemo
+}
+
+/**
+ * Should `host` (hostname, lower-cased) — optionally bound to `port` — bypass
+ * the SSRF guards? Returns `false` for EVERY host unless `NODE_ENV==='test'`
+ * AND the host (by bare hostname OR `host:port`) is in the env allowlist. The
+ * NODE_ENV gate runs FIRST, so outside test the env var is ignored entirely.
+ */
+function isHostAllowedForTest(host: string, port: string): boolean {
+  if (!isTestEnv()) return false
+  const allowed = getAllowedTestHosts()
+  if (allowed.size === 0) return false
+  if (allowed.has(host)) return true
+  return port.length > 0 && allowed.has(`${host}:${port}`)
 }
 
 /** IPv4 ranges that must never be reachable (private / loopback / link-local / metadata). */
@@ -329,7 +377,7 @@ export async function runIntegrationCall(
   }
 
   const host = parsed.hostname.toLowerCase()
-  const allowedForTest = isHostAllowedForTest(host)
+  const allowedForTest = isHostAllowedForTest(host, parsed.port)
 
   if (parsed.protocol !== 'https:' && !allowedForTest) {
     const { diagnosis } = classifyError({ kind: 'network' })

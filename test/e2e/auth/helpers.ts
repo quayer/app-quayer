@@ -17,6 +17,11 @@ interface VerificationCodeRow {
   code: string
 }
 
+interface UserOrgRow {
+  id: string
+  currentOrgId: string | null
+}
+
 interface MinimalPrismaClient {
   $connect: () => Promise<void>
   $disconnect: () => Promise<void>
@@ -25,6 +30,12 @@ interface MinimalPrismaClient {
       where: { identifier: string }
       orderBy: { createdAt: 'desc' }
     }) => Promise<VerificationCodeRow | null>
+  }
+  user: {
+    findFirst: (args: {
+      where: { email: string }
+      select: { id: true; currentOrgId: true }
+    }) => Promise<UserOrgRow | null>
   }
 }
 
@@ -69,6 +80,61 @@ export async function getLatestOtp(email: string): Promise<string> {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(
       'OTP capture failed - ensure TEST_DATABASE_URL is set (' + message + ')'
+    )
+  }
+}
+
+/**
+ * Read a logged-in user's id + active organization id straight from the test DB.
+ *
+ * Used by E2E specs that must seed tenant-scoped rows (BuilderProject, published
+ * AIAgentConfig, …) for the SAME org the OTP session is bound to. The login flow
+ * provisions the user + org server-side; this returns the `currentOrgId` the
+ * session's `authProcedure` will resolve, so seeded rows are visible to the API
+ * calls the spec drives. Requires TEST_DATABASE_URL or DATABASE_URL, exactly like
+ * {@link getLatestOtp}.
+ */
+export async function getUserOrgId(
+  email: string
+): Promise<{ userId: string; organizationId: string }> {
+  try {
+    const databaseUrl =
+      process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+    if (!databaseUrl) {
+      throw new Error('No database URL configured')
+    }
+
+    const mod = (await import('@prisma/client')) as {
+      PrismaClient: new (opts?: {
+        datasources?: { db: { url: string } }
+      }) => MinimalPrismaClient
+    }
+    const prisma: MinimalPrismaClient = new mod.PrismaClient({
+      datasources: { db: { url: databaseUrl } },
+    })
+
+    try {
+      await prisma.$connect()
+      const row = await prisma.user.findFirst({
+        where: { email },
+        select: { id: true, currentOrgId: true },
+      })
+      if (!row) {
+        throw new Error('No user found for ' + email)
+      }
+      if (!row.currentOrgId) {
+        throw new Error('User ' + email + ' has no currentOrgId set')
+      }
+      return { userId: row.id, organizationId: row.currentOrgId }
+    } finally {
+      await prisma.$disconnect()
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(
+      'User/org lookup failed - ensure TEST_DATABASE_URL is set (' +
+        message +
+        ')'
     )
   }
 }

@@ -17,20 +17,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 process.env.ENCRYPTION_KEY = 'test-key-exactly-32-chars-padded'
 
 vi.mock('@/server/services/database', () => ({
-  database: { agentTool: { findMany: vi.fn() } },
+  database: {
+    agentTool: { findMany: vi.fn() },
+    customIntegration: { update: vi.fn() },
+  },
 }))
 
 vi.mock('./integration-executor', () => ({
   runIntegrationCall: vi.fn(),
 }))
 
+// Logger is mocked so the (sanitized) writeback-failure warning is observable in
+// the swallow test without polluting test output.
+vi.mock('@/server/services/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}))
+
 import { database } from '@/server/services/database'
 import { encrypt } from '@/lib/crypto'
+import { logger } from '@/server/services/logger'
 import { runIntegrationCall } from './integration-executor'
 import { getCustomTools } from './custom-tools'
 
 const findMany = database.agentTool.findMany as ReturnType<typeof vi.fn>
+const integrationUpdate = database.customIntegration
+  .update as ReturnType<typeof vi.fn>
 const runIntegrationCallMock = runIntegrationCall as ReturnType<typeof vi.fn>
+const loggerWarn = logger.warn as ReturnType<typeof vi.fn>
 
 function mockRow(webhookSecret: string | null) {
   return {
@@ -211,5 +224,145 @@ describe('getCustomTools — backing por CustomIntegration (T20/T45)', () => {
     // Sem webhookUrl e integração não-active → row é pulada (continue).
     expect(tools['tool_integracao']).toBeUndefined()
     expect(runIntegrationCallMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * T31 — refinamento do writeback de erro de PRODUÇÃO no branch de integração.
+ *
+ * Quando o executor (que já fez seu retry de produção) devolve uma falha
+ * PERSISTENTE (5xx/rede), o execute da tool deve:
+ *  1. resolver `{ success: false, userFacingHint }` com um hint NEUTRO em pt-BR
+ *     (sem status, sem URL, sem credencial — FR-10/NFR-07);
+ *  2. marcar a CustomIntegration `status='error'` (writeback fail-open);
+ *  3. NUNCA lançar — nem na falha do executor, nem se o próprio writeback no DB
+ *     estourar (o turno tem que sobreviver).
+ */
+describe('getCustomTools — writeback de erro de integração (T31)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  function getIntegrationTool() {
+    findMany.mockResolvedValue([mockIntegrationRow('active')])
+    return getCustomTools(['tool_integracao'], ctx).then((tools) => {
+      const tool = tools['tool_integracao']
+      expect(tool).toBeDefined()
+      return tool as { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    })
+  }
+
+  it('falha 5xx persistente → success:false + userFacingHint neutro, writeback status=error, sem throw', async () => {
+    runIntegrationCallMock.mockResolvedValue({
+      outcome: 'network',
+      httpStatus: 503,
+      durationMs: 12,
+      diagnosis: 'serviço indisponível',
+    })
+    integrationUpdate.mockResolvedValue({})
+
+    const tool = await getIntegrationTool()
+
+    const result = (await tool.execute(
+      { foo: 'bar' },
+      { toolCallId: 't1', messages: [] },
+    )) as { success: boolean; userFacingHint?: string }
+
+    // 1. resultado seguro com hint neutro
+    expect(result.success).toBe(false)
+    expect(typeof result.userFacingHint).toBe('string')
+    expect(result.userFacingHint).toMatch(/não consegui concluir/i)
+    // hint NUNCA contém status / URL / credencial
+    expect(result.userFacingHint).not.toMatch(/503|http|https?:\/\/|secret|token|credential/i)
+
+    // 2. writeback flagou a integração como erro com código curto (o httpStatus)
+    expect(integrationUpdate).toHaveBeenCalledTimes(1)
+    const updateArg = integrationUpdate.mock.calls[0]?.[0] as {
+      where: { id: string }
+      data: { status: string; lastErrorAt: Date; lastErrorCode: string }
+    }
+    expect(updateArg.where).toEqual({ id: 'int-1' })
+    expect(updateArg.data.status).toBe('error')
+    expect(updateArg.data.lastErrorAt).toBeInstanceOf(Date)
+    expect(updateArg.data.lastErrorCode).toBe('503')
+  })
+
+  it('falha de rede sem httpStatus → lastErrorCode usa a classe do outcome', async () => {
+    runIntegrationCallMock.mockResolvedValue({
+      outcome: 'timeout',
+      durationMs: 10_000,
+      diagnosis: 'tempo esgotado',
+    })
+    integrationUpdate.mockResolvedValue({})
+
+    const tool = await getIntegrationTool()
+    await tool.execute({}, { toolCallId: 't1', messages: [] })
+
+    const updateArg = integrationUpdate.mock.calls[0]?.[0] as {
+      data: { lastErrorCode: string }
+    }
+    // sem httpStatus → usa o membro do union (curto, value-free), nunca um payload
+    expect(updateArg.data.lastErrorCode).toBe('timeout')
+  })
+
+  it('writeback que estoura no DB é engolido — execute ainda resolve a falha (sem throw) e loga sanitizado', async () => {
+    runIntegrationCallMock.mockResolvedValue({
+      outcome: 'network',
+      httpStatus: 502,
+      durationMs: 8,
+      diagnosis: 'falha no upstream',
+    })
+    // O writeback de observabilidade falha — NÃO pode derrubar o turno.
+    integrationUpdate.mockRejectedValue(new Error('db down'))
+
+    const tool = await getIntegrationTool()
+
+    const result = (await tool.execute(
+      {},
+      { toolCallId: 't1', messages: [] },
+    )) as { success: boolean; userFacingHint?: string }
+
+    // O erro do writeback foi engolido: o execute ainda resolve a falha segura.
+    expect(result.success).toBe(false)
+    expect(result.userFacingHint).toMatch(/não consegui concluir/i)
+
+    // E a falha do writeback foi logada de forma sanitizada (sem segredos/URL/payload).
+    expect(loggerWarn).toHaveBeenCalledTimes(1)
+    const [, logFields] = loggerWarn.mock.calls[0] as [string, Record<string, unknown>]
+    expect(logFields).toMatchObject({ integrationId: 'int-1', httpStatus: 502 })
+    const serialized = JSON.stringify(logFields)
+    expect(serialized).not.toMatch(/secret|token|credential|password|authorization/i)
+  })
+
+  it('CONTRATO never-throws: executor que LANÇA inesperado → success:false + hint, writeback best-effort, sem throw', async () => {
+    // O executor é especificado para nunca lançar, mas o execute da tool tem que
+    // honrar o contrato mesmo se algo inesperado estourar no caminho.
+    runIntegrationCallMock.mockRejectedValue(new Error('boom inesperado'))
+    integrationUpdate.mockResolvedValue({})
+
+    const tool = await getIntegrationTool()
+
+    let thrown = false
+    let result: { success: boolean; userFacingHint?: string } | undefined
+    try {
+      result = (await tool.execute({}, { toolCallId: 't1', messages: [] })) as {
+        success: boolean
+        userFacingHint?: string
+      }
+    } catch {
+      thrown = true
+    }
+
+    expect(thrown).toBe(false) // NUNCA propaga
+    expect(result?.success).toBe(false)
+    expect(result?.userFacingHint).toMatch(/não consegui concluir/i)
+    // best-effort writeback com classe coarse 'network' (sem httpStatus)
+    expect(integrationUpdate).toHaveBeenCalledTimes(1)
+    const updateArg = integrationUpdate.mock.calls[0]?.[0] as {
+      data: { status: string; lastErrorCode: string }
+    }
+    expect(updateArg.data.status).toBe('error')
+    expect(updateArg.data.lastErrorCode).toBe('network')
   })
 })

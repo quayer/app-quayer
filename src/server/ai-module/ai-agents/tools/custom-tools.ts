@@ -21,8 +21,10 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { database } from '@/server/services/database'
 import { decrypt } from '@/lib/crypto'
+import { logger } from '@/server/services/logger'
 import type { ToolExecutionContext } from './builtin-tools'
 import { runIntegrationCall } from './integration-executor'
+import { sanitizeForLog } from '../../builder/integrations/request-spec'
 import { requestSpecSchema } from '../../builder/integrations/integration.schemas'
 
 // ---------------------------------------------------------------------------
@@ -285,9 +287,13 @@ type IntegrationRow = Prisma.CustomIntegrationGetPayload<{
   }
 }>
 
-/** Neutral pt-BR hint surfaced to the LLM on any integration failure (never a technical error). */
+/**
+ * Neutral pt-BR hint surfaced to the LLM on ANY integration failure (FR-10/NFR-07).
+ * MUST stay generic: it NEVER contains a technical error, an HTTP status, a URL, or
+ * any credential — the LLM may relay it verbatim to the end user.
+ */
 const INTEGRATION_USER_FACING_HINT =
-  'Não consegui concluir essa ação agora. Tente novamente em instantes ou siga sem ela.'
+  'Não consegui concluir essa ação agora. Tente novamente em instantes ou avise o suporte.'
 
 /**
  * Decrypt the integration's stored credential values per call (never cached) into
@@ -309,62 +315,115 @@ function decryptCredentials(raw: Prisma.JsonValue | null): Record<string, string
 }
 
 /**
+ * Derive the SHORT, value-free error class persisted in `CustomIntegration.lastErrorCode`.
+ * This is a coarse classifier (the HTTP status when present, else the outcome union
+ * member) — NEVER a response payload, header, URL, or credential (FR-10/NFR-07).
+ */
+function errorCodeOf(result: { outcome: string; httpStatus?: number }): string {
+  return result.httpStatus ? String(result.httpStatus) : result.outcome
+}
+
+/**
+ * Fail-open observability writeback after a PERSISTENT integration failure (i.e. the
+ * executor already exhausted its single production retry). Flags the row `status='error'`
+ * with the timestamp and the short error class. STRICTLY best-effort:
+ *  - a DB failure here MUST NOT propagate (the turn must survive) → wrapped in try/catch;
+ *  - the swallowed DB error is logged via the repo logger through `sanitizeForLog`, so the
+ *    log line carries only whitelisted, secret-free keys (no payload / URL / credential).
+ * NEVER throws.
+ */
+async function writebackIntegrationError(
+  integration: IntegrationRow,
+  result: { outcome: string; httpStatus?: number },
+): Promise<void> {
+  try {
+    await database.customIntegration.update({
+      where: { id: integration.id },
+      data: {
+        status: 'error',
+        lastErrorAt: new Date(),
+        lastErrorCode: errorCodeOf(result),
+      },
+    })
+  } catch {
+    // Best-effort: the writeback is observability, never load-bearing. Log the
+    // failure (sanitized — no secrets/URLs/payloads) and keep going so the turn
+    // still resolves with the safe hint.
+    logger.warn(
+      '[custom-tools] integration error writeback failed',
+      sanitizeForLog({
+        integrationId: integration.id,
+        organizationId: integration.organizationId,
+        outcome: result.outcome,
+        httpStatus: result.httpStatus,
+      }),
+    )
+  }
+}
+
+/**
  * Build the `execute` for an AgentTool backed by an ACTIVE integration. Delegates
  * to the shared `runIntegrationCall` executor (same code path as the test/test-call
- * route → FR-08 parity). NEVER throws — every failure becomes a SAFE tool result.
+ * route → FR-08 parity).
+ *
+ * CONTRACT — this `execute` NEVER throws. The runtime relies on it always resolving:
+ * every failure mode (malformed spec, persistent executor failure, an unexpected
+ * error anywhere in the path) is caught and turned into the SAFE tool result
+ * `{ success: false, userFacingHint }` plus a best-effort error writeback. The hint
+ * is generic pt-BR and carries no technical detail (FR-10/NFR-07).
  */
 function buildIntegrationExecute(
   integration: IntegrationRow,
 ): (input: unknown) => Promise<unknown> {
   return async (input: unknown) => {
-    // Parse the persisted spec. A malformed spec is a config error, not a turn
-    // failure → return the safe hint (never throw).
-    const specParsed = requestSpecSchema.safeParse(integration.requestSpec)
-    if (!specParsed.success) {
+    try {
+      // Parse the persisted spec. A malformed spec is a config error, not a turn
+      // failure → safe hint (never throw).
+      const specParsed = requestSpecSchema.safeParse(integration.requestSpec)
+      if (!specParsed.success) {
+        return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
+      }
+
+      // Per-call decrypt; never cache plaintext.
+      const credentials = decryptCredentials(integration.credentials)
+      const params =
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {}
+
+      const result = await runIntegrationCall(specParsed.data, credentials, params, {
+        mode: 'production',
+        integrationId: integration.id,
+        organizationId: integration.organizationId,
+      })
+
+      if (result.outcome !== 'success') {
+        // PERSISTENT failure (the executor already applied its prod retry). Flag the
+        // row for observability — best-effort, never sinks the turn — then return the
+        // neutral hint with NO technical detail.
+        await writebackIntegrationError(integration, result)
+        return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
+      }
+
+      // Success: hand the (capped) response body back so the LLM can use it.
+      let data: unknown = result.bodySnippet ?? null
+      if (typeof data === 'string' && data.length > 0) {
+        try {
+          data = JSON.parse(data)
+        } catch {
+          // keep the raw string if it isn't JSON
+        }
+      }
+      return { success: true, data }
+    } catch (err) {
+      // Unexpected error anywhere in the path (e.g. the executor unexpectedly threw,
+      // a decrypt blew up): honour the never-throws contract. Best-effort writeback
+      // with a coarse 'network' class, then the safe hint. The raw error is NEVER
+      // surfaced to the LLM and NEVER logged with a payload.
+      await writebackIntegrationError(integration, { outcome: 'network' })
+      void err
       return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
     }
-
-    // Per-call decrypt; never cache plaintext.
-    const credentials = decryptCredentials(integration.credentials)
-    const params =
-      input && typeof input === 'object' && !Array.isArray(input)
-        ? (input as Record<string, unknown>)
-        : {}
-
-    const result = await runIntegrationCall(specParsed.data, credentials, params, {
-      mode: 'production',
-      integrationId: integration.id,
-      organizationId: integration.organizationId,
-    })
-
-    if (result.outcome !== 'success') {
-      // Fail-open writeback (refined further in T31/Onda 4). A writeback failure
-      // must NOT sink the turn → wrapped in try/catch.
-      try {
-        await database.customIntegration.update({
-          where: { id: integration.id },
-          data: {
-            status: 'error',
-            lastErrorAt: new Date(),
-            lastErrorCode: result.httpStatus ? String(result.httpStatus) : result.outcome,
-          },
-        })
-      } catch {
-        // swallow — observability writeback is best-effort, never load-bearing.
-      }
-      return { success: false, userFacingHint: INTEGRATION_USER_FACING_HINT }
-    }
-
-    // Success: hand the (capped) response body back so the LLM can use it.
-    let data: unknown = result.bodySnippet ?? null
-    if (typeof data === 'string' && data.length > 0) {
-      try {
-        data = JSON.parse(data)
-      } catch {
-        // keep the raw string if it isn't JSON
-      }
-    }
-    return { success: true, data }
   }
 }
 
