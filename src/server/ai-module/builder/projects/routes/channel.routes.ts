@@ -166,9 +166,11 @@ export const channelRoutes = {
 
       if (!connection) return response.notFound('Canal não encontrado ou não pertence à sua organização')
 
-      // Deactivate any existing deployment for this agent
+      // Pausa só o deployment ACTIVE da MESMA conexão (re-attach daquele canal) —
+      // escopo por connectionId habilita multi-canal simultâneo: N deployments
+      // ACTIVE por agente, 1 por conexão (espelha attach-to-agent.ts, plan §3.7/Onda 5b).
       await database.agentDeployment.updateMany({
-        where: { agentConfigId: project.aiAgentId, status: 'ACTIVE' },
+        where: { agentConfigId: project.aiAgentId, connectionId, status: 'ACTIVE' },
         data: { status: 'PAUSED', updatedAt: new Date() },
       })
 

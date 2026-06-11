@@ -869,21 +869,21 @@ describe('applyChannelPlatform — T103 (FR-24/25)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Rejeição de dupla seleção pré-5b (espelho do disable da UI; invertido em T94)
+  // Seleção dupla HABILITADA na Onda 5b (T94 removeu a rejeição pré-5b): o
+  // mesmo agente atende WhatsApp + Instagram (attach pausa por conexão, não por
+  // agente). Persiste as 2 plataformas e flipa o sentinel.
   // -------------------------------------------------------------------------
-  it('duas plataformas (pré-5b) → invalid, sem nenhum write', async () => {
+  it('duas plataformas (pós-5b) → aceito, grava ambas e flipa o sentinel', async () => {
     const res = await submitChannel({
       platforms: ['whatsapp', 'instagram'],
       whatsappMode: 'qr',
     })
 
-    expect(res.ok).toBe(false)
-    if (!res.ok) {
-      expect(res.reason).toBe('invalid')
-      expect(res.message).toMatch(/apenas um canal/i)
-    }
-    expect(mockTransaction).not.toHaveBeenCalled()
-    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['whatsapp', 'instagram'])
+    expect(next.channel?.whatsappMode).toBe('qr')
+    expect(next.confirmations.channelPlatform).toBe(true)
   })
 
   it('platforms duplicado é deduplicado para um canal único (não dispara a regra pré-5b)', async () => {

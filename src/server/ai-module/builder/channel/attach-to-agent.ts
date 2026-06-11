@@ -22,8 +22,12 @@ export async function attachConnectionToProjectAgent(
   })
   if (!project?.aiAgentId) return
 
+  // Multi-canal (plan §3.7): pausa SÓ deployments ACTIVE da MESMA conexão
+  // (re-attach daquele canal). Sem o filtro connectionId, anexar um segundo
+  // canal (ex.: Instagram) pausaria o WhatsApp do mesmo agente. Com ele, o
+  // agente pode ter N deployments ACTIVE — 1 por conexão/canal simultâneo.
   await db.agentDeployment.updateMany({
-    where: { agentConfigId: project.aiAgentId, status: 'ACTIVE' },
+    where: { agentConfigId: project.aiAgentId, connectionId, status: 'ACTIVE' },
     data: { status: 'PAUSED', updatedAt: new Date() },
   })
 

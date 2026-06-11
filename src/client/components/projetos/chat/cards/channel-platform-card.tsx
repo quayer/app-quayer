@@ -15,9 +15,9 @@
  *   "WhatsApp oficial da Meta" (badge avançado — Cloud API). Instagram NÃO tem
  *   nível 2 (FR-25).
  *
- * **Até a Onda 5b** a seleção DUPLA está DESABILITADA com hint honesto "em breve"
- * (FR-20/FR-26): marcar uma plataforma desmarca a outra. O handler server-side
- * (T91) espelha essa regra rejeitando 2 itens; a 5b (T94) libera os dois.
+ * **A partir da Onda 5b (T94)** a seleção DUPLA está HABILITADA: marcar/desmarcar
+ * é um toggle independente por plataforma (o mesmo agente atende ambos os canais).
+ * O handler server-side (`applyChannelPlatform`) aceita 1 ou 2 plataformas.
  *
  * Presentational only: lê seu slice de `props.value.channel`, dispara o payload
  * tipado via `props.onSubmit` (chat-panel owns POST + SSE — o card NUNCA faz
@@ -99,8 +99,8 @@ const WHATSAPP_MODE_OPTIONS: readonly WhatsAppModeOption[] = [
  * ChannelPlatformCard — multi-select de plataforma (nível 1) + modo de conexão
  * do WhatsApp inline (nível 2). Pré-preenche por exceção de `value.channel`.
  *
- * Pré-5b: seleção ÚNICA (marcar uma plataforma troca a seleção) com hint "em
- * breve" para os dois canais; o QR fica pré-selecionado assim que WhatsApp entra.
+ * Onda 5b: multi-select REAL (marcar/desmarcar cada plataforma de forma
+ * independente); o QR fica pré-selecionado assim que WhatsApp entra.
  */
 export function ChannelPlatformCard({
   value,
@@ -118,11 +118,14 @@ export function ChannelPlatformCard({
 
   const whatsappSelected = platforms.includes("whatsapp")
 
-  // Pré-5b: seleção ÚNICA. Marcar uma plataforma SUBSTITUI a seleção; clicar na
-  // já marcada desmarca. A 5b (T94) troca isto por toggle multi-select real.
+  // Onda 5b (T94): multi-select REAL. O mesmo agente atende ambos os canais
+  // (T92 já permite N deployments), então marcar/desmarcar é um toggle independente
+  // por plataforma — sem mais a substituição de seleção única.
   const togglePlatform = React.useCallback((platform: Platform) => {
     setPlatforms((current) =>
-      current.includes(platform) ? [] : [platform],
+      current.includes(platform)
+        ? current.filter((p) => p !== platform)
+        : [...current, platform],
     )
   }, [])
 
@@ -206,10 +209,9 @@ export function ChannelPlatformCard({
         })}
       </div>
 
-      {/* Pré-5b: seleção dupla DESABILITADA com hint honesto "em breve". */}
+      {/* Onda 5b (T94): seleção dupla habilitada — o mesmo agente atende ambos. */}
       <p className="mt-2 text-[11px]" style={{ color: tokens.textTertiary }}>
-        Atender nos dois ao mesmo tempo? Em breve — por enquanto, escolha um
-        canal.
+        Pode marcar os dois — o mesmo agente atende ambos.
       </p>
 
       {/* Nível 2 — expande inline SÓ se WhatsApp está marcado (IG não tem). */}

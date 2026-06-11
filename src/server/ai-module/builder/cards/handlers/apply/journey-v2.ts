@@ -319,8 +319,8 @@ export async function applyPublishedNextSteps(args: {
  *
  * RE-VALIDAÇÃO server-side (nunca confia no body — padrão do módulo):
  *  - `platforms` é deduplicado mantendo a ordem (1ª ocorrência);
- *  - **canal único pré-5b**: 2 plataformas → `invalid` (espelho do disable da UI;
- *    a remoção é T94/Onda 5b);
+ *  - **multi-canal (Onda 5b/T94)**: 1 ou 2 plataformas aceitas — o mesmo agente
+ *    atende ambas (T92 já permite N deployments por agente);
  *  - `whatsappMode` obrigatório quando `'whatsapp'` está selecionado
  *    (`channelPlatformWhatsappModeOk`); o modo só é persistido quando WhatsApp
  *    está entre as plataformas (IG não tem nível 2 — não guardamos modo órfão).
@@ -340,15 +340,6 @@ export async function applyChannelPlatform(args: {
 
   // Dedupe preservando a ordem (1ª ocorrência) — nunca confia no body.
   const platforms = Array.from(new Set(payload.platforms))
-
-  // Canal único até a Onda 5b (espelho do disable da UI; removido em T94).
-  if (platforms.length > 1) {
-    return {
-      ok: false,
-      reason: 'invalid',
-      message: 'Por enquanto, escolha apenas um canal (WhatsApp ou Instagram).',
-    }
-  }
 
   const wantsWhatsapp = platforms.includes('whatsapp')
   // Cross-field: whatsappMode obrigatório quando WhatsApp está selecionado.
@@ -386,16 +377,22 @@ export async function applyChannelPlatform(args: {
     })
   })
 
-  const platformLabel = wantsWhatsapp
-    ? `WhatsApp${whatsappMode === 'cloud' ? ' (Cloud API)' : ' (QR Code)'}`
-    : 'Instagram'
+  // Rótulo por plataforma, na ordem escolhida — multi-canal lista AMBAS (Onda 5b).
+  const platformLabel = platforms
+    .map((p) =>
+      p === 'whatsapp'
+        ? `WhatsApp${whatsappMode === 'cloud' ? ' (Cloud API)' : ' (QR Code)'}`
+        : 'Instagram',
+    )
+    .join(' + ')
+  const multi = platforms.length > 1
 
   return {
     ok: true,
     conversationId,
     cardInstruction:
-      `O usuário ESCOLHEU o canal de atendimento via card: ${platformLabel}. ` +
-      'Siga para a conexão do canal escolhido e o próximo passo da jornada. ' +
+      `O usuário ESCOLHEU ${multi ? 'os canais' : 'o canal'} de atendimento via card: ${platformLabel}. ` +
+      `Siga para a conexão ${multi ? 'de cada canal escolhido' : 'do canal escolhido'} e o próximo passo da jornada. ` +
       'Não reabra o card de escolha de canal.',
   }
 }
