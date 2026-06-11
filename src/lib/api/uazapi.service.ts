@@ -1,3 +1,20 @@
+/**
+ * Cliente das rotas ADMIN/instância do broker UAZAPI — dialeto v2.
+ *
+ * DIALETO (provado por probe contra quayer.uazapi.com em 2026-06-11, e espelhando
+ * o sender de produção `uazapi-sender.service.ts` que já fala v2):
+ *   - Rotas ADMIN (criar instância): header `admintoken` + POST /instance/init.
+ *   - Rotas DE INSTÂNCIA (connect/QR, webhook): header `token` (token da instância).
+ * O código anterior usava o dialeto v1 (`apikey` + POST /instance/create) e
+ * recebia 401 do broker em TODAS as chamadas — o QR nunca nasceu em homol
+ * ("Missing AdminToken Header" no probe).
+ *
+ * Respostas são NORMALIZADAS aqui (token/instanceId/qrcode aparecem em paths
+ * diferentes conforme a versão do broker) para os consumidores não conhecerem
+ * o shape cru. Erros do broker vêm em `{"error": "..."}` (v2) — com fallback
+ * para `message` (v1).
+ */
+
 interface UazapiResult<T = unknown> {
   success: boolean
   data?: T
@@ -20,20 +37,45 @@ function getBaseUrl(): string {
   )
 }
 
+function brokerError(data: unknown, fallback: string): string {
+  const d = data as { error?: unknown; message?: unknown } | null
+  const raw = d?.error ?? d?.message
+  return typeof raw === 'string' && raw.length > 0 ? raw : fallback
+}
+
 export const uazapiService = {
   async createInstance(name: string): Promise<UazapiResult<{ token: string; instance?: { id: string } }>> {
-    const apiKey = getAdminToken()
+    const adminToken = getAdminToken()
     const baseUrl = getBaseUrl()
-    if (!apiKey) return { success: false, error: 'UAZAPI_ADMIN_TOKEN not configured' }
+    if (!adminToken) return { success: false, error: 'UAZAPI_ADMIN_TOKEN not configured' }
 
     try {
-      const res = await fetch(`${baseUrl}/instance/create`, {
+      const res = await fetch(`${baseUrl}/instance/init`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: apiKey },
-        body: JSON.stringify({ instanceName: name }),
+        headers: { 'Content-Type': 'application/json', admintoken: adminToken },
+        // v2 usa `name`; `instanceName` (v1) vai junto por tolerância.
+        body: JSON.stringify({ name, instanceName: name }),
       })
-      const data = await res.json()
-      return { success: res.ok, data, error: res.ok ? undefined : data?.message }
+      const raw = (await res.json().catch(() => ({}))) as {
+        token?: string
+        instance?: { id?: string; token?: string }
+        id?: string
+      }
+      if (!res.ok) {
+        return {
+          success: false,
+          error: brokerError(raw, `Broker retornou HTTP ${res.status}`),
+        }
+      }
+      const token = raw.token ?? raw.instance?.token
+      if (!token) {
+        return { success: false, error: 'Broker não retornou token da instância' }
+      }
+      const instanceId = raw.instance?.id ?? raw.id
+      return {
+        success: true,
+        data: { token, instance: instanceId ? { id: instanceId } : undefined },
+      }
     } catch (err) {
       return { success: false, error: String(err) }
     }
@@ -42,12 +84,28 @@ export const uazapiService = {
   async generateQR(token: string): Promise<UazapiResult<{ qrcode: string }>> {
     const baseUrl = getBaseUrl()
     try {
+      // v2: POST /instance/connect com header `token` — body vazio gera QR
+      // (com `phone` geraria paircode; não usamos).
       const res = await fetch(`${baseUrl}/instance/connect`, {
-        method: 'GET',
-        headers: { apikey: token },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', token },
+        body: JSON.stringify({}),
       })
-      const data = await res.json()
-      return { success: res.ok, data, error: res.ok ? undefined : data?.message }
+      const raw = (await res.json().catch(() => ({}))) as {
+        qrcode?: string
+        instance?: { qrcode?: string }
+      }
+      if (!res.ok) {
+        return {
+          success: false,
+          error: brokerError(raw, `Broker retornou HTTP ${res.status}`),
+        }
+      }
+      const qrcode = raw.qrcode ?? raw.instance?.qrcode
+      if (!qrcode) {
+        return { success: false, error: 'Broker não retornou QR code' }
+      }
+      return { success: true, data: { qrcode } }
     } catch (err) {
       return { success: false, error: String(err) }
     }
@@ -72,7 +130,7 @@ export const uazapiService = {
     try {
       const res = await fetch(`${baseUrl}/webhook`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: token },
+        headers: { 'Content-Type': 'application/json', token },
         body: JSON.stringify({
           url: webhookUrl,
           enabled: true,
@@ -81,7 +139,11 @@ export const uazapiService = {
         }),
       })
       const data = await res.json().catch(() => ({}))
-      return { success: res.ok, data, error: res.ok ? undefined : data?.message }
+      return {
+        success: res.ok,
+        data,
+        error: res.ok ? undefined : brokerError(data, `Broker retornou HTTP ${res.status}`),
+      }
     } catch (err) {
       return { success: false, error: String(err) }
     }

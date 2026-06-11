@@ -108,7 +108,7 @@ const provisionWhatsApp = igniter.mutation({
 
     const project = await db.builderProject.findFirst({
       where: { id: projectId, organizationId: user.currentOrgId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, aiAgentId: true },
     })
     if (!project) return response.notFound('Projeto não encontrado')
 
@@ -116,23 +116,33 @@ const provisionWhatsApp = igniter.mutation({
 
     // 0) Idempotência: reusa a Connection WHATSAPP_WEB já provisionada para o
     //    projeto (ativa OU pendente) em vez de criar instância/Connection novas.
-    if (!force) {
-      const existing = await db.connection.findFirst({
+    //    O vínculo canônico projeto↔conexão é o AgentDeployment do agente do
+    //    projeto (Connection.projectId tem FK para a tabela LEGADA "Project" —
+    //    gravar o id do BuilderProject lá estoura P2003; ver attach-to-agent.ts).
+    if (!force && project.aiAgentId) {
+      const deployment = await db.agentDeployment.findFirst({
         where: {
-          projectId: project.id,
-          organizationId: user.currentOrgId,
-          channel: 'WHATSAPP',
-          provider: 'WHATSAPP_WEB',
+          agentConfigId: project.aiAgentId,
+          connection: {
+            organizationId: user.currentOrgId,
+            channel: 'WHATSAPP',
+            provider: 'WHATSAPP_WEB',
+          },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { updatedAt: 'desc' },
         select: {
-          id: true,
-          status: true,
-          shareToken: true,
-          shareTokenExpiresAt: true,
-          uazapiToken: true,
+          connection: {
+            select: {
+              id: true,
+              status: true,
+              shareToken: true,
+              shareTokenExpiresAt: true,
+              uazapiToken: true,
+            },
+          },
         },
       })
+      const existing = deployment?.connection ?? null
 
       if (existing) {
         // Já conectada — nada a provisionar; devolve a existente sem mexer no QR.
@@ -210,7 +220,9 @@ const provisionWhatsApp = igniter.mutation({
     //    — a página /compartilhar lê o QR direto da row.
     const qrCode = await generateQrSafe(broker.token)
 
-    // 3) Persiste a Connection vinculada ao projeto.
+    // 3) Persiste a Connection (SEM projectId: a coluna tem FK para a tabela
+    //    legada "Project" — o vínculo com o BuilderProject é o AgentDeployment
+    //    criado no attach abaixo, mesmo padrão da saga create-instance.handler).
     const connection = await db.connection.create({
       data: {
         name: instanceName,
@@ -218,7 +230,6 @@ const provisionWhatsApp = igniter.mutation({
         provider: 'WHATSAPP_WEB',
         status: 'DISCONNECTED',
         organizationId: user.currentOrgId,
-        projectId: project.id,
         shareToken,
         shareTokenExpiresAt,
         uazapiToken: broker.token,
