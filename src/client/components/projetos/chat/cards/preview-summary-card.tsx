@@ -19,6 +19,11 @@
  * `props.onAdjust(cardKey)`. The chat-panel owns POST + SSE and the reopen
  * state (use-chat-stream `reopenedCardKey`). Styling matches the existing
  * chat-panel cards via `CardShell` + design tokens (no raw colors).
+ *
+ * Jornada v2 (T98, FR-31): para projetos `journeyVersion: 2` o componente
+ * DELEGA para {@link SummaryV2} — um resumo por FASES + capacidades ATIVAS, sem
+ * as seções fixas v1 que assumem preços/transferência obrigatórios. O caminho v1
+ * abaixo fica byte-intocado (NFR-03): o branch acontece no topo do render.
  */
 
 import type { ReactNode } from "react"
@@ -39,6 +44,8 @@ import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import { CardShell } from "./card-shell"
 import {
   computeSummaryWarnings,
+  deriveActiveCapabilities,
+  JOURNEY_V2_PHASE_TITLES,
   SUMMARY_AREA,
   summarizeActivation,
   summarizeHandoff,
@@ -48,7 +55,7 @@ import {
   summarizeServices,
   type SummaryArea,
 } from "./preview-summary-helpers"
-import type { CardComponentProps, CardKey } from "./types"
+import type { BuilderState, CardComponentProps, CardKey } from "./types"
 
 /** Confirm-only payload — no owned fields, just flips `confirmations.summary`. */
 export type PreviewSummaryPayload = Record<string, never>
@@ -167,6 +174,131 @@ function SummarySection({
 }
 
 /**
+ * SummaryV2 — branch da Jornada v2 (T98, FR-31). Em vez das seções FIXAS da v1,
+ * lista as 4 FASES da jornada (trilha "Fase N de M — Título", igual ao PhaseList)
+ * + um recap do agente + SÓ as capacidades ATIVAS (helper `deriveActiveCapabilities`
+ * — mesma fonte de verdade das Capacidades). Capacidade desligada (ex.: handoff
+ * `nenhum`) não aparece: nada de transferência/preços como seção obrigatória.
+ * Mesmo contrato de submit que a v1 (`onSubmit({})` flipa `confirmations.summary`).
+ */
+function SummaryV2({
+  value,
+  disabled,
+  onSubmit,
+  tokens,
+}: {
+  value: BuilderState
+  disabled: boolean
+  onSubmit: (payload: PreviewSummaryPayload) => void
+  tokens: AppTokens
+}) {
+  const capabilities = deriveActiveCapabilities(value)
+  const persona = summarizePersona(value.persona)
+  const services = summarizeServices(value.services)
+  const recap = [persona, services].filter(Boolean).join("\n")
+  const total = JOURNEY_V2_PHASE_TITLES.length
+
+  return (
+    <CardShell
+      icon={<CheckCircle2 className="h-4 w-4" />}
+      title="Tudo certo?"
+      reason="Veja o que combinamos: as fases da jornada e o que seu agente sabe fazer."
+      tokens={tokens}
+      actions={[
+        {
+          label: "Tudo certo, publicar",
+          icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+          onClick: () => onSubmit({}),
+          disabled,
+        },
+      ]}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap gap-1.5">
+          {JOURNEY_V2_PHASE_TITLES.map((title, index) => (
+            <span
+              key={title}
+              className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+              style={{ backgroundColor: tokens.hoverBg, color: tokens.textSecondary }}
+            >
+              Fase {index + 1} de {total} — {title}
+            </span>
+          ))}
+        </div>
+
+        <div
+          className="rounded-md border p-3"
+          style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+              style={{ backgroundColor: tokens.brandSubtle, color: tokens.brand }}
+            >
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span
+                className="text-[13px] font-medium"
+                style={{ color: tokens.textPrimary }}
+              >
+                Seu agente
+              </span>
+              <div
+                className="mt-1 whitespace-pre-line text-[12px] leading-relaxed"
+                style={{ color: recap ? tokens.textSecondary : tokens.textTertiary }}
+              >
+                {recap || "a definir"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span
+            className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em]"
+            style={{ color: tokens.textSecondary }}
+          >
+            O que seu agente sabe fazer
+          </span>
+          {capabilities.map((cap) => (
+            <div
+              key={cap.key}
+              className="rounded-md border p-3"
+              style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="text-[13px] font-medium"
+                  style={{ color: tokens.textPrimary }}
+                >
+                  {cap.title}
+                </span>
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: tokens.successSubtle,
+                    color: tokens.successText,
+                  }}
+                >
+                  ativo
+                </span>
+              </div>
+              <p
+                className="mt-1 text-[12px] leading-relaxed"
+                style={{ color: tokens.textSecondary }}
+              >
+                {cap.summary}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </CardShell>
+  )
+}
+
+/**
  * PreviewSummaryCard — the "Tudo certo?" recap. Renders one row per build area
  * (each with an Ajustar link that reopens that area's card via `onAdjust`) and
  * a single confirm button that submits `{}` to flip `confirmations.summary`
@@ -179,6 +311,19 @@ export function PreviewSummaryCard({
   onAdjust,
   tokens,
 }: PreviewSummaryCardProps) {
+  // Jornada v2 (T98, FR-31): delega ao resumo por fases + capacidades ATIVAS. O
+  // branch fica no TOPO para o caminho v1 abaixo permanecer byte-intocado (NFR-03).
+  if (value.journeyVersion === 2) {
+    return (
+      <SummaryV2
+        value={value}
+        disabled={disabled}
+        onSubmit={onSubmit}
+        tokens={tokens}
+      />
+    )
+  }
+
   const { confirmations } = value
 
   // FR-17 — section → owning card. Returns undefined without `onAdjust` so the

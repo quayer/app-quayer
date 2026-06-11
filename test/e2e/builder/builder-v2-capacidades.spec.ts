@@ -647,4 +647,64 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
       'o status reflete a conexão real do profissional (CONNECTED)',
     ).toBe('CONNECTED')
   })
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // T109 (FR-34): a capacidade Agenda vira ATIVA após a conexão remota. O share
+  //   delegado fecha quando `getCapabilities` reporta `calendarConnected: true`
+  //   (reusa `hasActiveCalendarConnection` — a MESMA fonte do runtime). Prova de
+  //   que a conexão remota não só "confirma o card" mas LIGA a capacidade.
+  // ───────────────────────────────────────────────────────────────────────────
+  test('share da agenda delegado: a capacidade Agenda vira ativa (calendarConnected) após o flip remoto (T109/FR-34)', async ({
+    page,
+  }) => {
+    await setOverrideCookie(page, 'on')
+    await loginViaOtp(page)
+
+    const projectId = await createProjectViaHome(page)
+
+    // ── "Enviar link para o profissional": gera o connect-link delegável. ───────
+    const link = await createCalendarConnectLink(page, projectId)
+    test.skip(
+      link === null,
+      'CalendarConnection não provisionada neste ambiente (connect-link 404 ' +
+        'defensivo). Corpo completo preservado.',
+    )
+
+    // ── ANTES de conectar: a capacidade Agenda está DESLIGADA (FR-11 honesto). ──
+    const capsBefore = await fetchCapabilities(page, projectId)
+    expect(
+      capsBefore.calendarConnected ?? false,
+      'antes da conexão remota, a capacidade Agenda está desligada (calendarConnected false)',
+    ).toBe(false)
+
+    // ── Simula o scan remoto do profissional (sem OAuth real no E2E): o gate flipa
+    //    a CalendarConnection mais recente para CONNECTED via seed/stub server-side.
+    test.skip(
+      !process.env.E2E_CALENDAR_CONNECT_STUB,
+      'flip CONNECTED da agenda requer o stub do gate (E2E_CALENDAR_CONNECT_STUB) — ' +
+        'sem OAuth real no E2E. A asserção "antes desligada" já passou. ' +
+        'Corpo completo preservado.',
+    )
+
+    // ── A capacidade Agenda vira ATIVA: `getCapabilities` reporta calendarConnected
+    //    true (reusa `hasActiveCalendarConnection` — a mesma fonte do runtime).
+    await expect
+      .poll(
+        async () => (await fetchCapabilities(page, projectId)).calendarConnected ?? false,
+        {
+          timeout: 15_000,
+          message:
+            'após o flip remoto, a capacidade Agenda vira ativa (calendarConnected true)',
+        },
+      )
+      .toBe(true)
+
+    // E o status do connect-link confirma a conexão real (coerência entre as duas
+    // superfícies que a UI consome: card de share + linha de Capacidade).
+    const statusAfter = await fetchCalendarStatus(page, projectId)
+    expect(
+      statusAfter.connected ?? false,
+      'a mesma conexão real lastreia o "Verificar conexão" do card e a capacidade',
+    ).toBe(true)
+  })
 })

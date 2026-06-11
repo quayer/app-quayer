@@ -107,7 +107,15 @@ const ADVANCED_OPTIONS = ACTIVATION_MODE_OPTIONS.filter((option) =>
   ADVANCED_MODES.includes(option.value),
 )
 
-/** Default mode when the state carries no (or an unknown) activation mode. */
+/**
+ * Default mode when the state carries no (or an unknown) activation mode.
+ *
+ * Jornada-builder-v2 (FR-14): a ativação é um AJUSTE OPCIONAL da fase Lançar, com
+ * padrão "responder todas as mensagens". O card abre com `all` PRÉ-SELECIONADO —
+ * é o que `initialMode` resolve quando `value.activation.mode` está ausente (state
+ * fresco). O default vence DELIBERADAMENTE qualquer `capturedProposals.activation`:
+ * por FR-14 o agente já responde tudo a menos que o usuário escolha o contrário.
+ */
 const DEFAULT_MODE: ActivationModeValue = "all"
 
 function isActivationMode(value: string): value is ActivationModeValue {

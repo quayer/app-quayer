@@ -12,6 +12,9 @@
  */
 
 import { database } from '@/server/services/database'
+import { trackJourneyEvent } from '@/server/services/journey-events'
+import { parseBuilderState } from '../cards/builder-state'
+import { readBuilderStateByProject } from '../sources/builder-state-db'
 import type {
   DeployContext,
   DeployResult,
@@ -248,6 +251,28 @@ export async function executeDeployFlow(
       instanceId: result.instanceId,
       connectionId: result.connectionId,
     })
+
+    // Funil (T36, plan §6.2): o deployment virou `live` — emite `published`.
+    // Fire-and-forget: `trackJourneyEvent` NUNCA lança (try/catch interno), e o
+    // read do journeyVersion degrada fail-open via `readBuilderStateByProject` +
+    // `parseBuilderState` (backfilla legados/garbage para 1). Uma falha de
+    // telemetria jamais reabre/derruba a saga de deploy (já concluída com sucesso).
+    try {
+      const journeyVersion = parseBuilderState(
+        await readBuilderStateByProject(project.id),
+      ).journeyVersion
+      await trackJourneyEvent({
+        organizationId: project.organizationId,
+        projectId: project.id,
+        journeyVersion,
+        event: 'published',
+      })
+    } catch (err) {
+      console.warn(
+        '[journey-v2] falha ao emitir evento de funil "published" — ignorando:',
+        err,
+      )
+    }
 
     return result
   } catch (err) {

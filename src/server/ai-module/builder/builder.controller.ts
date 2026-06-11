@@ -24,6 +24,7 @@ import { mediaCurationRoutes } from './media/media-curation.routes'
 import { deployRoutes }   from './deploy/deploy.routes'
 import { channelCredentialsRoutes } from './channel/channel-credentials.routes'
 import { provisionWhatsAppRoutes } from './channel/provision-whatsapp.routes'
+import { refreshQrRoutes } from './channel/refresh-qr.routes'
 import { identityRoutes } from './identity/identity.routes'
 import { calendarRoutes } from './calendar/calendar.routes'
 import { calendarEventsPreviewRoutes } from './calendar/calendar-events-preview.routes'
@@ -49,6 +50,7 @@ export const builderController = igniter.controller({
     ...deployRoutes,
     ...channelCredentialsRoutes,
     ...provisionWhatsAppRoutes,
+    ...refreshQrRoutes,
     ...identityRoutes,
     ...calendarRoutes,
     ...calendarEventsPreviewRoutes,

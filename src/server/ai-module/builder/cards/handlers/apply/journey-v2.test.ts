@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // ---------------------------------------------------------------------------
 
 const mockConvFindFirst = vi.hoisted(() => vi.fn())
+const mockConvFindUnique = vi.hoisted(() => vi.fn())
 const mockConvUpdateMany = vi.hoisted(() => vi.fn())
 const mockProjectFindFirst = vi.hoisted(() => vi.fn())
 const mockProjectUpdateMany = vi.hoisted(() => vi.fn())
@@ -46,6 +47,12 @@ vi.mock('@/server/services/database', () => {
   return {
     database: {
       ...tx,
+      // `applySentinelAck` (test_drive/published_next_steps) resolve a posse da
+      // conversa pelo `projectId @unique` ANTES da transação — fora do tx mock.
+      builderProjectConversation: {
+        ...tx.builderProjectConversation,
+        findUnique: mockConvFindUnique,
+      },
       $transaction: mockTransaction.mockImplementation(
         async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
       ),
@@ -61,13 +68,23 @@ vi.mock('@/server/services/journey-events', () => ({
 // Imports após o registro dos mocks
 // ---------------------------------------------------------------------------
 
-import { applyBusinessIdentity, applyAgentReview } from './journey-v2'
+import {
+  applyBusinessIdentity,
+  applyAgentReview,
+  applyChannelPlatform,
+  applyTestDrive,
+  applyPublishedNextSteps,
+} from './journey-v2'
 import {
   parseBuilderState,
   patchBuilderState,
   type BuilderState,
 } from '../../builder-state'
-import type { AgentReviewPayload } from '../../card-submit.schemas'
+import type {
+  AgentReviewPayload,
+  ChannelPlatformPayload,
+  TestDrivePayload,
+} from '../../card-submit.schemas'
 import { getIdentityCardFromMetadata } from '@/lib/agent-identity-card'
 
 // ---------------------------------------------------------------------------
@@ -699,5 +716,505 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
     expect(next.confirmations.hours).toBe(true)
     expect(next.journeyVersion).toBe(2)
     expect(next.persona.greeting).toBe('Olá!')
+  })
+})
+
+// ===========================================================================
+// T103 (jornada-builder-v2, Onda 5) — unit do handler `applyChannelPlatform`.
+//
+// O `channel_platform` (T91, FR-24/25) é o card da fase Lançar onde o usuário
+// escolhe EM QUE canais o agente atende. Grava `channel.platforms` +
+// `channel.whatsappMode` e flipa `confirmations.channelPlatform` — o engine v2
+// lê `platforms` para surfar `whatsapp_connect`/`instagram_connect`. Os mocks de
+// `database`/`journey-events` são os mesmos dos blocos acima (write atômico
+// org-scoped via `$transaction`, igual a `applyBusinessIdentity`).
+//
+// Cobre (critério da tarefa T103):
+//   - min 1 plataforma (o schema garante; aqui o caminho feliz com 1 grava);
+//   - refine: `whatsappMode` obrigatório quando `'whatsapp'` selecionado → invalid;
+//   - rejeição de dupla seleção pré-5b (2 plataformas → invalid; invertido em T94);
+//   - grava `channel.platforms`/`channel.whatsappMode`;
+//   - flipa `channelPlatform` (e NÃO emite evento de funil — channel_connected é
+//     da conexão real, não da seleção);
+//   - cross-org: read fresco + write SEMPRE filtrados por organizationId.
+// ===========================================================================
+
+/** Atalho: chama o handler do channel_platform com defaults dos ids + estado-base. */
+function submitChannel(
+  payload: Pick<ChannelPlatformPayload, 'platforms' | 'whatsappMode'>,
+  current: BuilderState = patchBuilderState(parseBuilderState(undefined), {
+    journeyVersion: 2,
+  }),
+) {
+  return applyChannelPlatform({
+    conversationId: CONV_ID,
+    organizationId: ORG_ID,
+    current,
+    payload,
+  })
+}
+
+describe('applyChannelPlatform — T103 (FR-24/25)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    // $transaction re-arma o impl (clearAllMocks limpa a implementação). Este
+    // handler só toca a conversa (não há read/write de projeto).
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  // -------------------------------------------------------------------------
+  // Min 1 plataforma + grava platforms/whatsappMode + flipa o sentinel
+  // -------------------------------------------------------------------------
+  it('WhatsApp (QR): grava channel.platforms/whatsappMode e flipa channelPlatform num único write', async () => {
+    const res = await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'qr' })
+
+    expect(res.ok).toBe(true)
+    // Tudo numa só transação, com UM write de conversa.
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['whatsapp'])
+    expect(next.channel?.whatsappMode).toBe('qr')
+    expect(next.confirmations.channelPlatform).toBe(true)
+  })
+
+  it('WhatsApp (Cloud API): persiste whatsappMode = cloud', async () => {
+    const res = await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'cloud' })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['whatsapp'])
+    expect(next.channel?.whatsappMode).toBe('cloud')
+  })
+
+  it('Instagram: grava platforms sem whatsappMode (IG não tem nível 2)', async () => {
+    const res = await submitChannel({ platforms: ['instagram'] })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['instagram'])
+    // Nenhum modo órfão é persistido quando WhatsApp não está selecionado.
+    expect(next.channel?.whatsappMode).toBeUndefined()
+    expect(next.confirmations.channelPlatform).toBe(true)
+  })
+
+  it('IG com whatsappMode no body: o modo NÃO é persistido (sem órfão)', async () => {
+    // O body pode trazer um modo pré-selecionado pela UI; sem WhatsApp na lista,
+    // o handler descarta o modo (não guarda nível 2 órfão de IG).
+    const res = await submitChannel({ platforms: ['instagram'], whatsappMode: 'qr' })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['instagram'])
+    expect(next.channel?.whatsappMode).toBeUndefined()
+  })
+
+  it('NÃO emite evento de funil (channel_connected é da conexão real, não da seleção)', async () => {
+    await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'qr' })
+
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  it('subtrees não-relacionados sobrevivem ao patch do canal', async () => {
+    // O read FRESCO dentro da tx é a fonte do estado patcheado (o `current` só
+    // entra no fallback) — carrega os subtrees não-relacionados nele.
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        persona: { tone: 'cordial' },
+        confirmations: { persona: true },
+      }),
+    })
+
+    const res = await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'qr' })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.persona.tone).toBe('cordial')
+    expect(next.confirmations.persona).toBe(true)
+    expect(next.confirmations.channelPlatform).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // Refine — whatsappMode obrigatório quando WhatsApp marcado
+  // -------------------------------------------------------------------------
+  it('WhatsApp SEM whatsappMode → invalid, sem nenhum write', async () => {
+    const res = await submitChannel({ platforms: ['whatsapp'] })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/qr code ou cloud api/i)
+    }
+    // O refine roda ANTES da transação: zero side-effects.
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // Rejeição de dupla seleção pré-5b (espelho do disable da UI; invertido em T94)
+  // -------------------------------------------------------------------------
+  it('duas plataformas (pré-5b) → invalid, sem nenhum write', async () => {
+    const res = await submitChannel({
+      platforms: ['whatsapp', 'instagram'],
+      whatsappMode: 'qr',
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/apenas um canal/i)
+    }
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('platforms duplicado é deduplicado para um canal único (não dispara a regra pré-5b)', async () => {
+    // O body com a MESMA plataforma repetida vira 1 após o dedupe — não é "dupla
+    // seleção" e segue o caminho feliz.
+    const res = await submitChannel({
+      platforms: ['whatsapp', 'whatsapp'],
+      whatsappMode: 'qr',
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['whatsapp'])
+    expect(next.confirmations.channelPlatform).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // Boundary de tenant — read fresco org-scoped + write org-scoped + fallback
+  // -------------------------------------------------------------------------
+  it('cross-org: leitura e escrita da conversa SEMPRE filtram por organizationId', async () => {
+    await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'qr' })
+
+    // O read fresco dentro da tx é org-scoped.
+    expect(mockConvFindFirst).toHaveBeenCalledWith({
+      where: { id: CONV_ID, organizationId: ORG_ID },
+      select: { builderState: true },
+    })
+    // O write da conversa é org-scoped.
+    const convCall = mockConvUpdateMany.mock.calls[0]![0] as {
+      where: { id: string; organizationId: string }
+    }
+    expect(convCall.where).toEqual({ id: CONV_ID, organizationId: ORG_ID })
+  })
+
+  it('cross-org: read fresco vazio (conversa de outra org) cai no fallback do current sem clobber', async () => {
+    // findFirst filtrado por org alheia não acha → handler usa `current` (não dropa
+    // o write) mas continua escrevendo SÓ no escopo do org do caller.
+    mockConvFindFirst.mockResolvedValueOnce(null)
+
+    const res = await submitChannel(
+      { platforms: ['instagram'] },
+      patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        persona: { greeting: 'Oi!' },
+      }),
+    )
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['instagram'])
+    expect(next.confirmations.channelPlatform).toBe(true)
+    // herda do `current` (state v2 fornecido), provando que não houve clobber.
+    expect(next.journeyVersion).toBe(2)
+    expect(next.persona.greeting).toBe('Oi!')
+  })
+})
+
+// ===========================================================================
+// T69 (jornada-builder-v2, Onda 5) — unit dos handlers `applyTestDrive` e
+// `applyPublishedNextSteps` (cards das fases Testar/Lançar).
+//
+// Ambos passam por `applySentinelAck`, que resolve a POSSE da conversa pelo
+// `projectId @unique` (findUnique, FORA da transação) antes do write atômico
+// org-scoped. Diferente dos handlers acima, não recebem `conversationId`/`current`
+// nem espelham nada na linha do projeto — flipam UM sentinel e, depois do write,
+// emitem o evento de funil ramificado por ação.
+//
+// Cobre (critério da tarefa T69):
+//   - test_drive: skip vs tested flipam o MESMO sentinel `testDrive`, mas a COPY do
+//     ACK é DISTINTA (skip não promete validação) e o evento RAMIFICA
+//     (tested → test_done, skip → test_skipped);
+//   - published_next_steps: flipa `publishedNextSteps` e emite `next_steps_ack`;
+//   - evento só DEPOIS do write (não anunciamos passo não-gravado) e, em falha de
+//     posse (not_found/forbidden), NENHUM write/evento;
+//   - cross-org: a posse é provada por findUnique e o write é org-scoped.
+// ===========================================================================
+
+/** Atalho: chama o handler do test_drive com defaults dos ids + journeyVersion. */
+function submitTestDrive(action: TestDrivePayload['action']) {
+  return applyTestDrive({
+    projectId: PROJECT_ID,
+    organizationId: ORG_ID,
+    journeyVersion: 2,
+    payload: { action },
+  })
+}
+
+describe('applyTestDrive — T69 (FR-16)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Posse: a conversa do projeto pertence ao org do caller (caminho feliz).
+    mockConvFindUnique.mockResolvedValue({ id: CONV_ID, organizationId: ORG_ID })
+    // Read fresco dentro da tx: state v2 com o sentinel ainda false.
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    // $transaction re-arma o impl (clearAllMocks limpa a implementação). O
+    // applySentinelAck só toca a conversa dentro da tx.
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  // -------------------------------------------------------------------------
+  // Skip vs tested — MESMO sentinel, COPY do ACK distinta
+  // -------------------------------------------------------------------------
+  it('"tested": flipa testDrive num único write org-scoped', async () => {
+    const res = await submitTestDrive('tested')
+
+    expect(res.ok).toBe(true)
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+
+    const next = writtenConvState()
+    expect(next.confirmations.testDrive).toBe(true)
+  })
+
+  it('"skip": flipa o MESMO sentinel testDrive (gate soft destrava igual)', async () => {
+    const res = await submitTestDrive('skip')
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.confirmations.testDrive).toBe(true)
+  })
+
+  it('"tested": o ACK considera o teste concluído e segue para a publicação', async () => {
+    const res = await submitTestDrive('tested')
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/testou o agente/i)
+      expect(res.cardInstruction).toMatch(/publica/i)
+      // Nunca menciona "sem testar"/"não afirme validado" no caminho tested.
+      expect(res.cardInstruction).not.toMatch(/sem testar/i)
+    }
+  })
+
+  it('"skip": o ACK NÃO promete validação (copy distinta do tested)', async () => {
+    const res = await submitTestDrive('skip')
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/publicar sem testar/i)
+      // O LLM é instruído a NÃO afirmar que o agente foi validado.
+      expect(res.cardInstruction).toMatch(/não afirme que o agente foi validado/i)
+    }
+  })
+
+  it('skip e tested têm copy de ACK DIFERENTE (ramificação por ação)', async () => {
+    const tested = await submitTestDrive('tested')
+    const skipped = await submitTestDrive('skip')
+
+    expect(tested.ok && skipped.ok).toBe(true)
+    if (tested.ok && skipped.ok) {
+      expect(tested.cardInstruction).not.toBe(skipped.cardInstruction)
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Evento ramificado test_done / test_skipped — só APÓS o write
+  // -------------------------------------------------------------------------
+  it('"tested" emite test_done com a journeyVersion recebida', async () => {
+    await submitTestDrive('tested')
+
+    expect(mockTrackJourneyEvent).toHaveBeenCalledOnce()
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      journeyVersion: 2,
+      event: 'test_done',
+    })
+  })
+
+  it('"skip" emite test_skipped (NÃO test_done)', async () => {
+    await submitTestDrive('skip')
+
+    expect(mockTrackJourneyEvent).toHaveBeenCalledOnce()
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      journeyVersion: 2,
+      event: 'test_skipped',
+    })
+  })
+
+  it('emite o evento DEPOIS do write do sentinel (ordem do contrato)', async () => {
+    const order: string[] = []
+    mockConvUpdateMany.mockImplementationOnce(async () => {
+      order.push('write')
+      return { count: 1 }
+    })
+    mockTrackJourneyEvent.mockImplementationOnce(async () => {
+      order.push('event')
+    })
+
+    await submitTestDrive('tested')
+
+    expect(order).toEqual(['write', 'event'])
+  })
+
+  // -------------------------------------------------------------------------
+  // Falha de posse — NENHUM write/evento
+  // -------------------------------------------------------------------------
+  it('conversa inexistente → not_found, sem write nem evento', async () => {
+    mockConvFindUnique.mockResolvedValueOnce(null)
+
+    const res = await submitTestDrive('tested')
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('not_found')
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  it('conversa de outra org → forbidden, sem write nem evento', async () => {
+    mockConvFindUnique.mockResolvedValueOnce({
+      id: CONV_ID,
+      organizationId: 'org-OUTRA',
+    })
+
+    const res = await submitTestDrive('skip')
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('forbidden')
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // Boundary de tenant — posse por findUnique + write org-scoped
+  // -------------------------------------------------------------------------
+  it('cross-org: resolve a posse pelo projectId e escreve SEMPRE org-scoped', async () => {
+    await submitTestDrive('tested')
+
+    expect(mockConvFindUnique).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID },
+      select: { id: true, organizationId: true },
+    })
+    const convCall = mockConvUpdateMany.mock.calls[0]![0] as {
+      where: { id: string; organizationId: string }
+    }
+    expect(convCall.where).toEqual({ id: CONV_ID, organizationId: ORG_ID })
+  })
+})
+
+describe('applyPublishedNextSteps — T69 (FR-16)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindUnique.mockResolvedValue({ id: CONV_ID, organizationId: ORG_ID })
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  function submitNextSteps() {
+    return applyPublishedNextSteps({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      journeyVersion: 2,
+    })
+  }
+
+  it('flipa publishedNextSteps num único write org-scoped', async () => {
+    const res = await submitNextSteps()
+
+    expect(res.ok).toBe(true)
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+    const next = writtenConvState()
+    expect(next.confirmations.publishedNextSteps).toBe(true)
+  })
+
+  it('emite next_steps_ack com a journeyVersion recebida', async () => {
+    await submitNextSteps()
+
+    expect(mockTrackJourneyEvent).toHaveBeenCalledOnce()
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      journeyVersion: 2,
+      event: 'next_steps_ack',
+    })
+  })
+
+  it('emite next_steps_ack DEPOIS do write (ordem do contrato)', async () => {
+    const order: string[] = []
+    mockConvUpdateMany.mockImplementationOnce(async () => {
+      order.push('write')
+      return { count: 1 }
+    })
+    mockTrackJourneyEvent.mockImplementationOnce(async () => {
+      order.push('event')
+    })
+
+    await submitNextSteps()
+
+    expect(order).toEqual(['write', 'event'])
+  })
+
+  it('conversa inexistente → not_found, sem write nem evento', async () => {
+    mockConvFindUnique.mockResolvedValueOnce(null)
+
+    const res = await submitNextSteps()
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('not_found')
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
   })
 })

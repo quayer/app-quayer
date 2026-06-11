@@ -55,6 +55,11 @@ export type CardKey =
   | "agent_review"
   | "knowledge"
   | "media"
+  | "test_drive"
+  | "channel_platform"
+  | "whatsapp_connect"
+  | "instagram_connect"
+  | "published_next_steps"
 
 /**
  * Compile-time assertion that every backend-registered key is also a valid FE

@@ -23,6 +23,7 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 import { runFaithfulPreview } from '@/server/ai-module/builder/services/faithful-preview.service'
+import { autoFlipTestDrive } from '@/server/ai-module/builder/state/auto-flip-test-drive'
 import {
   resolveProjectAgent,
   OPTIONAL_AGENT_ID_DESCRIPTION,
@@ -176,6 +177,18 @@ Respond with EXACTLY this JSON format (no markdown, no extra text):
               reason,
             })
           }
+
+          // 2c. Jornada v2 (T33): rodar os cenários é um teste do agente — satisfaz
+          //     o passo Testar pelo MESMO helper do playground stateless (proibido
+          //     duplicar a lógica de flip). Usa o projectId do contexto da tool.
+          //     Idempotente e fail-open: se `runFaithfulPreview` já flipou via
+          //     `processPlaygroundStream` nesta mesma execução, vê `testDrive: true`
+          //     e é no-op — nunca re-grava nem re-emite o evento; erro de DB jamais
+          //     quebra a tool.
+          await autoFlipTestDrive({
+            projectId: ctx.projectId,
+            organizationId: ctx.organizationId,
+          })
 
           // 3. Calculate overall score
           const passedCount = results.filter((r) => r.passed).length

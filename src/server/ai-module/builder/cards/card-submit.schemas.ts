@@ -330,6 +330,85 @@ export const businessIdentityPayloadSchema = z.object({
 })
 
 /**
+ * Jornada v2 (T32, plan §3.3 item 3) — test_drive: gate SOFT da fase Testar. O
+ * usuário ou TESTOU o agente (`'tested'`) ou optou por PUBLICAR SEM TESTAR
+ * (`'skip'`). Ambas as ações flipam o MESMO sentinel `confirmations.testDrive`
+ * (o passo é satisfeito), mas o handler ramifica a copy do ACK e o evento de
+ * funil: `tested` → `test_done`, `skip` → `test_skipped` (o LLM NUNCA promete
+ * que validou — plan §3.3). Não há dado do client a confiar além da ação.
+ * → confirmation `testDrive`.
+ */
+export const testDrivePayloadSchema = z.object({
+  cardKey: z.literal('test_drive'),
+  action: z.enum(['tested', 'skip']),
+})
+
+/**
+ * Jornada v2 (T32/T91, FR-24/25, plan §3.3 item 5) — channel_platform: card da
+ * fase Lançar que define EM QUE canais o agente vai atender. `platforms` é a
+ * lista (mín. 1) de plataformas escolhidas; `whatsappMode` é o nível 2 do
+ * WhatsApp (QR pareado vs. Cloud API) — IG não tem nível 2.
+ *
+ * O cross-field refine (`whatsappMode` obrigatório quando `platforms` inclui
+ * `'whatsapp'`) vive em `channelPlatformRefine`/`channelPlatformSubmitSchema`
+ * abaixo — NÃO no schema do registry: `z.discriminatedUnion` (zod 3) exige
+ * `ZodObject`s crus com discriminador literal e REJEITA o `ZodEffects` que um
+ * `.refine()` produz. Por isso o objeto cru entra na união (discriminação por
+ * `cardKey`) e o handler RE-VALIDA o refine + a regra de canal único pré-5b
+ * server-side (nunca confia no body — o padrão deste módulo). A UI pré-seleciona
+ * `'qr'` (T96). O handler grava `channel.platforms`+`channel.whatsappMode` e
+ * flipa `channelPlatform`; o engine v2 (T15) lê `platforms` para surfar os
+ * passos de conexão condicionalmente. **Até a Onda 5b a seleção DUPLA é
+ * rejeitada server-side** (espelho do disable da UI; a remoção é T94/5b).
+ * → confirmation `channelPlatform`.
+ */
+export const channelPlatformPayloadSchema = z.object({
+  cardKey: z.literal('channel_platform'),
+  platforms: z.array(z.enum(['whatsapp', 'instagram'])).min(1),
+  whatsappMode: z.enum(['qr', 'cloud']).optional(),
+})
+
+/**
+ * Cross-field invariant do `channel_platform` (FR-24/25): `whatsappMode` é
+ * obrigatório sempre que `'whatsapp'` está entre as plataformas. Função PURA
+ * exportada para o handler (`apply/journey-v2.ts`) re-validar server-side e para
+ * o `channelPlatformSubmitSchema` (refine standalone, p/ tipagem/FE). A regra de
+ * canal ÚNICO pré-5b (rejeição de 2 plataformas) é checada SÓ no handler — é
+ * temporária (some em T94) e não é invariante do contrato do payload.
+ */
+export function channelPlatformWhatsappModeOk(p: {
+  platforms: readonly ('whatsapp' | 'instagram')[]
+  whatsappMode?: 'qr' | 'cloud'
+}): boolean {
+  return !p.platforms.includes('whatsapp') || p.whatsappMode !== undefined
+}
+
+/**
+ * Versão com refine do `channel_platform` (não entra em nenhuma união — só para
+ * uso standalone/tipagem do FE). O `safeParse` do route usa o objeto cru e o
+ * handler chama `channelPlatformWhatsappModeOk` para o mesmo efeito server-side.
+ */
+export const channelPlatformSubmitSchema = channelPlatformPayloadSchema.refine(
+  channelPlatformWhatsappModeOk,
+  {
+    message: 'whatsappMode é obrigatório quando WhatsApp está entre as plataformas',
+    path: ['whatsappMode'],
+  },
+)
+
+/**
+ * Jornada v2 (T32, FR-16, plan §3.3) — published_next_steps: card TERMINAL da
+ * fase Lançar (surfa só pós-publicação). A única ação é um `'ack'` informativo
+ * (mesmo padrão dos acks `knowledge`/`media`): flipa `confirmations.publishedNextSteps`
+ * e emite o evento de funil `next_steps_ack`. Sem dado do client a confiar.
+ * → confirmation `publishedNextSteps`.
+ */
+export const publishedNextStepsPayloadSchema = z.object({
+  cardKey: z.literal('published_next_steps'),
+  action: z.literal('ack'),
+})
+
+/**
  * Jornada v2 (T24, FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar que
  * funde persona + serviços + horários numa única confirmação consolidada (NFR-07:
  * 1 decisão obrigatória, 1 ACK turn em vez de 3). Reusa os MESMOS shapes dos cards
@@ -398,6 +477,11 @@ export const CARD_PAYLOAD_SCHEMAS = {
   silenced_contacts: silencedContactsPayloadSchema,
   business_identity: businessIdentityPayloadSchema,
   agent_review: agentReviewPayloadSchema,
+  // T32/T91 — cards das fases Testar/Lançar. Despachados pelo switch do
+  // `applyCardSubmit` (estão na união do entrypoint), com ACK conversacional.
+  test_drive: testDrivePayloadSchema,
+  channel_platform: channelPlatformPayloadSchema,
+  published_next_steps: publishedNextStepsPayloadSchema,
   // T31 — acks dos passos opcionais Conhecimento/Mídia. Registrados aqui para que
   // `CARD_KEYS`/`cardSubmitParamsSchema` reconheçam os cardKeys da rota; o despacho
   // vive no `card-submit.routes.ts` (handlers próprios), fora do `applyCardSubmit`.
@@ -455,6 +539,9 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   silencedContactsPayloadSchema,
   businessIdentityPayloadSchema,
   agentReviewPayloadSchema,
+  testDrivePayloadSchema,
+  channelPlatformPayloadSchema,
+  publishedNextStepsPayloadSchema,
 ])
 export type CardSubmitBody = z.infer<typeof cardSubmitBodySchema>
 
@@ -522,6 +609,9 @@ export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
   silencedContactsPayloadSchema,
   businessIdentityPayloadSchema,
   agentReviewPayloadSchema,
+  testDrivePayloadSchema,
+  channelPlatformPayloadSchema,
+  publishedNextStepsPayloadSchema,
   knowledgeAckPayloadSchema,
   mediaAckPayloadSchema,
 ])
@@ -556,5 +646,12 @@ export type BusinessIdentityPayload = z.infer<
   typeof businessIdentityPayloadSchema
 >
 export type AgentReviewPayload = z.infer<typeof agentReviewPayloadSchema>
+export type TestDrivePayload = z.infer<typeof testDrivePayloadSchema>
+export type ChannelPlatformPayload = z.infer<
+  typeof channelPlatformPayloadSchema
+>
+export type PublishedNextStepsPayload = z.infer<
+  typeof publishedNextStepsPayloadSchema
+>
 export type KnowledgeAckPayload = z.infer<typeof knowledgeAckPayloadSchema>
 export type MediaAckPayload = z.infer<typeof mediaAckPayloadSchema>

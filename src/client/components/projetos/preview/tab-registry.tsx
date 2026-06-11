@@ -25,6 +25,7 @@ import type {
   PreviewTab,
   WorkspaceProject,
 } from "@/client/components/projetos/types"
+import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
 
 import { canOpenDeploy } from "./deploy-gate"
 import { OverviewTab } from "./tabs/overview/overview-tab"
@@ -42,6 +43,16 @@ export interface TabRenderContext {
   project: WorkspaceProject
   messages: ChatMessage[]
   onTabChange: (tab: PreviewTab) => void
+  /**
+   * Readiness ÚNICO içado pelo `workspace.tsx` (FR-18, T49, plan §4.4). Opcional
+   * por compat: o ponto de render (preview-panel) repassa o snapshot hoisted para
+   * que `OverviewTab` (e o futuro `visibleWhen`, T53/T54) leiam a MESMA fonte do
+   * chat — sem uma segunda query. `undefined` enquanto a query carrega/em erro ou
+   * quando o render-site ainda não foi religado ao provider.
+   */
+  readiness?: Readiness
+  /** Re-runs a query içada de readiness (mesma identidade do contexto do chat). */
+  refetchReadiness?: () => void
 }
 
 export interface TabDescriptor {

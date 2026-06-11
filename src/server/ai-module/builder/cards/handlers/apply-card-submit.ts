@@ -41,7 +41,13 @@ import {
   type SilencedContactsPayload,
 } from '../card-submit.schemas'
 import { trackJourneyEvent } from '@/server/services/journey-events'
-import { applyBusinessIdentity, applyAgentReview } from './apply/journey-v2'
+import {
+  applyBusinessIdentity,
+  applyAgentReview,
+  applyTestDrive,
+  applyChannelPlatform,
+  applyPublishedNextSteps,
+} from './apply/journey-v2'
 // W3 (Revisar) per-card handlers extracted from this entrypoint (T22 split):
 // pure `(state, payload) => CardApplication` mirrors of the former locals.
 import { applyAgentPersona } from './apply/persona'
@@ -804,6 +810,32 @@ export async function applyCardSubmit(
         organizationId,
         current,
         payload: body,
+      })
+    case 'test_drive':
+      // Journey v2 (T32/FR-16): soft gate da fase Testar. Flipa `testDrive` e
+      // emite test_done/test_skipped por ação. Own write — return early.
+      return applyTestDrive({
+        projectId,
+        organizationId,
+        journeyVersion: current.journeyVersion,
+        payload: body,
+      })
+    case 'channel_platform':
+      // Journey v2 (T91/FR-24/25): grava channel.platforms+whatsappMode e flipa
+      // channelPlatform; re-valida whatsappMode + canal único pré-5b. Own write.
+      return applyChannelPlatform({
+        conversationId: conversation.id,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'published_next_steps':
+      // Journey v2 (T32/FR-16): card terminal pós-publicação. Flipa
+      // `publishedNextSteps` e emite next_steps_ack. Own write — return early.
+      return applyPublishedNextSteps({
+        projectId,
+        organizationId,
+        journeyVersion: current.journeyVersion,
       })
     default: {
       // Exhaustiveness guard — a new registered card without a handler branch

@@ -13,6 +13,12 @@
  * de área (`SUMMARY_AREA`) para pintar as seções certas de amber.
  */
 
+import {
+  deriveCalendarToolChanges,
+  deriveHandoffToolChanges,
+  derivePricingToolChanges,
+} from "@/server/ai-module/builder/deploy/enabled-tools-derivation.pure"
+
 import type { BuilderState } from "./types"
 
 /**
@@ -246,4 +252,112 @@ export function computeSummaryWarnings(value: BuilderState): SummaryWarning[] {
   }
 
   return warnings
+}
+
+// ==========================================
+// Jornada v2 — resumo por FASES + capacidades ATIVAS (T98, FR-31)
+// ==========================================
+
+/**
+ * As 4 fases da Jornada v2 ("Configure por exceção"), na ordem canônica do engine
+ * (`journey-v2.ts QUAYER_PHASES`). O resumo v2 lista as fases como cabeçalho de
+ * progresso — sem re-derivar status por fase (isso é responsabilidade do engine
+ * server-side; aqui é só a etiqueta "Fase N de M — Título" igual ao PhaseList).
+ */
+export const JOURNEY_V2_PHASE_TITLES: readonly string[] = [
+  "Conhecer",
+  "Revisar",
+  "Testar",
+  "Lançar",
+] as const
+
+/**
+ * Uma capacidade ATIVA do agente, já humanizada para o resumo v2. `key` casa com
+ * o domínio (debug/test); `title`/`summary` são a copy mostrada na linha.
+ */
+export interface ActiveCapability {
+  key: "knowledge" | "handoff" | "pricing" | "calendar" | "media"
+  title: string
+  summary: string
+}
+
+/** Há ao menos uma fonte com imagens de catálogo extraídas? (espelha journey-v2). */
+function hasCatalogImages(state: BuilderState): boolean {
+  return state.sourceIngestion.sources.some((s) => (s.imagesCount ?? 0) > 0)
+}
+
+/** A agenda está conectada SEGUNDO o builderState (proxy in-state do getCapabilities). */
+function calendarConnectedInState(calendar: BuilderState["calendar"]): boolean {
+  return Boolean(calendar.connectionId) || calendar.status === "connected"
+}
+
+/**
+ * FR-31 — Deriva SÓ as capacidades ATIVAS do agente, na MESMA fonte de verdade da
+ * superfície de Capacidades (`enabled-tools-derivation.pure`). Capacidades
+ * desligadas (handoff `nenhum`/ausente, preços sem tabela/`none`, sem agenda)
+ * NÃO entram — o resumo v2 nunca apresenta transferência/preços como seção
+ * obrigatória (contraste com a v1, que assume ambos). Conhecimento é SEMPRE ativo
+ * (espelha a linha "Sempre ativo" das Capacidades). Pura, sem IO.
+ */
+export function deriveActiveCapabilities(state: BuilderState): ActiveCapability[] {
+  const active: ActiveCapability[] = [
+    {
+      key: "knowledge",
+      title: "Conhecimento",
+      summary:
+        "O agente responde com base no que sabe do seu negócio. Sempre ativo.",
+    },
+  ]
+
+  const handoff = deriveHandoffToolChanges({
+    mode: state.handoff.mode,
+    steps: state.handoff.steps,
+  })
+  if (handoff.ensure.includes("transfer_to_human")) {
+    active.push({
+      key: "handoff",
+      title: "Transferir para humano",
+      summary: "O agente passa o atendimento para uma pessoa quando precisar.",
+    })
+  }
+
+  const pricing = derivePricingToolChanges({
+    activeItemCount: state.pricing.items.length,
+    disclosureStyle: state.pricing.disclosureStyle,
+  })
+  if (pricing.ensure.includes("get_pricing")) {
+    const count = state.pricing.items.length
+    active.push({
+      key: "pricing",
+      title: "Preços",
+      summary: `O agente informa os preços da sua tabela (${count} ${
+        count === 1 ? "item" : "itens"
+      }).`,
+    })
+  }
+
+  const connected = calendarConnectedInState(state.calendar)
+  const calendar = deriveCalendarToolChanges({
+    alsoSchedule: state.handoff.alsoSchedule,
+    hasActiveConnection: connected,
+  })
+  if (calendar.ensure.length > 0) {
+    active.push({
+      key: "calendar",
+      title: "Agenda",
+      summary: connected
+        ? "O agente marca horários direto na sua agenda conectada."
+        : "O agente registra o interesse de agendamento e te avisa.",
+    })
+  }
+
+  if (hasCatalogImages(state)) {
+    active.push({
+      key: "media",
+      title: "Fotos do catálogo",
+      summary: "O agente pode enviar fotos do seu catálogo durante a conversa.",
+    })
+  }
+
+  return active
 }

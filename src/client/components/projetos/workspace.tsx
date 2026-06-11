@@ -3,10 +3,24 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Layout, MessageSquare, MoreVertical, Pencil } from "lucide-react"
+import {
+  ArrowLeft,
+  Layout,
+  MessageSquare,
+  MoreVertical,
+  Pencil,
+  WifiOff,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/igniter.client"
+import { parseBuilderState } from "@/server/ai-module/builder/cards/builder-state"
+import type {
+  Readiness,
+  StepId,
+} from "@/server/ai-module/builder/state/readiness.types"
+import { unwrapReadiness } from "./preview/tabs/overview/helpers/readiness-adapters"
+import { ReadinessContext } from "./chat/use-chat-stream"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,6 +60,146 @@ interface WorkspaceProps {
   initialMessages: ChatMessage[]
 }
 
+// ── Readiness içado (T49/T50/T51 — FR-18/27, plan §4.4) ──────────────────────
+// O workspace é o dono ÚNICO da query de readiness (1 fetch). O snapshot e o
+// `refetch` descem para o chat (via ReadinessContext) e para o preview (mesmo
+// contexto), removendo a duplicação que existia em `use-chat-stream` +
+// `use-project-readiness`.
+
+/** Steps de conexão de canal — os ÚNICOS que ativam o polling de 5s (FR-27). */
+const CONNECTION_STEP_IDS: ReadonlySet<StepId> = new Set<StepId>([
+  "whatsapp_connect",
+  "instagram_connect",
+])
+
+/** Intervalo do polling de autodetecção do QR enquanto conecta (plan §4.4). */
+const READINESS_POLL_MS = 5_000
+/** Teto do polling: após 10min sem conexão o polling PARA (FR-27). */
+const READINESS_POLL_CEILING_MS = 10 * 60 * 1000
+
+interface HoistedReadiness {
+  readiness: Readiness | undefined
+  refetchReadiness: () => void
+  /** True quando o polling de conexão atingiu o teto de 10min e parou (FR-27). */
+  pollingExhausted: boolean
+  /** Re-arma o polling de conexão (re-zera o relógio dos 10min). */
+  rearmPolling: () => void
+}
+
+/**
+ * Dono único da query de readiness + polling condicionado (T49/T51, FR-18/27).
+ *
+ * O `refetchInterval` do client gerado só aceita um número fixo; então armamos
+ * 5s APENAS enquanto (a) o step ativo é de conexão E (b) ainda estamos dentro da
+ * janela de 10min desde o último arm. Passado o teto, um timer flipa
+ * `pollingExhausted` e o intervalo cai para `undefined` (polling para). O re-arm
+ * (focus, troca de step, ou ação do card via `rearmPolling`) re-zera o relógio.
+ */
+function useHoistedReadiness(projectId: string): HoistedReadiness {
+  // Relógio do teto: re-zerado a cada arm. `pollingExhausted` é derivado por um
+  // timer (não por render) para que o intervalo pare exatamente no teto.
+  const [armedAt, setArmedAt] = React.useState(() => Date.now())
+  const [pollingExhausted, setPollingExhausted] = React.useState(false)
+
+  const rearmPolling = React.useCallback(() => {
+    setPollingExhausted(false)
+    setArmedAt(Date.now())
+  }, [])
+
+  // 1ª passada sem polling (refetchInterval não é reativo a cada render no
+  // client gerado — ele lê `optionsRef.current`); por isso lemos a resposta e
+  // só então decidimos o intervalo na PRÓXIMA montagem do efeito de polling.
+  const query = api.builder.getReadiness.useQuery({
+    params: { id: projectId },
+    refetchInterval: undefined,
+  })
+
+  const readiness = React.useMemo(
+    () => unwrapReadiness(query.data) ?? undefined,
+    [query.data],
+  )
+
+  const activeStepId = readiness?.step.id
+  const isConnectionStep =
+    activeStepId !== undefined && CONNECTION_STEP_IDS.has(activeStepId)
+
+  // Re-arma automaticamente quando ENTRA num step de conexão (transição) — o
+  // relógio de 10min conta a partir daí, não desde o load do workspace.
+  const prevConnectionStepRef = React.useRef(false)
+  React.useEffect(() => {
+    if (isConnectionStep && !prevConnectionStepRef.current) rearmPolling()
+    prevConnectionStepRef.current = isConnectionStep
+  }, [isConnectionStep, rearmPolling])
+
+  // Voltar o foco à aba re-arma o polling de conexão (o usuário pode ter ido
+  // escanear o QR no celular): retoma a janela de 10min e os 5s (plan §4.4).
+  const isConnectionStepRef = React.useRef(isConnectionStep)
+  React.useEffect(() => {
+    isConnectionStepRef.current = isConnectionStep
+  }, [isConnectionStep])
+  React.useEffect(() => {
+    const onFocus = () => {
+      if (isConnectionStepRef.current) rearmPolling()
+    }
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [rearmPolling])
+
+  // Polling manual: o client gerado só dá `refetchInterval` numérico estático,
+  // então gerenciamos o setInterval aqui — ativo só em step de conexão e dentro
+  // da janela; um timer separado flipa `pollingExhausted` exatamente no teto.
+  const refetchRef = React.useRef(query.refetch)
+  React.useEffect(() => {
+    refetchRef.current = query.refetch
+  }, [query.refetch])
+
+  React.useEffect(() => {
+    if (!isConnectionStep || pollingExhausted) return
+    const remaining = armedAt + READINESS_POLL_CEILING_MS - Date.now()
+    if (remaining <= 0) {
+      setPollingExhausted(true)
+      return
+    }
+    const poll = window.setInterval(() => {
+      if (document.hidden) return
+      refetchRef.current()
+    }, READINESS_POLL_MS)
+    const ceiling = window.setTimeout(() => {
+      setPollingExhausted(true)
+    }, remaining)
+    return () => {
+      window.clearInterval(poll)
+      window.clearTimeout(ceiling)
+    }
+  }, [isConnectionStep, pollingExhausted, armedAt])
+
+  // Identidade estável do refetch entregue ao contexto (o hook gerado pode
+  // trocar a identidade de `refetch` a cada render).
+  const refetchReadiness = React.useCallback(() => {
+    refetchRef.current()
+  }, [])
+
+  return { readiness, refetchReadiness, pollingExhausted, rearmPolling }
+}
+
+/**
+ * Queda de conexão = AVISO, nunca regressão (T100, FR-30, plan §4.4): conectou
+ * uma vez (`confirmations.whatsappConnectedOnce`) MAS o canal não está mais ativo
+ * agora (`project.hasWhatsAppConnection === false`, snapshot SSR derivado do
+ * deployment live + connectionId). O step permanece concluído (monotonicidade no
+ * engine); aqui só exibimos o aviso de reconexão. NUNCA reabre a jornada.
+ */
+function isWhatsAppConnectionDown(
+  readiness: Readiness | undefined,
+  project: WorkspaceProject,
+): boolean {
+  const connectedOnce =
+    parseBuilderState(
+      (readiness as { builderState?: unknown } | undefined)?.builderState,
+    ).confirmations.whatsappConnectedOnce === true
+  return connectedOnce && !project.hasWhatsAppConnection
+}
+
 export function Workspace(props: WorkspaceProps) {
   const [mounted, setMounted] = React.useState(false)
 
@@ -75,6 +229,20 @@ export function Workspace(props: WorkspaceProps) {
 function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
   const { tokens } = useAppTokens()
   const router = useRouter()
+
+  // ── Readiness içado (fonte única, FR-18) ────────────────────────────────────
+  // Dono ÚNICO da query: o chat (via ReadinessContext) e o preview leem daqui.
+  const { readiness, refetchReadiness } = useHoistedReadiness(project.id)
+  const readinessContextValue = React.useMemo(
+    () => ({ readiness, refetchReadiness }),
+    [readiness, refetchReadiness],
+  )
+  // T100 (FR-30): conexão caiu DEPOIS de ter conectado → aviso, sem regredir.
+  // Memoizado: `isWhatsAppConnectionDown` roda um parse de Zod do builderState.
+  const whatsAppConnectionDown = React.useMemo(
+    () => isWhatsAppConnectionDown(readiness, project),
+    [readiness, project],
+  )
 
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
@@ -268,6 +436,21 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
     },
     [project.id, duplicateMutation],
   )
+
+  // T100 (FR-30): CTA do banner de queda — traz o chat à frente (mobile) e abre
+  // a conversa pré-preenchida para reconectar. A reconexão real acontece no
+  // fluxo de conexão existente; nada aqui regride a jornada.
+  const handleReconnectWhatsApp = React.useCallback(() => {
+    setMobilePanel("chat")
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("builder:focus-chat", {
+        detail: {
+          message: "Minha conexão do WhatsApp caiu — quero reconectar o número.",
+        },
+      }),
+    )
+  }, [])
 
   return (
     <>
@@ -470,36 +653,71 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         </div>
       </header>
 
-      {/* ───── Body: split layout ───── */}
-      <main className="flex min-h-0 flex-1 overflow-hidden">
-        <section
-          className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
-            mobilePanel === "chat" ? "flex" : "hidden md:flex"
-          }`}
+      {/* ───── Banner de queda de conexão (T100 / FR-30) ─────
+          Aviso NÃO-regressivo: o step permanece concluído e a jornada não
+          reabre — só sinalizamos a queda + CTA de reconexão (abre o chat). */}
+      {whatsAppConnectionDown && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-3 px-4 py-2.5 text-[13px] md:px-6"
           style={{
-            borderRight: `1px solid ${tokens.divider}`,
+            borderBottom: `1px solid ${tokens.divider}`,
+            backgroundColor: tokens.warningSubtle,
+            color: tokens.warningText,
           }}
         >
-          <ChatPanel
-            projectId={project.id}
-            initialMessages={initialMessages}
-            onMessagesChange={setLiveMessages}
-          />
-        </section>
+          <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="flex-1">
+            A conexão do WhatsApp caiu — seu agente parou de responder. Reconecte
+            para voltar a atender. Seu progresso está salvo.
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-[12px]"
+            onClick={handleReconnectWhatsApp}
+          >
+            Reconectar
+          </Button>
+        </div>
+      )}
 
-        <section
-          className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
-            mobilePanel === "preview" ? "flex" : "hidden md:flex"
-          }`}
-        >
-          <PreviewPanel
-            project={project}
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            messages={liveMessages}
-          />
-        </section>
-      </main>
+      {/* ───── Body: split layout ─────
+          ReadinessContext: o workspace é o dono ÚNICO da query (FR-18); o chat
+          (use-chat-stream) e o preview leem `readiness`/`refetchReadiness` deste
+          provider — 1 fetch, fonte única. */}
+      <ReadinessContext.Provider value={readinessContextValue}>
+        <main className="flex min-h-0 flex-1 overflow-hidden">
+          <section
+            className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
+              mobilePanel === "chat" ? "flex" : "hidden md:flex"
+            }`}
+            style={{
+              borderRight: `1px solid ${tokens.divider}`,
+            }}
+          >
+            <ChatPanel
+              projectId={project.id}
+              initialMessages={initialMessages}
+              onMessagesChange={setLiveMessages}
+            />
+          </section>
+
+          <section
+            className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
+              mobilePanel === "preview" ? "flex" : "hidden md:flex"
+            }`}
+          >
+            <PreviewPanel
+              project={project}
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              messages={liveMessages}
+            />
+          </section>
+        </main>
+      </ReadinessContext.Provider>
     </div>
     </>
   )

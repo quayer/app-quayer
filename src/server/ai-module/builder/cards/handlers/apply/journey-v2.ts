@@ -25,7 +25,10 @@ import {
 import type {
   AgentReviewPayload,
   BusinessIdentityPayload,
+  ChannelPlatformPayload,
+  TestDrivePayload,
 } from '../../card-submit.schemas'
+import { channelPlatformWhatsappModeOk } from '../../card-submit.schemas'
 import type {
   AgentReviewSectionErrors,
   ApplyCardSubmitResult,
@@ -227,6 +230,174 @@ export async function applyMediaAck(args: {
       'Use as fotos/vídeos já cadastrados (se houver) quando fizer sentido e siga para o próximo passo. ' +
       'Não reabra o card de Mídia.',
   })
+}
+
+/**
+ * T32 (FR-16, plan §3.3 item 3) — test_drive: gate SOFT da fase Testar. Tanto
+ * "Já testei" (`tested`) quanto "Publicar sem testar" (`skip`) destravam o passo
+ * (flipam o MESMO sentinel `confirmations.testDrive`), mas a copy do ACK e o
+ * evento de funil RAMIFICAM por ação: o LLM NUNCA promete que o agente foi
+ * validado quando o usuário pulou o teste. Self-contained, igual aos demais
+ * handlers da jornada v2: flip via `applySentinelAck` (write atômico org-scoped)
+ * e, DEPOIS do write, emite `test_done`/`test_skipped` fire-and-forget.
+ */
+export async function applyTestDrive(args: {
+  projectId: string
+  organizationId: string
+  journeyVersion: BuilderState['journeyVersion']
+  payload: Pick<TestDrivePayload, 'action'>
+}): Promise<ApplyCardSubmitResult> {
+  const { projectId, organizationId, journeyVersion, payload } = args
+  const tested = payload.action === 'tested'
+
+  const result = await applySentinelAck({
+    projectId,
+    organizationId,
+    sentinel: 'testDrive',
+    cardInstruction: tested
+      ? 'O usuário TESTOU o agente no playground e seguiu adiante. ' +
+        'Considere o teste concluído e prossiga para a publicação (deploy). ' +
+        'Não reabra o card de teste.'
+      : 'O usuário optou por PUBLICAR SEM TESTAR (pulou o teste no playground). ' +
+        'NÃO afirme que o agente foi validado — apenas siga para a publicação (deploy) e ' +
+        'lembre que ele pode testar a qualquer momento na aba Testar. Não reabra o card de teste.',
+  })
+
+  // Funil — só APÓS o flip persistir (não anunciamos um passo não-gravado). O
+  // evento ramifica por ação: tested → test_done, skip → test_skipped.
+  if (result.ok) {
+    await trackJourneyEvent({
+      organizationId,
+      projectId,
+      journeyVersion,
+      event: tested ? 'test_done' : 'test_skipped',
+    })
+  }
+
+  return result
+}
+
+/**
+ * T32 (FR-16, plan §3.3) — published_next_steps: card TERMINAL da fase Lançar
+ * (surfa só pós-publicação). Ação única `'ack'`: flipa `confirmations.publishedNextSteps`
+ * e emite o evento de funil `next_steps_ack`. Mesmo idiom de `applyTestDrive` —
+ * flip atômico org-scoped via `applySentinelAck`, evento depois do write.
+ */
+export async function applyPublishedNextSteps(args: {
+  projectId: string
+  organizationId: string
+  journeyVersion: BuilderState['journeyVersion']
+}): Promise<ApplyCardSubmitResult> {
+  const { projectId, organizationId, journeyVersion } = args
+
+  const result = await applySentinelAck({
+    projectId,
+    organizationId,
+    sentinel: 'publishedNextSteps',
+    cardInstruction:
+      'O usuário RECONHECEU os próximos passos pós-publicação. ' +
+      'O agente já está no ar — não reabra o card de próximos passos.',
+  })
+
+  if (result.ok) {
+    await trackJourneyEvent({
+      organizationId,
+      projectId,
+      journeyVersion,
+      event: 'next_steps_ack',
+    })
+  }
+
+  return result
+}
+
+/**
+ * T91 (FR-24/25, plan §3.3 item 5) — channel_platform: o usuário escolhe EM QUE
+ * canais o agente atende. Grava `channel.platforms` + `channel.whatsappMode` e
+ * flipa `confirmations.channelPlatform` — o engine v2 (T15) lê `platforms` para
+ * surfar `whatsapp_connect`/`instagram_connect` condicionalmente.
+ *
+ * RE-VALIDAÇÃO server-side (nunca confia no body — padrão do módulo):
+ *  - `platforms` é deduplicado mantendo a ordem (1ª ocorrência);
+ *  - **canal único pré-5b**: 2 plataformas → `invalid` (espelho do disable da UI;
+ *    a remoção é T94/Onda 5b);
+ *  - `whatsappMode` obrigatório quando `'whatsapp'` está selecionado
+ *    (`channelPlatformWhatsappModeOk`); o modo só é persistido quando WhatsApp
+ *    está entre as plataformas (IG não tem nível 2 — não guardamos modo órfão).
+ *
+ * Write atômico org-scoped (re-lê o state FRESCO dentro da tx, igual a
+ * `applyBusinessIdentity`, para não atropelar um submit concorrente). NÃO emite
+ * evento de funil: `channel_connected` pertence à conexão REAL (webhook UAZ, T35),
+ * não à seleção de plataforma. No `any`.
+ */
+export async function applyChannelPlatform(args: {
+  conversationId: string
+  organizationId: string
+  current: BuilderState
+  payload: Pick<ChannelPlatformPayload, 'platforms' | 'whatsappMode'>
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, organizationId, current, payload } = args
+
+  // Dedupe preservando a ordem (1ª ocorrência) — nunca confia no body.
+  const platforms = Array.from(new Set(payload.platforms))
+
+  // Canal único até a Onda 5b (espelho do disable da UI; removido em T94).
+  if (platforms.length > 1) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'Por enquanto, escolha apenas um canal (WhatsApp ou Instagram).',
+    }
+  }
+
+  const wantsWhatsapp = platforms.includes('whatsapp')
+  // Cross-field: whatsappMode obrigatório quando WhatsApp está selecionado.
+  if (!channelPlatformWhatsappModeOk({ platforms, whatsappMode: payload.whatsappMode })) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'Escolha como conectar o WhatsApp (QR Code ou Cloud API).',
+    }
+  }
+  // Modo só é persistido quando WhatsApp está entre as plataformas (sem órfão).
+  const whatsappMode = wantsWhatsapp ? payload.whatsappMode : undefined
+
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    // Fallback ao `current` já carregado quando o read in-tx não acha (test doubles)
+    // para o handler nunca descartar silenciosamente o write.
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    const patch: DeepPartial<BuilderState> = {
+      channel: {
+        platforms,
+        ...(whatsappMode ? { whatsappMode } : {}),
+      },
+    }
+    const next = applyConfirmation(patchBuilderState(fresh, patch), 'channelPlatform')
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const platformLabel = wantsWhatsapp
+    ? `WhatsApp${whatsappMode === 'cloud' ? ' (Cloud API)' : ' (QR Code)'}`
+    : 'Instagram'
+
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário ESCOLHEU o canal de atendimento via card: ${platformLabel}. ` +
+      'Siga para a conexão do canal escolhido e o próximo passo da jornada. ' +
+      'Não reabra o card de escolha de canal.',
+  }
 }
 
 /**

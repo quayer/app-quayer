@@ -34,6 +34,7 @@ import {
   setProviderCooldown,
   isRetriableError,
 } from './provider-failover'
+import { autoFlipTestDrive } from '@/server/ai-module/builder/state/auto-flip-test-drive'
 
 // ── Playground Runtime (stateless, no persistence) ──────────────────────────
 
@@ -354,6 +355,16 @@ export async function* processPlaygroundStream(
 
     const latencyMs = Date.now() - startTime
     const cost = calculateCost(pgActiveModelName, inputTokens, outputTokens)
+
+    // Jornada v2 (T33): primeiro turno bem-sucedido do playground satisfaz o
+    // passo Testar — flipa `confirmations.testDrive` (se ainda false) + emite
+    // `test_done`. Resolve o projeto pelo agentConfigId. Fail-open TOTAL: o
+    // helper nunca lança, então um erro de DB jamais quebra o stream; segundo
+    // turno é no-op (sentinel já true).
+    await autoFlipTestDrive({
+      agentConfigId: agentConfig.id,
+      organizationId: params.organizationId,
+    })
 
     yield {
       type: 'finish',

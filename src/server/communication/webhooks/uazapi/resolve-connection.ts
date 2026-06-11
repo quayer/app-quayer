@@ -8,6 +8,11 @@ import { NextResponse } from 'next/server'
 import type { Connection, Prisma } from '@prisma/client'
 import { database } from '@/server/services/database'
 import { logger } from '@/server/services/logger'
+import { trackJourneyEvent } from '@/server/services/journey-events'
+import {
+  applyConfirmation,
+  parseBuilderState,
+} from '@/server/ai-module/builder/cards/builder-state'
 import { badRequest } from './verify-request'
 import type { UazapiPayload } from './types'
 
@@ -32,6 +37,76 @@ export function isConnectionLifecycleEvent(payload: UazapiPayload): boolean {
 }
 
 /**
+ * FR-30 — Side-effects of a Connection flipping to CONNECTED (Jornada v2, T35).
+ * Fired ONCE per observed transition (both the lifecycle-event path and the
+ * opportunistic-inbound path converge here):
+ *
+ *   (a) funnel telemetry `channel_connected` (fire-and-forget, NO PII — emitted
+ *       with no metadata, so no phone/contact can ever leak); and
+ *   (b) flips the monotonicity sentinel-mirror `whatsappConnectedOnce` in the
+ *       project's builderState, so the `whatsapp_connect` step never reopens if
+ *       the live connection later drops (degradation becomes a warning, T100).
+ *
+ * The project is resolved ORG-SCOPED via the canonical Connection↔project link
+ * — the ACTIVE `AgentDeployment` → `agentConfig` → `BuilderProject.aiAgentId`
+ * (Connection.projectId points at the LEGACY `Project` table, not BuilderProject
+ * — see provision-whatsapp.routes.ts / attach-to-agent.ts). A Connection with no
+ * resolvable project flips nothing.
+ *
+ * FAIL-OPEN by contract: the whole body is wrapped so a DB error in the
+ * project lookup / sentinel write — or in telemetry — NEVER aborts the webhook.
+ */
+async function onConnectionConnected(
+  connectionId: string,
+  organizationId: string,
+): Promise<void> {
+  try {
+    const deployment = await database.agentDeployment.findFirst({
+      where: {
+        connectionId,
+        status: 'ACTIVE',
+        agentConfig: { organizationId },
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        agentConfig: { select: { builderProject: { select: { id: true } } } },
+      },
+    })
+    const projectId = deployment?.agentConfig?.builderProject?.id
+    if (!projectId) return
+
+    // (a) Funnel telemetry — itself fire-and-forget (never throws). No PII.
+    const conversation = await database.builderProjectConversation.findUnique({
+      where: { projectId },
+      select: { id: true, organizationId: true, builderState: true },
+    })
+    if (!conversation || conversation.organizationId !== organizationId) return
+
+    const state = parseBuilderState(conversation.builderState)
+
+    await trackJourneyEvent({
+      organizationId,
+      projectId,
+      journeyVersion: state.journeyVersion,
+      event: 'channel_connected',
+    })
+
+    // (b) Monotonicity sentinel — flip once; skip the write if already true.
+    if (state.confirmations.whatsappConnectedOnce) return
+    const next = applyConfirmation(state, 'whatsappConnectedOnce')
+    await database.builderProjectConversation.updateMany({
+      where: { id: conversation.id, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  } catch (err) {
+    logger.warn('[uazapi-webhook] channel_connected side-effects failed (fail-open)', {
+      connectionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
  * Reads a connected/disconnected signal from a UAZAPI connection-lifecycle
  * event and updates the owning Connection.status. This closes the gap where an
  * instance paired via QR stayed `DISCONNECTED` forever (the QR path never had a
@@ -51,7 +126,7 @@ export async function promoteConnectionFromEvent(
 
   const conn = await database.connection.findFirst({
     where: { OR: orClauses },
-    select: { id: true, status: true },
+    select: { id: true, status: true, organizationId: true },
   })
   if (!conn) return false
 
@@ -79,6 +154,11 @@ export async function promoteConnectionFromEvent(
       where: { id: conn.id },
       data: { status: nextStatus },
     })
+    // FR-30 (T35): a transition INTO CONNECTED fires the funnel event + flips
+    // the monotonicity sentinel — fail-open, never aborts the webhook.
+    if (nextStatus === 'CONNECTED' && conn.organizationId) {
+      await onConnectionConnected(conn.id, conn.organizationId)
+    }
     return true
   } catch (err) {
     logger.warn('[uazapi-webhook] connection status update failed', {
@@ -144,7 +224,7 @@ export async function resolveConnection(
  * full context before the message proceeds — failures never abort the webhook.
  */
 export async function promoteConnectionOnInbound(
-  connection: Pick<Connection, 'id' | 'status'>,
+  connection: Pick<Connection, 'id' | 'status' | 'organizationId'>,
   traceId: string,
 ): Promise<void> {
   if (!connection.status || connection.status === 'CONNECTED') {
@@ -155,6 +235,11 @@ export async function promoteConnectionOnInbound(
       where: { id: connection.id },
       data: { status: 'CONNECTED' },
     })
+    // FR-30 (T35): same CONNECTED-transition point as the lifecycle path —
+    // fire the funnel event + flip the monotonicity sentinel (fail-open).
+    if (connection.organizationId) {
+      await onConnectionConnected(connection.id, connection.organizationId)
+    }
   } catch (err) {
     logger.warn('[uazapi-webhook] opportunistic status promotion failed', {
       connectionId: connection.id,

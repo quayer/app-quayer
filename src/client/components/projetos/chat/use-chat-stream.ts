@@ -5,14 +5,20 @@
  *
  * Structural extraction from chat-panel.tsx (no behavior change): owns the
  * messages list, the SSE parser/consumer, sendMessage + submitCard (card-action
- * protocol), the readiness query, scroll/auto-scroll refs, the
- * `builder:focus-chat` listener and the auto-trigger of the initial message.
- * ChatPanel renders from what this hook returns.
+ * protocol), scroll/auto-scroll refs, the `builder:focus-chat` listener and the
+ * auto-trigger of the initial message. ChatPanel renders from what this hook
+ * returns.
+ *
+ * READINESS UNIFICADO (T49/T50, FR-18, plan §4.4): a query de readiness NÃO vive
+ * mais aqui. O `workspace.tsx` é o dono ÚNICO da query (1 fetch) e injeta
+ * `readiness` + `refetchReadiness` via {@link ReadinessContext}. Este hook só
+ * CONSOME do contexto e mantém os triggers existentes (refetch em SSE finish e
+ * pós-card-submit), que agora chamam o refetch içado — comportamento preservado.
+ * Fora de um Provider o contexto degrada para `{ readiness: undefined, refetch
+ * no-op }`, então o chat renderiza sem o card de passo ativo em vez de quebrar.
  */
 
 import * as React from "react"
-
-import { api } from "@/igniter.client"
 
 import type { CardKey } from "./cards/types"
 import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
@@ -47,46 +53,40 @@ function createId(): string {
 }
 
 /**
- * Minimal structural view of the auto-generated `api.builder.getReadiness`
- * query hook. The generated client (`igniter.schema.ts`) now exposes this action
- * (`builder.getReadiness` → `GET /projects/:id/readiness`), so the cast that
- * used to bridge a missing action is no longer required. We keep this structural
- * type as the call contract and a defensive resolver ({@link READINESS_QUERY})
- * so a regenerate that ever drops the action degrades to a no-op hook instead of
- * crashing at module-eval. The server returns `{ success, data: Readiness }`
- * (see chat.routes.ts `getReadinessAction`).
+ * Hoisted-readiness contract shared between the SINGLE owner of the readiness
+ * query (`workspace.tsx`) and its descendants (the chat via this hook, and the
+ * preview Overview via the same context). FR-18: one source of truth, one fetch.
+ *
+ *  - `readiness`        : the latest step-engine snapshot (or `undefined` while
+ *                         loading / on error — the chat then hides the active-step
+ *                         card, honest degrade).
+ *  - `refetchReadiness` : re-runs the hoisted query. The chat calls it on SSE
+ *                         finish + after a card submit (the legacy triggers).
  */
-interface GetReadinessQuery {
-  useQuery: (opts: { params: { id: string } }) => {
-    data: { success?: boolean; data?: Readiness } | undefined
-    refetch: () => unknown
-  }
+export interface ReadinessContextValue {
+  readiness: Readiness | undefined
+  refetchReadiness: () => void
 }
 
 /**
- * Resolve the readiness query hook off the typed client with a defensive guard,
- * ONCE at module-eval. The typed client now resolves `api.builder.getReadiness`
- * directly (no `as unknown as` cast needed); if a future regenerate ever drops
- * the action we fall back to a stable no-op hook
- * (`{ data: undefined, refetch: () => {} }`) so the panel renders without the
- * active-step card rather than throwing.
- *
- * Resolving once (module scope, not per-render) keeps the chosen hook IDENTITY
- * stable across renders — the Rules-of-Hooks contract holds because the same
- * `useQuery` function is invoked unconditionally on every render.
+ * Default value used when a consumer renders OUTSIDE the workspace's
+ * `ReadinessContext.Provider` (defensive — same spirit as the old module-eval
+ * no-op resolver). Keeps the chat rendering without the active-step card instead
+ * of throwing. The real value is supplied by `workspace.tsx` (the single owner).
  */
-const READINESS_QUERY: GetReadinessQuery = (() => {
-  const candidate = (api.builder as { getReadiness?: unknown }).getReadiness
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as GetReadinessQuery
-  }
-  return {
-    useQuery: () => ({ data: undefined, refetch: () => {} }),
-  }
-})()
+const READINESS_CONTEXT_DEFAULT: ReadinessContextValue = {
+  readiness: undefined,
+  refetchReadiness: () => {},
+}
+
+/**
+ * The hoisted-readiness context. `workspace.tsx` wraps the chat + preview in the
+ * Provider with the value of its single `api.builder.getReadiness` query; the
+ * chat (here) and the Overview read from it so there is exactly ONE fetch.
+ */
+export const ReadinessContext = React.createContext<ReadinessContextValue>(
+  READINESS_CONTEXT_DEFAULT,
+)
 
 export interface UseChatStreamOptions {
   projectId: string
@@ -209,11 +209,12 @@ export function useChatStream({
   )
 
   // ── Readiness (deterministic step-engine — single source of truth) ──
-  // Drives the active-step card at the END of the conversation flow.
-  // Invalidated on SSE finish + after a card submit (no polling — per the spec).
-  const { data: readinessEnvelope, refetch: refetchReadiness } =
-    READINESS_QUERY.useQuery({ params: { id: projectId } })
-  const readiness = readinessEnvelope?.data
+  // T49/T50 (FR-18): NÃO há query aqui. `readiness` + `refetchReadiness` vêm do
+  // contexto içado (workspace = dono único da query, 1 fetch). Este hook só
+  // CONSOME e drive o card de passo ativo no fim do fluxo da conversa. Os
+  // triggers de invalidação (SSE finish + pós-card-submit) chamam o refetch
+  // içado — comportamento preservado, agora sobre a fonte única.
+  const { readiness, refetchReadiness } = React.useContext(ReadinessContext)
 
   // Keep a stable ref so the stream-consumer can invalidate readiness on finish
   // without re-creating its useCallback on every readiness change.

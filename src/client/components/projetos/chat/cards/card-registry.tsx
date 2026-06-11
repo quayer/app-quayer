@@ -45,9 +45,14 @@ import {
   CalendarPlus,
   CheckCircle2,
   Clock,
+  FlaskConical,
   Headset,
+  Instagram,
   KeyRound,
   ListChecks,
+  MapPin,
+  MessageCircle,
+  PartyPopper,
   ShieldOff,
   Sparkles,
   Store,
@@ -73,10 +78,16 @@ import { QuickReplyChipsCard } from "./quick-reply-chips-card"
 import { SourceProgressCard } from "./source-progress-card"
 import { SilencedContactsCard } from "./silenced-contacts-card"
 import { BusinessIdentityCard } from "./business-identity-card"
+import { TestDriveCard } from "./test-drive-card"
+import { ChannelPlatformCard } from "./channel-platform-card"
+import { WhatsAppConnectCard } from "./whatsapp-connect-card"
+import { InstagramConnectCard } from "./instagram-connect-card"
+import { PublishedNextStepsCard } from "./published-next-steps-card"
 
 /**
- * The `CardKey`s this registry renders — the 11 catalog cards. Excludes the 3
- * legacy keys (rendered inline in ToolCallCard).
+ * The `CardKey`s this registry renders — the catalog cards. Excludes the 3
+ * legacy keys (rendered inline in ToolCallCard) and `byok_guided` (blocker-driven,
+ * rendered outside the active-step slot — not a step/submit card).
  */
 export type RegisteredW3CardKey =
   | "agent_persona"
@@ -92,6 +103,11 @@ export type RegisteredW3CardKey =
   | "source_progress"
   | "silenced_contacts"
   | "business_identity"
+  | "test_drive"
+  | "channel_platform"
+  | "whatsapp_connect"
+  | "instagram_connect"
+  | "published_next_steps"
 
 /**
  * The registry. Heterogeneous by design — each component narrows `TPayload`
@@ -213,6 +229,56 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Conte sobre o negócio",
     icon: <Store className="h-4 w-4" />,
     component: BusinessIdentityCard as ComponentType<CardComponentProps>,
+  },
+  test_drive: {
+    // Jornada v2 (T46, FR-20) — ACTIVE-STEP card da fase "Testar". Gate SOFT:
+    // convida a testar o agente no playground antes de publicar, com escape
+    // explícito ("Publicar sem testar"). Surfa como step `test_drive`.
+    cardKey: "test_drive",
+    stepId: "test_drive",
+    title: "Que tal testar o agente?",
+    icon: <FlaskConical className="h-4 w-4" />,
+    component: TestDriveCard as ComponentType<CardComponentProps>,
+  },
+  channel_platform: {
+    // Jornada v2 (T96, FR-24/25) — primeiro card da fase "Lançar": onde o agente
+    // vai atender (WhatsApp/Instagram) + modo de conexão do WhatsApp. Surfa como
+    // step `channel_platform`.
+    cardKey: "channel_platform",
+    stepId: "channel_platform",
+    title: "Onde seu agente vai atender?",
+    icon: <MapPin className="h-4 w-4" />,
+    component: ChannelPlatformCard as ComponentType<CardComponentProps>,
+  },
+  whatsapp_connect: {
+    // Jornada v2 (T47, FR-15/27/30/34) — ACTIVE-STEP card da fase "Lançar":
+    // conexão do WhatsApp (QR pareado ou Cloud API). Conclusão por autodetecção
+    // server-side (sem submit). Surfa como step `whatsapp_connect`.
+    cardKey: "whatsapp_connect",
+    stepId: "whatsapp_connect",
+    title: "Conectar o WhatsApp",
+    icon: <MessageCircle className="h-4 w-4" />,
+    component: WhatsAppConnectCard as ComponentType<CardComponentProps>,
+  },
+  instagram_connect: {
+    // Jornada v2 (T97, FR-24/25) — card condicional da fase "Lançar": conexão do
+    // Instagram (só caminho oficial Meta, sem nível 2). Conclusão por autodetecção
+    // server-side (sem submit). Surfa como step `instagram_connect`.
+    cardKey: "instagram_connect",
+    stepId: "instagram_connect",
+    title: "Conectar o Instagram",
+    icon: <Instagram className="h-4 w-4" />,
+    component: InstagramConnectCard as ComponentType<CardComponentProps>,
+  },
+  published_next_steps: {
+    // Jornada v2 (T48, FR-16) — card TERMINAL da fase "Lançar": surfa pós-publicação
+    // e entrega os próximos passos (testar do celular, ver Atividade, pausar). Ação
+    // única `ack` (não bloqueia a jornada). Surfa como step `published_next_steps`.
+    cardKey: "published_next_steps",
+    stepId: "published_next_steps",
+    title: "Seu agente está no ar!",
+    icon: <PartyPopper className="h-4 w-4" />,
+    component: PublishedNextStepsCard as ComponentType<CardComponentProps>,
   },
 }
 
