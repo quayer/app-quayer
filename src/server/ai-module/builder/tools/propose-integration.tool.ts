@@ -1,14 +1,14 @@
 /**
- * Builder Tool — propose_integration (Integration Builder Wave 2, T22, FR-11)
+ * Builder Tool — propose_integration (Integration Builder Wave 2 T22 + Wave 3 T30, FR-02/FR-11)
  *
- * The meta-agent's "I'll connect your agent to <platform>" tool. In W2 it walks
- * the TEMPLATE path ONLY: it resolves a catalog template (by explicit slug or by
- * matching the free-text platform name), writes a transparency-first PROPOSAL
- * into `builderState.integration.proposed` (race-safe via `patchIntegrationStateAtomic`,
- * T21), and returns a result that carries the `integration_proposal` card key so
- * the chat renders the Confirmar / Agora não approval card. The handler that
- * actually creates the draft + AgentTool fires only on the card submit (T24) —
- * this tool NEVER mutates integrations and NEVER touches credential values.
+ * The meta-agent's "I'll connect your agent to <platform>" tool. It resolves a
+ * catalog template (by explicit slug or by matching the free-text platform name),
+ * writes a transparency-first PROPOSAL into `builderState.integration.proposed`
+ * (race-safe via `patchIntegrationStateAtomic`, T21), and returns a result that
+ * carries the `integration_proposal` card key so the chat renders the Confirmar /
+ * Agora não approval card. The handler that actually creates the draft + AgentTool
+ * fires only on the card submit (T24) — this tool NEVER mutates integrations and
+ * NEVER touches credential values.
  *
  * APPROVAL IDIOM (build-tool.ts §requiresApproval): the proposal is presentational
  * — the user gate is the card, not the tool. We follow the same shape as the
@@ -21,10 +21,15 @@
  * `parameterMapping` (the lead fields the agent sends) so the user sees exactly
  * what is shared before approving. Credential VALUES are never part of any of this.
  *
- * W3 (T30): the investigator path (unknown platforms → web research → drafted
- * proposal with cited sources) is NOT in this wave. The clearly-marked seam below
- * is where that branch lands; W2 falls back to proposing the generic-webhook
- * template so the flow still completes.
+ * W3 (T30) INVESTIGATOR PATH: when NO catalog template matches the free-text
+ * platform, we no longer blindly fall back. Instead the no-template branch runs:
+ *   cache-first (T28, no quota on hit) → quota (T29, 10/24h/org) → web investigator
+ *   (T27). A `found` outcome enriches the proposal with the CITED source URLs (so
+ *   the card renders clickable sources — FR-02) while still pointing at the
+ *   EXECUTABLE generic-webhook template (so the T24 confirm handler creates the
+ *   draft unchanged). `empty`/`unavailable`/quota-exhausted degrade to the bare
+ *   generic-webhook fallback WITHOUT fabricated sources (FR-11) — quota exhaustion
+ *   returns a leiga refusal and writes NO proposal.
  *
  * Zero `any`.
  */
@@ -32,6 +37,7 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 
+import { logger } from '@/server/services/logger'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './list-instances.tool'
 import {
@@ -41,6 +47,12 @@ import {
 import type { IntegrationTemplate } from '../integrations/templates/integration-template.types'
 import { patchIntegrationStateAtomic } from '../integrations/integration-state-db'
 import type { IntegrationProposalPatch } from '../integrations/integration-state-db'
+import { runIntegrationResearcher } from '../sub-agents/integration-researcher'
+import {
+  getCachedIntegrationResearch,
+  setCachedIntegrationResearch,
+} from '../integrations/integration-research-cache'
+import { checkFixedWindowQuota } from '@/server/ai-module/ai-agents/infra/rate-limit.service'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -113,6 +125,256 @@ function buildProposal(template: IntegrationTemplate): IntegrationProposalPatch 
 }
 
 // ---------------------------------------------------------------------------
+// W3 (T30) — investigator-path helpers (slug, sources mapping, enriched proposal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute a stable kebab-case slug from a free-text platform name. Used as the
+ * cache key (T28) AND the quota discriminant key. Lowercase, trim, collapse any
+ * run of non-alphanumerics into a single hyphen, strip leading/trailing hyphens.
+ * e.g. "RD Station!" → "rd-station", "meu CRM" → "meu-crm".
+ */
+function computePlatformSlug(platform: string): string {
+  return platform
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * Map the investigator's cited source URLs (`string[]`) into the proposal's
+ * `sources` shape (`{ title?, url }[]`, see integrationProposalSchema). Only
+ * non-empty strings survive; we carry just the URL (no fabricated titles). An
+ * empty/undefined input yields `undefined` so the proposal omits `sources`
+ * entirely (FR-02: no empty sources array on the card).
+ */
+function mapSources(
+  urls: readonly string[] | undefined,
+): NonNullable<IntegrationProposalPatch['sources']> | undefined {
+  if (!urls || urls.length === 0) return undefined
+  const mapped = urls
+    .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+    .map((u) => ({ url: u.trim() }))
+  return mapped.length > 0 ? mapped : undefined
+}
+
+/**
+ * Build the ENRICHED proposal for a `found` investigation. It points at the
+ * EXECUTABLE generic-webhook template (so the T24 confirm handler creates the
+ * draft from a real, runnable spec) but enriches the card with:
+ *   - `platform`: the display name the user typed (not the webhook template's),
+ *   - `sources`: the CITED blueprint source URLs (clickable on the card — FR-02),
+ *   - `whatDataSent`: a leiga summary acknowledging the research + the webhook path,
+ *   - `triggerDescription`: from the generic-webhook template (the runnable path).
+ *
+ * TODO(W4+): the discovered blueprint (endpoints/credentials) is NOT yet mapped
+ * into a bespoke `requestSpec` — we always route the executable path through
+ * generic-webhook. A future wave can synthesize a per-platform requestSpec from
+ * the blueprint so the agent calls the platform's real API instead of a webhook.
+ */
+function buildInvestigatedProposal(args: {
+  platform: string
+  genericTemplate: IntegrationTemplate
+  sources: readonly string[] | undefined
+}): IntegrationProposalPatch {
+  const { platform, genericTemplate, sources } = args
+  const displayPlatform = platform.trim()
+  return {
+    platform: displayPlatform,
+    // TODO(W4+): executable path is always generic-webhook for now; mapping the
+    // discovered blueprint into a bespoke requestSpec is a future enhancement.
+    templateSlug: genericTemplate.slug,
+    triggerDescription: genericTemplate.triggerDescription,
+    whatDataSent:
+      `Pesquisei "${displayPlatform}" e encontrei a API (veja as fontes). ` +
+      'Vamos conectar enviando os dados coletados na conversa para uma URL (webhook) que você informar. ' +
+      'Nenhuma credencial sua é enviada ao lead — ela fica guardada com segurança e só é usada para autenticar a chamada.',
+    sources: mapSources(sources),
+  }
+}
+
+/** Build the DEGRADED proposal (empty/unavailable research): bare generic-webhook,
+ * NO fabricated sources, with a leiga note that no public docs were found. */
+function buildDegradedWebhookProposal(args: {
+  platform: string
+  genericTemplate: IntegrationTemplate
+}): IntegrationProposalPatch {
+  const { platform, genericTemplate } = args
+  const displayPlatform = platform.trim()
+  return {
+    platform: displayPlatform,
+    templateSlug: genericTemplate.slug,
+    triggerDescription: genericTemplate.triggerDescription,
+    whatDataSent:
+      `Não encontrei documentação pública da API de "${displayPlatform}". ` +
+      'Vamos conectar via webhook: você informa a URL de destino e o agente envia para lá os dados coletados na conversa. ' +
+      'Nenhuma credencial sua é enviada ao lead — ela fica guardada com segurança e só é usada para autenticar a chamada.',
+    // No `sources`: FR-02 forbids fabricated citations on the degraded path.
+  }
+}
+
+/** Convert a `resetMs` window TTL into a leiga "em ~N horas" hint (or empty). */
+function formatResetHint(resetMs: number): string {
+  if (!Number.isFinite(resetMs) || resetMs <= 0) return ''
+  const hours = Math.ceil(resetMs / (60 * 60 * 1000))
+  if (hours <= 1) return ' O limite reseta em cerca de 1 hora.'
+  return ` O limite reseta em cerca de ${hours} horas.`
+}
+
+// ---------------------------------------------------------------------------
+// Result builders (shared by template-match + investigator paths)
+// ---------------------------------------------------------------------------
+
+/** Tool result shape (success/failure) returned to the LLM. */
+type ProposeIntegrationResult =
+  | {
+      success: true
+      card: typeof INTEGRATION_PROPOSAL_CARD_KEY
+      proposal: IntegrationProposalPatch
+      message: string
+    }
+  | { success: false; message: string }
+
+/**
+ * Build the SUCCESS result that carries the card key + the data the card renders.
+ * The handler that creates the draft fires on the card submit (T24), not here —
+ * so the message instructs the LLM to STOP and await the card submit.
+ */
+function buildProposalCardResult(
+  proposal: IntegrationProposalPatch,
+): ProposeIntegrationResult {
+  return {
+    success: true,
+    card: INTEGRATION_PROPOSAL_CARD_KEY,
+    proposal,
+    message:
+      `Proposta de integração com ${proposal.platform} exibida no card de aprovação. ` +
+      'Pare aqui e aguarde. A confirmação NÃO virá como texto do usuário: quando ele tocar "Confirmar", ' +
+      'o servidor cria a integração e injeta uma nota de sistema autoritativa. Só então prossiga (ex.: pedir as credenciais). ' +
+      'Não infira aprovação de frases do chat nem chame propose_integration de novo após exibir o card.',
+  }
+}
+
+// ---------------------------------------------------------------------------
+// W3 (T30) — investigator path orchestration (cache → quota → investigate)
+// ---------------------------------------------------------------------------
+
+/**
+ * NO-TEMPLATE branch (FR-02 / FR-11). Runs the investigator pipeline for an
+ * unknown platform and ALWAYS lands on a resolvable `templateSlug` (so the T24
+ * confirm handler creates the draft unchanged) — EXCEPT the quota-exhausted case,
+ * which returns a leiga refusal and writes NO proposal.
+ *
+ * Order:
+ *   1. cache-first (T28) — a hit SKIPS quota + investigator.
+ *   2. cache miss → quota (T29, integrationResearch 10/24h/org). `!allowed` →
+ *      refusal (no card, no proposal).
+ *   3. quota OK → investigate (T27). `found` → cache the synthesis + ENRICHED
+ *      proposal with cited sources. `empty`/`unavailable` → degraded webhook
+ *      fallback WITHOUT fabricated sources.
+ *
+ * One structured `[propose_integration]` log line summarizes the decision.
+ */
+async function runInvestigatorPath(args: {
+  platform: string
+  projectId: string
+  organizationId: string
+}): Promise<ProposeIntegrationResult> {
+  const { platform, projectId, organizationId } = args
+
+  // The executable/assisted path is ALWAYS generic-webhook for the no-template
+  // branch. Resolve it up front; the registry guarantees it exists (validated at
+  // load), but if it were ever removed we fail loud rather than silently.
+  const genericTemplate = getIntegrationTemplate(FALLBACK_TEMPLATE_SLUG)
+  if (!genericTemplate) {
+    logger.warn('[propose_integration] generic-webhook template missing', {
+      platformSlug: computePlatformSlug(platform),
+    })
+    return {
+      success: false,
+      message: `Ainda não tenho um modelo pronto para "${platform}", e o webhook genérico de fallback não está disponível. Peça para o usuário descrever o sistema ou usar outra plataforma.`,
+    }
+  }
+
+  const platformSlug = computePlatformSlug(platform)
+
+  // 1. CACHE FIRST (no quota on hit). A cached synthesis means a recent
+  //    investigation already grounded the API in real sources → reuse it.
+  const cached = await getCachedIntegrationResearch(platformSlug)
+  let cacheHit = false
+  let researchStatus: 'found' | 'empty' | 'unavailable' | 'cache' = 'unavailable'
+  let proposal: IntegrationProposalPatch
+
+  if (cached) {
+    cacheHit = true
+    researchStatus = 'cache'
+    proposal = buildInvestigatedProposal({
+      platform,
+      genericTemplate,
+      sources: cached.sources,
+    })
+  } else {
+    // 2. CACHE MISS → spend quota. `!allowed` → leiga refusal, NO proposal.
+    const quota = await checkFixedWindowQuota('integrationResearch', organizationId)
+    if (!quota.allowed) {
+      logger.info('[propose_integration]', {
+        platformSlug,
+        cacheHit,
+        researchStatus: 'quota_exhausted',
+        sourceCount: 0,
+      })
+      return {
+        success: false,
+        message:
+          'Já usamos o limite de pesquisas de integração por hoje.' +
+          formatResetHint(quota.resetMs) +
+          ' Você pode usar um modelo pronto (ex.: RD Station) ou conectar via webhook informando a URL de destino.',
+      }
+    }
+
+    // 3. QUOTA OK → run the pure web investigator (T27).
+    const outcome = await runIntegrationResearcher({ platform, organizationId })
+
+    if (outcome.status === 'found') {
+      researchStatus = 'found'
+      // Persist the synthesis for the next caller (7-day cache, fail-open).
+      await setCachedIntegrationResearch(platformSlug, {
+        endpoints: outcome.blueprint.endpoints,
+        credentials: outcome.blueprint.credentials,
+        sources: outcome.sources,
+      })
+      proposal = buildInvestigatedProposal({
+        platform,
+        genericTemplate,
+        sources: outcome.sources,
+      })
+    } else {
+      // `empty` or `unavailable` → degraded webhook fallback, NO fabricated
+      // sources (FR-11 — same downstream confirm gate as the matched path).
+      researchStatus = outcome.status
+      proposal = buildDegradedWebhookProposal({ platform, genericTemplate })
+    }
+  }
+
+  // Persist the proposal metadata (race-safe, org-scoped — never credentials).
+  await patchIntegrationStateAtomic({
+    projectId,
+    organizationId,
+    patch: { proposed: proposal },
+  })
+
+  logger.info('[propose_integration]', {
+    platformSlug,
+    cacheHit,
+    researchStatus,
+    sourceCount: proposal.sources?.length ?? 0,
+  })
+
+  return buildProposalCardResult(proposal)
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -143,32 +405,24 @@ export function proposeIntegrationTool(ctx: BuilderToolExecutionContext) {
       }),
       execute: async (input) => {
         try {
-          // 1. Resolve a template. Explicit slug wins; else match by platform name.
-          let template: IntegrationTemplate | null = input.templateSlug
+          // 1. Resolve a catalog template. Explicit slug wins; else match by
+          //    platform name. The investigator ONLY runs when neither resolves.
+          const template: IntegrationTemplate | null = input.templateSlug
             ? getIntegrationTemplate(input.templateSlug)
             : matchTemplateByPlatform(input.platform)
 
-          // 2. No template matched.
+          // 2. NO catalog template matched → W3 (T30) investigator path.
           if (!template) {
-            // W3 (T30): cair no investigador aqui — plataforma desconhecida vira
-            // pesquisa web + proposta com fontes citadas (builderState.integration
-            // .proposed.sources). Nesta onda (W2) não há investigador; caímos no
-            // template generic-webhook para que o fluxo ainda complete: o usuário
-            // cola a URL de destino no passo de credenciais.
-            const fallback = getIntegrationTemplate(FALLBACK_TEMPLATE_SLUG)
-            if (!fallback) {
-              // Registry guarantees this template exists (validated at load); if
-              // it were ever removed we fail loud rather than silently.
-              return {
-                success: false as const,
-                message: `Ainda não tenho um modelo pronto para "${input.platform}", e o webhook genérico de fallback não está disponível. Peça para o usuário descrever o sistema ou usar outra plataforma.`,
-              }
-            }
-            template = fallback
+            return await runInvestigatorPath({
+              platform: input.platform,
+              projectId: ctx.projectId,
+              organizationId: ctx.organizationId,
+            })
           }
 
-          // 3. Persist the proposal metadata into builderState.integration.proposed
-          //    (race-safe, org-scoped — never carries credential values).
+          // 3. TEMPLATE-MATCH path (unchanged): persist the proposal metadata into
+          //    builderState.integration.proposed (race-safe, org-scoped — never
+          //    carries credential values) and return the approval card.
           const proposal = buildProposal(template)
           await patchIntegrationStateAtomic({
             projectId: ctx.projectId,
@@ -179,16 +433,7 @@ export function proposeIntegrationTool(ctx: BuilderToolExecutionContext) {
           // 4. Return a result that CARRIES the card key + the data the card
           //    renders. The handler that creates the draft fires on the card
           //    submit (T24), not here — so we stop and instruct the LLM to wait.
-          return {
-            success: true as const,
-            card: INTEGRATION_PROPOSAL_CARD_KEY,
-            proposal,
-            message:
-              `Proposta de integração com ${proposal.platform} exibida no card de aprovação. ` +
-              'Pare aqui e aguarde. A confirmação NÃO virá como texto do usuário: quando ele tocar "Confirmar", ' +
-              'o servidor cria a integração e injeta uma nota de sistema autoritativa. Só então prossiga (ex.: pedir as credenciais). ' +
-              'Não infira aprovação de frases do chat nem chame propose_integration de novo após exibir o card.',
-          }
+          return buildProposalCardResult(proposal)
         } catch (err) {
           return {
             success: false as const,

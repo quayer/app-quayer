@@ -29,12 +29,10 @@ export const RATE_LIMITS = {
 // bucket — é contagem bruta por janela, por org. Mantém os buckets do runtime
 // (instance/contact/org) intocados.
 //
-// Onda 3 adicionará `integrationResearch` aqui — há espaço reservado; não
-// adicionar agora.
-
 export const FIXED_WINDOW_QUOTAS = {
   /** Teste de integração: 30 requisições por hora por org — POST /:id/test. */
   integrationTest: { limit: 30, windowMs: 60 * 60 * 1000 }, // 30/h/org
+  integrationResearch: { limit: 10, windowMs: 24 * 60 * 60 * 1000 }, // 10/24h/org — investigador (T29)
 } as const
 
 export type FixedWindowQuotaScope = keyof typeof FIXED_WINDOW_QUOTAS
