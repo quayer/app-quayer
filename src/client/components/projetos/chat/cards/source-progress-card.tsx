@@ -898,9 +898,76 @@ function proposalReason(proposal: SourceProposal): React.ReactNode {
 
   return (
     <>
-      Li seu site e encontrei: <strong>{foundText}</strong>. Você pode completar:{" "}
-      <strong>{missingText}</strong> — me conte aqui no chat ou toque em Editar.
+      Base pronta: encontrei <strong>{foundText}</strong>. Falta opcional:{" "}
+      <strong>{missingText}</strong>.
     </>
+  )
+}
+
+function ProposalSummary({
+  proposal,
+  tokens,
+}: {
+  proposal: SourceProposal
+  tokens: AppTokens
+}) {
+  const offer = proposal.services?.slice(0, 2).join(" · ")
+  const address = proposal.address?.trim()
+  const description = proposal.description?.trim()
+  const highlights = proposal.differentiators?.slice(0, 4) ?? []
+  const hiddenHighlights = Math.max(
+    0,
+    (proposal.differentiators?.length ?? 0) - highlights.length,
+  )
+
+  return (
+    <div
+      className="rounded-md border px-3 py-3"
+      style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
+    >
+      <div className="flex flex-col gap-1">
+        <span
+          className="text-[13px] font-semibold"
+          style={{ color: tokens.textPrimary }}
+        >
+          {proposal.businessName ?? "Base do agente"}
+        </span>
+        {(offer || address) && (
+          <span
+            className="text-[12px] leading-relaxed"
+            style={{ color: tokens.textSecondary }}
+          >
+            {[offer, address].filter(Boolean).join(" · ")}
+          </span>
+        )}
+        {description && (
+          <span
+            className="text-[12px] leading-relaxed"
+            style={{ color: tokens.textSecondary }}
+          >
+            {description}
+          </span>
+        )}
+      </div>
+
+      {highlights.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <ReadChips items={highlights} tokens={tokens} />
+          {hiddenHighlights > 0 && (
+            <span
+              className="rounded-full border px-2 py-1 text-[11px]"
+              style={{
+                backgroundColor: tokens.bgSurface,
+                borderColor: tokens.divider,
+                color: tokens.textTertiary,
+              }}
+            >
+              +{hiddenHighlights} diferenciais
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1139,6 +1206,37 @@ export function SourceProgressCard({
   const imagesAnyError = sources.some(
     (source) => source.imagesStatus === "error",
   )
+  const pendingSourceImagesCount = React.useMemo(
+    () => images.filter((image) => image.confirmedAt == null).length,
+    [images],
+  )
+  const approvePendingSourceImages = React.useCallback(() => {
+    if (pendingSourceImagesCount <= 0) return
+    void fetchWithAuthRetry(
+      `/api/v1/builder/projects/${projectId}/sources/images/bulk`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "approve_all" }),
+      },
+      { notifyOnAuthFailure: true },
+    ).then((res) => {
+      if (!res.ok) return
+      void refetchImages()
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("builder:local-receipt", {
+            detail: {
+              message: `✓ ${pendingSourceImagesCount} ${pendingSourceImagesCount === 1 ? "foto aprovada" : "fotos aprovadas"} para o agente`,
+            },
+          }),
+        )
+      }
+    })
+  }, [pendingSourceImagesCount, projectId, refetchImages])
 
   const hasProposal =
     proposed != null &&
@@ -1245,6 +1343,7 @@ export function SourceProgressCard({
 
   // ── Accept ──────────────────────────────────────────────────────────────
   const handleAccept = React.useCallback(() => {
+    approvePendingSourceImages()
     if (!editing) {
       // Accept the proposal as-is — no `edited` overrides.
       onSubmit({ accept: true })
@@ -1277,13 +1376,14 @@ export function SourceProgressCard({
     address,
     description,
     onSubmit,
+    approvePendingSourceImages,
   ])
 
   // ── Footer actions ──────────────────────────────────────────────────────
   const actions: CardShellAction[] = []
   if (!alreadyConfirmed) {
     actions.push({
-      label: "Usar informações no agente",
+      label: editing ? "Salvar e montar agente" : "Montar agente com isso",
       onClick: handleAccept,
       variant: "primary",
       icon: <Check className="h-3.5 w-3.5" />,
@@ -1292,7 +1392,7 @@ export function SourceProgressCard({
     })
     if (hasProposal && !editing) {
       actions.push({
-        label: "Editar",
+        label: "Editar dados",
         onClick: enterEdit,
         variant: "secondary",
         icon: <Pencil className="h-3.5 w-3.5" />,
@@ -1333,19 +1433,20 @@ export function SourceProgressCard({
   }
 
   const reason = alreadyConfirmed
-    ? "Pronto! Usei essas informações para montar seu agente. Quer ajustar algo? É só me dizer aqui no chat."
+    ? "Base enviada ao agente. Quer ajustar algo? É só me dizer aqui no chat."
     : hasFailedWithoutProposal
       ? allErrored
         ? "Não consegui ler suas fontes. Verifique o link, cole de novo ou me conte as informações no chat."
         : "Li seu site, mas não consegui terminar de organizar as informações. Nada se perdeu — você pode me contar os dados no chat."
       : hasProposal && proposed
         ? proposalReason(proposed)
-        : "Estou lendo seu site e anotando as informações do negócio. Atualizo aqui sozinho — enquanto isso, me conta: como você prefere que o agente fale com seus clientes?"
+        : "Estou lendo o site e preparando uma base curta para montar o agente."
+  const cardTitle = sources.length <= 1 ? "Site analisado" : "Fontes analisadas"
 
   return (
     <CardShell
       icon={<Sparkles className="h-4 w-4" />}
-      title="Fontes do negócio"
+      title={cardTitle}
       reason={reason}
       actions={actions}
       tokens={tokens}
@@ -1401,7 +1502,7 @@ export function SourceProgressCard({
               className="text-[11px] font-medium uppercase tracking-wide"
               style={{ color: tokens.textTertiary }}
             >
-              O que encontrei
+              Resumo
             </span>
 
             {editing ? (
@@ -1476,72 +1577,7 @@ export function SourceProgressCard({
                 </FieldRow>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {proposed.businessName && (
-                  <FieldRow label="Nome do negócio" tokens={tokens}>
-                    <span
-                      className="text-[13px]"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {proposed.businessName}
-                    </span>
-                  </FieldRow>
-                )}
-                {proposed.services && proposed.services.length > 0 && (
-                  <FieldRow label="Serviços" tokens={tokens}>
-                    <ReadChips items={proposed.services} tokens={tokens} />
-                  </FieldRow>
-                )}
-                {proposed.audience && (
-                  <FieldRow label="Público-alvo" tokens={tokens}>
-                    <span
-                      className="text-[13px]"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {proposed.audience}
-                    </span>
-                  </FieldRow>
-                )}
-                {proposed.differentiators &&
-                  proposed.differentiators.length > 0 && (
-                    <FieldRow label="Diferenciais" tokens={tokens}>
-                      <ReadChips
-                        items={proposed.differentiators}
-                        tokens={tokens}
-                      />
-                    </FieldRow>
-                  )}
-                {proposed.tone && (
-                  <FieldRow label="Tom de voz" tokens={tokens}>
-                    <span
-                      className="text-[13px]"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {proposed.tone}
-                    </span>
-                  </FieldRow>
-                )}
-                {proposed.address && (
-                  <FieldRow label="Endereço" tokens={tokens}>
-                    <span
-                      className="text-[13px]"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {proposed.address}
-                    </span>
-                  </FieldRow>
-                )}
-                {proposed.description && (
-                  <FieldRow label="Descrição" tokens={tokens}>
-                    <span
-                      className="text-[13px]"
-                      style={{ color: tokens.textPrimary }}
-                    >
-                      {proposed.description}
-                    </span>
-                  </FieldRow>
-                )}
-              </div>
+              <ProposalSummary proposal={proposed} tokens={tokens} />
             )}
           </div>
         )}
@@ -1553,16 +1589,8 @@ export function SourceProgressCard({
               className="text-[11px] font-medium uppercase tracking-wide"
               style={{ color: tokens.textTertiary }}
             >
-              Catálogo de fotos
+              Fotos
             </span>
-
-            <p
-              className="text-[12px] leading-relaxed"
-              style={{ color: tokens.textSecondary }}
-            >
-              Seu agente pode enviar estas fotos nas conversas com clientes.
-              Remova as que não quiser que ele use.
-            </p>
 
             {imagesCatalogLoading ? (
               <div
