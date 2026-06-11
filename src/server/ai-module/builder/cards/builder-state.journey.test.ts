@@ -15,6 +15,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseBuilderState,
+  patchBuilderState,
+  clearCapturedProposals,
   DEFAULT_BUILDER_STATE,
 } from './builder-state'
 
@@ -158,5 +160,212 @@ describe('channel namespace (T86) — optional, no default', () => {
     // parseBuilderState falls back to DEFAULT (channel undefined).
     const parsed = parseBuilderState({ channel: { platforms: ['telegram'] } })
     expect(parsed.channel).toBeUndefined()
+  })
+})
+
+describe('capturedProposals namespace (T06/FR-02) — parse + legacy backfill', () => {
+  it('an empty {} resolves capturedProposals to undefined (OPTIONAL, no default)', () => {
+    expect(parseBuilderState({}).capturedProposals).toBeUndefined()
+  })
+
+  it('DEFAULT_BUILDER_STATE has no capturedProposals', () => {
+    expect(DEFAULT_BUILDER_STATE.capturedProposals).toBeUndefined()
+  })
+
+  it('backfills a LEGACY JSONB state (predates the namespace) to undefined', () => {
+    const legacy = {
+      project: { name: 'Barbearia X' },
+      persona: { name: 'Ana' },
+      confirmations: { persona: true },
+    }
+    expect(parseBuilderState(legacy).capturedProposals).toBeUndefined()
+  })
+
+  it('backfills a legacy persisted JSON STRING without the namespace to undefined', () => {
+    const legacyJson = JSON.stringify({
+      project: { name: 'Loja Y' },
+      confirmations: {},
+    })
+    expect(parseBuilderState(legacyJson).capturedProposals).toBeUndefined()
+  })
+
+  it('preserves a populated capturedProposals namespace (multiple domains)', () => {
+    const parsed = parseBuilderState({
+      capturedProposals: {
+        persona: { name: 'Bia', tone: 'formal' },
+        services: { offered: ['corte', 'barba'] },
+        handoff: { mode: 'roleta', reason: 'nicho regulado' },
+      },
+    })
+    expect(parsed.capturedProposals).toEqual({
+      persona: { name: 'Bia', tone: 'formal' },
+      services: { offered: ['corte', 'barba'] },
+      handoff: { mode: 'roleta', reason: 'nicho regulado' },
+    })
+  })
+
+  it('preserves capturedProposals when parsing a persisted JSON string', () => {
+    const json = JSON.stringify({
+      capturedProposals: { hours: { preset: 'seg-sex 9-18' } },
+      confirmations: {},
+    })
+    expect(parseBuilderState(json).capturedProposals).toEqual({
+      hours: { preset: 'seg-sex 9-18' },
+    })
+  })
+
+  it('strips UNKNOWN domains from capturedProposals (structural whitelist)', () => {
+    // `unknownDomain` is not in capturedProposalsSchema → safeParse drops the
+    // extra key while keeping the valid `persona` proposal.
+    const parsed = parseBuilderState({
+      capturedProposals: {
+        persona: { name: 'Caio' },
+        unknownDomain: { whatever: true },
+      },
+    })
+    expect(parsed.capturedProposals).toEqual({ persona: { name: 'Caio' } })
+    expect(
+      (parsed.capturedProposals as Record<string, unknown>).unknownDomain,
+    ).toBeUndefined()
+  })
+
+  it('drops an out-of-contract capturedProposals without throwing (NEVER throws)', () => {
+    // `handoff.mode` must be a HandoffMode enum value; an invalid one fails the
+    // whole safeParse, so parseBuilderState backfills to DEFAULT (undefined).
+    const parsed = parseBuilderState({
+      capturedProposals: { handoff: { mode: 'bogus_mode' } },
+    })
+    expect(parsed.capturedProposals).toBeUndefined()
+  })
+
+  it('truncation contract: an over-long captured text fails safeParse → DEFAULT (never throws)', () => {
+    // CAPTURED_TEXT_MAX is 300; a 301-char name is out of contract. The LLM can
+    // never persist an arbitrary-length blob into the JSONB.
+    const parsed = parseBuilderState({
+      capturedProposals: { persona: { name: 'x'.repeat(301) } },
+    })
+    expect(parsed.capturedProposals).toBeUndefined()
+  })
+})
+
+describe('clearCapturedProposals (T06/FR-02) — explicit per-domain deletion', () => {
+  const stateWith = (
+    captured: NonNullable<ReturnType<typeof parseBuilderState>['capturedProposals']>,
+  ) => parseBuilderState({ capturedProposals: captured })
+
+  it('removes ONLY the given domain, leaving the others untouched', () => {
+    const state = stateWith({
+      persona: { name: 'Bia' },
+      services: { offered: ['corte'] },
+      hours: { preset: 'seg-sex' },
+    })
+    const next = clearCapturedProposals(state, 'services')
+    expect(next.capturedProposals).toEqual({
+      persona: { name: 'Bia' },
+      hours: { preset: 'seg-sex' },
+    })
+    // The cleared domain is truly gone, not merely undefined-merged.
+    expect(next.capturedProposals?.services).toBeUndefined()
+  })
+
+  it('removes the whole namespace when the last remaining domain is cleared (no orphan {})', () => {
+    const state = stateWith({ persona: { name: 'Bia' } })
+    const next = clearCapturedProposals(state, 'persona')
+    expect(next.capturedProposals).toBeUndefined()
+    expect('capturedProposals' in next).toBe(false)
+  })
+
+  it('is a no-op (returns the same reference) when the domain is absent', () => {
+    const state = stateWith({ persona: { name: 'Bia' } })
+    const next = clearCapturedProposals(state, 'services')
+    expect(next).toBe(state)
+  })
+
+  it('is a no-op (returns the same reference) when the namespace itself is absent', () => {
+    const state = parseBuilderState({})
+    expect(state.capturedProposals).toBeUndefined()
+    const next = clearCapturedProposals(state, 'persona')
+    expect(next).toBe(state)
+  })
+
+  it('is PURE — never mutates the input state', () => {
+    const state = stateWith({
+      persona: { name: 'Bia' },
+      services: { offered: ['corte'] },
+    })
+    const snapshot = JSON.parse(JSON.stringify(state))
+    clearCapturedProposals(state, 'persona')
+    expect(state).toEqual(snapshot)
+    expect(state.capturedProposals).toEqual({
+      persona: { name: 'Bia' },
+      services: { offered: ['corte'] },
+    })
+  })
+
+  it('clearing each domain in turn drains the namespace to undefined', () => {
+    let state = stateWith({
+      persona: { name: 'Bia' },
+      services: { offered: ['corte'] },
+    })
+    state = clearCapturedProposals(state, 'persona')
+    expect(state.capturedProposals).toEqual({ services: { offered: ['corte'] } })
+    state = clearCapturedProposals(state, 'services')
+    expect(state.capturedProposals).toBeUndefined()
+  })
+})
+
+describe('regression — deepMerge (patchBuilderState) NEVER deletes keys', () => {
+  it('patching a domain with undefined does NOT clear it (why clearCapturedProposals exists)', () => {
+    const state = parseBuilderState({
+      capturedProposals: { persona: { name: 'Bia' } },
+    })
+    // The tempting-but-wrong way to "clear": patch the domain to undefined.
+    // deepMerge ignores undefined patch values, so the proposal SURVIVES — this
+    // is exactly the zombie-badge trap the explicit helper guards against.
+    const patched = patchBuilderState(state, {
+      capturedProposals: { persona: undefined },
+    })
+    expect(patched.capturedProposals?.persona).toEqual({ name: 'Bia' })
+  })
+
+  it('patching a sub-field with undefined leaves the existing value in place', () => {
+    const state = parseBuilderState({
+      capturedProposals: { persona: { name: 'Bia', tone: 'formal' } },
+    })
+    const patched = patchBuilderState(state, {
+      capturedProposals: { persona: { tone: undefined } },
+    })
+    // `tone` is NOT deleted; only present (defined) patch keys win.
+    expect(patched.capturedProposals?.persona).toEqual({
+      name: 'Bia',
+      tone: 'formal',
+    })
+  })
+
+  it('patch only adds/overwrites defined keys — never removes a sibling domain', () => {
+    const state = parseBuilderState({
+      capturedProposals: { persona: { name: 'Bia' } },
+    })
+    const patched = patchBuilderState(state, {
+      capturedProposals: { services: { offered: ['corte'] } },
+    })
+    expect(patched.capturedProposals).toEqual({
+      persona: { name: 'Bia' },
+      services: { offered: ['corte'] },
+    })
+  })
+
+  it('clearCapturedProposals SUCCEEDS where the patch fails to clear', () => {
+    const state = parseBuilderState({
+      capturedProposals: { persona: { name: 'Bia' }, services: { offered: ['x'] } },
+    })
+    // The patch cannot delete `persona`...
+    const patchAttempt = patchBuilderState(state, {
+      capturedProposals: { persona: undefined },
+    })
+    expect(patchAttempt.capturedProposals?.persona).toBeDefined()
+    // ...but the explicit helper does, leaving only `services`.
+    const cleared = clearCapturedProposals(state, 'persona')
+    expect(cleared.capturedProposals).toEqual({ services: { offered: ['x'] } })
   })
 })

@@ -20,9 +20,16 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { trackJourneyEvent } from '@/server/services/journey-events'
 import { buildBuilderTool } from './build-tool'
 import { BUILDER_RESERVED_NAME } from '../builder.constants'
 import { collectionNameFor } from '../knowledge/knowledge-helpers'
+import { parseBuilderState } from '../cards/builder-state'
+import {
+  IDENTITY_CARD_METADATA_KEY,
+  getIdentityCardFromMetadata,
+  injectDisclosureIntoPrompt,
+} from '@/lib/agent-identity-card'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -103,7 +110,16 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
             id: ctx.projectId,
             organizationId: ctx.organizationId,
           },
-          select: { id: true, aiAgentId: true },
+          select: {
+            id: true,
+            aiAgentId: true,
+            // T25 (FR-22) — o disclosure escolhido no agent_review vive em
+            // metadata.identityCard ANTES de o agente existir (v2 decide a
+            // identidade antes da criação); o journeyVersion vem do builderState
+            // da conversa para etiquetar o evento de funil.
+            metadata: true,
+            conversation: { select: { builderState: true } },
+          },
         })
 
         if (!project) {
@@ -137,6 +153,26 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
           select: { id: true },
         })
 
+        // T25 (FR-22, plan §4.5) — disclosure no prompt ANTES de o agente existir.
+        // No v2 a identidade é decidida no agent_review e vive em
+        // metadata.identityCard; o `create_agent` materializa o bloco '# Identidade'
+        // no systemPrompt (idempotente). Em v1 o disclosure entra depois, via PATCH
+        // /builder/identity (identity.routes.ts). Só injetamos quando o projeto TEM
+        // um identityCard de verdade — sem ele o prompt fica IDÊNTICO ao aprovado
+        // (getIdentityCardFromMetadata devolveria o card default, que ainda assim
+        // anexaria um bloco; o guard pela chave evita esse efeito colateral).
+        const hasIdentityCard =
+          project.metadata !== null &&
+          typeof project.metadata === 'object' &&
+          !Array.isArray(project.metadata) &&
+          IDENTITY_CARD_METADATA_KEY in project.metadata
+        const systemPrompt = hasIdentityCard
+          ? injectDisclosureIntoPrompt(
+              input.systemPrompt,
+              getIdentityCardFromMetadata(project.metadata),
+            )
+          : input.systemPrompt
+
         // Transactional create: agent + version + project link
         const result = await database.$transaction(async (tx) => {
           const agent = await tx.aIAgentConfig.create({
@@ -146,7 +182,7 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
               provider: input.provider,
               model: input.model,
               temperature: input.temperature,
-              systemPrompt: input.systemPrompt,
+              systemPrompt,
               enabledTools: input.enabledTools,
               isActive: true,
               ...(existingCollection
@@ -160,7 +196,7 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
             data: {
               aiAgentId: agent.id,
               versionNumber: 1,
-              content: input.systemPrompt,
+              content: systemPrompt,
               description: 'Initial version (created by Builder AI)',
               createdBy: 'chat',
             },
@@ -173,6 +209,18 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
           })
 
           return { agent, version }
+        })
+
+        // T25 — funil: o agente nasceu. Fire-and-forget, nunca lança. O
+        // journeyVersion vem do builderState da conversa (parseBuilderState
+        // backfilla legados para 1).
+        await trackJourneyEvent({
+          organizationId: ctx.organizationId,
+          projectId: ctx.projectId,
+          journeyVersion: parseBuilderState(
+            project.conversation?.builderState ?? null,
+          ).journeyVersion,
+          event: 'agent_created',
         })
 
         return {

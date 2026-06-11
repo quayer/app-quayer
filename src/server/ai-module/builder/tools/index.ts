@@ -36,6 +36,7 @@ import { teachAgentTool } from './teach-agent.tool'
 import { editPromptSectionTool } from './edit-prompt-section.tool'
 import { revertPromptTool } from './revert-prompt.tool'
 import { setProjectBasicsTool } from './set-project-basics.tool'
+import { proposeFieldValuesTool } from './propose-field-values.tool'
 
 export type { BuilderToolExecutionContext }
 
@@ -70,6 +71,9 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     edit_prompt_section: editPromptSectionTool(ctx),
     revert_prompt: revertPromptTool(ctx),
     set_project_basics: setProjectBasicsTool(ctx),
+    // T23 (FR-02) — captura propostas de texto livre em capturedProposals.*; NUNCA
+    // flipa sentinel (proposta ≠ confirmação). Card prefilla e o usuário confirma.
+    propose_field_values: proposeFieldValuesTool(ctx),
     // Instagram agora é configurado pelo card de credenciais (deploy tab), não
     // por um wizard no chat — o wizard antigo foi removido (dead UI).
   }

@@ -61,6 +61,7 @@ import type { StepId } from "@/server/ai-module/builder/state/readiness.types"
 import type { CardComponentProps, CardDescriptor, CardKey } from "./types"
 
 import { AgentPersonaCard } from "./agent-persona-card"
+import { AgentReviewCard } from "./agent-review-card"
 import { ServicesOfferedCard } from "./services-offered-card"
 import { BusinessHoursCard } from "./business-hours-card"
 import { PricingCard } from "./pricing-card"
@@ -79,6 +80,7 @@ import { BusinessIdentityCard } from "./business-identity-card"
  */
 export type RegisteredW3CardKey =
   | "agent_persona"
+  | "agent_review"
   | "services"
   | "business_hours"
   | "pricing"
@@ -108,6 +110,17 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Personalidade do agente",
     icon: <UserRound className="h-4 w-4" />,
     component: AgentPersonaCard as ComponentType<CardComponentProps>,
+  },
+  agent_review: {
+    // Jornada v2 (T43, FR-05/FR-22) — ACTIVE-STEP card da fase "Revisar". Card
+    // COMPOSTO que funde persona + serviços + horários numa única confirmação
+    // (NFR-07) + seção avançada de disclosure. Surfa como step `agent_review`,
+    // cujo isDone (journey-v2 engine) exige persona && services && hours.
+    cardKey: "agent_review",
+    stepId: "agent_review",
+    title: "Revisar o agente",
+    icon: <Sparkles className="h-4 w-4" />,
+    component: AgentReviewCard as ComponentType<CardComponentProps>,
   },
   services: {
     cardKey: "services",

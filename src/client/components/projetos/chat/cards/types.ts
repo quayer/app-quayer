@@ -52,6 +52,7 @@ export type CardKey =
   | "source_progress"
   | "silenced_contacts"
   | "business_identity"
+  | "agent_review"
 
 /**
  * Compile-time assertion that every backend-registered key is also a valid FE

@@ -246,6 +246,63 @@ export const channelStateSchema = z.object({
   whatsappMode: z.enum(['qr', 'cloud']).optional(),
 })
 
+/**
+ * Jornada v2 (T06, FR-02, plan §2.2 item 2) — `capturedProposals` é a generalização
+ * do invariante de `sourceIngestion.proposed`: valores PROPOSTOS por captura de conversa
+ * (tool `propose_field_values`) ou por nicho regulado (`research-niche`), que NUNCA
+ * flipam sentinels e só viram OWNED no submit do card correspondente (confirmação humana
+ * obrigatória — o "configure por exceção"). O prefill dos cards lê
+ * `capturedProposals.<domínio>` como fallback abaixo do owned confirmado (FR-02).
+ *
+ * Naming: `capturedProposals`, NÃO `proposals` — o state já tem `proposal` (singular,
+ * nome/descrição do agente, linhas 29-32); um plural a um caractere de distância seria
+ * armadilha de leitura/review.
+ *
+ * SEGURANÇA: cada domínio é um sub-schema FECHADO com max-lengths e o conjunto de
+ * domínios é uma WHITELIST estrutural (chaves extras são descartadas pelo safeParse) —
+ * o LLM nunca grava shape arbitrário. Limpeza no submit é remoção EXPLÍCITA via
+ * `clearCapturedProposals` (o `deepMerge` de `patchBuilderState` ignora `undefined` e
+ * nunca deleta chaves). 100% aditivo: states legados parseiam para `undefined`.
+ */
+const CAPTURED_TEXT_MAX = 300
+
+export const capturedPersonaProposalSchema = z.object({
+  name: z.string().max(CAPTURED_TEXT_MAX).optional(),
+  tone: z.string().max(CAPTURED_TEXT_MAX).optional(),
+  greeting: z.string().max(CAPTURED_TEXT_MAX).optional(),
+})
+
+export const capturedServicesProposalSchema = z.object({
+  offered: z.array(z.string().max(CAPTURED_TEXT_MAX)).max(50).optional(),
+})
+
+export const capturedHoursProposalSchema = z.object({
+  preset: z.string().max(CAPTURED_TEXT_MAX).optional(),
+})
+
+export const capturedPricingProposalSchema = z.object({
+  items: z.array(pricingItemSchema).max(100).optional(),
+})
+
+export const capturedHandoffProposalSchema = z.object({
+  mode: handoffModeSchema.optional(),
+  // Justificativa da proposta por nicho regulado (research-niche.tool.ts → T26).
+  reason: z.string().max(CAPTURED_TEXT_MAX).optional(),
+})
+
+export const capturedActivationProposalSchema = z.object({
+  mode: z.string().max(CAPTURED_TEXT_MAX).optional(),
+})
+
+export const capturedProposalsSchema = z.object({
+  persona: capturedPersonaProposalSchema.optional(),
+  services: capturedServicesProposalSchema.optional(),
+  hours: capturedHoursProposalSchema.optional(),
+  pricing: capturedPricingProposalSchema.optional(),
+  handoff: capturedHandoffProposalSchema.optional(),
+  activation: capturedActivationProposalSchema.optional(),
+})
+
 // ==========================================
 // Confirmation sentinels (server-resolved booleans)
 // ==========================================
@@ -336,6 +393,10 @@ export const builderStateSchema = z.object({
   // T86 — canal em 2 níveis (FR-24/25). OPCIONAL e SEM default: um state vazio/
   // legado parseia para `channel: undefined`; o engine v2 lê `state.channel?.platforms`.
   channel: channelStateSchema.optional(),
+  // T06 — propostas capturadas da conversa (FR-02). OPCIONAL e SEM default: um state
+  // vazio/legado parseia para `capturedProposals: undefined`. NUNCA flipa sentinels;
+  // o prefill dos cards lê isto como fallback e o submit limpa via `clearCapturedProposals`.
+  capturedProposals: capturedProposalsSchema.optional(),
   confirmations: confirmationsSchema.default({}),
 })
 
@@ -362,6 +423,9 @@ export type IdentityState = z.infer<typeof identityStateSchema>
 export type SilencedContactItem = z.infer<typeof silencedContactItemSchema>
 export type SilencedContactsState = z.infer<typeof silencedContactsStateSchema>
 export type ChannelState = z.infer<typeof channelStateSchema>
+export type CapturedProposals = z.infer<typeof capturedProposalsSchema>
+/** Whitelist de domínios de `capturedProposals` — o que `clearCapturedProposals` aceita. */
+export type CapturedProposalDomain = keyof CapturedProposals
 export type BuilderConfirmations = z.infer<typeof confirmationsSchema>
 export type BuilderState = z.infer<typeof builderStateSchema>
 
@@ -397,6 +461,31 @@ export function applyConfirmation(
     ...state,
     confirmations: { ...state.confirmations, [key]: true },
   }
+}
+
+/**
+ * T06 (FR-02) — Remove a proposta capturada de UM domínio, retornando um NOVO state.
+ * É uma deleção EXPLÍCITA por spread porque o `deepMerge` de `patchBuilderState` ignora
+ * `undefined` e NUNCA apaga chaves — confiar no patch para "limpar" deixaria a proposta
+ * confirmada zumbi no JSONB e re-aparecendo como badge "sugerido da conversa". Os cards
+ * (business_identity, agent_review, etc.) chamam isto no submit, depois que o valor vira
+ * owned. Pura, nunca muta o input. No-op quando o namespace/domínio já está ausente —
+ * e quando o namespace fica vazio, ele é removido por inteiro (sem `{}` órfão).
+ */
+export function clearCapturedProposals(
+  state: BuilderState,
+  domain: CapturedProposalDomain
+): BuilderState {
+  if (state.capturedProposals?.[domain] === undefined) return state
+  // Spread sem a chave do domínio (deleção real, não merge).
+  const { [domain]: _removed, ...rest } = state.capturedProposals
+  const hasRemaining = Object.values(rest).some((v) => v !== undefined)
+  if (!hasRemaining) {
+    // Namespace esvaziou: remove `capturedProposals` por inteiro (sem `{}` órfão).
+    const { capturedProposals: _drop, ...stateRest } = state
+    return stateRest
+  }
+  return { ...state, capturedProposals: rest }
 }
 
 /** Recursive partial used by patchBuilderState. */

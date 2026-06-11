@@ -5,14 +5,15 @@
  *
  * cardKey `services`. Defines the agent's SCOPE — what it DOES and what it does
  * NOT do — useful for any agent type (support, FAQ, etc.), not only services.
- * Two editable chip lists:
- *   - "Faz / oferece" → services.offered    (brand-subtle chips)
- *   - "NÃO faz"       → services.notOffered (danger-subtle chips)
+ * The two editable chip lists live in the reusable `review/services-section.tsx`
+ * (extracted in T41, jornada-builder-v2): this card is the SHELL + confirm flow
+ * and the composite `agent_review` card reuses the same section (zero
+ * duplication; this card stays for the reopen FR-17).
  *
- * PRESENTATIONAL: pre-fills from `props.value.services`, lets the user add
- * (Enter / "+" button) and remove (x) chips, trims + de-dupes input, caps each
- * list at MAX_ITEMS, and on confirm calls `props.onSubmit({ offered, notOffered })`.
- * It does NOT fetch — chat-panel owns POST + SSE.
+ * PRESENTATIONAL: the section pre-fills from `props.value.services`; this card
+ * tracks the section's live value and on confirm calls
+ * `props.onSubmit({ offered, notOffered })`. It does NOT fetch — chat-panel owns
+ * POST + SSE.
  *
  * Styling idiom matches ToolSelectionCard / ChannelSelectionCard via CardShell
  * + useAppTokens tokens (passed down as `props.tokens`).
@@ -21,154 +22,22 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, Check, Plus, Wrench, X } from "lucide-react"
-
-import { Input } from "@/client/components/ui/input"
-import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import { Check, Wrench } from "lucide-react"
 
 import { CardShell } from "./card-shell"
+import {
+  ServicesSection,
+  type ServicesSectionValue,
+} from "./review/services-section"
 import type { CardComponentProps } from "./types"
 
 /** The exact submit payload for cardKey `services`. */
-export interface ServicesCardPayload {
-  offered: string[]
-  notOffered: string[]
-}
-
-/** Soft cap per list (per the agent brief: max ~30). */
-const MAX_ITEMS = 30
+export type ServicesCardPayload = ServicesSectionValue
 
 /**
- * Append `raw` to `list` (trimmed, case-insensitive de-dupe, capped). Returns the
- * SAME reference when the value is empty/duplicate/over-cap so callers can no-op.
- */
-function addItem(list: string[], raw: string): string[] {
-  const value = raw.trim()
-  if (value.length === 0) return list
-  if (list.length >= MAX_ITEMS) return list
-  const exists = list.some((item) => item.toLowerCase() === value.toLowerCase())
-  if (exists) return list
-  return [...list, value]
-}
-
-/** A single editable chip-list column. */
-function ChipList({
-  heading,
-  placeholder,
-  items,
-  onAdd,
-  onRemove,
-  tone,
-  tokens,
-  disabled,
-}: {
-  heading: string
-  placeholder: string
-  items: string[]
-  onAdd: (value: string) => void
-  onRemove: (index: number) => void
-  /** Visual tone of the chips: brand (offered) or danger (not offered). */
-  tone: "brand" | "danger"
-  tokens: AppTokens
-  disabled: boolean
-}) {
-  const [draft, setDraft] = React.useState("")
-
-  const chipBg = tone === "brand" ? tokens.brandSubtle : tokens.dangerSubtle
-  const chipBorder = tone === "brand" ? tokens.brandBorder : tokens.danger
-  const chipText = tone === "brand" ? tokens.brandText : tokens.dangerText
-
-  const commitDraft = React.useCallback(() => {
-    if (draft.trim().length === 0) return
-    onAdd(draft)
-    setDraft("")
-  }, [draft, onAdd])
-
-  const handleKeyDown = React.useCallback(
-    (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault()
-        commitDraft()
-      }
-    },
-    [commitDraft],
-  )
-
-  const atCap = items.length >= MAX_ITEMS
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span
-          className="text-[12px] font-medium"
-          style={{ color: tokens.textPrimary }}
-        >
-          {heading}
-        </span>
-        <span className="text-[11px]" style={{ color: tokens.textTertiary }}>
-          {items.length}/{MAX_ITEMS}
-        </span>
-      </div>
-
-      {items.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map((item, index) => (
-            <span
-              key={`${item}-${index}`}
-              className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px]"
-              style={{
-                backgroundColor: chipBg,
-                borderColor: chipBorder,
-                color: chipText,
-              }}
-            >
-              <span className="max-w-[180px] truncate">{item}</span>
-              <button
-                type="button"
-                aria-label={`Remover ${item}`}
-                disabled={disabled}
-                onClick={() => onRemove(index)}
-                className="-mr-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <X className="h-3 w-3" strokeWidth={2.5} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={atCap ? "Limite atingido" : placeholder}
-          disabled={disabled || atCap}
-          className="h-8 text-[12px]"
-          aria-label={heading}
-        />
-        <button
-          type="button"
-          aria-label={`Adicionar a ${heading}`}
-          disabled={disabled || atCap || draft.trim().length === 0}
-          onClick={commitDraft}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            backgroundColor: tokens.bgBase,
-            borderColor: tokens.divider,
-            color: tokens.textSecondary,
-          }}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/**
- * ServicesOfferedCard — cardKey `services`. Renders the two chip lists inside a
- * CardShell and submits `{ offered, notOffered }`.
+ * ServicesOfferedCard — cardKey `services`. Renders the reusable
+ * {@link ServicesSection} inside a CardShell and submits
+ * `{ offered, notOffered }`.
  */
 export function ServicesOfferedCard({
   value,
@@ -176,30 +45,15 @@ export function ServicesOfferedCard({
   onSubmit,
   tokens,
 }: CardComponentProps<ServicesCardPayload>) {
-  const [offered, setOffered] = React.useState<string[]>(
-    () => value.services.offered,
-  )
-  const [notOffered, setNotOffered] = React.useState<string[]>(
-    () => value.services.notOffered,
+  const [current, setCurrent] = React.useState<ServicesSectionValue>(
+    () => value.services,
   )
   // Alerta NÃO-bloqueante (jornada-builder-v2): confirmar com as duas listas
   // vazias mostra o aviso uma vez; o 2º clique confirma mesmo assim.
   const [emptyWarned, setEmptyWarned] = React.useState(false)
 
-  const addOffered = React.useCallback((raw: string) => {
-    setOffered((current) => addItem(current, raw))
-  }, [])
-  const removeOffered = React.useCallback((index: number) => {
-    setOffered((current) => current.filter((_, i) => i !== index))
-  }, [])
-  const addNotOffered = React.useCallback((raw: string) => {
-    setNotOffered((current) => addItem(current, raw))
-  }, [])
-  const removeNotOffered = React.useCallback((index: number) => {
-    setNotOffered((current) => current.filter((_, i) => i !== index))
-  }, [])
-
-  const bothEmpty = offered.length === 0 && notOffered.length === 0
+  const bothEmpty =
+    current.offered.length === 0 && current.notOffered.length === 0
   const showEmptyWarning = emptyWarned && bothEmpty
 
   const handleConfirm = React.useCallback(() => {
@@ -209,8 +63,8 @@ export function ServicesOfferedCard({
       setEmptyWarned(true)
       return
     }
-    onSubmit({ offered, notOffered })
-  }, [bothEmpty, emptyWarned, offered, notOffered, onSubmit])
+    onSubmit({ offered: current.offered, notOffered: current.notOffered })
+  }, [bothEmpty, emptyWarned, current, onSubmit])
 
   return (
     <CardShell
@@ -229,41 +83,13 @@ export function ServicesOfferedCard({
         },
       ]}
     >
-      <div className="flex flex-col gap-4">
-        <ChipList
-          heading="Faz / oferece"
-          placeholder="Ex.: tirar dúvidas, agendar, consultoria…"
-          items={offered}
-          onAdd={addOffered}
-          onRemove={removeOffered}
-          tone="brand"
-          tokens={tokens}
-          disabled={disabled}
-        />
-        <ChipList
-          heading="NÃO faz"
-          placeholder="Ex.: suporte técnico, parcelamento…"
-          items={notOffered}
-          onAdd={addNotOffered}
-          onRemove={removeNotOffered}
-          tone="danger"
-          tokens={tokens}
-          disabled={disabled}
-        />
-
-        {showEmptyWarning && (
-          <p
-            role="alert"
-            className="flex items-start gap-1.5 text-[12px] leading-relaxed"
-            style={{ color: tokens.warningText }}
-          >
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            As duas listas estão vazias — o agente não vai saber o que você
-            oferece. Você pode confirmar mesmo assim e completar depois pela
-            conversa.
-          </p>
-        )}
-      </div>
+      <ServicesSection
+        initialValue={value.services}
+        disabled={disabled}
+        showEmptyWarning={showEmptyWarning}
+        onChange={setCurrent}
+        tokens={tokens}
+      />
     </CardShell>
   )
 }

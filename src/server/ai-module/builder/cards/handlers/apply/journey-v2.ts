@@ -17,11 +17,27 @@ import {
   parseBuilderState,
   patchBuilderState,
   applyConfirmation,
+  clearCapturedProposals,
   type BuilderState,
   type DeepPartial,
 } from '../../builder-state'
-import type { BusinessIdentityPayload } from '../../card-submit.schemas'
-import type { ApplyCardSubmitResult } from '../apply-card-submit'
+import type {
+  AgentReviewPayload,
+  BusinessIdentityPayload,
+} from '../../card-submit.schemas'
+import type {
+  AgentReviewSectionErrors,
+  ApplyCardSubmitResult,
+} from '../apply-card-submit'
+import { applyAgentPersona } from './persona'
+import { applyServices } from './services'
+import { applyBusinessHours } from './hours'
+import {
+  getIdentityCardFromMetadata,
+  mergeIdentityCardIntoMetadata,
+  normalizeIdentityCard,
+  type AgentIdentityCard,
+} from '@/lib/agent-identity-card'
 
 /** Clamp a free-text field server-side (trim + max length). `undefined`/empty → undefined. */
 function sanitizeText(raw: string | undefined, max: number): string | undefined {
@@ -122,5 +138,193 @@ export async function applyBusinessIdentity(args: {
       'Esses dados agora fazem parte do contexto do agente. ' +
       'Use-os ao montar o agente e siga para o próximo passo da jornada. ' +
       'Não reabra o card "Sobre o negócio".',
+  }
+}
+
+/**
+ * FR-22 — valida CADA seção do card composto `agent_review` server-side ANTES de
+ * qualquer write. Regra mínima de "revisado o suficiente para confirmar", espelho
+ * do que cada card individual carrega quando preenchido de verdade:
+ *   - persona: ao menos um campo com texto (nome/tom/estilo/saudação).
+ *   - services: ao menos um serviço OFERECIDO (o "não oferece" é só complemento).
+ *   - hours: um preset OU um schedule não-vazio (o default "sempre aberto" vive no
+ *     componente — o body sempre chega com algo a confirmar).
+ * Retorna `undefined` quando todas passam; caso contrário um objeto granular SÓ
+ * com as seções que falharam (nunca um erro monolítico). Pura, sem IO.
+ */
+function validateAgentReviewSections(
+  payload: AgentReviewPayload,
+): AgentReviewSectionErrors | undefined {
+  const errors: AgentReviewSectionErrors = {}
+
+  const personaFilled = [
+    payload.persona.name,
+    payload.persona.tone,
+    payload.persona.style,
+    payload.persona.greeting,
+  ].some((v) => typeof v === 'string' && v.trim().length > 0)
+  if (!personaFilled) {
+    errors.persona =
+      'Defina ao menos um detalhe da persona (nome, tom, estilo ou saudação).'
+  }
+
+  const hasOffered = payload.offered.some((s) => s.trim().length > 0)
+  if (!hasOffered) {
+    errors.services = 'Informe ao menos um serviço que o negócio oferece.'
+  }
+
+  const hasPreset =
+    typeof payload.preset === 'string' && payload.preset.trim().length > 0
+  const hasSchedule =
+    payload.schedule !== undefined &&
+    payload.schedule !== null &&
+    !(Array.isArray(payload.schedule) && payload.schedule.length === 0) &&
+    !(
+      typeof payload.schedule === 'object' &&
+      !Array.isArray(payload.schedule) &&
+      Object.keys(payload.schedule as Record<string, unknown>).length === 0
+    )
+  if (!hasPreset && !hasSchedule) {
+    errors.hours = 'Defina o horário de atendimento (preset ou agenda manual).'
+  }
+
+  return Object.keys(errors).length > 0 ? errors : undefined
+}
+
+/**
+ * T24 (FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar. Funde persona +
+ * serviços + horários numa ÚNICA confirmação consolidada (NFR-07: 1 decisão, 1 ACK
+ * em vez de 3) e, opcionalmente, aplica o disclosure (seção avançada — antiga
+ * IdentityTab) no MESMO handler.
+ *
+ * Fluxo:
+ *  1. VALIDAÇÃO GRANULAR (FR-22) — antes de qualquer escrita. Em falha de uma
+ *     seção, retorna `{ errors: { persona?, services?, hours? } }` SEM nenhum write
+ *     parcial; o client preserva o estado local das seções válidas (T43).
+ *  2. Compõe os exports PUROS de `apply/{persona,services,hours}.ts` num único
+ *     state encadeado (cada um flipa seu sentinel) e LIMPA explicitamente
+ *     `capturedProposals.{persona,services,hours}` via `clearCapturedProposals`
+ *     (o deepMerge nunca deleta — o clear precisa ser explícito).
+ *  3. Persiste em UM `updateMany` org-scoped (3 sentinels num só write) e, quando
+ *     há `disclosure`, aplica `normalizeIdentityCard`+`mergeIdentityCardIntoMetadata`
+ *     sobre `BuilderProject.metadata.identityCard` na MESMA transação — 1 POST real,
+ *     sem segundo request ao PATCH /builder/identity. A injeção no prompt acontece
+ *     depois, no `create_agent` (o agente ainda não existe no agent_review).
+ *  4. Emite `review_done` (funil), fire-and-forget.
+ * Re-lê o state FRESCO dentro da transação (igual a `applyBusinessIdentity`) para
+ * não atropelar um submit concorrente. Org-scoped em TODO write. No `any`.
+ */
+export async function applyAgentReview(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  current: BuilderState
+  payload: AgentReviewPayload
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, projectId, organizationId, current, payload } = args
+
+  // 1. FR-22 — validação granular ANTES de qualquer escrita.
+  const errors = validateAgentReviewSections(payload)
+  if (errors) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'Revise as seções destacadas antes de confirmar.',
+      errors,
+    }
+  }
+
+  // O bloco de disclosure (opcional) só é aplicado quando o usuário abriu a seção
+  // avançada — fora dela, `metadata.identityCard` permanece intocado.
+  const disclosure = payload.disclosure
+
+  // 2 + 3. Read-modify-write atômico org-scoped: compõe os 3 cards num único state
+  // (cada export puro flipa seu sentinel), limpa as propostas capturadas e grava
+  // tudo num só `updateMany`. O disclosure (quando presente) vai no metadata do
+  // projeto NA MESMA transação (1 POST real).
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    // Encadeia os exports puros: cada um aplica seus campos OWNED + flipa o
+    // sentinel da sua seção sobre o state do anterior (1 state final, 3 flips).
+    let next = applyAgentPersona(fresh, payload.persona).next
+    next = applyServices(next, {
+      offered: payload.offered,
+      notOffered: payload.notOffered,
+    }).next
+    next = applyBusinessHours(next, {
+      preset: payload.preset,
+      schedule: payload.schedule,
+      timezone: payload.timezone,
+      outOfHours: payload.outOfHours,
+    }).next
+
+    // Clear EXPLÍCITO das propostas capturadas dos 3 domínios (o deepMerge nunca
+    // deleta chaves — confiar no patch deixaria a proposta zumbi no JSONB).
+    next = clearCapturedProposals(next, 'persona')
+    next = clearCapturedProposals(next, 'services')
+    next = clearCapturedProposals(next, 'hours')
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+
+    // Disclosure (seção avançada) → BuilderProject.metadata.identityCard, na MESMA
+    // transação. Normaliza o card sobre o metadata atual (merge parcial), sem 2º
+    // request ao PATCH /builder/identity. Org-scoped via updateMany.
+    if (disclosure) {
+      const project = await tx.builderProject.findFirst({
+        where: { id: projectId, organizationId },
+        select: { metadata: true },
+      })
+      // Merge parcial: parte do card atual (normalizado) e sobrescreve SÓ os
+      // campos de disclosure escolhidos no card composto.
+      const merged: AgentIdentityCard = normalizeIdentityCard({
+        ...getIdentityCardFromMetadata(project?.metadata),
+        disclosureMode: disclosure.mode,
+        disclosureCustomText: disclosure.customText,
+      })
+      await tx.builderProject.updateMany({
+        where: { id: projectId, organizationId },
+        data: {
+          metadata: mergeIdentityCardIntoMetadata(
+            project?.metadata,
+            merged,
+          ) as unknown as Prisma.InputJsonValue,
+        },
+      })
+    }
+  })
+
+  // 4. Funil — a revisão consolidada foi confirmada. Fire-and-forget, nunca lança.
+  await trackJourneyEvent({
+    organizationId,
+    projectId,
+    journeyVersion: current.journeyVersion,
+    event: 'review_done',
+  })
+
+  const disclosureNote = disclosure
+    ? disclosure.mode === 'human_passthrough'
+      ? ' Identidade: o agente se apresenta de forma humanizada (sem afirmar ser humano se perguntado).'
+      : disclosure.mode === 'custom'
+        ? ' Identidade: texto de apresentação personalizado definido.'
+        : ' Identidade: o agente assume com naturalidade ser uma IA.'
+    : ''
+
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      'O usuário CONFIRMOU a revisão consolidada do agente via card (persona, serviços e horário de atendimento).' +
+      `${disclosureNote} ` +
+      'Esses dados já estão no contexto do agente — não reabra os cards de persona, serviços ou horários. ' +
+      'Prossiga para a aprovação/criação do agente e siga para o próximo passo da jornada.',
   }
 }

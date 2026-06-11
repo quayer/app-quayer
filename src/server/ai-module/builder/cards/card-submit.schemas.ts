@@ -304,6 +304,53 @@ export const businessIdentityPayloadSchema = z.object({
 })
 
 /**
+ * Jornada v2 (T24, FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar que
+ * funde persona + serviços + horários numa única confirmação consolidada (NFR-07:
+ * 1 decisão obrigatória, 1 ACK turn em vez de 3). Reusa os MESMOS shapes dos cards
+ * individuais (`persona` espelha `agentPersonaPayloadSchema.persona`; `offered`/
+ * `notOffered` espelham `services`; `preset`/`schedule`/`timezone`/`outOfHours`
+ * espelham `business_hours`) — o handler compõe os exports puros de
+ * `handlers/apply/{persona,services,hours}.ts` num único write org-scoped.
+ *
+ * O bloco OPCIONAL `disclosure` (vindo da seção avançada — antiga IdentityTab) é
+ * aplicado NO MESMO handler sobre `BuilderProject.metadata.identityCard` (1 POST
+ * real, sem segundo request ao PATCH /builder/identity). `customText` só é
+ * significativo quando `mode === 'custom'`; o lib normaliza/clamp server-side.
+ *
+ * O default de horários ("sempre aberto", decisão 3 da spec §9) vive no COMPONENTE
+ * (T43), não aqui — `schedule` é opaco/`unknown` igual ao card individual.
+ * → confirmations `persona` + `services` + `hours` (validação granular FR-22).
+ */
+export const agentReviewPayloadSchema = z.object({
+  cardKey: z.literal('agent_review'),
+  // Espelha agentPersonaPayloadSchema.persona (mesmos campos opcionais + clamps).
+  persona: z
+    .object({
+      name: z.string().min(1).max(120).optional(),
+      tone: z.string().min(1).max(120).optional(),
+      style: z.string().min(1).max(120).optional(),
+      greeting: z.string().min(1).max(2000).optional(),
+      speechMode: z.enum(['assistant', 'first_person', 'secretary']).optional(),
+    })
+    .default({}),
+  // Espelha servicesPayloadSchema (re-trim/dedupe server-side).
+  offered: z.array(z.string().min(1)).default([]),
+  notOffered: z.array(z.string().min(1)).default([]),
+  // Espelha businessHoursPayloadSchema (`schedule` opaco — o card o serializa).
+  preset: z.string().min(1).max(120).optional(),
+  schedule: z.unknown(),
+  timezone: z.string().min(1).max(120).optional(),
+  outOfHours: z.enum(['reply_notice', 'silent']).optional(),
+  // Seção avançada OPCIONAL (disclosure → metadata.identityCard, sem 2º request).
+  disclosure: z
+    .object({
+      mode: z.enum(['ai_explicit', 'human_passthrough', 'custom']),
+      customText: z.string().max(600).optional(),
+    })
+    .optional(),
+})
+
+/**
  * Registry of per-card payload schemas. ADD a card here (W3) and the cardKey
  * enum + discriminated union below pick it up automatically. Keyed by the
  * literal `cardKey` each schema carries in its discriminator field.
@@ -324,6 +371,7 @@ export const CARD_PAYLOAD_SCHEMAS = {
   source_progress: sourceProgressPayloadSchema,
   silenced_contacts: silencedContactsPayloadSchema,
   business_identity: businessIdentityPayloadSchema,
+  agent_review: agentReviewPayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -370,6 +418,7 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   sourceProgressPayloadSchema,
   silencedContactsPayloadSchema,
   businessIdentityPayloadSchema,
+  agentReviewPayloadSchema,
 ])
 export type CardSubmitBody = z.infer<typeof cardSubmitBodySchema>
 
@@ -401,3 +450,4 @@ export type SilencedContactsPayload = z.infer<
 export type BusinessIdentityPayload = z.infer<
   typeof businessIdentityPayloadSchema
 >
+export type AgentReviewPayload = z.infer<typeof agentReviewPayloadSchema>

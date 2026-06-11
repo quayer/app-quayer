@@ -32,12 +32,8 @@ import {
   CHANNEL_KEYS,
   type CardSubmitBody,
   type ChannelKey,
-  type AgentPersonaPayload,
-  type ServicesPayload,
-  type BusinessHoursPayload,
   type PricingPayload,
   type PricingItemPayload,
-  type HandoffPayload,
   type CalendarConnectPayload,
   type ActivationModePayload,
   type QuickReplyChipsPayload,
@@ -45,7 +41,14 @@ import {
   type SilencedContactsPayload,
 } from '../card-submit.schemas'
 import { trackJourneyEvent } from '@/server/services/journey-events'
-import { applyBusinessIdentity } from './apply/journey-v2'
+import { applyBusinessIdentity, applyAgentReview } from './apply/journey-v2'
+// W3 (Revisar) per-card handlers extracted from this entrypoint (T22 split):
+// pure `(state, payload) => CardApplication` mirrors of the former locals.
+import { applyAgentPersona } from './apply/persona'
+import { applyServices } from './apply/services'
+import { applyBusinessHours } from './apply/hours'
+import { applyChannel } from './apply/channel'
+import { applyHandoff } from './apply/handoff'
 
 // ---------------------------------------------------------------------------
 // Args / result
@@ -60,9 +63,30 @@ export interface ApplyCardSubmitArgs {
   body: CardSubmitBody
 }
 
+/**
+ * Granular per-section validation errors for the composite `agent_review` card
+ * (T24/FR-22). When a section fails, the handler returns these instead of a
+ * monolithic card error and performs NO partial write — the client (T43)
+ * preserves the local state of the valid sections and highlights only the
+ * failing one. Carried on the `invalid` failure variant so the existing route
+ * (which maps `invalid → badRequest(message)`) stays untouched while the client
+ * reads the structured `errors`.
+ */
+export interface AgentReviewSectionErrors {
+  persona?: string
+  services?: string
+  hours?: string
+}
+
 export type ApplyCardSubmitResult =
   | { ok: true; cardInstruction: string; conversationId: string }
-  | { ok: false; reason: 'not_found' | 'forbidden' | 'invalid' ; message: string }
+  | {
+      ok: false
+      reason: 'not_found' | 'forbidden' | 'invalid'
+      message: string
+      /** Granular per-section errors (agent_review/FR-22) — no partial write. */
+      errors?: AgentReviewSectionErrors
+    }
 
 // ---------------------------------------------------------------------------
 // Server-side re-validation of client lists
@@ -95,8 +119,12 @@ function isValidChannelKey(key: string): key is ChannelKey {
   return CHANNEL_KEY_SET.has(key)
 }
 
-/** Trim, drop empties, and dedupe a free-text string list (order-preserving). */
-function sanitizeStringList(values: readonly string[]): string[] {
+/**
+ * Trim, drop empties, and dedupe a free-text string list (order-preserving).
+ * Transversal helper — used here (handoff/activation/source) and re-imported by
+ * the extracted `apply/services.ts` (T22 split). Single source of truth.
+ */
+export function sanitizeStringList(values: readonly string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const raw of values) {
@@ -196,8 +224,11 @@ function sanitizeCurrency(currency: string): string {
  * validação `^\+\d{10,15}$`) para que FE e BE concordem sobre o que é um número
  * válido. Só retorna um número quando há confiança na forma; caso contrário
  * `undefined` — telefone é OPCIONAL, então simplesmente o omitimos.
+ *
+ * Exported as a transversal helper — used here (silenced_contacts) and re-imported
+ * by the extracted `apply/handoff.ts` (sanitizeTeamMembers). Single source of truth.
  */
-function normalizeWhatsappBr(raw: string | undefined): string | undefined {
+export function normalizeWhatsappBr(raw: string | undefined): string | undefined {
   if (!raw) return undefined
   const digits = raw.replace(/\D/g, '')
   if (!digits) return undefined
@@ -217,30 +248,6 @@ function normalizeWhatsappBr(raw: string | undefined): string | undefined {
   // Valida a forma final igual ao FE (isValidBrE164) antes de confiar nela.
   if (candidate !== null && /^\+\d{10,15}$/.test(candidate)) return candidate
   return undefined
-}
-
-/**
- * Re-validate team members server-side: keep position as a non-negative int,
- * trim string fields and normalizar o WhatsApp (G6) para E.164-BR — incluindo o
- * campo só quando confiável (espelha o opcional `userId`).
- */
-function sanitizeTeamMembers(
-  members: HandoffPayload['members'],
-): HandoffPayload['members'] {
-  return members.map((m) => {
-    const userId = m.userId?.trim()
-    const name = m.name?.trim()
-    const whatsapp = normalizeWhatsappBr(m.whatsapp)
-    const connectionId = m.connectionId?.trim()
-    return {
-      position: Math.max(0, Math.trunc(m.position)),
-      ...(userId && userId.length > 0 ? { userId } : {}),
-      ...(name && name.length > 0 ? { name } : {}),
-      ...(whatsapp ? { whatsapp } : {}),
-      // F0 — só transita; o runtime valida tenant-scoped (fail-open).
-      ...(connectionId && connectionId.length > 0 ? { connectionId } : {}),
-    }
-  })
 }
 
 /**
@@ -268,7 +275,12 @@ function sanitizeSilencedContacts(
 // Per-card application — returns the next state + the ACK instruction
 // ---------------------------------------------------------------------------
 
-interface CardApplication {
+/**
+ * The result of applying a card to the builder state: the next state + the pt-BR
+ * ACK note that seeds the LLM turn. Exported so the extracted per-card handlers
+ * (`apply/{persona,services,hours}.ts`, T22 split) share one canonical shape.
+ */
+export interface CardApplication {
   next: BuilderState
   cardInstruction: string
 }
@@ -309,114 +321,7 @@ function applyToolSelection(
   }
 }
 
-function applyChannel(
-  state: BuilderState,
-  channelKey: ChannelKey,
-): CardApplication {
-  const patch: DeepPartial<BuilderState> = { selectedChannelKey: channelKey }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'channel')
-  return {
-    next,
-    cardInstruction:
-      `O usuário ESCOLHEU o canal "${channelKey}" via card. ` +
-      'Conduza a publicação nesse canal (create_whatsapp_instance ou o fluxo do canal correspondente) e siga a jornada. ' +
-      'Não reabra o seletor de canais.',
-  }
-}
-
-// --- W3 cards --------------------------------------------------------------
-
-function applyAgentPersona(
-  state: BuilderState,
-  persona: AgentPersonaPayload['persona'],
-): CardApplication {
-  // Only carry fields the user actually supplied (deepMerge ignores undefined).
-  // G7 — `speechMode` (estilo de voz) é OPCIONAL e additivo: persiste verbatim
-  // quando vier, e o deepMerge descarta `undefined` quando não vier.
-  const patch: DeepPartial<BuilderState> = {
-    persona: {
-      name: persona.name,
-      tone: persona.tone,
-      style: persona.style,
-      greeting: persona.greeting,
-      speechMode: persona.speechMode,
-    },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'persona')
-
-  const bits: string[] = []
-  if (persona.name) bits.push(`nome "${persona.name}"`)
-  if (persona.tone) bits.push(`tom "${persona.tone}"`)
-  if (persona.style) bits.push(`estilo "${persona.style}"`)
-  const summary = bits.length > 0 ? bits.join(', ') : 'os valores informados'
-  return {
-    next,
-    cardInstruction:
-      `O usuário DEFINIU a persona do agente via card (${summary}). ` +
-      'Use a saudação configurada e siga para o próximo passo da jornada. ' +
-      'Não reabra o card de persona.',
-  }
-}
-
-function applyServices(
-  state: BuilderState,
-  payload: Pick<ServicesPayload, 'offered' | 'notOffered'>,
-): CardApplication {
-  const offered = sanitizeStringList(payload.offered)
-  const notOffered = sanitizeStringList(payload.notOffered)
-  const patch: DeepPartial<BuilderState> = {
-    services: { offered, notOffered },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'services')
-
-  const offeredLabel = offered.length > 0 ? offered.join(', ') : '(nenhum)'
-  const notOfferedLabel =
-    notOffered.length > 0 ? notOffered.join(', ') : '(nenhum)'
-  return {
-    next,
-    cardInstruction:
-      `O usuário INFORMOU os serviços via card. Oferece: ${offeredLabel}. Não oferece: ${notOfferedLabel}. ` +
-      'Incorpore isso ao escopo do agente e siga para o próximo passo. ' +
-      'Não reabra o card de serviços.',
-  }
-}
-
-function applyBusinessHours(
-  state: BuilderState,
-  payload: Pick<
-    BusinessHoursPayload,
-    'preset' | 'schedule' | 'timezone' | 'outOfHours'
-  >,
-): CardApplication {
-  // `schedule` is opaque (card owns its shape) — store verbatim. Onda 3d:
-  // `outOfHours` (additivo) só entra no patch quando vier — deepMerge ignora
-  // undefined, então um payload legado nunca sobrescreve um valor já salvo.
-  const patch: DeepPartial<BuilderState> = {
-    hours: {
-      preset: payload.preset,
-      schedule: payload.schedule,
-      timezone: payload.timezone,
-      ...(payload.outOfHours ? { outOfHours: payload.outOfHours } : {}),
-    },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'hours')
-
-  const presetLabel = payload.preset ? `preset "${payload.preset}"` : 'horário manual'
-  // Onda 3d — descreve o comportamento fora do horário na copy do ACK.
-  const outOfHoursNote =
-    payload.outOfHours === 'silent'
-      ? ' Fora do horário, o agente fica em SILÊNCIO (não responde).'
-      : payload.outOfHours === 'reply_notice'
-        ? ' Fora do horário, o agente RESPONDE avisando que está fora do expediente.'
-        : ''
-  return {
-    next,
-    cardInstruction:
-      `O usuário DEFINIU o horário de atendimento via card (${presetLabel}).${outOfHoursNote} ` +
-      'Considere esse horário no comportamento do agente e siga para o próximo passo. ' +
-      'Não reabra o card de horários.',
-  }
-}
+// --- W3 cards (persona/services/hours extracted to apply/{...}.ts — T22) ----
 
 /** Frase PT-BR de COMO o agente fala o preço (G4), para a copy do ACK. */
 const DISCLOSURE_LABELS: Record<PricingDisclosureStyle, string> = {
@@ -489,71 +394,6 @@ export function applyPricing(
       `Ao falar de preço, use o formato: ${DISCLOSURE_LABELS[disclosureStyle]}. ` +
       'Use a tool get_pricing para responder sobre preços e siga para o próximo passo. ' +
       'Não reabra o card de preços.',
-  }
-}
-
-/**
- * handoff (Onda 2) — FUSÃO de qualification_action + qualification_steps +
- * team_structure + handoff_pairing num único handler. Grava `builderState.handoff.*`
- * + flipa `handoff`. O roster (members) só é relevante em roleta/departamentos
- * (em solo/nenhum vem vazio). `connectionId` por membro habilita warm transfer
- * (runtime valida tenant-scoped, fail-open). A saga materializa
- * Department/DepartmentMember + routing conforme o `mode`.
- */
-function applyHandoff(
-  state: BuilderState,
-  payload: Pick<
-    HandoffPayload,
-    | 'mode'
-    | 'alsoSchedule'
-    | 'steps'
-    | 'departmentName'
-    | 'departmentType'
-    | 'members'
-    | 'openingMessage'
-  >,
-): CardApplication {
-  const steps = sanitizeStringList(payload.steps)
-  const members = sanitizeTeamMembers(payload.members)
-  const openingMessage = payload.openingMessage?.trim()
-  const patch: DeepPartial<BuilderState> = {
-    handoff: {
-      mode: payload.mode,
-      alsoSchedule: payload.alsoSchedule,
-      steps,
-      departmentName: payload.departmentName,
-      departmentType: payload.departmentType,
-      members,
-      ...(openingMessage ? { openingMessage } : {}),
-    },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'handoff')
-
-  const modeLabel: Record<HandoffPayload['mode'], string> = {
-    solo: 'SOLO — o próprio dono atende (o bot pausa e avisa no WhatsApp dele)',
-    roleta: 'ROLETA — rodízio entre os membros',
-    departamentos:
-      'DEPARTAMENTOS — a IA tria por assunto e encaminha ao departamento certo',
-    nenhum: 'NENHUM — o agente não passa para humano (só conversa)',
-  }
-  const hasRoster = payload.mode === 'roleta' || payload.mode === 'departamentos'
-  const pairedCount = members.filter((m) => Boolean(m.connectionId)).length
-  const rosterNote = hasRoster
-    ? ` ${members.length === 1 ? '1 atendente' : `${members.length} atendentes`} no roster${pairedCount > 0 ? ' (alguns com WhatsApp próprio para warm transfer)' : ''}.`
-    : ''
-  const stepsNote =
-    steps.length > 0
-      ? ` ${steps.length === 1 ? '1 pergunta' : `${steps.length} perguntas`} de qualificação antes do bastão.`
-      : ''
-  const scheduleNote = payload.alsoSchedule
-    ? ' Também marca na agenda (conecte o calendário no próximo passo).'
-    : ''
-  return {
-    next,
-    cardInstruction:
-      `O usuário CONFIGUROU a passagem para humano via card: ${modeLabel[payload.mode]}.` +
-      `${rosterNote}${stepsNote}${scheduleNote} ` +
-      'Siga para o próximo passo; não reabra o card de handoff.',
   }
 }
 
@@ -947,6 +787,18 @@ export async function applyCardSubmit(
       // builder_projects.name mirror) and emits `identity_done`. Return early —
       // the generic write below is for the pure (state) => application handlers.
       return applyBusinessIdentity({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'agent_review':
+      // Journey v2 (T24/FR-05/FR-22): composite card. Owns its OWN transactional
+      // write (persona+services+hours in 1 updateMany + optional disclosure on
+      // metadata.identityCard), clears capturedProposals, and emits `review_done`.
+      // Granular per-section validation → no partial write. Return early.
+      return applyAgentReview({
         conversationId: conversation.id,
         projectId,
         organizationId,
