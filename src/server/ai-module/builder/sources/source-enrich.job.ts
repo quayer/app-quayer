@@ -443,6 +443,7 @@ async function extractImagesMirror(
       projectId,
       html,
       baseUrl: meta.value,
+      awaitCaptions: false,
     })
     return { imagesStatus: 'ready', imagesCount: imagesResult.persisted }
   } catch (err) {

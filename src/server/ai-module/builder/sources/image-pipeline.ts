@@ -75,6 +75,9 @@ export const RESIZE_QUALITY = 82
 export const MIN_DIMENSION_PX = 200
 /** Concorrência do download/caption (semáforo p-limit) — equilíbrio custo/latência. */
 export const IMAGE_CONCURRENCY = 8
+/** Concorrência das legendas em background. Separada do download/upload para a UI
+ *  não esperar o vision-LLM quando só precisa mostrar thumbnails para revisão. */
+export const IMAGE_CAPTION_CONCURRENCY = 4
 /** Concorrência EXTRA (interna) p/ leitura de corpos ACIMA de MAX_IMAGE_BYTES:
  *  limita o pico de memória do caminho oversized a ~2×MAX_DOWNLOAD_BYTES. */
 export const OVERSIZE_READ_CONCURRENCY = 2
@@ -96,6 +99,8 @@ export interface ExtractImagesInput {
   projectId: string
   html: string
   baseUrl: string
+  /** Default true. Quando false, persiste a imagem e agenda legenda em background. */
+  awaitCaptions?: boolean
 }
 
 /**
@@ -210,6 +215,10 @@ export async function extractImagesForSource(
         result.persisted += 1
         result.errors += 1 // caption falhou (só log; imagem fica sem legenda)
         break
+      case 'persisted-caption-pending':
+        result.downloaded += 1
+        result.persisted += 1
+        break
       case 'skipped':
         result.skipped += 1
         break
@@ -230,12 +239,14 @@ export async function extractImagesForSource(
 type CandidateOutcome =
   | 'persisted-captioned'
   | 'persisted-no-caption'
+  | 'persisted-caption-pending'
   | 'skipped'
   | 'error'
 
 /** Semáforo GLOBAL p/ leitura de corpos acima de MAX_IMAGE_BYTES (cap de memória:
  *  no pior caso OVERSIZE_READ_CONCURRENCY × MAX_DOWNLOAD_BYTES em buffers). */
 const oversizeReadLimit = pLimit(OVERSIZE_READ_CONCURRENCY)
+const captionBackgroundLimit = pLimit(IMAGE_CAPTION_CONCURRENCY)
 
 async function processCandidate(
   url: string,
@@ -393,43 +404,32 @@ async function processCandidate(
       return 'error'
     }
 
-    // 6. Caption multimodal (vision-LLM PT-BR). É o último passo e o mais frágil:
-    //    a imagem JÁ está persistida; se a legenda falhar, fica NULL (fail-open).
-    let caption: { ok: true; caption: string } | { ok: false; error: string }
-    try {
-      caption = await captionImage(
-        { buffer: finalBuffer, mimeType: finalKind.contentType },
-        {
+    // 6. Caption multimodal (vision-LLM PT-BR). Para o fluxo do Builder, a UI só
+    // precisa da imagem persistida para mostrar thumbnails; legenda pode chegar
+    // depois. Testes/callers legados continuam aguardando por default.
+    if (input.awaitCaptions === false) {
+      void captionBackgroundLimit(() =>
+        captionPersistedImage({
+          imageId,
+          buffer: finalBuffer,
+          mimeType: finalKind.contentType,
           organizationId: input.organizationId,
           userId: input.userId,
           projectId: input.projectId,
-        },
+        }),
       )
-    } catch (err) {
-      // captionImage é contratualmente fail-open, mas mantemos a rede de segurança.
-      caption = { ok: false, error: errorMessage(err) }
+      return 'persisted-caption-pending'
     }
 
-    if (!caption.ok) {
-      return 'persisted-no-caption'
-    }
-
-    // Grava a legenda (best-effort). Falha aqui não regride a persistência.
-    try {
-      await database.knowledgeImage.update({
-        where: { id: imageId },
-        data: { caption: caption.caption },
-      })
-    } catch (err) {
-      console.warn(
-        '[image-pipeline] update caption falhou (fail-open):',
-        imageId,
-        errorMessage(err),
-      )
-      return 'persisted-no-caption'
-    }
-
-    return 'persisted-captioned'
+    const captioned = await captionPersistedImage({
+      imageId,
+      buffer: finalBuffer,
+      mimeType: finalKind.contentType,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      projectId: input.projectId,
+    })
+    return captioned ? 'persisted-captioned' : 'persisted-no-caption'
   } catch (err) {
     // Rede de segurança final — NADA escapa de processCandidate.
     console.warn(
@@ -438,6 +438,48 @@ async function processCandidate(
       errorMessage(err),
     )
     return 'error'
+  }
+}
+
+async function captionPersistedImage(args: {
+  imageId: string
+  buffer: Buffer
+  mimeType: string
+  organizationId: string
+  userId: string
+  projectId: string
+}): Promise<boolean> {
+  let caption: { ok: true; caption: string } | { ok: false; error: string }
+  try {
+    caption = await captionImage(
+      { buffer: args.buffer, mimeType: args.mimeType },
+      {
+        organizationId: args.organizationId,
+        userId: args.userId,
+        projectId: args.projectId,
+      },
+    )
+  } catch (err) {
+    // captionImage é contratualmente fail-open, mas mantemos a rede de segurança.
+    caption = { ok: false, error: errorMessage(err) }
+  }
+
+  if (!caption.ok) return false
+
+  // Grava a legenda (best-effort). Falha aqui não regride a persistência.
+  try {
+    await database.knowledgeImage.update({
+      where: { id: args.imageId },
+      data: { caption: caption.caption },
+    })
+    return true
+  } catch (err) {
+    console.warn(
+      '[image-pipeline] update caption falhou (fail-open):',
+      args.imageId,
+      errorMessage(err),
+    )
+    return false
   }
 }
 
