@@ -219,6 +219,21 @@ export interface SourceImagesMirror {
   imagesCount?: number
 }
 
+/** Manual synthesis retries exposed to the "Tentar novamente" button. */
+export const SOURCE_SYNTHESIS_MANUAL_RETRY_LIMIT = 1
+
+/** Per-source synthesis mirror (`sourceIngestion.sources[]`). */
+export interface SourceSynthesisMirror {
+  synthesisStatus: NonNullable<SourceIngestionItem['synthesisStatus']>
+  /**
+   * Error copy/code for the failed synthesis. Empty string clears a previous
+   * error while preserving all other source fields.
+   */
+  synthesisError?: string
+  /** Manual retry attempt counter; omitted = leave the stored count untouched. */
+  synthesisAttempts?: number
+}
+
 /** What an atomic `sourceIngestion` patch may change. All optional. */
 export interface SourceIngestionPatch {
   /**
@@ -233,6 +248,12 @@ export interface SourceIngestionPatch {
    * card polls to know when the photo catalog has settled.
    */
   imagesBySourceId?: ReadonlyMap<string, SourceImagesMirror>
+  /**
+   * Synthesis mirror overrides keyed by `KnowledgeSource.id`. This is separate
+   * from the RAG status: a source can be `ready` for retrieval while its
+   * business-field synthesis failed and needs retry.
+   */
+  synthesisBySourceId?: ReadonlyMap<string, SourceSynthesisMirror>
   /**
    * New refs to merge into `sources` (deduped by value). Used by the seed path
    * (chat hook / POST ingest) so a concurrent write can't drop earlier sources.
@@ -323,6 +344,29 @@ export async function patchSourceIngestionAtomic(
         }
       })
     }
+    if (patch.synthesisBySourceId && patch.synthesisBySourceId.size > 0) {
+      const mirrors = patch.synthesisBySourceId
+      sources = sources.map((s) => {
+        if (!s.sourceId) return s
+        const mirror = mirrors.get(s.sourceId)
+        if (!mirror) return s
+        const next: SourceIngestionItem = {
+          ...s,
+          synthesisStatus: mirror.synthesisStatus,
+          ...(mirror.synthesisAttempts !== undefined
+            ? { synthesisAttempts: mirror.synthesisAttempts }
+            : {}),
+        }
+        if (mirror.synthesisError !== undefined) {
+          if (mirror.synthesisError.trim().length > 0) {
+            next.synthesisError = mirror.synthesisError
+          } else {
+            delete next.synthesisError
+          }
+        }
+        return next
+      })
+    }
 
     // Cross-batch proposal merge: fold the incoming proposal ONTO the persisted
     // one with the same semantics the job uses intra-batch (scalars: existing
@@ -360,5 +404,109 @@ export async function patchSourceIngestionAtomic(
       data: { builderState: next as unknown as Prisma.InputJsonValue },
     })
     return true
+  })
+}
+
+export type SourceSynthesisRetryMarkResult =
+  | { ok: true; attempt: number }
+  | {
+      ok: false
+      reason:
+        | 'conversation_not_found'
+        | 'already_running'
+        | 'retry_limit_reached'
+      attempt: number
+    }
+
+export interface MarkSourceSynthesisRetryArgs {
+  conversationId: string
+  organizationId: string
+  source: SourceIngestionItem
+  maxAttempts?: number
+}
+
+/**
+ * Atomically marks one source synthesis as running for a manual retry.
+ *
+ * Idempotence:
+ * - concurrent clicks while the source is already `running` do not increment the
+ *   counter and do not ask the caller to enqueue another job;
+ * - once the per-source retry limit is reached, the source remains actionable
+ *   in the poll response as a terminal failed synthesis, but this write refuses
+ *   to enqueue more LLM work.
+ */
+export async function markSourceSynthesisRetryAtomic(
+  args: MarkSourceSynthesisRetryArgs,
+): Promise<SourceSynthesisRetryMarkResult> {
+  const {
+    conversationId,
+    organizationId,
+    source,
+    maxAttempts = SOURCE_SYNTHESIS_MANUAL_RETRY_LIMIT,
+  } = args
+
+  return database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    if (!row) {
+      return { ok: false, reason: 'conversation_not_found', attempt: 0 }
+    }
+
+    const current = parseBuilderState(row.builderState)
+    let sources = current.sourceIngestion.sources
+    const sourceKey = source.sourceId
+      ? `id:${source.sourceId}`
+      : `value:${canonicalizeSourceValue(source.value)}`
+
+    function keyOf(item: SourceIngestionItem): string {
+      return item.sourceId
+        ? `id:${item.sourceId}`
+        : `value:${canonicalizeSourceValue(item.value)}`
+    }
+
+    if (!sources.some((item) => keyOf(item) === sourceKey)) {
+      sources = mergeSources(current, [source])
+    }
+
+    const existing = sources.find((item) => keyOf(item) === sourceKey)
+    const currentAttempt = existing?.synthesisAttempts ?? 0
+    if (existing?.synthesisStatus === 'running') {
+      return {
+        ok: false,
+        reason: 'already_running',
+        attempt: currentAttempt,
+      }
+    }
+    if (currentAttempt >= maxAttempts) {
+      return {
+        ok: false,
+        reason: 'retry_limit_reached',
+        attempt: currentAttempt,
+      }
+    }
+
+    const nextAttempt = currentAttempt + 1
+    sources = sources.map((item) => {
+      if (keyOf(item) !== sourceKey) return item
+      const { synthesisError: _drop, ...rest } = item
+      return {
+        ...rest,
+        synthesisStatus: 'running',
+        synthesisAttempts: nextAttempt,
+      }
+    })
+
+    const next = patchBuilderState(current, {
+      sourceIngestion: { sources },
+    })
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+
+    return { ok: true, attempt: nextAttempt }
   })
 }

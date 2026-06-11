@@ -94,6 +94,9 @@ vi.mock('./image-pipeline', () => ({
 // In-memory builderState: o $transaction entrega um tx apontando para o MESMO
 // store, então patchSourceIngestionAtomic roda o merge REAL contra ele.
 const store = vi.hoisted(() => ({ builderState: null as unknown }))
+const chunkStore = vi.hoisted(() => ({
+  rows: [] as { sourceId: string; content: string; ordinal: number }[],
+}))
 
 const mockConvFindFirst = vi.hoisted(() =>
   vi.fn(async () => ({ builderState: store.builderState })),
@@ -114,6 +117,17 @@ const mockSourceFindFirst = vi.hoisted(() =>
     imagesEnabled: false,
   })),
 )
+const mockChunkFindMany = vi.hoisted(() =>
+  vi.fn(
+    async (args: {
+      where: { sourceId: string; collection: { organizationId: string } }
+    }) =>
+      chunkStore.rows
+        .filter((row) => row.sourceId === args.where.sourceId)
+        .sort((a, b) => a.ordinal - b.ordinal)
+        .map((row) => ({ content: row.content })),
+  ),
+)
 
 vi.mock('@/server/services/database', () => {
   const conversationDelegate = {
@@ -123,6 +137,7 @@ vi.mock('@/server/services/database', () => {
   return {
     database: {
       knowledgeSource: { findFirst: mockSourceFindFirst },
+      knowledgeChunk: { findMany: mockChunkFindMany },
       builderProjectConversation: conversationDelegate,
       $transaction: vi.fn(
         async (fn: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
@@ -168,6 +183,9 @@ function finalState() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  chunkStore.rows = [
+    { sourceId: 'src-1', ordinal: 0, content: EXTRACTED_TEXT },
+  ]
   // ETAPA 1 — fetch devolve a source resolvida + o texto do MESMO fetch.
   mockFetchSource.mockResolvedValue({
     source: SOURCE_ROW,
@@ -252,6 +270,54 @@ describe('runSourceEnrich — cross-batch proposal merge', () => {
     // Sem aceite anterior, o sentinel não muda.
     expect(state.confirmations.source).toBe(false)
   })
+
+  it('retries one transient synthesis failure and mirrors synthesisStatus=ready', async () => {
+    store.builderState = {
+      sourceIngestion: {
+        sources: [
+          {
+            value: 'https://vibraresidencial.com.br',
+            type: 'url',
+            status: 'pending',
+            sourceId: 'src-1',
+            synthesisStatus: 'pending',
+            synthesisAttempts: 0,
+          },
+        ],
+      },
+      confirmations: { source: false },
+    }
+
+    mockRunLLMSubAgent
+      .mockResolvedValueOnce({ success: false, error: 'timeout' })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          text: synthesisJSON({
+            businessName: 'Vibra Residencial',
+          }),
+        },
+      })
+
+    const result = await runSourceEnrich(PAYLOAD)
+
+    expect(result.proposalWritten).toBe(true)
+    expect(mockRunLLMSubAgent).toHaveBeenCalledTimes(2)
+    expect(mockRunLLMSubAgent.mock.calls[0][0]).toMatchObject({
+      timeoutMs: 45_000,
+    })
+
+    const state = finalState()
+    expect(state.sourceIngestion.proposed?.businessName).toBe(
+      'Vibra Residencial',
+    )
+    const mirror = state.sourceIngestion.sources.find(
+      (s) => s.sourceId === 'src-1',
+    )
+    expect(mirror?.synthesisStatus).toBe('ready')
+    expect(mirror?.synthesisError).toBeUndefined()
+    expect(mirror?.synthesisAttempts).toBe(0)
+  })
 })
 
 describe('runSourceEnrich — reopen pós-aceite (confirmations.source)', () => {
@@ -332,6 +398,8 @@ describe('runSourceEnrich — reopen pós-aceite (confirmations.source)', () => 
       (s) => s.sourceId === 'src-1',
     )
     expect(mirror?.status).toBe('ready')
+    expect(mirror?.synthesisStatus).toBe('error')
+    expect(mirror?.synthesisError).toContain('não encontrei campos')
   })
 
   it('does NOT reopen when synthesis fails (graceful degradation path)', async () => {
@@ -366,5 +434,68 @@ describe('runSourceEnrich — reopen pós-aceite (confirmations.source)', () => 
     const state = finalState()
     expect(state.confirmations.source).toBe(true)
     expect(state.sourceIngestion.proposed?.businessName).toBe('Vibra Butantã')
+    const mirror = state.sourceIngestion.sources.find(
+      (s) => s.sourceId === 'src-1',
+    )
+    expect(mirror?.synthesisStatus).toBe('error')
+    expect(mirror?.synthesisError).toBe('timeout')
+  })
+})
+
+describe('runSourceEnrich — synthesis_retry mode', () => {
+  it('reuses persisted chunks and does not re-fetch/embed the source', async () => {
+    store.builderState = {
+      sourceIngestion: {
+        sources: [
+          {
+            value: 'https://vibraresidencial.com.br',
+            type: 'url',
+            status: 'ready',
+            sourceId: 'src-1',
+            synthesisStatus: 'error',
+            synthesisError: 'timeout',
+            synthesisAttempts: 1,
+          },
+        ],
+      },
+      confirmations: { source: false },
+    }
+
+    mockRunLLMSubAgent.mockResolvedValue({
+      success: true,
+      data: {
+        text: synthesisJSON({
+          businessName: 'Vibra Residencial',
+          services: ['Apartamentos de 2 quartos'],
+        }),
+      },
+    })
+
+    const result = await runSourceEnrich({
+      ...PAYLOAD,
+      mode: 'synthesis_retry',
+      synthesisAttempt: 1,
+    })
+
+    expect(result).toEqual({
+      processed: 1,
+      ingested: 1,
+      errors: 0,
+      proposalWritten: true,
+    })
+    expect(mockFetchSource).not.toHaveBeenCalled()
+    expect(mockEmbedAndPersistSource).not.toHaveBeenCalled()
+    expect(mockChunkFindMany).toHaveBeenCalledTimes(1)
+
+    const state = finalState()
+    expect(state.sourceIngestion.proposed?.businessName).toBe(
+      'Vibra Residencial',
+    )
+    const mirror = state.sourceIngestion.sources.find(
+      (s) => s.sourceId === 'src-1',
+    )
+    expect(mirror?.synthesisStatus).toBe('ready')
+    expect(mirror?.synthesisError).toBeUndefined()
+    expect(mirror?.synthesisAttempts).toBe(1)
   })
 })

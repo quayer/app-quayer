@@ -80,6 +80,8 @@ const READINESS_POLL_CEILING_MS = 10 * 60 * 1000
 interface HoistedReadiness {
   readiness: Readiness | undefined
   refetchReadiness: () => void
+  readinessLoading: boolean
+  readinessError: boolean
   /** True quando o polling de conexão atingiu o teto de 10min e parou (FR-27). */
   pollingExhausted: boolean
   /** Re-arma o polling de conexão (re-zera o relógio dos 10min). */
@@ -114,10 +116,26 @@ function useHoistedReadiness(projectId: string): HoistedReadiness {
     refetchInterval: undefined,
   })
 
-  const readiness = React.useMemo(
+  const rawReadiness = React.useMemo(
     () => unwrapReadiness(query.data) ?? undefined,
     [query.data],
   )
+  const [lastValidReadiness, setLastValidReadiness] =
+    React.useState<Readiness | undefined>(rawReadiness)
+
+  React.useEffect(() => {
+    if (!rawReadiness) return
+    setLastValidReadiness(rawReadiness)
+  }, [rawReadiness])
+
+  const readiness = rawReadiness ?? lastValidReadiness
+  const queryMeta = query as typeof query & {
+    error?: unknown
+    isError?: boolean
+  }
+  const readinessError =
+    Boolean(queryMeta.error) || queryMeta.isError === true
+  const readinessLoading = readiness === undefined && Boolean(query.isLoading)
 
   const activeStepId = readiness?.step.id
   const isConnectionStep =
@@ -179,7 +197,14 @@ function useHoistedReadiness(projectId: string): HoistedReadiness {
     refetchRef.current()
   }, [])
 
-  return { readiness, refetchReadiness, pollingExhausted, rearmPolling }
+  return {
+    readiness,
+    refetchReadiness,
+    readinessLoading,
+    readinessError,
+    pollingExhausted,
+    rearmPolling,
+  }
 }
 
 /**
@@ -232,10 +257,16 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
 
   // ── Readiness içado (fonte única, FR-18) ────────────────────────────────────
   // Dono ÚNICO da query: o chat (via ReadinessContext) e o preview leem daqui.
-  const { readiness, refetchReadiness } = useHoistedReadiness(project.id)
+  const { readiness, refetchReadiness, readinessLoading, readinessError } =
+    useHoistedReadiness(project.id)
   const readinessContextValue = React.useMemo(
-    () => ({ readiness, refetchReadiness }),
-    [readiness, refetchReadiness],
+    () => ({
+      readiness,
+      refetchReadiness,
+      readinessLoading,
+      readinessError,
+    }),
+    [readiness, refetchReadiness, readinessLoading, readinessError],
   )
   // T100 (FR-30): conexão caiu DEPOIS de ter conectado → aviso, sem regredir.
   // Memoizado: `isWhatsAppConnectionDown` roda um parse de Zod do builderState.

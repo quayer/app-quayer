@@ -6,8 +6,8 @@ import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
 import {
   FolderKanban,
+  Menu,
   Moon,
-  PanelLeft,
   Plus,
   Sun,
   ChevronRight,
@@ -34,6 +34,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/client/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/client/components/ui/tooltip"
 import { useAuth } from "@/lib/auth/auth-provider"
 import {
   useCurrentOrganization,
@@ -52,6 +57,7 @@ interface BuilderSidebarProject {
 interface BuilderSidebarProps {
   recentProjects: BuilderSidebarProject[]
   onToggle?: () => void
+  shortcutLabel?: string
 }
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
@@ -113,6 +119,7 @@ function getInitials(name?: string | null, email?: string | null): string {
 export function BuilderSidebar({
   recentProjects,
   onToggle,
+  shortcutLabel = "Ctrl+B",
 }: BuilderSidebarProps) {
   const pathname = usePathname()
   const { resolvedTheme } = useTheme()
@@ -163,27 +170,35 @@ export function BuilderSidebar({
           className="bsb-focus-ring flex items-center rounded-sm transition-opacity hover:opacity-90"
           aria-label="Quayer — página inicial"
         >
-          <Logo size={24} variant={isLight ? "light" : "color"} />
+          <Logo size={24} variant={isLight ? "light" : "color"} animateOnMount />
         </Link>
         {onToggle && (
-          <button
-            type="button"
-            onClick={onToggle}
-            className="bsb-focus-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-            style={{ color: tokens.textTertiary }}
-            onMouseEnter={(e) => {
-              if (!supportsHover) return
-              e.currentTarget.style.backgroundColor = tokens.hoverBg
-              e.currentTarget.style.color = tokens.textPrimary
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "transparent"
-              e.currentTarget.style.color = tokens.textTertiary
-            }}
-            aria-label="Ocultar sidebar (⌘B)"
-          >
-            <PanelLeft className="h-4 w-4" aria-hidden="true" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggle}
+                className="bsb-focus-ring flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[12px] font-semibold transition-colors"
+                style={{ color: tokens.textTertiary }}
+                onMouseEnter={(e) => {
+                  if (!supportsHover) return
+                  e.currentTarget.style.backgroundColor = tokens.hoverBg
+                  e.currentTarget.style.color = tokens.textPrimary
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "transparent"
+                  e.currentTarget.style.color = tokens.textTertiary
+                }}
+                aria-label={`Recolher menu (${shortcutLabel})`}
+              >
+                <Menu className="h-4 w-4" aria-hidden="true" />
+                <span>Menu</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              Recolher menu ({shortcutLabel})
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
 

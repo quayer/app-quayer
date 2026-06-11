@@ -145,6 +145,11 @@ export async function ingestSourceRefs(
     // imagens do source_progress card; o enrich job SEMPRE settla este espelho
     // (ready|error) por fonte ao final, mesmo nos caminhos gateados/sem imagem.
     imagesStatus: 'pending',
+    // Síntese é independente do RAG: a fonte pode ficar ready para retrieval e
+    // ainda falhar ao organizar campos propostos. Este espelho dá contrato para
+    // o poll distinguir "ainda rodando" de "falhou, pode tentar de novo".
+    synthesisStatus: 'pending',
+    synthesisAttempts: 0,
   }))
 
   // 3. Seed builderState.sourceIngestion.sources via the race-safe atomic patch

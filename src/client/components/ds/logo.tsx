@@ -19,6 +19,8 @@ export interface LogoProps {
    * Se exibe o wordmark "Quayer" ao lado do icone. Default true.
    */
   showWordmark?: boolean;
+  /** Anima o raio quando o logo entra na tela. Respeita prefers-reduced-motion. */
+  animateOnMount?: boolean;
   'aria-label'?: string;
 }
 
@@ -39,6 +41,7 @@ export function Logo({
   className = '',
   variant = 'color',
   showWordmark = true,
+  animateOnMount = false,
   'aria-label': ariaLabel = 'Quayer',
 }: LogoProps): React.ReactElement {
   const iconHeight = size;
@@ -74,10 +77,28 @@ export function Logo({
       style={{ gap }}
       suppressHydrationWarning
     >
+      {animateOnMount && (
+        <style>
+          {`
+            @media (prefers-reduced-motion: no-preference) {
+              .q-logo-bolt-enter {
+                transform-origin: 45% 54%;
+                animation: q-logo-bolt-enter 640ms cubic-bezier(.2,.8,.2,1) both;
+              }
+            }
+            @keyframes q-logo-bolt-enter {
+              0% { opacity: .62; transform: translateY(2px) scale(.88) rotate(-4deg); filter: saturate(1.15); }
+              52% { opacity: 1; transform: translateY(-1px) scale(1.06) rotate(2deg); filter: saturate(1.35); }
+              100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); filter: saturate(1); }
+            }
+          `}
+        </style>
+      )}
       <svg
         width={iconWidth}
         height={iconHeight}
         viewBox="0 0 200 248"
+        className={animateOnMount ? 'q-logo-bolt-enter' : undefined}
         filter={variant === 'color' || variant === 'light' ? `url(#${ids.filter})` : undefined}
         aria-hidden="true"
         suppressHydrationWarning

@@ -6,19 +6,17 @@
  * Orquestrador da GALERIA de curadoria visual, renderizado INLINE dentro do
  * card `source_progress` (zona "Catálogo de fotos"). Porta de
  * `web/src/components/sdr/ImagesPreviewPanel.tsx` do Orayon, adaptada ao DS da
- * Quayer (tokens via prop, ZERO cor hard-coded) e ao client tipado Igniter.
+ * Quayer (tokens via prop, ZERO cor hard-coded).
  *
- * Responsabilidades (o card é dono do `useQuery`; o panel é dono da CURADORIA):
+ * Responsabilidades (o card é dono do fetch da lista; o panel é dono da CURADORIA):
  *   - agrupa `images` por `sourceId` (uma grid por fonte) — `groupedImages`.
  *   - mantém o estado local de curadoria: `drafts` (legenda em edição) +
  *     `deletingIds` (fade-out enquanto o soft-delete está em voo).
- *   - dispara `api.builder.patchSourceImage` (delete / caption com debounce) e
- *     `api.builder.bulkSourceImages` (approve_all / delete_low_quality), e pede
- *     ao pai um `onRefetch()` no sucesso para repuxar a lista canônica.
- *   - footer CONDICIONAL: "Aprovar todas (N)" (pendentes: confirmedAt == null) e
- *     "Remover genéricas (N)" (heurística FE: sem legenda OU dimensão pequena) —
- *     cada botão só renderiza quando seu N > 0. O server é a verdade; o N de
- *     "genéricas" é só indicativo (o GET não devolve esse count).
+ *   - dispara fetch autenticado para patchSourceImage (delete / caption com
+ *     debounce) e bulkSourceImages (approve_all), e pede ao pai um `onRefetch()`
+ *     no sucesso para repuxar a lista canônica.
+ *   - footer CONDICIONAL: uma ação primária "Usar estas fotos no agente (N)" para
+ *     confirmar pendentes. Remoção é por foto, por exceção.
  *   - abre o lightbox passando o GRUPO da fonte daquela imagem, para a navegação
  *     ←/→ ficar dentro da MESMA fonte.
  *
@@ -32,7 +30,7 @@
 import * as React from "react"
 
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
-import { api } from "@/igniter.client"
+import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 
 import { ImageLightbox } from "./image-lightbox"
 import { ImagesPreviewCard } from "./images-preview-card"
@@ -70,35 +68,16 @@ export interface CuratedImage {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Constantes de UI / heurística FE
+// Constantes de UI
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Debounce da edição de legenda antes de bater no PATCH (ms). */
 const CAPTION_DEBOUNCE_MS = 600
 
-/**
- * Dimensão mínima (px) abaixo da qual a imagem conta como "genérica" na
- * heurística do FRONTEND. É só um indicador do contador "Remover genéricas (N)";
- * o repository do server tem a sua própria heurística (a verdade). Mantida
- * deliberadamente conservadora para não superestimar o número.
- */
-const LOW_QUALITY_MIN_DIMENSION = 200
-
-/**
- * Heurística FE de "imagem genérica" (espelha o espírito de
- * `bulkDeleteLowQuality`): sem legenda OU com alguma dimensão conhecida pequena.
- * Imagens sem dimensão conhecida NÃO entram só por isso (evita falso-positivo).
- */
-function isLowQuality(image: CuratedImage): boolean {
-  const hasCaption =
-    typeof image.caption === "string" && image.caption.trim().length > 0
-  if (!hasCaption) return true
-  const tooSmallWidth =
-    typeof image.width === "number" && image.width < LOW_QUALITY_MIN_DIMENSION
-  const tooSmallHeight =
-    typeof image.height === "number" && image.height < LOW_QUALITY_MIN_DIMENSION
-  return tooSmallWidth || tooSmallHeight
-}
+type PatchImageBody =
+  | { deleted: true }
+  | { caption: string }
+  | { confirmed: boolean }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Props
@@ -107,7 +86,7 @@ function isLowQuality(image: CuratedImage): boolean {
 export interface ImagesPreviewPanelProps {
   /** Projeto Builder dono das imagens (vai no path do bulk). */
   projectId: string
-  /** Lista canônica vinda do pai (o card é dono do `useQuery`). */
+  /** Lista canônica vinda do pai (o card é dono do fetch da lista). */
   images: CuratedImage[]
   /** `true` enquanto a lista ainda está carregando (1º fetch / poll). */
   loading: boolean
@@ -115,7 +94,7 @@ export interface ImagesPreviewPanelProps {
   tokens: AppTokens
   /** Desabilita toda a curadoria (ex.: card em streaming). */
   disabled?: boolean
-  /** Repuxa a lista canônica após patch/bulk (refetch do `useQuery` do card). */
+  /** Repuxa a lista canônica após patch/bulk (refetch do card). */
   onRefetch: () => void
 }
 
@@ -137,18 +116,6 @@ export function ImagesPreviewPanel({
   disabled = false,
   onRefetch,
 }: ImagesPreviewPanelProps): React.JSX.Element {
-  // ── Mutations (client tipado Igniter, agrupado por controller → api.builder.*)
-  // `onSuccess` (refetch da lista canônica) vive no hook — nesta versão do
-  // client o `.mutate({ params, body })` NÃO aceita callbacks por chamada; ele
-  // devolve uma Promise da resposta, então o error-handling pontual (rollback do
-  // fade-out no delete) é feito no `.catch`/inspeção da resposta no handler.
-  const patchImage = api.builder.patchSourceImage.useMutation({
-    onSuccess: () => onRefetch(),
-  })
-  const bulkImages = api.builder.bulkSourceImages.useMutation({
-    onSuccess: () => onRefetch(),
-  })
-
   // ── Estado local de curadoria ───────────────────────────────────────────
   // Legendas em edição (controladas pelo lightbox via drafts[id]).
   const [drafts, setDrafts] = React.useState<Record<string, string>>({})
@@ -161,6 +128,7 @@ export function ImagesPreviewPanel({
   const [lightboxOpenId, setLightboxOpenId] = React.useState<string | null>(
     null,
   )
+  const [pendingRequests, setPendingRequests] = React.useState(0)
 
   // Um timer de debounce por imageId (legenda) — limpo no unmount.
   const captionTimers = React.useRef<
@@ -193,21 +161,65 @@ export function ImagesPreviewPanel({
     return ids
   }, [groupedImages])
 
-  // ── Contadores do footer condicional ──────────────────────────────────────
-  // Pendentes de curadoria (confirmedAt == null) → "Aprovar todas (N)".
+  // ── Contador do footer condicional ────────────────────────────────────────
+  // Pendentes de curadoria (confirmedAt == null) → "Usar estas fotos... (N)".
   const pendingApproveCount = React.useMemo(
     () => images.filter((i) => i.confirmedAt == null).length,
     [images],
   )
-  // Heurística FE (indicativa) → "Remover genéricas (N)".
-  const lowQualityCount = React.useMemo(
-    () => images.filter((i) => isLowQuality(i)).length,
-    [images],
-  )
 
-  const busy = patchImage.isLoading || bulkImages.isLoading
+  const busy = pendingRequests > 0
 
   // ── Handlers de curadoria ─────────────────────────────────────────────────
+
+  const runRequest = React.useCallback(async (task: () => Promise<boolean>) => {
+    setPendingRequests((count) => count + 1)
+    try {
+      return await task()
+    } finally {
+      setPendingRequests((count) => Math.max(0, count - 1))
+    }
+  }, [])
+
+  const patchSourceImage = React.useCallback(
+    (imageId: string, body: PatchImageBody) =>
+      runRequest(async () => {
+        const res = await fetchWithAuthRetry(
+          `/api/v1/builder/sources/images/${imageId}`,
+          {
+            method: "PATCH",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          },
+          { notifyOnAuthFailure: true },
+        )
+        return res.ok
+      }),
+    [runRequest],
+  )
+
+  const approvePendingImages = React.useCallback(
+    () =>
+      runRequest(async () => {
+        const res = await fetchWithAuthRetry(
+          `/api/v1/builder/projects/${projectId}/sources/images/bulk`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "approve_all" }),
+          },
+          { notifyOnAuthFailure: true },
+        )
+        return res.ok
+      }),
+    [projectId, runRequest],
+  )
 
   /** Libera um id do conjunto de fade-out (quando o delete falha). */
   const clearDeleting = React.useCallback((imageId: string) => {
@@ -221,9 +233,8 @@ export function ImagesPreviewPanel({
 
   /**
    * Soft-delete de UMA imagem. Marca o id como "deletando" (fade-out no card) e,
-   * no sucesso, o `onSuccess` do hook chama `onRefetch()` — a lista canônica volta
-   * sem a imagem e o id sai do grid. Se o PATCH falhar (resposta com `error` ou
-   * rejeição), libera o id do fade-out para o usuário poder tentar de novo.
+   * no sucesso, repuxa a lista canônica. Se o PATCH falhar, libera o id do
+   * fade-out para o usuário poder tentar de novo.
    */
   const handleDelete = React.useCallback(
     (imageId: string) => {
@@ -240,14 +251,17 @@ export function ImagesPreviewPanel({
         next.add(imageId)
         return next
       })
-      void patchImage
-        .mutate({ params: { imageId }, body: { deleted: true } })
-        .then((res) => {
-          if (res?.error != null) clearDeleting(imageId)
+      void patchSourceImage(imageId, { deleted: true })
+        .then((ok) => {
+          if (ok) {
+            onRefetch()
+          } else {
+            clearDeleting(imageId)
+          }
         })
         .catch(() => clearDeleting(imageId))
     },
-    [clearDeleting, disabled, patchImage],
+    [clearDeleting, disabled, onRefetch, patchSourceImage],
   )
 
   /** Edição de legenda com debounce por id → PATCH { caption }. */
@@ -259,23 +273,21 @@ export function ImagesPreviewPanel({
       timers[imageId] = setTimeout(() => {
         delete timers[imageId]
         if (disabled) return
-        void patchImage.mutate({
-          params: { imageId },
-          body: { caption: next.trim() },
+        void patchSourceImage(imageId, { caption: next.trim() }).then((ok) => {
+          if (ok) onRefetch()
         })
       }, CAPTION_DEBOUNCE_MS)
     },
-    [disabled, patchImage],
+    [disabled, onRefetch, patchSourceImage],
   )
 
-  /** Ação em massa (approve_all | delete_low_quality) → POST /bulk. */
-  const handleBulk = React.useCallback(
-    (action: "approve_all" | "delete_low_quality") => {
-      if (disabled) return
-      void bulkImages.mutate({ params: { id: projectId }, body: { action } })
-    },
-    [bulkImages, disabled, projectId],
-  )
+  /** Confirma as fotos ainda pendentes para uso pelo agente. */
+  const handleApprovePending = React.useCallback(() => {
+    if (disabled) return
+    void approvePendingImages().then((ok) => {
+      if (ok) onRefetch()
+    })
+  }, [approvePendingImages, disabled, onRefetch])
 
   // ── Lightbox (escopado ao grupo da fonte da imagem aberta) ─────────────────
   const openImage = React.useMemo(
@@ -299,8 +311,7 @@ export function ImagesPreviewPanel({
 
   // ── Render ────────────────────────────────────────────────────────────────
   const showApproveAll = pendingApproveCount > 0
-  const showCleanLowQuality = lowQualityCount > 0
-  const showFooter = !loading && (showApproveAll || showCleanLowQuality)
+  const showFooter = !loading && showApproveAll
 
   return (
     <section
@@ -330,38 +341,20 @@ export function ImagesPreviewPanel({
 
       {showFooter && (
         <div className="flex flex-wrap items-center gap-2">
-          {showApproveAll && (
-            <button
-              type="button"
-              onClick={() => handleBulk("approve_all")}
-              disabled={disabled || busy}
-              aria-label={`Aprovar todas as ${pendingApproveCount} fotos pendentes`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                backgroundColor: tokens.brandSubtle,
-                borderColor: tokens.brandBorder,
-                color: tokens.brandText,
-              }}
-            >
-              Aprovar todas ({pendingApproveCount})
-            </button>
-          )}
-          {showCleanLowQuality && (
-            <button
-              type="button"
-              onClick={() => handleBulk("delete_low_quality")}
-              disabled={disabled || busy}
-              aria-label={`Remover ${lowQualityCount} fotos genéricas`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                backgroundColor: tokens.bgBase,
-                borderColor: tokens.divider,
-                color: tokens.dangerText,
-              }}
-            >
-              Remover genéricas ({lowQualityCount})
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleApprovePending}
+            disabled={disabled || busy}
+            aria-label={`Usar ${pendingApproveCount} fotos no agente`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              backgroundColor: tokens.brandSubtle,
+              borderColor: tokens.brandBorder,
+              color: tokens.brandText,
+            }}
+          >
+            Usar estas fotos no agente ({pendingApproveCount})
+          </button>
         </div>
       )}
 

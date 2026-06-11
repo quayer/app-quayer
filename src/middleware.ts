@@ -82,6 +82,7 @@ export async function middleware(request: NextRequest) {
     'x-organization-role',
     'x-org-id',
     'x-org-role',
+    'x-pathname',
   ] as const;
 
   const requestHeaders = new Headers(request.headers);
@@ -90,6 +91,7 @@ export async function middleware(request: NextRequest) {
   // Generate per-request nonce for CSP (available in Edge runtime without imports)
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('x-pathname', pathname);
 
   // 1. Permitir rotas públicas sem autenticação
   // startsWith sozinho daria match em prefixos parciais (ex: '/login' matcharia

@@ -36,11 +36,18 @@ import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { getDatabase } from '@/server/services/database'
+import { enqueueSourceEnrich } from '@/server/services/jobs/source-enrich.queue'
 
 import { loadProject } from '../knowledge/knowledge-helpers'
 import { parseBuilderState } from '../cards/builder-state'
 import { ingestSourceRefs } from './ingest-source-refs'
-import { readBuilderStateByProject } from './builder-state-db'
+import {
+  SOURCE_SYNTHESIS_MANUAL_RETRY_LIMIT,
+  hasAnyProposalField,
+  markSourceSynthesisRetryAtomic,
+  patchSourceIngestionAtomic,
+  readBuilderStateByProject,
+} from './builder-state-db'
 
 // ---------------------------------------------------------------------------
 // Local utilities (mirror chat.routes.ts / card-submit.routes.ts guards)
@@ -59,6 +66,59 @@ function getUser(context: unknown): AuthedUser | null {
     auth?: { session?: { user?: AuthedUser } }
   } | null
   return ctx?.auth?.session?.user ?? null
+}
+
+type SynthesisStatus = 'pending' | 'running' | 'ready' | 'error'
+
+function hasProposal(value: ReturnType<typeof parseBuilderState>): boolean {
+  const proposed = value.sourceIngestion.proposed
+  return proposed ? hasAnyProposalField(proposed) : false
+}
+
+function deriveSynthesisStatus(
+  rowStatus: string,
+  mirrorStatus: SynthesisStatus | undefined,
+  proposalExists: boolean,
+): SynthesisStatus {
+  if (mirrorStatus) return mirrorStatus
+  if (rowStatus === 'error') return 'error'
+  if (rowStatus === 'ready') return proposalExists ? 'ready' : 'error'
+  if (rowStatus === 'processing' || rowStatus === 'running') return 'running'
+  return 'pending'
+}
+
+function derivePollStatus(
+  rowStatus: string,
+  synthesisStatus: SynthesisStatus,
+  proposalExists: boolean,
+): string {
+  if (
+    rowStatus === 'ready' &&
+    !proposalExists &&
+    (synthesisStatus === 'pending' || synthesisStatus === 'running')
+  ) {
+    return 'processing'
+  }
+  return rowStatus
+}
+
+function retrySynthesisPath(projectId: string, sourceId: string): string {
+  return `/api/v1/builder/projects/${projectId}/sources/${sourceId}/synthesis/retry`
+}
+
+function sourceRefType(
+  value: string,
+  mirrorType: 'url' | 'instagram' | undefined,
+): 'url' | 'instagram' {
+  if (mirrorType) return mirrorType
+  try {
+    const host = new URL(value).hostname.toLowerCase()
+    return host === 'instagram.com' || host === 'www.instagram.com'
+      ? 'instagram'
+      : 'url'
+  } catch {
+    return /(^|\.)instagram\.com\//i.test(value) ? 'instagram' : 'url'
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +266,7 @@ const sourcesStatus = igniter.query({
         s.sourceId ? ([[s.sourceId, s]] as const) : [],
       ),
     )
+    const proposalExists = hasProposal(state)
 
     // Response shape: keep the original row fields (id/source/...) AND the
     // card-contract fields the source_progress poll parses (`value`, `sourceId`,
@@ -213,8 +274,25 @@ const sourcesStatus = igniter.query({
     // parser drops every entry (it requires `value`) and the card never settles.
     const sources = rows.map((row) => {
       const mirror = mirrorBySourceId.get(row.id)
+      const synthesisStatus = deriveSynthesisStatus(
+        row.status,
+        mirror?.synthesisStatus,
+        proposalExists,
+      )
+      const status = derivePollStatus(row.status, synthesisStatus, proposalExists)
+      const synthesisAttempts = mirror?.synthesisAttempts ?? 0
+      const synthesisError =
+        mirror?.synthesisError ??
+        (synthesisStatus === 'error' && row.status === 'ready'
+          ? 'Li o conteúdo, mas não consegui organizar os campos do negócio.'
+          : undefined)
+      const canRetrySynthesis =
+        row.status === 'ready' &&
+        synthesisStatus === 'error' &&
+        synthesisAttempts < SOURCE_SYNTHESIS_MANUAL_RETRY_LIMIT
       return {
         ...row,
+        status,
         value: row.source,
         sourceId: row.id,
         // KnowledgeSource.type is always 'url' (fetcher contract); the REF type
@@ -224,6 +302,16 @@ const sourcesStatus = igniter.query({
         ...(mirror?.imagesCount !== undefined
           ? { imagesCount: mirror.imagesCount }
           : {}),
+        synthesisStatus,
+        ...(synthesisError ? { synthesisError } : {}),
+        synthesisAttempts,
+        canRetrySynthesis,
+        retrySynthesis: canRetrySynthesis
+          ? {
+              method: 'POST' as const,
+              path: retrySynthesisPath(projectId, row.id),
+            }
+          : null,
       }
     })
 
@@ -235,10 +323,161 @@ const sourcesStatus = igniter.query({
 })
 
 // ---------------------------------------------------------------------------
+// retrySourceSynthesis — manual retry for a ready source with failed synthesis
+// ---------------------------------------------------------------------------
+
+const retrySourceSynthesis = igniter.mutation({
+  name: 'Retry Builder Source Synthesis',
+  description:
+    'Re-run only the business-field synthesis for one already-ingested source of a project. Org-scoped and idempotent: concurrent clicks while running do not enqueue duplicate work; the per-source manual retry limit is enforced in builderState.',
+  path: '/projects/:id/sources/:sourceId/synthesis/retry' as const,
+  method: 'POST',
+  use: [authOrApiKeyProcedure({ required: true })],
+  handler: async ({ request, context, response }) => {
+    const user = getUser(context)
+    if (!user) return response.unauthorized('Não autenticado')
+    if (!user.currentOrgId) {
+      return response.badRequest('Organização não selecionada')
+    }
+    const organizationId = user.currentOrgId
+
+    const { id: projectId, sourceId } = request.params as {
+      id: string
+      sourceId: string
+    }
+    if (!projectId || !UUID_REGEX.test(projectId)) {
+      return response.badRequest('projectId inválido')
+    }
+    if (!sourceId || !UUID_REGEX.test(sourceId)) {
+      return response.badRequest('sourceId inválido')
+    }
+
+    const project = await loadProject(projectId, organizationId)
+    if (!project) return response.notFound('Projeto não encontrado')
+
+    const db = getDatabase()
+    const [collection, conversation] = await Promise.all([
+      db.knowledgeCollection.findFirst({
+        where: { organizationId, name: `kb:${projectId}` },
+        select: { id: true },
+      }),
+      db.builderProjectConversation.findFirst({
+        where: { projectId, organizationId },
+        select: { id: true },
+      }),
+    ])
+    if (!collection) return response.notFound('Coleção de conhecimento não encontrada')
+    if (!conversation) {
+      return response.notFound('Conversa do Builder não encontrada')
+    }
+
+    const source = await db.knowledgeSource.findFirst({
+      where: { id: sourceId, organizationId, collectionId: collection.id },
+      select: {
+        id: true,
+        source: true,
+        status: true,
+        chunkCount: true,
+        error: true,
+      },
+    })
+    if (!source) return response.notFound('Fonte não encontrada')
+
+    if (source.status !== 'ready') {
+      return response.success({
+        ok: true,
+        queued: false,
+        reason: 'source_not_ready',
+        sourceId,
+        status: source.status,
+      })
+    }
+
+    const state = parseBuilderState(await readBuilderStateByProject(projectId))
+    const mirror = state.sourceIngestion.sources.find(
+      (item) => item.sourceId === sourceId,
+    )
+
+    const mark = await markSourceSynthesisRetryAtomic({
+      conversationId: conversation.id,
+      organizationId,
+      source: {
+        value: source.source,
+        type: sourceRefType(source.source, mirror?.type),
+        status: source.status,
+        sourceId: source.id,
+        ...(mirror?.imagesStatus ? { imagesStatus: mirror.imagesStatus } : {}),
+        ...(mirror?.imagesCount !== undefined
+          ? { imagesCount: mirror.imagesCount }
+          : {}),
+      },
+    })
+
+    if (!mark.ok) {
+      return response.success({
+        ok: true,
+        queued: false,
+        reason: mark.reason,
+        sourceId,
+        synthesisStatus:
+          mark.reason === 'already_running' ? 'running' : 'error',
+        synthesisAttempts: mark.attempt,
+        canRetrySynthesis: mark.reason !== 'retry_limit_reached',
+      })
+    }
+
+    const enqueueResult = await enqueueSourceEnrich(
+      {
+        organizationId,
+        userId: user.id,
+        projectId,
+        conversationId: conversation.id,
+        sourceIds: [sourceId],
+        mode: 'synthesis_retry',
+        synthesisAttempt: mark.attempt,
+      },
+      {
+        jobId: `source-synthesis-retry:${projectId}:${sourceId}:${mark.attempt}`,
+      },
+    )
+
+    if (!enqueueResult.enqueued) {
+      await patchSourceIngestionAtomic(conversation.id, organizationId, {
+        synthesisBySourceId: new Map([
+          [
+            sourceId,
+            {
+              synthesisStatus: 'error',
+              synthesisError: 'Não consegui iniciar nova tentativa agora.',
+              synthesisAttempts: mark.attempt,
+            },
+          ],
+        ]),
+      })
+      return response.badRequest('Não consegui iniciar nova tentativa agora')
+    }
+
+    return response.success({
+      ok: true,
+      queued: true,
+      sourceId,
+      synthesisStatus: 'running',
+      synthesisAttempts: mark.attempt,
+      canRetrySynthesis: false,
+      retrySynthesis: {
+        method: 'POST' as const,
+        path: retrySynthesisPath(projectId, sourceId),
+      },
+    })
+  },
+})
+
+// ---------------------------------------------------------------------------
 // Export composition (spread into builder.controller by the integration owner)
 // ---------------------------------------------------------------------------
 
 export const sourcesRoutes = {
   ingestSources,
   sourcesStatus,
+  retrySourceSynthesis,
 }

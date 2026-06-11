@@ -16,7 +16,7 @@
  */
 
 import { useContext, useEffect, useMemo, useRef, useState } from "react"
-import { Lock } from "lucide-react"
+import { Loader2, Lock } from "lucide-react"
 import { toast } from "sonner"
 import {
   Tabs,
@@ -51,12 +51,18 @@ export function PreviewPanel({
   // Readiness içado (fonte única, FR-18): o `workspace.tsx` é o dono da query e
   // injeta via ReadinessContext. v2 (`journey` presente) → registry filtra por
   // fase; v1 → comportamento locked legado (NFR-03).
-  const { readiness, refetchReadiness } = useContext(ReadinessContext)
+  const {
+    readiness,
+    refetchReadiness,
+    readinessLoading,
+    readinessError,
+  } = useContext(ReadinessContext)
+  const tabsPending = readiness === undefined && (readinessLoading || readinessError)
 
   // v1: inclui tabs bloqueadas (layout estável). v2: filtradas por fase.
   const tabs = useMemo(
-    () => getTabsForProjectWithLocked(project, readiness),
-    [project, readiness],
+    () => (tabsPending ? [] : getTabsForProjectWithLocked(project, readiness)),
+    [project, readiness, tabsPending],
   )
 
   // Tabs desbloqueadas para fallback e renderização de conteúdo
@@ -107,10 +113,11 @@ export function PreviewPanel({
   // inexistente → overview. Cliques nunca caem aqui — tab travada não dispara
   // onTabChange; o clique mostra o motivo via toast/title (FR-20).
   const safeActiveTab: PreviewTab = useMemo(() => {
+    if (tabsPending) return "overview"
     const found = tabs.find((t) => t.value === activeTab)
     if (!found || found.locked) return "overview"
     return activeTab
-  }, [tabs, activeTab])
+  }, [tabs, activeTab, tabsPending])
 
   const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null)
   const bannerState = useMemo(
@@ -158,8 +165,19 @@ export function PreviewPanel({
               borderColor: tokens.divider,
             }}
           >
-            {tabs.map((tab) =>
-              tab.locked ? (
+            {tabsPending ? (
+              <div
+                className="flex h-10 items-center gap-2 px-3 text-[12px]"
+                style={{ color: tokens.textTertiary }}
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                <span>Carregando painel…</span>
+              </div>
+            ) : (
+              tabs.map((tab) =>
+                tab.locked ? (
                 // Travada porém CLICÁVEL: o clique explica o porquê (toast +
                 // title) em vez de não fazer nada / cair na overview (FR-20).
                 // O motivo vem do registry (gate único `canOpenDeploy` para a
@@ -178,32 +196,33 @@ export function PreviewPanel({
                   <Lock className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
                   {tab.label}
                 </button>
-              ) : (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  onAnimationEnd={
-                    pulsingTabs.has(tab.value)
-                      ? () => handlePulseEnd(tab.value)
-                      : undefined
-                  }
-                  className={`h-10 rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none ${
-                    pulsingTabs.has(tab.value) ? "builder-tab-pulse" : ""
-                  }`}
-                  style={{
-                    color:
-                      safeActiveTab === tab.value
-                        ? tokens.brandText
-                        : tokens.textSecondary,
-                    backgroundColor:
-                      safeActiveTab === tab.value
-                        ? tokens.brandSubtle
-                        : "transparent",
-                  }}
-                >
-                  {tab.label}
-                </TabsTrigger>
-              ),
+                ) : (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    onAnimationEnd={
+                      pulsingTabs.has(tab.value)
+                        ? () => handlePulseEnd(tab.value)
+                        : undefined
+                    }
+                    className={`h-10 rounded-md px-3 text-[12px] font-medium transition-colors data-[state=active]:shadow-none ${
+                      pulsingTabs.has(tab.value) ? "builder-tab-pulse" : ""
+                    }`}
+                    style={{
+                      color:
+                        safeActiveTab === tab.value
+                          ? tokens.brandText
+                          : tokens.textSecondary,
+                      backgroundColor:
+                        safeActiveTab === tab.value
+                          ? tokens.brandSubtle
+                          : "transparent",
+                    }}
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                ),
+              )
             )}
           </TabsList>
         </div>
@@ -225,17 +244,51 @@ export function PreviewPanel({
             </div>
           )}
 
-          {unlockedTabs.map((tab) => (
-            <TabsContent key={tab.value} value={tab.value} className="m-0 p-6">
-              {tab.render({
-                project,
-                messages,
-                onTabChange,
-                readiness,
-                refetchReadiness,
-              })}
-            </TabsContent>
-          ))}
+          {readinessError && (
+            <div
+              role="status"
+              className="sticky top-0 z-10 flex items-center gap-2 border-b px-4 py-2 text-[12px]"
+              style={{
+                borderColor: tokens.divider,
+                backgroundColor: tokens.bgSurface,
+                color: tokens.textTertiary,
+              }}
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <span>Reconectando… mantive o último progresso carregado.</span>
+            </div>
+          )}
+
+          {tabsPending ? (
+            <div className="flex flex-col gap-3 p-6" aria-busy="true">
+              <div
+                className="h-6 w-48 animate-pulse rounded-md"
+                style={{ backgroundColor: tokens.hoverBg }}
+              />
+              <div
+                className="h-36 w-full animate-pulse rounded-lg"
+                style={{ backgroundColor: tokens.hoverBg }}
+              />
+              <div
+                className="h-28 w-full animate-pulse rounded-lg"
+                style={{ backgroundColor: tokens.hoverBg }}
+              />
+            </div>
+          ) : (
+            unlockedTabs.map((tab) => (
+              <TabsContent key={tab.value} value={tab.value} className="m-0 p-6">
+                {tab.render({
+                  project,
+                  messages,
+                  onTabChange,
+                  readiness,
+                  refetchReadiness,
+                  readinessLoading,
+                  readinessError,
+                })}
+              </TabsContent>
+            ))
+          )}
         </div>
       </Tabs>
     </div>

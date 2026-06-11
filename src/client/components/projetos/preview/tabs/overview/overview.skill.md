@@ -3,6 +3,7 @@ Criado: 2026-06-10
 Atualizado: 2026-06-11
 Revisar em: mudança no step-engine (next-pending-step.ts) ou no contrato de Readiness
 Relacionados:
+  - src/client/components/projetos/workspace.tsx
   - src/server/ai-module/builder/state/next-pending-step.ts
   - src/server/ai-module/builder/state/readiness.types.ts
   - src/client/components/projetos/preview/deploy-gate.ts
@@ -26,9 +27,11 @@ checks tipados: plan/byok/agent/prompt/version/channel) e `isDeployReady`.
 
 ## Entry point
 
-`overview-tab.tsx` é o orquestrador. Consome `useProjectReadiness` e roteia
-callbacks `onTabChange`. Registrado em
-`src/client/components/projetos/preview/tab-registry.tsx` como tab _core.
+`workspace.tsx` é o dono único da query `getReadiness` e injeta o snapshot via
+`ReadinessContext`/`TabRenderContext`. `overview-tab.tsx` é o orquestrador
+visual: recebe `readiness` por props, adapta para view-models e roteia callbacks
+`onTabChange`. Registrado em `src/client/components/projetos/preview/tab-registry.tsx`
+como tab _core.
 
 ## Inventário de arquivos
 
@@ -58,11 +61,6 @@ callbacks `onTabChange`. Registrado em
 - `action-button.tsx` — Botão primário/secundário (suporta `disabled`+`title`).
 - `metrics-card.tsx` — Card de métricas (apenas publicado).
 
-### `hooks/`
-- `use-project-readiness.ts` — Dono do `getReadiness.useQuery` + polling leve:
-  refetch on window focus e quando a conversa avança (sinal derivado de
-  `messages.length` + nº de tool-results; 1 refetch por mudança).
-
 ### `helpers/`
 - `readiness-adapters.ts` — Adaptadores puros do payload `Readiness` para os
   view-models (`unwrapReadiness`, `stepsToStages`, `blockersToChecklist`).
@@ -84,14 +82,17 @@ Tab e botões nunca podem discordar.
 ## Fluxo de dados
 
 **Props in:** `project: WorkspaceProject`, `messages: ChatMessage[]`
-(saudação + sinal de atividade), `onTabChange?`.
+(saudação + estado vazio), `readiness?`, `readinessLoading?`,
+`readinessError?`, `onTabChange?`.
 
 **Dentro:**
-1. `useProjectReadiness(project.id, messages)` → `{ readiness, stages,
-   checklist, isLoading }`.
-2. Sem atividade → `<EmptyState />`. Carregando → skeletons. Falha →
+1. `workspace.tsx` → `ReadinessContext` → `PreviewPanel` → `TabRenderContext`
+   entrega `{ readiness, readinessLoading, readinessError }`.
+2. `overview-tab.tsx` adapta `readiness` com `stepsToStages`,
+   `journeyToPhases` e `blockersToChecklist`.
+3. Sem atividade → `<EmptyState />`. Carregando → skeletons. Falha →
    parágrafo honesto (NFR-06), nunca progresso inventado.
-3. Com readiness: `ProgressHeader` + `StageList` + `DeployReadinessCard` +
+4. Com readiness: `ProgressHeader` + `StageList` + `DeployReadinessCard` +
    `QuickActions` + `MetricsCard` (se publicado).
 
 ## Convenções

@@ -56,6 +56,10 @@ export interface TabRenderContext {
   readiness?: Readiness
   /** Re-runs a query içada de readiness (mesma identidade do contexto do chat). */
   refetchReadiness?: () => void
+  /** True enquanto a readiness içada ainda não entregou o primeiro snapshot. */
+  readinessLoading?: boolean
+  /** True quando a query içada falhou; consumidores devem manter estado stale. */
+  readinessError?: boolean
 }
 
 export interface TabDescriptor {
@@ -136,11 +140,21 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Visão geral",
     // v2: a Visão geral abre quando a revisão começa (fase Revisar+).
     visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
-    render: ({ project, onTabChange, messages }) => (
+    render: ({
+      project,
+      onTabChange,
+      messages,
+      readiness,
+      readinessLoading,
+      readinessError,
+    }) => (
       <OverviewTab
         project={project}
         onTabChange={onTabChange}
         messages={messages}
+        readiness={readiness}
+        readinessLoading={readinessLoading}
+        readinessError={readinessError}
       />
     ),
   },

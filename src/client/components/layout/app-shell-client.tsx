@@ -1,20 +1,78 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { PanelLeft } from "lucide-react"
+import { Menu } from "lucide-react"
 import { BuilderSidebar } from "./builder-sidebar"
 import { SidebarProvider } from "@/client/components/ui/sidebar"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/client/components/ui/tooltip"
 
 interface AppShellClientProps {
   recentProjects: Array<{ id: string; name: string; status: string; type: string }>
   children: ReactNode
   /** Sidebar override. Quando presente, substitui a BuilderSidebar padrão. */
   sidebarOverride?: ReactNode
+  /** Estado vindo do server para evitar flash de layout na primeira pintura. */
+  initialCollapsed?: boolean
 }
 
 const STORAGE_KEY = "quayer.sidebar.collapsed"
+const COOKIE_KEY = "quayer.sidebar.collapsed"
+const DEFAULT_SHORTCUT_LABEL = "Ctrl+B"
+
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect
+
+function isProjectWorkspacePath(pathname: string | null): boolean {
+  return /^\/projetos\/[^/]+/.test(pathname ?? "")
+}
+
+function readStoredCollapsed(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "true"
+  } catch (e) {
+    console.warn("[sidebar] localStorage indisponível:", e)
+    return false
+  }
+}
+
+function persistCollapsedPreference(collapsed: boolean) {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, String(collapsed))
+    } catch (e) {
+      console.warn("[sidebar] localStorage indisponível:", e)
+    }
+  }
+
+  if (typeof document !== "undefined") {
+    document.cookie = [
+      `${COOKIE_KEY}=${String(collapsed)}`,
+      "path=/",
+      "max-age=31536000",
+      "SameSite=Lax",
+    ].join("; ")
+  }
+}
+
+function getShortcutLabel(): string {
+  if (typeof navigator === "undefined") return DEFAULT_SHORTCUT_LABEL
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+    ? "⌘B"
+    : DEFAULT_SHORTCUT_LABEL
+}
 
 /**
  * AppShellClient — camada client do AppShell.
@@ -31,12 +89,17 @@ export function AppShellClient({
   recentProjects,
   children,
   sidebarOverride,
+  initialCollapsed = false,
 }: AppShellClientProps) {
-  const [collapsed, setCollapsed] = useState(false)
+  const pathname = usePathname()
+  const isProjectWorkspace = isProjectWorkspacePath(pathname)
+  const [collapsed, setCollapsed] = useState(
+    () => initialCollapsed || isProjectWorkspace,
+  )
   const [hydrated, setHydrated] = useState(false)
+  const [shortcutLabel, setShortcutLabel] = useState(DEFAULT_SHORTCUT_LABEL)
   const { resolvedTheme } = useTheme()
   const router = useRouter()
-  const pathname = usePathname()
   const isLight = hydrated && resolvedTheme === "light"
   // DS v3 tokens:
   //   --color-bg-base    #000000 (dark)
@@ -45,15 +108,13 @@ export function AppShellClient({
   const mainBg = isLight ? "#F5F2ED" : "#000000"
   const mainText = isLight ? "#1A0800" : "#FFFFFF"
 
-  // Carrega estado persistido após hidratação + registra atalho ⌘B
+  // Carrega preferencia legada do localStorage após hidratação + registra atalho.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
+    if (!initialCollapsed && readStoredCollapsed()) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved === "true") setCollapsed(true)
-    } catch (e) {
-      console.warn("[sidebar] localStorage indisponível:", e)
+      setCollapsed(true)
     }
+    setShortcutLabel(getShortcutLabel())
     setHydrated(true)
 
     const onKey = (e: KeyboardEvent) => {
@@ -61,11 +122,7 @@ export function AppShellClient({
         e.preventDefault()
         setCollapsed((prev) => {
           const next = !prev
-          try {
-            localStorage.setItem(STORAGE_KEY, String(next))
-          } catch (e) {
-            console.warn("[sidebar] localStorage indisponível:", e)
-          }
+          persistCollapsedPreference(next)
           return next
         })
       }
@@ -87,28 +144,24 @@ export function AppShellClient({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [router, pathname])
+  }, [initialCollapsed, router])
 
   // Entrar no WORKSPACE de um projeto (e só nele) auto-minimiza a sidebar —
   // chat + painel ganham a tela inteira (ex.: mandou mensagem na home e caiu
   // no projeto recém-criado). Decisão de sessão: NÃO persiste no localStorage,
   // então a preferência global do usuário (⌘B/botão, que persistem) fica intacta
   // e reabrir a sidebar não briga com novas navegações dentro do workspace.
-  const isProjectWorkspace = /^\/projetos\/[^/]+/.test(pathname ?? "")
-  const wasProjectWorkspaceRef = useRef(false)
-  useEffect(() => {
+  const wasProjectWorkspaceRef = useRef(isProjectWorkspace)
+  useIsomorphicLayoutEffect(() => {
     const was = wasProjectWorkspaceRef.current
     wasProjectWorkspaceRef.current = isProjectWorkspace
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isProjectWorkspace && !was) setCollapsed(true)
   }, [isProjectWorkspace])
 
   const toggle = () => {
     setCollapsed((prev) => {
       const next = !prev
-      try {
-        localStorage.setItem(STORAGE_KEY, String(next))
-      } catch {}
+      persistCollapsedPreference(next)
       return next
     })
   }
@@ -117,6 +170,7 @@ export function AppShellClient({
     <BuilderSidebar
       recentProjects={recentProjects}
       onToggle={toggle}
+      shortcutLabel={shortcutLabel}
     />
   )
 
@@ -137,28 +191,33 @@ export function AppShellClient({
         Pular para o conteúdo
       </a>
 
-      {/* Durante hidratação OU quando não-colapsado, renderiza sidebar.
-          suppressHydrationWarning pro caso de o estado inicial ser colapsado. */}
-      {(!hydrated || !collapsed) && sidebar}
+      {!collapsed && sidebar}
 
       <SidebarProvider className="relative flex-1 !min-h-0 !w-auto">
         {hydrated && collapsed && (
-          <button
-            type="button"
-            onClick={toggle}
-            className="fixed left-4 top-4 z-40 flex h-9 w-9 items-center justify-center rounded-lg border transition-all hover:bg-white/5"
-            style={{
-              backgroundColor: "var(--color-bg-surface, #060402)",
-              borderColor:
-                "var(--color-border-default, rgba(255,255,255,0.1))",
-              color: "var(--color-text-secondary, rgba(255,255,255,0.75))",
-              boxShadow: "0 4px 12px -2px rgba(0,0,0,0.4)",
-            }}
-            aria-label="Mostrar sidebar"
-            title="Mostrar sidebar (⌘B)"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggle}
+                className="fixed left-4 top-4 z-40 inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-semibold transition-all hover:bg-white/5"
+                style={{
+                  backgroundColor: "var(--color-bg-surface, #060402)",
+                  borderColor:
+                    "var(--color-border-default, rgba(255,255,255,0.1))",
+                  color: "var(--color-text-secondary, rgba(255,255,255,0.75))",
+                  boxShadow: "0 4px 12px -2px rgba(0,0,0,0.4)",
+                }}
+                aria-label={`Abrir menu (${shortcutLabel})`}
+              >
+                <Menu className="h-4 w-4" aria-hidden="true" />
+                <span>Menu</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              Abrir menu ({shortcutLabel})
+            </TooltipContent>
+          </Tooltip>
         )}
 
         <main

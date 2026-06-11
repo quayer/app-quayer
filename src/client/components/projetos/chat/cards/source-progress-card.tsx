@@ -14,7 +14,7 @@
  *      settles to ready|error — cards are otherwise presentational, but this poll
  *      is the one async affordance the brief grants (status is owned by a sibling
  *      route, not the SSE turn).
- *   2. "Campos detectados" — the PROPOSED synthesis from
+ *   2. "O que encontrei" — the PROPOSED synthesis from
  *      `value.sourceIngestion.proposed` (businessName / services / audience /
  *      differentiators / tone / address / description). These are
  *      anti-hallucination PROPOSALS: they only
@@ -45,13 +45,15 @@ import {
   Instagram,
   Loader2,
   Pencil,
+  RefreshCcw,
   Sparkles,
+  UploadCloud,
   X,
 } from "lucide-react"
 
 import { Input } from "@/client/components/ui/input"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
-import { api } from "@/igniter.client"
+import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 import type {
   SourceIngestionItem,
   SourceProposal,
@@ -168,6 +170,20 @@ const PHASE_PILL: Record<
 
 /** Image-catalog mirror status per source (Onda D, vision/G2). */
 type SourceImagesPhase = "pending" | "running" | "ready" | "error"
+type SourceSynthesisPhase = "pending" | "running" | "ready" | "error"
+
+type RetrySynthesisAction = {
+  method: "POST"
+  path: string
+}
+
+type SourceProgressSource = SourceIngestionItem & {
+  synthesisStatus?: SourceSynthesisPhase
+  synthesisError?: string
+  synthesisAttempts?: number
+  canRetrySynthesis?: boolean
+  retrySynthesis?: RetrySynthesisAction | null
+}
 
 /**
  * Structural shape of one source row returned by the status endpoint. Kept
@@ -185,6 +201,11 @@ interface StatusEndpointSource {
   imagesStatus?: SourceImagesPhase
   /** Count of extracted images for this source (informational). */
   imagesCount?: number
+  synthesisStatus?: SourceSynthesisPhase
+  synthesisError?: string
+  synthesisAttempts?: number
+  canRetrySynthesis?: boolean
+  retrySynthesis?: RetrySynthesisAction | null
 }
 
 /** Status endpoint envelope: `{ sources: [...] }` (and optionally a proposal). */
@@ -211,6 +232,25 @@ function coerceImagesPhase(v: unknown): SourceImagesPhase | undefined {
   return undefined
 }
 
+function coerceSynthesisPhase(v: unknown): SourceSynthesisPhase | undefined {
+  if (
+    v === "pending" ||
+    v === "running" ||
+    v === "ready" ||
+    v === "error"
+  ) {
+    return v
+  }
+  return undefined
+}
+
+function coerceRetrySynthesisAction(v: unknown): RetrySynthesisAction | null {
+  if (!isRecord(v)) return null
+  if (v.method !== "POST") return null
+  if (typeof v.path !== "string" || v.path.length === 0) return null
+  return { method: "POST", path: v.path }
+}
+
 /** Coerce an unknown JSON body into `StatusEndpointSource[]` (never throws). */
 function parseStatusSources(body: unknown): StatusEndpointSource[] {
   if (!isRecord(body)) return []
@@ -233,6 +273,17 @@ function parseStatusSources(body: unknown): StatusEndpointSource[] {
       imagesStatus: coerceImagesPhase(entry.imagesStatus),
       imagesCount:
         typeof entry.imagesCount === "number" ? entry.imagesCount : undefined,
+      synthesisStatus: coerceSynthesisPhase(entry.synthesisStatus),
+      synthesisError:
+        typeof entry.synthesisError === "string"
+          ? entry.synthesisError
+          : undefined,
+      synthesisAttempts:
+        typeof entry.synthesisAttempts === "number"
+          ? entry.synthesisAttempts
+          : undefined,
+      canRetrySynthesis: entry.canRetrySynthesis === true,
+      retrySynthesis: coerceRetrySynthesisAction(entry.retrySynthesis),
     })
   }
   return out
@@ -283,9 +334,10 @@ function asNullableNumber(v: unknown): number | null {
 
 /**
  * Coerce ONE unknown entry into a `CuratedImage`, or `null` when it lacks the
- * required identity fields. `imageUrl` is the signed URL on-read (https) and is
- * NULLABLE by design (fail-safe per item on the route) — we only ever render
- * `<img src>` when it is non-null (the leaf components enforce that).
+ * required identity fields. `imageUrl` is nullable by design (fail-safe per item
+ * on the route). For local storage, old responses may include an absolute
+ * `/api/v1/files/...` URL with a stale dev port; we normalize that to a
+ * same-origin path before rendering, without changing the storage config.
  */
 function asCuratedImage(entry: unknown): CuratedImage | null {
   if (!isRecord(entry)) return null
@@ -304,7 +356,7 @@ function asCuratedImage(entry: unknown): CuratedImage | null {
     sourceId,
     collectionId,
     originalUrl,
-    imageUrl: asNullableString(entry.imageUrl),
+    imageUrl: normalizeImageUrl(entry.imageUrl),
     caption: asNullableString(entry.caption),
     width: asNullableNumber(entry.width),
     height: asNullableNumber(entry.height),
@@ -313,6 +365,33 @@ function asCuratedImage(entry: unknown): CuratedImage | null {
     confirmedAt: asNullableString(entry.confirmedAt),
     createdAt,
   }
+}
+
+/**
+ * Render-safe media URL. Absolute local-storage links can point to the wrong dev
+ * port; if they target the app file route, use a relative path so the current
+ * origin serves the image. Third-party http(s) URLs are kept as-is.
+ */
+function normalizeImageUrl(raw: unknown): string | null {
+  const value = asNullableString(raw)?.trim()
+  if (!value) return null
+  if (value.startsWith("/api/v1/files/")) return value
+
+  try {
+    const base =
+      typeof window !== "undefined" ? window.location.origin : "http://localhost"
+    const url = new URL(value, base)
+    const filesIndex = url.pathname.indexOf("/api/v1/files/")
+    if (filesIndex >= 0) {
+      return `${url.pathname.slice(filesIndex)}${url.search}${url.hash}`
+    }
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.toString()
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 /**
@@ -334,9 +413,66 @@ function parseCuratedImages(data: unknown): CuratedImage[] {
   return out
 }
 
+interface SourceImagesQuery {
+  images: CuratedImage[]
+  isLoading: boolean
+  hasError: boolean
+  refetch: () => Promise<void>
+}
+
+function useSourceImages(projectId: string): SourceImagesQuery {
+  const mounted = React.useRef(true)
+  const [state, setState] = React.useState<{
+    images: CuratedImage[]
+    isLoading: boolean
+    hasError: boolean
+  }>({ images: [], isLoading: true, hasError: false })
+
+  React.useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  const refetch = React.useCallback(async () => {
+    setState((cur) => ({
+      ...cur,
+      isLoading: cur.images.length === 0,
+      hasError: false,
+    }))
+    try {
+      const res = await fetchWithAuthRetry(
+        `/api/v1/builder/projects/${projectId}/sources/images`,
+        { method: "GET", headers: { Accept: "application/json" } },
+        { notifyOnAuthFailure: true },
+      )
+      if (!res.ok) throw new Error(`listSourceImages ${res.status}`)
+      const body: unknown = await res.json()
+      const images = parseCuratedImages(body)
+      if (!mounted.current) return
+      setState({ images, isLoading: false, hasError: false })
+    } catch {
+      if (!mounted.current) return
+      setState((cur) => ({ ...cur, isLoading: false, hasError: true }))
+    }
+  }, [projectId])
+
+  React.useEffect(() => {
+    void refetch()
+  }, [refetch])
+
+  return {
+    images: state.images,
+    isLoading: state.isLoading,
+    hasError: state.hasError,
+    refetch,
+  }
+}
+
 interface PollResult {
   /** Live sources merged from the poll (falls back to seed when not polled yet). */
-  sources: SourceIngestionItem[]
+  sources: SourceProgressSource[]
   /** Live proposal from the poll, when the endpoint includes it. */
   proposed: SourceProposal | undefined
   /**
@@ -347,7 +483,10 @@ interface PollResult {
    * when there are no sources, so the images query never spins on an empty list.
    */
   imagesAllReady: boolean
+  markSynthesisRunning: (sourceId: string) => void
 }
+
+type PollState = Omit<PollResult, "markSynthesisRunning">
 
 /**
  * Derive whether the image catalog has finished for ALL sources. A source counts
@@ -379,7 +518,7 @@ function useSourceStatusPoll(
   seedSources: SourceIngestionItem[],
   seedProposed: SourceProposal | undefined,
 ): PollResult {
-  const [polled, setPolled] = React.useState<PollResult | null>(null)
+  const [polled, setPolled] = React.useState<PollState | null>(null)
 
   // Whether all KNOWN sources have settled — derived from the freshest data
   // (polled if present, else the seed). Drives whether the interval keeps going.
@@ -403,9 +542,10 @@ function useSourceStatusPoll(
 
     const tick = async () => {
       try {
-        const res = await fetch(
+        const res = await fetchWithAuthRetry(
           `/api/v1/builder/projects/${projectId}/sources/status`,
           { method: "GET", headers: { Accept: "application/json" } },
+          { notifyOnAuthFailure: true },
         )
         if (cancelled) return
         if (res.ok) {
@@ -446,12 +586,39 @@ function useSourceStatusPoll(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, allSettled, seedSources.length])
 
+  const markSynthesisRunning = React.useCallback(
+    (sourceId: string) => {
+      setPolled((cur) => {
+        const currentSources = cur?.sources ?? seedSources
+        const nextSources = currentSources.map((source) => {
+          if (source.sourceId !== sourceId) return source
+          const { synthesisError: _drop, ...rest } = source
+          const nextSource: SourceProgressSource = {
+            ...rest,
+            status: "processing",
+            synthesisStatus: "running",
+            canRetrySynthesis: false,
+            retrySynthesis: null,
+          }
+          return nextSource
+        })
+        return {
+          sources: nextSources,
+          proposed: cur?.proposed ?? seedProposed,
+          imagesAllReady: deriveImagesAllReady(nextSources),
+        }
+      })
+    },
+    [seedProposed, seedSources],
+  )
+
   return {
     sources: polled?.sources ?? seedSources,
     proposed: polled?.proposed ?? seedProposed,
     // `imagesAllReady` is derived above from the freshest data (polled ?? seed),
     // so the images query (D3) can gate its own `refetchInterval` on it.
     imagesAllReady,
+    markSynthesisRunning,
   }
 }
 
@@ -569,10 +736,15 @@ function SourceRow({
   source,
   tokens,
 }: {
-  source: SourceIngestionItem
+  source: SourceProgressSource
   tokens: AppTokens
 }) {
-  const phase = resolvePhase(source.status)
+  const phase =
+    source.synthesisStatus === "running"
+      ? "processing"
+      : source.synthesisStatus === "error" && source.status === "ready"
+        ? "error"
+        : resolvePhase(source.status)
   const pill = PHASE_PILL[phase]
   const TypeIcon = source.type === "instagram" ? Instagram : Globe
 
@@ -652,6 +824,253 @@ function ReadChips({ items, tokens }: { items: string[]; tokens: AppTokens }) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Proposal summary
+// ──────────────────────────────────────────────────────────────────────────
+
+const PROPOSAL_FIELDS: Array<{
+  key: keyof SourceProposal
+  label: string
+  hasValue: (proposal: SourceProposal) => boolean
+}> = [
+  {
+    key: "businessName",
+    label: "nome",
+    hasValue: (proposal) => Boolean(proposal.businessName?.trim()),
+  },
+  {
+    key: "services",
+    label: "serviços",
+    hasValue: (proposal) => Boolean(proposal.services?.length),
+  },
+  {
+    key: "audience",
+    label: "público",
+    hasValue: (proposal) => Boolean(proposal.audience?.trim()),
+  },
+  {
+    key: "differentiators",
+    label: "diferenciais",
+    hasValue: (proposal) => Boolean(proposal.differentiators?.length),
+  },
+  {
+    key: "tone",
+    label: "tom de voz",
+    hasValue: (proposal) => Boolean(proposal.tone?.trim()),
+  },
+  {
+    key: "address",
+    label: "endereço",
+    hasValue: (proposal) => Boolean(proposal.address?.trim()),
+  },
+  {
+    key: "description",
+    label: "descrição",
+    hasValue: (proposal) => Boolean(proposal.description?.trim()),
+  },
+]
+
+function formatPortugueseList(items: string[]): string {
+  if (items.length === 0) return ""
+  if (items.length === 1) return items[0]
+  if (items.length === 2) return `${items[0]} e ${items[1]}`
+  return `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`
+}
+
+function proposalReason(proposal: SourceProposal): React.ReactNode {
+  const found = PROPOSAL_FIELDS.filter((field) => field.hasValue(proposal)).map(
+    (field) => field.label,
+  )
+  const missing = PROPOSAL_FIELDS.filter(
+    (field) => !field.hasValue(proposal),
+  ).map((field) => field.label)
+  const foundText = formatPortugueseList(found) || "algumas informações"
+  const missingText =
+    formatPortugueseList(missing) || "qualquer ajuste fino que quiser"
+
+  return (
+    <>
+      Li seu site e encontrei: <strong>{foundText}</strong>. Você pode completar:{" "}
+      <strong>{missingText}</strong> — me conte aqui no chat ou toque em Editar.
+    </>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Manual photo upload empty state
+// ──────────────────────────────────────────────────────────────────────────
+
+const MANUAL_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif"
+const MANUAL_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+
+function manualUploadErrorMessage(status: number, errorCode: string | null): string {
+  if (status === 401) return "Sua sessão expirou. Entre de novo para continuar."
+  if (status === 413) return "Foto grande demais. Use uma imagem de até 5MB."
+  if (status === 415) return "Tipo não suportado. Use JPG, PNG, WebP ou GIF."
+  if (status === 503) return "Não consegui acessar o armazenamento agora."
+  switch (errorCode) {
+    case "file_too_large":
+      return "Foto grande demais. Use uma imagem de até 5MB."
+    case "unsupported_media":
+    case "invalid_media_signature":
+      return "Tipo não suportado. Use JPG, PNG, WebP ou GIF."
+    case "storage_unavailable":
+    case "collection_unavailable":
+      return "Não consegui acessar o armazenamento agora."
+    default:
+      return "Não consegui enviar a foto agora."
+  }
+}
+
+async function parseUploadErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return typeof body.error === "string" ? body.error : null
+  } catch {
+    return null
+  }
+}
+
+function SourceImagesEmptyState({
+  projectId,
+  tokens,
+  disabled,
+  extractionFailed,
+  loadingFailed,
+  onUploaded,
+}: {
+  projectId: string
+  tokens: AppTokens
+  disabled: boolean
+  extractionFailed: boolean
+  loadingFailed: boolean
+  onUploaded: () => void
+}) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = React.useState(false)
+  const [notice, setNotice] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const handleFile = React.useCallback(
+    async (file: File) => {
+      setNotice(null)
+      setError(null)
+
+      if (!file.type.startsWith("image/")) {
+        setError("Use uma foto em JPG, PNG, WebP ou GIF.")
+        return
+      }
+      if (file.size > MANUAL_IMAGE_MAX_BYTES) {
+        setError("Foto grande demais. Use uma imagem de até 5MB.")
+        return
+      }
+
+      const body = new FormData()
+      body.append("projectId", projectId)
+      body.append("file", file)
+
+      setUploading(true)
+      try {
+        const res = await fetchWithAuthRetry(
+          "/api/v1/builder/media/upload",
+          { method: "POST", headers: { Accept: "application/json" }, body },
+          { notifyOnAuthFailure: true },
+        )
+        if (!res.ok) {
+          const code = await parseUploadErrorCode(res)
+          throw new Error(manualUploadErrorMessage(res.status, code))
+        }
+        setNotice(
+          "Foto enviada para o catálogo do agente. Ela já pode ser usada nas conversas.",
+        )
+        onUploaded()
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Não consegui enviar a foto agora.",
+        )
+      } finally {
+        setUploading(false)
+        if (inputRef.current) inputRef.current.value = ""
+      }
+    },
+    [onUploaded, projectId],
+  )
+
+  const headline = loadingFailed
+    ? "Não consegui carregar as fotos agora."
+    : extractionFailed
+      ? "Não consegui ler as fotos desta fonte."
+      : "Não encontrei fotos no seu site."
+
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-md border px-3 py-3 text-[12px]"
+      style={{
+        backgroundColor: tokens.bgBase,
+        borderColor: tokens.divider,
+        color: tokens.textSecondary,
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <Images
+          className="mt-0.5 h-3.5 w-3.5 shrink-0"
+          style={{ color: tokens.textTertiary }}
+          aria-hidden="true"
+        />
+        <div className="flex flex-col gap-1">
+          <span style={{ color: tokens.textPrimary }}>{headline}</span>
+          <span style={{ color: tokens.textTertiary }}>
+            Você pode adicionar fotos manualmente. Seu agente pode enviá-las nas
+            conversas com clientes.
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept={MANUAL_IMAGE_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void handleFile(file)
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={disabled || uploading}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            backgroundColor: tokens.brandSubtle,
+            borderColor: tokens.brandBorder,
+            color: tokens.brandText,
+          }}
+        >
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <UploadCloud className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {uploading ? "Enviando foto..." : "Adicionar fotos ao agente"}
+        </button>
+      </div>
+
+      {notice && (
+        <p className="text-[11px]" style={{ color: tokens.successText }}>
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p className="text-[11px]" style={{ color: tokens.dangerText }}>
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // SourceProgressCard
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -676,31 +1095,22 @@ export function SourceProgressCard({
   // Live poll: merges fresh per-source status (and a fresher proposal, if the
   // endpoint returns one) over the canonical seed. `imagesAllReady` is the lean
   // image-catalog mirror's settle flag — it gates the SEPARATE images query (D3).
-  const { sources, proposed, imagesAllReady } = useSourceStatusPoll(
-    projectId,
-    seedSources,
-    seedProposed,
-  )
+  const { sources, proposed, imagesAllReady, markSynthesisRunning } =
+    useSourceStatusPoll(projectId, seedSources, seedProposed)
 
   // ── Catálogo de fotos (Onda D3) — galeria de curadoria visual ─────────────
-  // O card é dono do useQuery; o panel é dono da curadoria. NÃO usamos o
-  // `refetchInterval` do client porque o intervalo dele é montado uma vez (lê
-  // `refetchInterval` de um ref e re-arma só quando `execute`/`enabled` mudam),
-  // o que NÃO reage à virada de `imagesAllReady`. Em vez disso, o card é dono de
-  // um setInterval determinístico que chama `refetch()` enquanto o espelho
-  // `imagesStatus` de alguma fonte NÃO estiver settled — para sozinho quando
-  // `imagesAllReady`, mesma cadência (~2s) do status poll. SEM SSE (padrão W4).
-  const imagesQuery = api.builder.listSourceImages.useQuery({
-    params: { id: projectId },
-  })
-  const images = parseCuratedImages(imagesQuery.data)
+  // O card é dono do fetch autenticado; o panel é dono da curadoria. NÃO usamos
+  // o `refetchInterval` do client porque ele não reage à virada de
+  // `imagesAllReady`, e aqui precisamos do mesmo retry de sessão usado no poll.
+  const imagesQuery = useSourceImages(projectId)
+  const images = imagesQuery.images
   const imagesLoading = imagesQuery.isLoading
   const refetchImages = imagesQuery.refetch
 
   React.useEffect(() => {
     if (imagesAllReady) return
     const timer = setInterval(() => {
-      refetchImages()
+      void refetchImages()
     }, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [imagesAllReady, refetchImages])
@@ -712,6 +1122,8 @@ export function SourceProgressCard({
     (!imagesAllReady || imagesLoading) && images.length === 0
   const imagesCatalogEmpty =
     imagesAllReady && !imagesLoading && images.length === 0
+  const imagesCatalogError =
+    imagesQuery.hasError && !imagesLoading && images.length === 0
   // Copy honesta no vazio: erro de extração ≠ fonte sem fotos. O espelho
   // por fonte (`imagesStatus`) distingue — alguma fonte com `error` mantém a
   // mensagem de falha; todas settladas sem falha e 0 imagens é vazio legítimo.
@@ -731,12 +1143,61 @@ export function SourceProgressCard({
         proposed.description,
     )
 
-  // Todas as fontes falharam e nenhuma síntese saiu → estado de erro EXPLÍCITO,
-  // em vez do "aguarde concluir" eterno com o Aceitar mudo desabilitado.
+  // Fontes assentadas sem proposta → estado de reparo EXPLÍCITO, em vez do
+  // "aguarde concluir" eterno com o Aceitar mudo desabilitado.
+  const textSettled =
+    sources.length > 0 &&
+    sources.every((source) => isSettled(resolvePhase(source.status)))
   const allErrored =
     sources.length > 0 &&
     sources.every((source) => resolvePhase(source.status) === "error")
-  const hasFailedWithoutProposal = allErrored && !hasProposal && !alreadyConfirmed
+  const hasSettledWithoutProposal =
+    textSettled && !hasProposal && !alreadyConfirmed
+  const hasFailedWithoutProposal =
+    (allErrored || hasSettledWithoutProposal) && !hasProposal && !alreadyConfirmed
+  const retryableSynthesisSource = React.useMemo(
+    () =>
+      sources.find(
+        (source) =>
+          source.canRetrySynthesis === true &&
+          source.retrySynthesis?.method === "POST" &&
+          typeof source.retrySynthesis.path === "string" &&
+          source.retrySynthesis.path.length > 0 &&
+          typeof source.sourceId === "string",
+      ) ?? null,
+    [sources],
+  )
+  const [retryingSourceId, setRetryingSourceId] = React.useState<string | null>(
+    null,
+  )
+  const retryingSynthesis = retryingSourceId !== null
+
+  const handleRetrySynthesis = React.useCallback(async () => {
+    const source = retryableSynthesisSource
+    const sourceId = source?.sourceId
+    const path = source?.retrySynthesis?.path
+    if (!sourceId || !path) return
+
+    setRetryingSourceId(sourceId)
+    try {
+      const res = await fetchWithAuthRetry(
+        path,
+        { method: "POST", headers: { Accept: "application/json" } },
+        { notifyOnAuthFailure: true },
+      )
+      if (!res.ok) throw new Error(`retry synthesis ${res.status}`)
+      const body: unknown = await res.json().catch(() => null)
+      const retryAccepted =
+        isRecord(body) &&
+        (body.queued === true || body.synthesisStatus === "running")
+      if (!retryAccepted) throw new Error("retry synthesis not accepted")
+      markSynthesisRunning(sourceId)
+    } catch {
+      // Keep the failed state visible; the user can try again or continue manually.
+    } finally {
+      setRetryingSourceId(null)
+    }
+  }, [markSynthesisRunning, retryableSynthesisSource])
 
   // ── Edit mode + draft (seeded from the proposal) ────────────────────────
   const [editing, setEditing] = React.useState(false)
@@ -813,7 +1274,7 @@ export function SourceProgressCard({
   const actions: CardShellAction[] = []
   if (!alreadyConfirmed) {
     actions.push({
-      label: "Aceitar",
+      label: "Usar informações no agente",
       onClick: handleAccept,
       variant: "primary",
       icon: <Check className="h-3.5 w-3.5" />,
@@ -837,6 +1298,21 @@ export function SourceProgressCard({
         disabled,
       })
     }
+    if (retryableSynthesisSource && hasFailedWithoutProposal && !editing) {
+      actions.push({
+        label: retryingSynthesis ? "Tentando de novo..." : "Tentar de novo",
+        onClick: () => {
+          void handleRetrySynthesis()
+        },
+        variant: "secondary",
+        icon: retryingSynthesis ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RefreshCcw className="h-3.5 w-3.5" />
+        ),
+        disabled: disabled || retryingSynthesis,
+      })
+    }
     if (onDismiss && !editing) {
       actions.push({
         label: "Agora não",
@@ -848,12 +1324,14 @@ export function SourceProgressCard({
   }
 
   const reason = alreadyConfirmed
-    ? "Fontes processadas — os campos detectados já foram aplicados ao agente."
+    ? "Pronto! Usei essas informações para montar seu agente. Quer ajustar algo? É só me dizer aqui no chat."
     : hasFailedWithoutProposal
-      ? "Não consegui ler suas fontes. Cole o link de novo, ou siga sem fonte e preencha manualmente."
-      : hasProposal
-        ? "Revise os campos detectados a partir do seu site/Instagram. Edite se precisar e clique em Aceitar para aplicar ao agente."
-        : "Estamos lendo seu site/Instagram e extraindo os campos do negócio. Isto atualiza sozinho — aguarde concluir."
+      ? allErrored
+        ? "Não consegui ler suas fontes. Verifique o link, cole de novo ou me conte as informações no chat."
+        : "Li seu site, mas não consegui terminar de organizar as informações. Nada se perdeu — você pode me contar os dados no chat."
+      : hasProposal && proposed
+        ? proposalReason(proposed)
+        : "Estou lendo seu site e anotando as informações do negócio. Atualizo aqui sozinho — enquanto isso, me conta: como você prefere que o agente fale com seus clientes?"
 
   return (
     <CardShell
@@ -877,8 +1355,11 @@ export function SourceProgressCard({
           >
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>
-              Não consegui ler o conteúdo dessas fontes. Verifique o link e cole de
-              novo, ou toque em “Agora não” para preencher os campos manualmente.
+              {allErrored
+                ? "Não consegui ler o conteúdo dessas fontes. Verifique o link e cole de novo, ou toque em “Agora não” para preencher os campos manualmente."
+                : retryableSynthesisSource
+                  ? "Li o conteúdo, mas não consegui transformar isso em campos do agente. Toque em “Tentar de novo” ou me conte os dados no chat."
+                  : "Li o conteúdo, mas não consegui transformar isso em campos do agente. Você pode me contar no chat ou tocar em “Agora não” para preencher manualmente."}
             </span>
           </div>
         )}
@@ -911,7 +1392,7 @@ export function SourceProgressCard({
               className="text-[11px] font-medium uppercase tracking-wide"
               style={{ color: tokens.textTertiary }}
             >
-              Campos detectados
+              O que encontrei
             </span>
 
             {editing ? (
@@ -1059,51 +1540,54 @@ export function SourceProgressCard({
         {/* ── Catálogo de fotos (Onda D3) — só quando há ao menos uma fonte ── */}
         {sources.length > 0 && (
           <div className="flex flex-col gap-2">
-          <span
-            className="text-[11px] font-medium uppercase tracking-wide"
-            style={{ color: tokens.textTertiary }}
-          >
-            Catálogo de fotos
-          </span>
+            <span
+              className="text-[11px] font-medium uppercase tracking-wide"
+              style={{ color: tokens.textTertiary }}
+            >
+              Catálogo de fotos
+            </span>
 
-          {imagesCatalogLoading ? (
-            <div
-              className="flex items-center gap-2 rounded-md border px-3 py-3 text-[12px]"
-              style={{
-                backgroundColor: tokens.bgBase,
-                borderColor: tokens.divider,
-                color: tokens.textTertiary,
-              }}
+            <p
+              className="text-[12px] leading-relaxed"
+              style={{ color: tokens.textSecondary }}
             >
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              <span>Lendo as fotos…</span>
-            </div>
-          ) : imagesCatalogEmpty ? (
-            <div
-              className="flex items-center gap-2 rounded-md border px-3 py-3 text-[12px]"
-              style={{
-                backgroundColor: tokens.bgBase,
-                borderColor: tokens.divider,
-                color: tokens.textTertiary,
-              }}
-            >
-              <Images className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>
-                {imagesAnyError
-                  ? "Não consegui ler as fotos desta fonte."
-                  : "Nenhuma foto encontrada nas fontes."}
-              </span>
-            </div>
-          ) : (
-            <ImagesPreviewPanel
-              projectId={projectId}
-              images={images}
-              loading={imagesLoading}
-              tokens={tokens}
-              disabled={disabled}
-              onRefetch={refetchImages}
-            />
-          )}
+              Seu agente pode enviar estas fotos nas conversas com clientes.
+              Remova as que não quiser que ele use.
+            </p>
+
+            {imagesCatalogLoading ? (
+              <div
+                className="flex items-center gap-2 rounded-md border px-3 py-3 text-[12px]"
+                style={{
+                  backgroundColor: tokens.bgBase,
+                  borderColor: tokens.divider,
+                  color: tokens.textTertiary,
+                }}
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                <span>Lendo as fotos…</span>
+              </div>
+            ) : imagesCatalogEmpty || imagesCatalogError ? (
+              <SourceImagesEmptyState
+                projectId={projectId}
+                tokens={tokens}
+                disabled={disabled}
+                extractionFailed={imagesAnyError}
+                loadingFailed={imagesCatalogError}
+                onUploaded={() => {
+                  void refetchImages()
+                }}
+              />
+            ) : (
+              <ImagesPreviewPanel
+                projectId={projectId}
+                images={images}
+                loading={imagesLoading}
+                tokens={tokens}
+                disabled={disabled}
+                onRefetch={refetchImages}
+              />
+            )}
           </div>
         )}
       </div>

@@ -4,8 +4,9 @@
  * OverviewTab — Mission Control do workspace do Builder.
  *
  * FR-18 (spec jornada-builder-v2): o progresso e a prontidão vêm de UMA fonte
- * — `GET /builder/projects/:id/readiness` (step-engine determinístico) — via
- * `useProjectReadiness`. Nada aqui re-deriva progresso de tool-calls.
+ * — `GET /builder/projects/:id/readiness` (step-engine determinístico) —
+ * içada pelo `workspace.tsx` e recebida por props. Nada aqui re-deriva
+ * progresso de tool-calls nem abre uma segunda query.
  *
  * Fluxo de estados:
  *   1. Sem mensagens e sem agent → EmptyState (instrução para iniciar conversa)
@@ -22,6 +23,7 @@ import type {
   PreviewTab,
   WorkspaceProject,
 } from "@/client/components/projetos/types"
+import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
 import { Skeleton } from "@/client/components/ui/skeleton"
 import { canOpenDeploy } from "../../deploy-gate"
 import { AgentIdentityHeader } from "./components/agent-identity-header"
@@ -35,7 +37,11 @@ import { ProgressHeader } from "./components/progress-header"
 import { QuickActions } from "./components/quick-actions"
 import { StageList } from "./components/stage-list"
 import { deriveFirstMessage } from "./helpers/derive-first-message"
-import { useProjectReadiness } from "./hooks/use-project-readiness"
+import {
+  blockersToChecklist,
+  journeyToPhases,
+  stepsToStages,
+} from "./helpers/readiness-adapters"
 
 // ── Main tab ─────────────────────────────────────────────────────────────────
 
@@ -43,19 +49,35 @@ export interface OverviewTabProps {
   project: WorkspaceProject
   onTabChange?: (tab: PreviewTab) => void
   messages?: ChatMessage[]
+  readiness?: Readiness
+  readinessLoading?: boolean
+  readinessError?: boolean
 }
 
 export function OverviewTab({
   project,
   onTabChange,
   messages = [],
+  readiness,
+  readinessLoading = false,
+  readinessError = false,
 }: OverviewTabProps) {
   const { tokens } = useAppTokens()
-  const { readiness, stages, phases, checklist, isLoading } =
-    useProjectReadiness(project.id, messages)
-  // Greeting canônico vem do readiness (builderState.persona.greeting) — o
-  // mesmo hook acima, com refetch por activity-signal (pós-submit do card).
-  const firstMessage = deriveFirstMessage(project, readiness)
+  const stages = React.useMemo(
+    () => (readiness ? stepsToStages(readiness) : []),
+    [readiness],
+  )
+  const phases = React.useMemo(
+    () => (readiness ? journeyToPhases(readiness) : null),
+    [readiness],
+  )
+  const checklist = React.useMemo(
+    () => (readiness ? blockersToChecklist(readiness) : []),
+    [readiness],
+  )
+  const isLoading = readiness === undefined && readinessLoading
+  // Greeting canônico vem do readiness içado (builderState.persona.greeting).
+  const firstMessage = deriveFirstMessage(project, readiness ?? null)
   const deployGate = canOpenDeploy(project)
 
   const [showCelebration, setShowCelebration] = useState(false)
@@ -216,8 +238,9 @@ export function OverviewTab({
       {/* Degradação honesta (NFR-06): falhou o readiness → avisa, sem inventar */}
       {!isLoading && !readiness && (
         <p className="text-[13px]" style={{ color: tokens.textTertiary }}>
-          Não foi possível carregar o progresso agora — ele atualiza sozinho
-          quando você voltar a esta aba.
+          {readinessError
+            ? "Não foi possível carregar o progresso agora — estou tentando reconectar."
+            : "Não foi possível carregar o progresso agora — ele atualiza sozinho quando você voltar a esta aba."}
         </p>
       )}
 

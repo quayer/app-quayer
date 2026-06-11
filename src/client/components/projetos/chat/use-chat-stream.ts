@@ -21,6 +21,7 @@
 import * as React from "react"
 
 import type { CardKey } from "./cards/types"
+import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
 
 import type { ChatMessage } from "../types"
@@ -66,6 +67,8 @@ function createId(): string {
 export interface ReadinessContextValue {
   readiness: Readiness | undefined
   refetchReadiness: () => void
+  readinessLoading: boolean
+  readinessError: boolean
 }
 
 /**
@@ -77,6 +80,8 @@ export interface ReadinessContextValue {
 const READINESS_CONTEXT_DEFAULT: ReadinessContextValue = {
   readiness: undefined,
   refetchReadiness: () => {},
+  readinessLoading: false,
+  readinessError: false,
 }
 
 /**
@@ -111,6 +116,7 @@ export function useChatStream({
 }: UseChatStreamOptions) {
   // ── State ──────────────────────────────────────────────────────
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages)
+  const composerStorageKey = `builder:composer:${projectId}`
 
   // Notify parent on every messages change (lets PreviewPanel derive progress
   // from tool calls without owning the conversation).
@@ -121,7 +127,10 @@ export function useChatStream({
   React.useEffect(() => {
     onMessagesChangeRef.current?.(messages)
   }, [messages])
-  const [input, setInput] = React.useState("")
+  const [input, setInput] = React.useState(() => {
+    if (typeof window === "undefined") return ""
+    return window.localStorage.getItem(composerStorageKey) ?? ""
+  })
   const [isStreaming, setIsStreaming] = React.useState(false)
   const [streamingText, setStreamingText] = React.useState("")
   const [streamingToolCalls, setStreamingToolCalls] = React.useState<
@@ -182,6 +191,16 @@ export function useChatStream({
   }, [scrollToBottom])
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const trimmed = input.trim()
+    if (trimmed) {
+      window.localStorage.setItem(composerStorageKey, input)
+    } else {
+      window.localStorage.removeItem(composerStorageKey)
+    }
+  }, [composerStorageKey, input])
 
   // ── SSE parser (preserved) ─────────────────────────────────────
   const parseSseBuffer = React.useCallback(
@@ -249,6 +268,11 @@ export function useChatStream({
   const consumeStream = React.useCallback(
     async (response: Response, fallbackErr: string) => {
       if (!response.ok || !response.body) {
+        if (response.status === 401) {
+          throw new Error(
+            "Sua sessão expirou. Entre de novo para continuar — o que você já fez está salvo.",
+          )
+        }
         throw new Error(`${fallbackErr} (HTTP ${response.status})`)
       }
 
@@ -342,13 +366,14 @@ export function useChatStream({
       setStreamingToolCalls([])
 
       try {
-        const response = await fetch(
+        const response = await fetchWithAuthRetry(
           `/api/v1/builder/projects/${projectId}/chat/message`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content: trimmed, skipUserPersist }),
           },
+          { notifyOnAuthFailure: true },
         )
         await consumeStream(response, "Falha ao enviar mensagem")
       } catch (err) {
@@ -384,7 +409,7 @@ export function useChatStream({
       setStreamingToolCalls([])
 
       try {
-        const response = await fetch(
+        const response = await fetchWithAuthRetry(
           `/api/v1/builder/projects/${projectId}/cards/${cardKey}/submit`,
           {
             method: "POST",
@@ -393,6 +418,7 @@ export function useChatStream({
             // the cardKey discriminator IN the body alongside the owned slice.
             body: JSON.stringify({ cardKey, ...payload }),
           },
+          { notifyOnAuthFailure: true },
         )
         await consumeStream(response, "Falha ao enviar card")
         // FR-17: um re-submit bem-sucedido do card REABERTO fecha a reabertura

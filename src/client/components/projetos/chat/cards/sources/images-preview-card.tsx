@@ -10,9 +10,9 @@
  * Fluxo opt-out v3 (default = visível = aprovada):
  *   - thumbnail `aspect-square object-cover` clicável → onView (abre o lightbox,
  *     onde a edição de legenda de fato acontece);
- *   - `[x]` no canto (hover desktop / sempre em touch) → onDelete (o pai dispara
- *     patchSourceImage { deleted:true }); enquanto o patch está em voo, `deleting`
- *     pinta a borda de perigo + fade-out 300ms;
+ *   - ação "Remover foto" por item → onDelete (o pai dispara patchSourceImage
+ *     { deleted:true }); enquanto o patch está em voo, `deleting` pinta a borda
+ *     de perigo + fade-out 300ms;
  *   - preview de legenda READ-ONLY com `stripHashtags` (remove `#xxx`/`@menção`
  *     SÓ no DISPLAY — nunca toca no dado real). Clicar na legenda também chama
  *     onView (a edição vive no lightbox).
@@ -24,7 +24,7 @@
  * NUNCA renderizamos `storageKey`/`originalUrl` cru no `<img>`.
  *
  * PRESENTATIONAL: não faz fetch, não tem estado próprio. O pai (panel) é dono do
- * useQuery/mutations e desce `tokens` + handlers.
+ * fetch/mutations e desce `tokens` + handlers.
  */
 
 import * as React from "react"
@@ -119,7 +119,7 @@ export function ImagesPreviewCard({
 
   return (
     <div
-      className="group/card relative flex flex-col gap-2 rounded-lg border p-2 transition-all duration-300"
+      className="relative flex flex-col gap-2 rounded-lg border p-2 transition-all duration-300"
       style={{
         backgroundColor: tokens.bgSurface,
         borderColor: deleting ? tokens.dangerText : tokens.divider,
@@ -158,29 +158,6 @@ export function ImagesPreviewCard({
         )}
       </button>
 
-      {/* Único overlay: [x] remover. Hover (desktop) ou sempre visível (touch). */}
-      <div
-        className="pointer-events-none absolute right-2 top-2 z-10 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/card:opacity-100 [@media(hover:none)]:opacity-100"
-      >
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onDelete()
-          }}
-          disabled={interactionsDisabled}
-          aria-label="Remover foto"
-          title="Remover"
-          className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full shadow-sm transition-colors focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            backgroundColor: tokens.bgElevated,
-            color: tokens.dangerText,
-          }}
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </div>
-
       {/* Preview de legenda READ-ONLY — clique abre a edição no lightbox. */}
       <button
         type="button"
@@ -199,6 +176,22 @@ export function ImagesPreviewCard({
             Sem descrição — clique para editar
           </em>
         )}
+      </button>
+
+      <button
+        type="button"
+        onClick={onDelete}
+        disabled={interactionsDisabled}
+        aria-label="Remover foto do agente"
+        className="inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          backgroundColor: tokens.bgBase,
+          borderColor: tokens.divider,
+          color: tokens.dangerText,
+        }}
+      >
+        <X className="h-3.5 w-3.5" aria-hidden="true" />
+        Remover foto
       </button>
     </div>
   )

@@ -172,6 +172,9 @@ export const sourceIngestionItemSchema = z.object({
   sourceId: z.string().optional(),
   imagesStatus: z.enum(['pending', 'running', 'ready', 'error']).optional(),
   imagesCount: z.number().int().nonnegative().optional(),
+  synthesisStatus: z.enum(['pending', 'running', 'ready', 'error']).optional(),
+  synthesisError: z.string().optional(),
+  synthesisAttempts: z.number().int().nonnegative().optional(),
 })
 
 /** Proposed synthesis written by the source-enrich pipeline (anti-hallucination:

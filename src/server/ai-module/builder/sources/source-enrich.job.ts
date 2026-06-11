@@ -60,9 +60,9 @@ import type { SubAgentContext } from '../sub-agents/types'
 import type { SourceProposal } from '../cards/builder-state'
 import {
   hasAnyProposalField,
-  mergeProposal,
   patchSourceIngestionAtomic,
   type SourceImagesMirror,
+  type SourceSynthesisMirror,
 } from './builder-state-db'
 import { extractImagesForSource } from './image-pipeline'
 import {
@@ -86,7 +86,9 @@ const SYNTHESIS_TEMPERATURE = 0.2
 /** Hard cap on the synthesis output. Proposals are small; ~1500 is generous. */
 const SYNTHESIS_MAX_TOKENS = 1500
 /** Per-source synthesis timeout (ms). The whole job is async — be patient but bounded. */
-const SYNTHESIS_TIMEOUT_MS = 25_000
+const SYNTHESIS_TIMEOUT_MS = 45_000
+/** One retry for transient LLM/parse failures (initial attempt + one retry). */
+const SYNTHESIS_MAX_ATTEMPTS = 2
 
 /**
  * Quantas fontes enriquecemos EM PARALELO no mesmo job (S03/M1 fan-out). Para 1
@@ -115,6 +117,8 @@ export interface EnrichSourceResult {
   status: 'ready' | 'error'
   /** Proposal synthesized from this source (undefined when ungrounded/failed). */
   proposal?: SourceProposal
+  /** Per-source synthesis outcome, independent from the RAG ingestion status. */
+  synthesis: SourceSynthesisMirror
   /**
    * Image-catalog outcome mirrored into builderState (Onda D). ALWAYS present so
    * every source seeded with `imagesStatus:'pending'` settles (ready|error) —
@@ -192,6 +196,10 @@ export async function enrichSource(
       sourceId,
       status: 'error',
       images: { imagesStatus: 'error', imagesCount: 0 },
+      synthesis: {
+        synthesisStatus: 'error',
+        synthesisError: 'Não consegui ler a fonte para organizar as informações.',
+      },
       error: message,
     }
   }
@@ -254,8 +262,11 @@ export async function enrichSource(
     embedSettled.status === 'fulfilled'
       ? embedSettled.value
       : { status: 'error', error: errorMessage(embedSettled.reason) }
-  const proposal: SourceProposal | undefined =
-    synthSettled.status === 'fulfilled' ? synthSettled.value : undefined
+  const synthesis: SynthesisOutcome =
+    synthSettled.status === 'fulfilled'
+      ? synthSettled.value
+      : synthesisErrorOutcome(errorMessage(synthSettled.reason))
+  const proposal = synthesis.proposal
   const images: SourceImagesMirror =
     imagesSettled.status === 'fulfilled'
       ? imagesSettled.value
@@ -276,6 +287,7 @@ export async function enrichSource(
     sourceId,
     status: embed.status,
     images,
+    synthesis: synthesis.mirror,
     ...(proposal ? { proposal } : {}),
     ...(embed.error ? { error: embed.error } : {}),
   }
@@ -297,18 +309,24 @@ interface SynthesizeArgs {
   traceId?: string
 }
 
+interface SynthesisOutcome {
+  proposal?: SourceProposal
+  mirror: SourceSynthesisMirror
+}
+
 /**
  * Síntese do proposal a partir do MESMO texto extraído (sem re-fetch). NUNCA
- * lança — uma falha/parse-error/ungrounded degrada para `undefined` (a fonte
- * segue em RAG; só não contribui campos propostos). Texto magro pula o LLM.
+ * lança — falha/parse-error/ungrounded vira `synthesisStatus:'error'` para o
+ * poll expor uma saída de retry sem transformar isso em erro de RAG.
  */
 async function synthesizeProposal(
   args: SynthesizeArgs,
-): Promise<SourceProposal | undefined> {
+): Promise<SynthesisOutcome> {
   const { sourceId, conversationId, meta, text, grounded, ctx, traceId } = args
   if (!grounded) {
-    // Texto fino demais para aterrar qualquer campo — pula o LLM (sem custo).
-    return undefined
+    return synthesisErrorOutcome(
+      'Texto insuficiente para organizar informações do negócio.',
+    )
   }
 
   const synthInput: SourceSynthesisInput = {
@@ -317,52 +335,76 @@ async function synthesizeProposal(
     text,
   }
 
-  try {
-    const llm = await runLLMSubAgent(
-      {
-        systemPrompt: SOURCE_SYNTHESIS_SYSTEM,
-        userMessage: buildSourceSynthesisUserMessage(synthInput),
-        temperature: SYNTHESIS_TEMPERATURE,
-        maxOutputTokens: SYNTHESIS_MAX_TOKENS,
-        timeoutMs: SYNTHESIS_TIMEOUT_MS,
-      },
-      ctx,
-    )
+  let lastError = 'Falha desconhecida na síntese.'
+  for (let attempt = 1; attempt <= SYNTHESIS_MAX_ATTEMPTS; attempt += 1) {
+    let llm: Awaited<ReturnType<typeof runLLMSubAgent>>
+    try {
+      llm = await runLLMSubAgent(
+        {
+          systemPrompt: SOURCE_SYNTHESIS_SYSTEM,
+          userMessage: buildSourceSynthesisUserMessage(synthInput),
+          temperature: SYNTHESIS_TEMPERATURE,
+          maxOutputTokens: SYNTHESIS_MAX_TOKENS,
+          timeoutMs: SYNTHESIS_TIMEOUT_MS,
+        },
+        ctx,
+      )
+    } catch (err) {
+      lastError = errorMessage(err)
+      logger.warn('[source-enrich.job] synthesis threw (retryable)', {
+        traceId,
+        sourceId,
+        attempt,
+        error: lastError,
+      })
+      continue
+    }
 
     if (!llm.success) {
-      // Graceful degradation — a fonte está ingerida (RAG funciona); só não há
-      // campos propostos dela. Não é erro de ingestão.
+      lastError = llm.error
       logger.warn('[source-enrich.job] synthesis failed for source', {
         traceId,
         sourceId,
         conversationId,
+        attempt,
         error: llm.error,
       })
-      return undefined
+      continue
     }
 
     const parsed = parseSourceSynthesisJSON(llm.data.text)
     if (!parsed.ok) {
+      lastError = parsed.message
       logger.warn('[source-enrich.job] could not parse synthesis JSON', {
         traceId,
         sourceId,
+        attempt,
         error: parsed.message,
       })
-      return undefined
+      continue
     }
 
-    // `ungrounded` (sem campos) é resposta VÁLIDA — nenhuma proposta.
-    if (parsed.ungrounded) return undefined
-    return parsed.value
-  } catch (err) {
-    // Defensivo: runLLMSubAgent não deveria lançar, mas garante fail-open para a
-    // proteção do allSettled (uma síntese morta nunca derruba embed/imagens).
-    logger.warn('[source-enrich.job] synthesis threw (fail-open)', {
-      traceId,
-      sourceId,
-      error: errorMessage(err),
-    })
-    return undefined
+    if (parsed.ungrounded) {
+      return synthesisErrorOutcome(
+        'Li o conteúdo, mas não encontrei campos do negócio para propor.',
+      )
+    }
+
+    return {
+      proposal: parsed.value,
+      mirror: { synthesisStatus: 'ready', synthesisError: '' },
+    }
+  }
+
+  return synthesisErrorOutcome(lastError)
+}
+
+function synthesisErrorOutcome(message: string): SynthesisOutcome {
+  return {
+    mirror: {
+      synthesisStatus: 'error',
+      synthesisError: message.slice(0, 500),
+    },
   }
 }
 
@@ -461,6 +503,10 @@ export async function runSourceEnrich(
   const { organizationId, userId, projectId, conversationId, sourceIds } =
     payload
 
+  if (payload.mode === 'synthesis_retry') {
+    return runSourceSynthesisRetry(payload, traceId)
+  }
+
   const limit = pLimit(SOURCE_ENRICH_CONCURRENCY)
 
   // S03 — fan out: each source is enriched under the concurrency limiter and, AS
@@ -471,6 +517,14 @@ export async function runSourceEnrich(
   const outcomes = await Promise.all(
     sourceIds.map((sourceId) =>
       limit(async () => {
+        await patchSourceSynthesisMirror(
+          conversationId,
+          organizationId,
+          sourceId,
+          { synthesisStatus: 'running', synthesisError: '' },
+          traceId,
+        )
+
         const outcome = await enrichSource(
           sourceId,
           conversationId,
@@ -498,6 +552,9 @@ export async function runSourceEnrich(
               [sourceId, outcome.status],
             ]),
             new Map<string, SourceImagesMirror>([[sourceId, outcome.images]]),
+            new Map<string, SourceSynthesisMirror>([
+              [sourceId, outcome.synthesis],
+            ]),
           )
         } catch (err) {
           logger.error(
@@ -525,6 +582,169 @@ export async function runSourceEnrich(
   }
 
   return { processed: outcomes.length, ingested, errors, proposalWritten }
+}
+
+async function runSourceSynthesisRetry(
+  payload: SourceEnrichJobPayload,
+  traceId?: string,
+): Promise<SourceEnrichResult> {
+  const { organizationId, userId, projectId, conversationId, sourceIds } =
+    payload
+
+  const outcomes = await Promise.all(
+    sourceIds.map(async (sourceId) => {
+      await patchSourceSynthesisMirror(
+        conversationId,
+        organizationId,
+        sourceId,
+        { synthesisStatus: 'running', synthesisError: '' },
+        traceId,
+      )
+
+      const outcome = await synthesizeFromPersistedChunks({
+        sourceId,
+        conversationId,
+        organizationId,
+        userId,
+        projectId,
+        traceId,
+      })
+
+      const proposal =
+        outcome.proposal && hasAnyProposalField(outcome.proposal)
+          ? outcome.proposal
+          : undefined
+
+      try {
+        await patchSourceIngestion(
+          conversationId,
+          organizationId,
+          proposal,
+          new Map<string, 'ready' | 'error'>(),
+          new Map<string, SourceImagesMirror>(),
+          new Map<string, SourceSynthesisMirror>([
+            [sourceId, outcome.synthesis],
+          ]),
+        )
+      } catch (err) {
+        logger.error(
+          '[source-enrich.job] failed to PATCH synthesis retry result',
+          { traceId, conversationId, sourceId, error: errorMessage(err) },
+        )
+      }
+
+      return outcome
+    }),
+  )
+
+  let errors = 0
+  let proposalWritten = false
+  for (const outcome of outcomes) {
+    if (outcome.synthesis.synthesisStatus === 'error') errors += 1
+    if (outcome.proposal && hasAnyProposalField(outcome.proposal)) {
+      proposalWritten = true
+    }
+  }
+
+  return {
+    processed: outcomes.length,
+    ingested: outcomes.length - errors,
+    errors,
+    proposalWritten,
+  }
+}
+
+interface PersistedSynthesisArgs {
+  sourceId: string
+  conversationId: string
+  organizationId: string
+  userId: string
+  projectId: string
+  traceId?: string
+}
+
+interface PersistedSynthesisOutcome {
+  sourceId: string
+  proposal?: SourceProposal
+  synthesis: SourceSynthesisMirror
+}
+
+async function synthesizeFromPersistedChunks(
+  args: PersistedSynthesisArgs,
+): Promise<PersistedSynthesisOutcome> {
+  const {
+    sourceId,
+    conversationId,
+    organizationId,
+    userId,
+    projectId,
+    traceId,
+  } = args
+
+  try {
+    const [meta, chunks] = await Promise.all([
+      resolveSourceMeta(sourceId, organizationId),
+      database.knowledgeChunk.findMany({
+        where: { sourceId, collection: { organizationId } },
+        orderBy: { ordinal: 'asc' },
+        select: { content: true },
+      }),
+    ])
+
+    if (chunks.length === 0) {
+      return {
+        sourceId,
+        synthesis: synthesisErrorOutcome(
+          'Não encontrei conteúdo salvo para tentar organizar de novo.',
+        ).mirror,
+      }
+    }
+
+    const text = chunks.map((chunk) => chunk.content).join('\n\n')
+    const outcome = await synthesizeProposal({
+      sourceId,
+      conversationId,
+      meta,
+      text,
+      grounded: text.replace(/\s/g, '').length >= SOURCE_TEXT_MIN_CHARS,
+      ctx: { organizationId, userId, projectId },
+      traceId,
+    })
+
+    return {
+      sourceId,
+      synthesis: outcome.mirror,
+      ...(outcome.proposal ? { proposal: outcome.proposal } : {}),
+    }
+  } catch (err) {
+    return {
+      sourceId,
+      synthesis: synthesisErrorOutcome(errorMessage(err)).mirror,
+    }
+  }
+}
+
+async function patchSourceSynthesisMirror(
+  conversationId: string,
+  organizationId: string,
+  sourceId: string,
+  mirror: SourceSynthesisMirror,
+  traceId?: string,
+): Promise<void> {
+  try {
+    await patchSourceIngestionAtomic(conversationId, organizationId, {
+      synthesisBySourceId: new Map<string, SourceSynthesisMirror>([
+        [sourceId, mirror],
+      ]),
+    })
+  } catch (err) {
+    logger.warn('[source-enrich.job] failed to PATCH synthesis mirror', {
+      traceId,
+      conversationId,
+      sourceId,
+      error: errorMessage(err),
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +777,7 @@ async function patchSourceIngestion(
   proposed: SourceProposal | undefined,
   statusBySourceId: Map<string, 'ready' | 'error'>,
   imagesBySourceId: Map<string, SourceImagesMirror>,
+  synthesisBySourceId: Map<string, SourceSynthesisMirror>,
 ): Promise<void> {
   const patched = await patchSourceIngestionAtomic(
     conversationId,
@@ -566,6 +787,7 @@ async function patchSourceIngestion(
       // Onda D — settla o espelho imagesStatus/imagesCount de cada fonte (o
       // poll de imagens do source_progress card depende disso para parar).
       imagesBySourceId,
+      synthesisBySourceId,
       // Only attach `proposed` when we actually have grounded fields, so a
       // failed/ungrounded batch never clobbers an existing proposal with {}
       // (and never reopens an accepted card for nothing). The write boundary

@@ -9,6 +9,7 @@ import { MessageInput } from "@/client/components/ds/message-input"
 
 import { ActiveStepCard } from "./active-step-card"
 import { EmptyState, MessageBubble, StreamingBubble } from "./message-bubbles"
+import { SourceStatusChips } from "./source-status-chips"
 import { useChatStream } from "./use-chat-stream"
 import { parseBuilderState } from "@/server/ai-module/builder/cards/builder-state"
 
@@ -177,6 +178,12 @@ export function ChatPanel({
               hospeda cards REABERTOS via "Ajustar" do resumo (reopenCard); a
               reabertura substitui o card do passo ativo até fechar (silencioso)
               ou re-submeter com sucesso. */}
+          <SourceStatusChips
+            projectId={projectId}
+            seedSources={builderState.sourceIngestion.sources}
+            sourceConfirmed={builderState.confirmations.source}
+            tokens={tokens}
+          />
           <ActiveStepCard
             projectId={projectId}
             readiness={readiness}

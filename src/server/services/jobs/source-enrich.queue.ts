@@ -80,6 +80,13 @@ export interface SourceEnrichJobPayload {
   readonly conversationId: string
   /** IDs dos KnowledgeSource já criados (status pending) a enriquecer. */
   readonly sourceIds: string[]
+  /**
+   * Default/ausente = pipeline completo (fetch→embed→synthesis→images).
+   * `synthesis_retry` reaproveita chunks já persistidos e roda só a síntese.
+   */
+  readonly mode?: 'full' | 'synthesis_retry'
+  /** Manual retry attempt stamped by the route for deterministic jobId/logs. */
+  readonly synthesisAttempt?: number
 }
 
 /**
@@ -108,6 +115,12 @@ export type RunSourceEnrich = (
   payload: SourceEnrichJobPayload,
   traceId?: string,
 ) => Promise<SourceEnrichResult>
+
+export interface EnqueueSourceEnrichResult {
+  enqueued: boolean
+  transport: 'bullmq' | 'sync' | 'none'
+  reason?: 'missing_redis'
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,8 +175,8 @@ async function loadRunSourceEnrich(): Promise<RunSourceEnrich> {
  */
 export async function enqueueSourceEnrich(
   payload: SourceEnrichJobPayload,
-  options: { redisUrl?: string; traceId?: string } = {},
-): Promise<void> {
+  options: { redisUrl?: string; traceId?: string; jobId?: string } = {},
+): Promise<EnqueueSourceEnrichResult> {
   // QH-13: anexa o traceId ao payload via withTrace (fail-open: gera um novo se ausente).
   const traceId = options.traceId ?? newTraceId()
   const tracedPayload = withTrace(
@@ -185,7 +198,7 @@ export async function enqueueSourceEnrich(
           (err as Error)?.message ?? err,
         )
       })
-    return
+    return { enqueued: true, transport: 'sync' }
   }
 
   const redisUrl = options.redisUrl ?? process.env.REDIS_URL
@@ -196,7 +209,7 @@ export async function enqueueSourceEnrich(
       '[source-enrich.queue] REDIS_URL ausente e SOURCE_ENRICH_SYNC desligado — ' +
         'enrichment NÃO enfileirado. Defina REDIS_URL ou SOURCE_ENRICH_SYNC=1 (dev).',
     )
-    return
+    return { enqueued: false, transport: 'none', reason: 'missing_redis' }
   }
 
   const connection = parseRedisUrl(redisUrl)
@@ -206,6 +219,7 @@ export async function enqueueSourceEnrich(
 
   try {
     await queue.add(SOURCE_ENRICH_JOB_NAME, tracedPayload, {
+      ...(options.jobId ? { jobId: options.jobId } : {}),
       // RETRY: falha transitória (site fora do ar, timeout de embed, blip de DB)
       // não pode deixar a fonte eternamente "pending" — 3 tentativas com backoff
       // exponencial (5s → 10s → 20s). Seguro re-executar: o handler recarrega os
@@ -218,6 +232,7 @@ export async function enqueueSourceEnrich(
       removeOnComplete: { age: 3600, count: 100 },
       removeOnFail: { age: 24 * 3600, count: 50 },
     })
+    return { enqueued: true, transport: 'bullmq' }
   } finally {
     // Producer efêmero: fecha a conexão para não vazar sockets quando chamado
     // de dentro do runtime Next (uma conexão por turno).

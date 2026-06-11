@@ -2,6 +2,13 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  fetchWithAuthRetry,
+  refreshAuthSession,
+} from './client-refresh'
 
 export interface AuthUser {
   id: string
@@ -53,6 +60,21 @@ interface MeResponse {
   error?: string
 }
 
+const PROACTIVE_REFRESH_MS = 12 * 60 * 1000
+
+function currentReturnTo(): string {
+  if (typeof window === 'undefined') return '/projetos'
+  return `${window.location.pathname}${window.location.search}`
+}
+
+function isAuthSurface(pathname: string): boolean {
+  return (
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/signup') ||
+    pathname.startsWith('/register')
+  )
+}
+
 function mapMeResponseToAuthUser(payload: MeResponse): AuthUser | null {
   const data = payload?.data
   if (!data?.id) return null
@@ -77,10 +99,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [user, setUser] = React.useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
+  const sessionExpiredHandledRef = React.useRef(false)
+
+  const handleSessionExpired = React.useCallback(() => {
+    if (sessionExpiredHandledRef.current) return
+    sessionExpiredHandledRef.current = true
+    setUser(null)
+
+    const pathname =
+      typeof window === 'undefined' ? '/login' : window.location.pathname
+    if (isAuthSurface(pathname)) return
+
+    toast.error(
+      'Sua sessão expirou. Entre de novo para continuar — o que você já fez está salvo.',
+    )
+    router.push(`/login?redirect=${encodeURIComponent(currentReturnTo())}`)
+    router.refresh()
+  }, [router])
 
   const fetchMe = React.useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/auth/me', {
+      const res = await fetchWithAuthRetry('/api/v1/auth/me', {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       })
@@ -90,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const json = (await res.json()) as MeResponse
       setUser(mapMeResponseToAuthUser(json))
+      sessionExpiredHandledRef.current = false
     } catch {
       setUser(null)
     } finally {
@@ -100,6 +140,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     void fetchMe()
   }, [fetchMe])
+
+  React.useEffect(() => {
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired)
+    return () =>
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired)
+  }, [handleSessionExpired])
+
+  React.useEffect(() => {
+    if (!user) return
+
+    let timer: number | undefined
+
+    const runRefresh = async () => {
+      const ok = await refreshAuthSession()
+      if (!ok) {
+        handleSessionExpired()
+        return
+      }
+      sessionExpiredHandledRef.current = false
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(runRefresh, PROACTIVE_REFRESH_MS)
+    }
+
+    const schedule = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(runRefresh, PROACTIVE_REFRESH_MS)
+    }
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void runRefresh()
+    }
+
+    schedule()
+    window.addEventListener('focus', runRefresh)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      window.removeEventListener('focus', runRefresh)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [handleSessionExpired, user])
 
   const logout = React.useCallback(async () => {
     try {
