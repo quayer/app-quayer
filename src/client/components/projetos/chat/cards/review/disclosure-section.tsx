@@ -4,8 +4,8 @@
  * Builder Cards — review/disclosure-section (Jornada v2 · T43, FR-21)
  *
  * The "Como o agente se apresenta" advanced section of the composite `agent_review`
- * card, migrated VERBATIM from the removed IdentityTab (the only non-duplicated field
- * it carried): the disclosure mode (`ai_explicit` / `human_passthrough` / `custom`)
+ * card, migrated from the removed IdentityTab (the only non-duplicated field it
+ * carried): the disclosure mode (`ai_explicit` / `human_passthrough` / `custom`)
  * plus the legal acceptance gate for `human_passthrough`.
  *
  * Split out of `agent-review-card.tsx` to keep the orchestrator a thin ≤300-line
@@ -33,19 +33,27 @@ export interface DisclosureValue {
   customText?: string
 }
 
-/** The 3 disclosure options, copy migrated from the IdentityTab (FR-21). */
+/** The 3 disclosure options (FR-21), rewritten for the review card context. */
 const DISCLOSURE_OPTIONS: ReadonlyArray<{
   value: DisclosureMode
   label: string
   hint: string
 }> = [
-  { value: "ai_explicit", label: "🤖 Assume que é IA", hint: '"Sou a assistente virtual…"' },
+  {
+    value: "ai_explicit",
+    label: "IA transparente",
+    hint: '"Sou o atendimento virtual da equipe..."',
+  },
   {
     value: "human_passthrough",
-    label: "👤 Se passa por humano",
-    hint: '"Oi, sou a Marina da clínica" (sem revelar IA)',
+    label: "Parece humano",
+    hint: '"Oi, aqui é a Marina" sem dizer que é IA',
   },
-  { value: "custom", label: "✎ Personalizado", hint: "Você escreve como ele se apresenta" },
+  {
+    value: "custom",
+    label: "Texto próprio",
+    hint: "Defina exatamente como o agente abre a conversa",
+  },
 ]
 
 /**
@@ -100,7 +108,7 @@ export function DisclosureSection({
           className="text-[12px] font-medium"
           style={{ color: tokens.textSecondary }}
         >
-          Como o agente se apresenta{" "}
+          Transparência no atendimento{" "}
           <span style={{ color: tokens.textTertiary }}>(avançado)</span>
         </span>
         <ChevronDown
@@ -165,8 +173,9 @@ export function DisclosureSection({
               >
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  Fingir ser humano pode violar LGPD/CDC (dever de transparência)
-                  e a política do WhatsApp. Você assume a responsabilidade legal.
+                  Esse modo aumenta conversão no curto prazo, mas cobra a conta
+                  depois: pode violar LGPD/CDC, política do WhatsApp e quebrar
+                  confiança quando o lead percebe que era IA.
                 </span>
               </p>
               {!accepted && (
@@ -174,7 +183,8 @@ export function DisclosureSection({
                   className="mt-1.5 text-[11px] font-medium"
                   style={{ color: tokens.warningText }}
                 >
-                  Pendente de aceite — este modo NÃO será salvo até você aceitar.
+                  Pendente de aceite — esse modo não será salvo até você assumir
+                  o risco.
                 </p>
               )}
               <label
@@ -187,7 +197,7 @@ export function DisclosureSection({
                   disabled={disabled}
                   onChange={(e) => setAccepted(e.target.checked)}
                 />
-                Li e aceito o risco.
+                Entendi o risco e quero usar mesmo assim.
               </label>
             </div>
           )}
@@ -197,7 +207,7 @@ export function DisclosureSection({
               value={customText}
               disabled={disabled}
               onChange={(e) => setCustomText(e.target.value)}
-              placeholder="Ex: Apresente-se como concierge do hotel, sem mencionar tecnologia."
+              placeholder="Ex.: Sou o atendimento oficial da Vibra Butantã. Vou entender seu perfil e te encaminhar para um consultor."
               className="min-h-[60px] rounded-md border px-3 py-2 text-[13px] outline-none disabled:cursor-not-allowed disabled:opacity-60"
               style={{
                 backgroundColor: tokens.bgBase,

@@ -414,7 +414,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
             className="text-[12px] font-medium"
             style={{ color: tokens.textSecondary }}
           >
-            Jeito de falar
+            Quem o lead acha que respondeu
           </span>
           <div className="grid gap-2 sm:grid-cols-3">
             {SPEECH_MODES.map((option) => {
@@ -462,7 +462,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
                 className="text-[12px] font-medium"
                 style={{ color: tokens.textSecondary }}
               >
-                Nome do negócio / agente
+                Nome exibido no atendimento
               </Label>
               {origin.name === "proposed" && <SuggestedBadge tokens={tokens} />}
             </div>
@@ -470,7 +470,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
               id="persona-name"
               value={name}
               disabled={disabled}
-              placeholder="Ex.: Clínica Aurora"
+              placeholder="Ex.: SDR Vibra Butantã"
               onChange={(event) => setName(event.target.value)}
               className="text-[13px]"
               style={{
@@ -496,7 +496,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
                 className="text-[12px] font-medium"
                 style={{ color: tokens.textSecondary }}
               >
-                Tom
+                Tom comercial
               </Label>
               {origin.tone === "proposed" && <SuggestedBadge tokens={tokens} />}
             </div>
@@ -504,7 +504,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
               id="persona-tone"
               value={tone}
               disabled={disabled}
-              placeholder="Ex.: acolhedor e direto"
+              placeholder="Ex.: consultivo, claro e sem pressão"
               onChange={(event) => setTone(event.target.value)}
               className="text-[13px]"
               style={{
@@ -530,13 +530,13 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
             className="text-[12px] font-medium"
             style={{ color: tokens.textSecondary }}
           >
-            Estilo
+            Regras de escrita
           </Label>
           <Input
             id="persona-style"
             value={style}
             disabled={disabled}
-            placeholder="Ex.: respostas curtas, usa emojis com moderação"
+            placeholder="Ex.: respostas curtas, sem emojis, chama para visita"
             onChange={(event) => setStyle(event.target.value)}
             className="text-[13px]"
             style={{

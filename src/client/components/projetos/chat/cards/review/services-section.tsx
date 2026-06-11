@@ -264,11 +264,11 @@ export function ServicesSection({
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <ChipList
-          heading="Faz / oferece"
+          heading="Responde e conduz"
           headingBadge={
             offeredFromProposal ? <SuggestedBadge tokens={tokens} /> : null
           }
-          placeholder="Ex.: tirar dúvidas, agendar, consultoria…"
+          placeholder="Ex.: plantas, localização, visita, financiamento..."
           items={offered}
           onAdd={addOffered}
           onRemove={removeOffered}
@@ -286,8 +286,8 @@ export function ServicesSection({
         )}
       </div>
       <ChipList
-        heading="NÃO faz"
-        placeholder="Ex.: suporte técnico, parcelamento…"
+        heading="Não promete"
+        placeholder="Ex.: desconto garantido, crédito aprovado, reserva..."
         items={notOffered}
         onAdd={addNotOffered}
         onRemove={removeNotOffered}
@@ -304,7 +304,7 @@ export function ServicesSection({
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           As duas listas estão vazias — o agente não vai saber o que você
-          oferece. Você pode confirmar mesmo assim e completar depois pela
+          deve responder. Você pode confirmar mesmo assim e completar depois pela
           conversa.
         </p>
       )}

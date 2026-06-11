@@ -74,13 +74,13 @@ const OUT_OF_HOURS_OPTIONS: ReadonlyArray<{
 }> = [
   {
     key: "reply_notice",
-    label: "Avisar prazo humano",
-    hint: "A IA continua atendendo e informa quando a equipe retorna",
+    label: "Alinhar expectativa",
+    hint: "A IA segue atendendo e avisa quando alguém da equipe retorna",
   },
   {
     key: "silent",
-    label: "Não acionar humano",
-    hint: "A IA responde sozinha e não promete retorno imediato da equipe",
+    label: "Não prometer retorno",
+    hint: "A IA responde sozinha e não cria expectativa de contato humano",
   },
 ]
 
@@ -89,16 +89,20 @@ const PRESET_OPTIONS: ReadonlyArray<{
   label: string
   hint: string
 }> = [
-  { key: "24_7", label: "Equipe 24/7", hint: "Há pessoas disponíveis todos os dias" },
+  {
+    key: "24_7",
+    label: "Equipe sempre disponível",
+    hint: "Pode chamar humano em qualquer dia e horário",
+  },
   {
     key: "commercial",
-    label: "Equipe comercial",
-    hint: "Seg a Sex, 09:00 às 18:00",
+    label: "Equipe em horário comercial",
+    hint: "Humano atende de seg a sex, 09:00 às 18:00",
   },
   {
     key: "custom",
-    label: "Personalizado",
-    hint: "Defina cada dia manualmente",
+    label: "Horário manual",
+    hint: "Defina os dias em que há equipe humana",
   },
 ]
 
@@ -556,7 +560,7 @@ export function HoursSection({
           className="mb-1 block text-[12px] font-medium"
           style={{ color: tokens.textSecondary }}
         >
-          Fuso horário
+          Fuso do atendimento
         </label>
         <input
           id="business-hours-timezone"
@@ -580,7 +584,7 @@ export function HoursSection({
           className="mb-1 block text-[12px] font-medium"
           style={{ color: tokens.textSecondary }}
         >
-          Fora do horário da equipe
+          Quando não houver equipe humana
         </span>
         <div
           className="grid gap-2 sm:grid-cols-2"

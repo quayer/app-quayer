@@ -44,18 +44,18 @@ export interface SpeechModeOption {
 export const SPEECH_MODES: ReadonlyArray<SpeechModeOption> = [
   {
     key: "assistant",
-    label: "Assistente",
-    hint: "Fala em nome do negócio. Ex.: \"Sou o assistente da clínica.\"",
+    label: "Atendente oficial",
+    hint: "Fala pelo negócio. Ex.: \"Sou o consultor virtual da equipe.\"",
   },
   {
     key: "first_person",
     label: "Em primeira pessoa",
-    hint: "Fala como se fosse você mesmo(a). Ex.: \"Oi! Aqui é a Dra. Marina.\"",
+    hint: "Fala como uma pessoa nomeada. Ex.: \"Oi, aqui é a Marina.\"",
   },
   {
     key: "secretary",
-    label: "Como secretária",
-    hint: "Fala como a recepção do negócio. Ex.: \"A Dra. já te retorna.\"",
+    label: "Recepção",
+    hint: "Fala como triagem. Ex.: \"Vou entender seu interesse e encaminhar.\"",
   },
 ]
 

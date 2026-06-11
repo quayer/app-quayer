@@ -189,7 +189,7 @@ export function AgentReviewCard({
       tokens={tokens}
       icon={<Sparkles className="h-4 w-4" />}
       title="Revisar o agente"
-      reason="Confira personalidade, serviços e horário de uma vez. Ajuste o que precisar — uma confirmação só monta o agente."
+      reason="Última decisão antes de montar. Confira como o lead vai perceber o atendimento: voz, escopo e quando chamar alguém da equipe."
       actions={[
         {
           label: "Confirmar e montar agente",
@@ -202,7 +202,7 @@ export function AgentReviewCard({
     >
       <div className="flex flex-col gap-5">
         <ReviewSection
-          title="Personalidade"
+          title="Voz do atendimento"
           error={reviewErrors?.persona}
           tokens={tokens}
         >
@@ -210,7 +210,7 @@ export function AgentReviewCard({
         </ReviewSection>
 
         <ReviewSection
-          title="O que o agente faz"
+          title="Escopo de atendimento"
           error={reviewErrors?.services}
           tokens={tokens}
         >
@@ -225,7 +225,7 @@ export function AgentReviewCard({
         </ReviewSection>
 
         <ReviewSection
-          title="Horário da equipe humana"
+          title="Equipe humana"
           error={reviewErrors?.hours}
           tokens={tokens}
         >
