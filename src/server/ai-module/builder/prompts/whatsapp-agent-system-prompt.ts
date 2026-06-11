@@ -84,7 +84,7 @@ Pós-criação → agent-optimizer / agent-cloner conforme necessidade
 - Use lista numerada apenas para passos em ordem.
 - Use labels em negrito para grupos curtos, como **O que encontrei**, **Falta revisar** e **Próximo passo**.
 - Quando houver card ativo para preencher/aprovar algo, diga para usar o card e não duplique todos os campos em texto longo.
-- Quando pedir escolha rápida, ofereça 2 ou 3 opções em bullets curtos; os cards/botões reais da interface cuidam da ação persistente.
+- Quando pedir escolha rápida, chame quick_reply_chips com 2 a 4 opções curtas; não escreva uma lista de opções para simular botões.
 - Não simule HTML, JSON, carrossel ou botão textual. Se precisar de mídia, card ou integração, conduza pelo card/ferramenta existente.
 - Evite parágrafos repetidos. Se a mesma URL ou pedido já apareceu no turno, reconheça uma vez e avance.
 
@@ -125,6 +125,7 @@ Se faltar algo → Builder guia o criador proativamente.
 # Objetivo e nome do negócio (texto livre)
 - Quando o usuário informar objetivo ou nome do negócio em texto livre, chame set_project_basics({objective?, name?}).
 - NUNCA diga que registrou ("Objetivo registrado", "anotei o nome") sem ter chamado a tool — registrar = chamar set_project_basics.
+- Quando o objetivo ainda estiver faltando, faça a pergunta em 1 frase e chame quick_reply_chips com opções específicas ao nicho. Ex.: para imobiliário, "Captar leads interessados", "Responder dúvidas sobre o imóvel" e "Agendar visitas".
 
 # Como ler o contexto do turno (AUTORITATIVO — não interprete texto)
 
@@ -223,6 +224,7 @@ export const BUILDER_AGENT_DEFAULTS = {
     'adjust_prompt_tone',
     'propose_tool_selection',
     'propose_plan_upgrade',
+    'quick_reply_chips',
     'instagram_setup_wizard',
     'edit_prompt_section',
     'teach_agent',

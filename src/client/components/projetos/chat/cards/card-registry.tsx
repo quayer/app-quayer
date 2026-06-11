@@ -28,10 +28,10 @@
  *     Re-submit goes through the normal card-submit endpoint; the step-engine
  *     is unaffected (the confirmation was already true and stays true).
  *  3. TRANSIENT (1 card): `quick_reply_chips` — a quick-answer prompt with NO
- *     `stepId` and no sentinel; it routes as a normal chat turn. Its descriptor
- *     stays registered for direct lookup, but it is EXPLICITLY excluded from the
- *     active-step mapping (see {@link STEP_TO_CARD}) so it can never surface in
- *     the pinned slot — chips-parsing was never wired through that path.
+ *     `stepId` and no sentinel; it routes as a normal chat turn. The Builder can
+ *     emit it through the `quick_reply_chips` tool, and ToolCallCard renders the
+ *     registered component inline. It is EXPLICITLY excluded from the active-step
+ *     mapping (see {@link STEP_TO_CARD}) so it never surfaces in the pinned slot.
  *  4. INLINE / LEGACY (3 cards): `agent_approval`, `tool_selection`, `channel`
  *     keep their inline rendering inside `ToolCallCard` (chat-panel.tsx) for
  *     backward compat — they are NOT in this registry at all.
@@ -284,10 +284,10 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
 
 /**
  * Card keys that must NEVER be surfaced by the active-step slot, regardless of
- * whether they carry a `stepId`. `quick_reply_chips` is a TRANSIENT prompt whose
- * chips-parsing was never wired through the active-step path, so excluding it
- * here guarantees `getCardForStep` can never return it — even if a `stepId` is
- * added to its descriptor by mistake later.
+ * whether they carry a `stepId`. `quick_reply_chips` is a TRANSIENT prompt
+ * rendered inline from tool output, so excluding it here guarantees
+ * `getCardForStep` can never return it — even if a `stepId` is added to its
+ * descriptor by mistake later.
  */
 const ACTIVE_STEP_EXCLUDED: ReadonlySet<CardKey> = new Set<CardKey>([
   "quick_reply_chips",

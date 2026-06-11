@@ -27,6 +27,13 @@ describe('BUILDER_SYSTEM_PROMPT — regras duras', () => {
     expect(BUILDER_SYSTEM_PROMPT).toMatch(/NUNCA diga que registrou/)
   })
 
+  it('orienta escolhas rápidas via quick_reply_chips real', () => {
+    expect(BUILDER_SYSTEM_PROMPT).toContain('quick_reply_chips')
+    expect(BUILDER_SYSTEM_PROMPT).toContain(
+      'não escreva uma lista de opções para simular botões',
+    )
+  })
+
   it('proíbe generate_prompt_anatomy antes de objetivo + persona', () => {
     expect(BUILDER_SYSTEM_PROMPT).toContain(
       'NUNCA chame generate_prompt_anatomy antes de o objetivo estar definido E o tom/persona conhecidos',
@@ -45,6 +52,7 @@ describe('BUILDER_JOURNEY_RULES — disciplina do banner', () => {
   it('conduz apenas o passo ativo e registra respostas de outros passos sem anunciar', () => {
     expect(BUILDER_JOURNEY_RULES).toContain('Conduza APENAS o passo do PRÓXIMO PASSO')
     expect(BUILDER_JOURNEY_RULES).toContain('set_project_basics')
+    expect(BUILDER_JOURNEY_RULES).toContain('quick_reply_chips({ prompt, chips })')
     expect(BUILDER_JOURNEY_RULES).toContain('SEM anunciar')
   })
 

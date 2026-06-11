@@ -18,8 +18,10 @@ import {
   AGENT_PROPOSAL_CAPABILITIES,
   getAgentProposal,
   getChannelSelection,
+  getQuickReplyChips,
   getQrResult,
   getToolSelection,
+  isSuccessfulToolResult,
   toolLabel,
   toolResultSummary,
 } from "./tool-call-helpers"
@@ -27,6 +29,7 @@ import { ToolSelectionCard } from "./tool-selection-card"
 import { ChannelSelectionCard } from "./channel-selection-card"
 import { WhatsAppQrCard } from "./whatsapp-qr-card"
 import { renderIntegrationToolCard } from "./cards/integration/integration-tool-cards"
+import { QuickReplyChipsCard } from "./cards/quick-reply-chips-card"
 
 export function ToolCallCard({
   toolName,
@@ -66,6 +69,10 @@ export function ToolCallCard({
     selectedToolKeys: string[]
   }
 }) {
+  if (toolName === "set_project_basics" && !streaming && isSuccessfulToolResult(result)) {
+    return null
+  }
+
   if (toolName === "propose_agent_creation" && !streaming) {
     const proposal = getAgentProposal(args, result)
 
@@ -180,6 +187,26 @@ export function ToolCallCard({
         </div>
       </div>
     )
+  }
+
+  if (toolName === "quick_reply_chips" && !streaming) {
+    const quickReplies = getQuickReplyChips(args, result)
+    if (quickReplies) {
+      return (
+        <QuickReplyChipsCard
+          projectId={projectId}
+          cardKey="quick_reply_chips"
+          value={builderState}
+          disabled={isStreaming}
+          tokens={tokens}
+          chips={quickReplies.chips}
+          prompt={quickReplies.prompt}
+          onSubmit={(payload) =>
+            onSubmitCard("quick_reply_chips", { value: payload.value })
+          }
+        />
+      )
+    }
   }
 
   // Integration Builder (W2, T41) — mode-4 inline cards (NOT in CARD_REGISTRY).

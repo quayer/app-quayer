@@ -39,6 +39,7 @@ import { setProjectBasicsTool } from './set-project-basics.tool'
 import { proposeFieldValuesTool } from './propose-field-values.tool'
 import { proposeIntegrationTool } from './propose-integration.tool'
 import { testIntegrationTool } from './test-integration.tool'
+import { quickReplyChipsTool } from './quick-reply-chips.tool'
 import { isIntegrationBuilderEnabled } from '@/lib/feature-flags/integration-builder'
 
 export type { BuilderToolExecutionContext }
@@ -74,6 +75,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     edit_prompt_section: editPromptSectionTool(ctx),
     revert_prompt: revertPromptTool(ctx),
     set_project_basics: setProjectBasicsTool(ctx),
+    quick_reply_chips: quickReplyChipsTool(ctx),
     // T23 (FR-02) — captura propostas de texto livre em capturedProposals.*; NUNCA
     // flipa sentinel (proposta ≠ confirmação). Card prefilla e o usuário confirma.
     propose_field_values: proposeFieldValuesTool(ctx),

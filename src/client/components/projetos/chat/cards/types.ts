@@ -30,7 +30,7 @@ export type { BuilderState }
  * W3 lands card-by-card: each component agent registers its backend payload
  * schema in `card-submit.schemas.ts`, growing `RegisteredCardKey` toward this
  * set. `preview_summary` is a confirm-only card; `quick_reply_chips` carries no
- * sentinel and routes as a normal chat turn (handled by chat-panel, not POST).
+ * sentinel and routes as a normal chat turn through the card-submit endpoint.
  *
  * Keys mirror the spec's card catalog (docs/builder/ORAYON_UPLIFT_SPEC.md) and
  * the W2 keys already in the backend registry (`agent_approval`,

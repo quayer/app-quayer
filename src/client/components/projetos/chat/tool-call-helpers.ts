@@ -37,6 +37,8 @@ const TOOL_LABELS: Record<string, string> = {
   generate_prompt_anatomy:   "Gerando prompt",
   propose_agent_creation:    "Propondo agente",
   propose_tool_selection:    "Escolhendo capacidades",
+  quick_reply_chips:         "Preparando respostas",
+  set_project_basics:        "Dados registrados",
   create_agent:              "Criando agente",
   update_agent:              "Atualizando agente",
   select_channel:            "Escolhendo canal",
@@ -64,6 +66,66 @@ export function toolResultSummary(result: unknown): string | null {
   if (typeof r.error === "string" && r.error) return `Erro: ${r.error}`
   if (r.success === false) return "Falha na operação"
   return null
+}
+
+export interface QuickReplyToolChip {
+  value: string
+  label?: string
+}
+
+function normalizeQuickReplyChips(value: unknown): QuickReplyToolChip[] {
+  if (!Array.isArray(value)) return []
+
+  const seen = new Set<string>()
+  const out: QuickReplyToolChip[] = []
+  for (const item of value) {
+    let chipValue = ""
+    let chipLabel: string | undefined
+
+    if (typeof item === "string") {
+      chipValue = item.trim()
+    } else if (item && typeof item === "object") {
+      const raw = item as Record<string, unknown>
+      chipValue = typeof raw.value === "string" ? raw.value.trim() : ""
+      const label = typeof raw.label === "string" ? raw.label.trim() : ""
+      chipLabel = label.length > 0 ? label : undefined
+    }
+
+    if (!chipValue || seen.has(chipValue)) continue
+    seen.add(chipValue)
+    out.push(chipLabel ? { value: chipValue, label: chipLabel } : { value: chipValue })
+  }
+
+  return out
+}
+
+export function getQuickReplyChips(args: unknown, result: unknown) {
+  const resultRecord =
+    result && typeof result === "object"
+      ? (result as Record<string, unknown>)
+      : null
+  const argsRecord =
+    args && typeof args === "object" ? (args as Record<string, unknown>) : null
+
+  if (resultRecord?.success === false) return null
+
+  const prompt =
+    getStringField(result, "prompt") ??
+    getStringField(args, "prompt") ??
+    "Escolha uma opção para responder."
+  const chips = normalizeQuickReplyChips(
+    resultRecord?.chips ?? argsRecord?.chips,
+  )
+
+  return chips.length > 0 ? { prompt, chips } : null
+}
+
+export function isSuccessfulToolResult(result: unknown): boolean {
+  return Boolean(
+    result &&
+      typeof result === "object" &&
+      (result as Record<string, unknown>).success === true,
+  )
 }
 
 export function getStringField(value: unknown, field: string): string | null {
