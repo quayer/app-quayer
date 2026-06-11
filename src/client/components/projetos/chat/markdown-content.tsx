@@ -22,6 +22,42 @@ export function MarkdownContent({ content, className, tokens: tokensProp }: Mark
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          h1: ({ children }) => (
+            <h3
+              style={{
+                margin: "0 0 0.45em",
+                color: tokens.textPrimary,
+                fontSize: "0.95rem",
+                fontWeight: 700,
+              }}
+            >
+              {children}
+            </h3>
+          ),
+          h2: ({ children }) => (
+            <h4
+              style={{
+                margin: "0.2em 0 0.4em",
+                color: tokens.textPrimary,
+                fontSize: "0.9rem",
+                fontWeight: 650,
+              }}
+            >
+              {children}
+            </h4>
+          ),
+          h3: ({ children }) => (
+            <h5
+              style={{
+                margin: "0.2em 0 0.35em",
+                color: tokens.textPrimary,
+                fontSize: "0.85rem",
+                fontWeight: 650,
+              }}
+            >
+              {children}
+            </h5>
+          ),
           p: ({ children }) => (
             <p style={{ margin: "0 0 0.5em" }}>{children}</p>
           ),
@@ -68,12 +104,66 @@ export function MarkdownContent({ content, className, tokens: tokensProp }: Mark
             )
           },
           ul: ({ children }) => (
-            <ul style={{ margin: "0 0 0.5em", paddingLeft: "1.25rem" }}>{children}</ul>
+            <ul style={{ margin: "0 0 0.55em", paddingLeft: "1.15rem" }}>{children}</ul>
           ),
           ol: ({ children }) => (
-            <ol style={{ margin: "0 0 0.5em", paddingLeft: "1.25rem" }}>{children}</ol>
+            <ol style={{ margin: "0 0 0.55em", paddingLeft: "1.15rem" }}>{children}</ol>
           ),
-          li: ({ children }) => <li style={{ marginBottom: "0.15em" }}>{children}</li>,
+          li: ({ children }) => (
+            <li style={{ marginBottom: "0.22em", paddingLeft: "0.1rem" }}>{children}</li>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote
+              style={{
+                margin: "0.4em 0 0.65em",
+                padding: "0.55rem 0.75rem",
+                borderLeft: `3px solid ${tokens.brand}`,
+                background: tokens.bgElevated,
+                color: tokens.textSecondary,
+                borderRadius: 6,
+              }}
+            >
+              {children}
+            </blockquote>
+          ),
+          table: ({ children }) => (
+            <div style={{ maxWidth: "100%", overflowX: "auto", margin: "0.5em 0" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "0.8125rem",
+                }}
+              >
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th
+              style={{
+                borderBottom: `1px solid ${tokens.divider}`,
+                color: tokens.textPrimary,
+                fontWeight: 650,
+                padding: "0.4rem 0.5rem",
+                textAlign: "left",
+              }}
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td
+              style={{
+                borderBottom: `1px solid ${tokens.divider}`,
+                color: tokens.textSecondary,
+                padding: "0.4rem 0.5rem",
+                verticalAlign: "top",
+              }}
+            >
+              {children}
+            </td>
+          ),
           strong: ({ children }) => (
             <strong style={{ color: tokens.textPrimary, fontWeight: 600 }}>{children}</strong>
           ),

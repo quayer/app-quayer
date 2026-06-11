@@ -17,6 +17,7 @@ import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { BuilderState } from "@/server/ai-module/builder/cards/builder-state"
 import { getCardDescriptor } from "@/client/components/projetos/chat/cards/card-registry"
 import type { CardKey } from "@/client/components/projetos/chat/cards/types"
+import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 
 // ── getCapabilities query (NFR-05) ─────────────────────────────────────────
 
@@ -29,6 +30,8 @@ export interface CustomToolView {
 export interface CapabilitiesEnvelope {
   customTools?: CustomToolView[]
   mediaImagesCount?: number
+  sourceImagesCount?: number
+  sourceImagesPendingCount?: number
   knowledgeSourceCount?: number
   calendarConnected?: boolean
 }
@@ -43,9 +46,50 @@ interface GetCapabilitiesQuery {
 }
 
 /**
- * Resolve `api.builder.getCapabilities` UMA vez (module-eval), com fallback no-op
- * se o client gerado ainda não expõe a action — mantém a IDENTIDADE do hook
- * estável (Rules of Hooks) e a seção degrada (counts vazios) em vez de quebrar.
+ * Fetch nativo usado quando o schema/client Igniter ainda não expõe a action
+ * gerada. Mantém a identidade do hook estável e evita que a Overview degrade para
+ * counts vazios só porque o client gerado ficou atrasado no dev.
+ */
+const NATIVE_GET_CAPABILITIES_QUERY: GetCapabilitiesQuery = {
+  useQuery: ({ params }) => {
+    const mounted = React.useRef(false)
+    const [data, setData] = React.useState<
+      { success?: boolean; data?: CapabilitiesEnvelope } | undefined
+    >(undefined)
+
+    const refetch = React.useCallback(async () => {
+      try {
+        const res = await fetchWithAuthRetry(
+          `/api/v1/builder/projects/${params.id}/capabilities`,
+          { method: "GET", headers: { Accept: "application/json" } },
+          { notifyOnAuthFailure: true },
+        )
+        if (!res.ok) throw new Error(`getCapabilities ${res.status}`)
+        const body = (await res.json()) as {
+          success?: boolean
+          data?: CapabilitiesEnvelope
+        }
+        if (mounted.current) setData(body)
+      } catch {
+        if (mounted.current) setData(undefined)
+      }
+    }, [params.id])
+
+    React.useEffect(() => {
+      mounted.current = true
+      void refetch()
+      return () => {
+        mounted.current = false
+      }
+    }, [refetch])
+
+    return { data, refetch }
+  },
+}
+
+/**
+ * Resolve `api.builder.getCapabilities` UMA vez (module-eval), com fallback
+ * nativo se o client gerado ainda não expõe a action.
  */
 const GET_CAPABILITIES_QUERY: GetCapabilitiesQuery = (() => {
   const candidate = (api.builder as { getCapabilities?: unknown }).getCapabilities
@@ -55,7 +99,7 @@ const GET_CAPABILITIES_QUERY: GetCapabilitiesQuery = (() => {
   ) {
     return candidate as GetCapabilitiesQuery
   }
-  return { useQuery: () => ({ data: undefined, refetch: () => {} }) }
+  return NATIVE_GET_CAPABILITIES_QUERY
 })()
 
 export function useCapabilities(projectId: string): {

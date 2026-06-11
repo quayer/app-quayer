@@ -15,8 +15,8 @@
  * `onChange` on mount and on every edit; this card keeps the latest one and POSTs
  * it on confirm (it NEVER fetches — chat-panel owns POST + SSE).
  *
- * Prefill precedence (owned > capturedProposals > default "sempre aberto") and
- * the 24/7 default both live in the section (spec §9 decisão 3).
+ * Prefill precedence (owned > capturedProposals > default equipe 24/7) and the
+ * default both live in the section (spec §9 decisão 3).
  *
  * Contract (CARD CONTRACTS): cardKey 'business_hours'
  *   payload  → { preset, schedule, timezone, outOfHours }
@@ -63,11 +63,11 @@ export function BusinessHoursCard({
     <CardShell
       tokens={tokens}
       icon={<Clock className="h-4 w-4" />}
-      title="Horário de atendimento"
-      reason="Quando o agente deve atender ativamente? Escolha um preset ou personalize cada dia."
+      title="Horário da equipe humana"
+      reason="A IA responde 24/7. Defina quando a equipe comercial pode assumir ou retornar."
       actions={[
         {
-          label: "Confirmar horário",
+          label: "Confirmar horário da equipe",
           onClick: handleConfirm,
           variant: "primary",
           disabled,

@@ -148,7 +148,7 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
   business_hours: {
     cardKey: "business_hours",
     stepId: "business_hours",
-    title: "Horário de atendimento",
+    title: "Horário da equipe humana",
     icon: <Clock className="h-4 w-4" />,
     component: BusinessHoursCard as ComponentType<CardComponentProps>,
   },

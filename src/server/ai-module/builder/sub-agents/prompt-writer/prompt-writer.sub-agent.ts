@@ -119,7 +119,7 @@ function emptySections(): PromptWriterSections {
  * between each header and the next (or EOF), and trims each block. Sections
  * that are missing or whose body is empty after trim end up in `missing`.
  *
- * Extra headers the writer is allowed to add (e.g. "# Horário de atendimento")
+ * Extra headers the writer is allowed to add (e.g. "# Horário da equipe")
  * also terminate the previous section's body, so optional sections never leak
  * into a canonical one.
  *

@@ -230,9 +230,11 @@ export function formatBuilderContextBlock(
     lines.push(`- Serviços oferecidos: ${NOT_PROVIDED}`)
   }
 
-  // Horário
+  // Horário da equipe humana (não limita disponibilidade da IA)
   if (ctx.hours) {
-    lines.push('- Horário de atendimento (incluir seção "# Horário de atendimento"):')
+    lines.push(
+      '- Horário da equipe humana (incluir seção "# Horário da equipe"; a IA continua disponível 24/7):',
+    )
     if (ctx.hours.preset) lines.push(`  - Preset: ${ctx.hours.preset}`)
     if (ctx.hours.scheduleText) {
       lines.push(`  - Agenda: ${ctx.hours.scheduleText}`)
@@ -240,11 +242,11 @@ export function formatBuilderContextBlock(
     if (ctx.hours.timezone) lines.push(`  - Fuso: ${ctx.hours.timezone}`)
     lines.push(
       ctx.hours.outOfHours === 'silent'
-        ? '  - Fora do horário: ficar em silêncio até reabrir'
-        : '  - Fora do horário: responder avisando que está fora do horário',
+        ? '  - Fora do horário da equipe: a IA responde sozinha e não promete retorno humano imediato'
+        : '  - Fora do horário da equipe: a IA responde e avisa quando a equipe humana retorna',
     )
   } else {
-    lines.push(`- Horário de atendimento: ${NOT_PROVIDED}`)
+    lines.push(`- Horário da equipe humana: ${NOT_PROVIDED}`)
   }
 
   // Handoff

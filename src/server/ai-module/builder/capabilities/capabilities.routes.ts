@@ -6,6 +6,7 @@
  *       builderState (este o readiness já entrega — NFR-05: sem fetch extra):
  *         - customTools:        AgentTool type CUSTOM da org (id/name/description/isActive)
  *         - mediaImagesCount:   fotos enviáveis (MediaAsset image) da collection do projeto
+ *         - sourceImagesCount:  fotos extraídas das fontes para curadoria
  *         - calendarConnected:  reusa hasActiveCalendarConnection (mesma fonte do runtime)
  *         - knowledgeSourceCount: fontes ingeridas na collection do projeto
  *
@@ -34,7 +35,7 @@ type AuthedUser = { id: string; currentOrgId?: string | null }
 const getCapabilities = igniter.query({
   name: 'Get Project Capabilities',
   description:
-    'Insumos da superfície de Capacidades (FR-06/07) que NÃO derivam do builderState: integrações CUSTOM da org, contagem de fotos enviáveis e de fontes de conhecimento do projeto, e se a agenda está conectada. Org-scoped, read-only.',
+    'Insumos da superfície de Capacidades (FR-06/07) que NÃO derivam do builderState: integrações CUSTOM da org, contagem de fotos enviáveis/extraídas e de fontes de conhecimento do projeto, e se a agenda está conectada. Org-scoped, read-only.',
   // Relativo ao prefixo do builderController ('/builder') — NÃO repetir '/builder'.
   path: '/projects/:id/capabilities' as const,
   method: 'GET',
@@ -59,35 +60,62 @@ const getCapabilities = igniter.query({
     // Sem collection nenhum MediaAsset/KnowledgeSource pode existir → counts 0.
     const collectionId = await resolveCollectionId(project, organizationId)
 
-    const [customTools, mediaImagesCount, knowledgeSourceCount, calendarConnected] =
-      await Promise.all([
-        database.agentTool.findMany({
-          // String literal de AgentToolType — idiom verificado em custom-tools.ts.
-          where: { organizationId, type: 'CUSTOM' },
-          select: { id: true, name: true, description: true, isActive: true },
-          orderBy: { createdAt: 'desc' },
-        }),
-        collectionId
-          ? database.mediaAsset.count({
-              where: {
-                organizationId,
-                collectionId,
-                mediaType: 'image',
-                deletedAt: null,
-              },
-            })
-          : Promise.resolve(0),
-        collectionId
-          ? database.knowledgeSource.count({
-              where: { organizationId, collectionId },
-            })
-          : Promise.resolve(0),
-        hasActiveCalendarConnection(organizationId, projectId),
-      ])
+    const [
+      customTools,
+      mediaImagesCount,
+      sourceImagesCount,
+      sourceImagesPendingCount,
+      knowledgeSourceCount,
+      calendarConnected,
+    ] = await Promise.all([
+      database.agentTool.findMany({
+        // String literal de AgentToolType — idiom verificado em custom-tools.ts.
+        where: { organizationId, type: 'CUSTOM' },
+        select: { id: true, name: true, description: true, isActive: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      collectionId
+        ? database.mediaAsset.count({
+            where: {
+              organizationId,
+              collectionId,
+              mediaType: 'image',
+              deletedAt: null,
+            },
+          })
+        : Promise.resolve(0),
+      collectionId
+        ? database.knowledgeImage.count({
+            where: {
+              organizationId,
+              collectionId,
+              deletedAt: null,
+            },
+          })
+        : Promise.resolve(0),
+      collectionId
+        ? database.knowledgeImage.count({
+            where: {
+              organizationId,
+              collectionId,
+              deletedAt: null,
+              confirmedAt: null,
+            },
+          })
+        : Promise.resolve(0),
+      collectionId
+        ? database.knowledgeSource.count({
+            where: { organizationId, collectionId },
+          })
+        : Promise.resolve(0),
+      hasActiveCalendarConnection(organizationId, projectId),
+    ])
 
     return response.success({
       customTools,
       mediaImagesCount,
+      sourceImagesCount,
+      sourceImagesPendingCount,
       knowledgeSourceCount,
       calendarConnected,
     })

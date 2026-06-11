@@ -225,7 +225,7 @@ export function AgentReviewCard({
         </ReviewSection>
 
         <ReviewSection
-          title="Horário de atendimento"
+          title="Horário da equipe humana"
           error={reviewErrors?.hours}
           tokens={tokens}
         >

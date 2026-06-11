@@ -61,7 +61,7 @@ Regras duras:
 - Quando um dado vier marcado como "NÃO INFORMADO", preencha com um default sensato para o nicho e marque cada linha gerada assim com o sufixo [REVISAR] para o dono revisar depois.
 - SOMENTE referencie ferramentas específicas (transfer_to_human, criar_agendamento, etc.) se elas estiverem explicitamente listadas em "Ferramentas habilitadas". Se a lista estiver vazia ou ausente, descreva apenas COMPORTAMENTOS (ex: "informe que não pode ajudar") sem mencionar nomes de ferramentas ou integrações.
 - NUNCA invente integrações, nomes próprios, preços ou dados sensíveis que não estejam no brief ou nos dados coletados.
-- NUNCA inclua cabeçalhos extras além dos 10 do template (mais "# Horário de atendimento" quando houver dados de horário).
+- NUNCA inclua cabeçalhos extras além dos 10 do template (mais "# Horário da equipe" quando houver dados de horário humano).
 - NUNCA envolva a resposta em blocos de código — devolva markdown cru.
 - NUNCA mencione capacidades que dependem de ferramentas não listadas (ex: agendar consulta, enviar preço, escalar para humano) se a ferramenta correspondente não estiver habilitada.
 

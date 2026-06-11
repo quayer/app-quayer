@@ -336,7 +336,7 @@ describe('buildUserMessage — builder context & validator feedback', () => {
     })
 
     expect(msg).toContain('## Dados já coletados do negócio')
-    expect(msg).toContain('Horário de atendimento: NÃO INFORMADO')
+    expect(msg).toContain('Horário da equipe humana: NÃO INFORMADO')
     expect(msg).toContain('Handoff para humanos: NÃO INFORMADO')
     expect(msg).toContain('[REVISAR]')
   })
@@ -361,13 +361,15 @@ describe('buildUserMessage — builder context & validator feedback', () => {
 
     expect(msg).toContain('Nome: Lia')
     expect(msg).toContain('Preset: comercial')
-    expect(msg).toContain('ficar em silêncio até reabrir')
+    expect(msg).toContain(
+      'a IA responde sozinha e não promete retorno humano imediato',
+    )
     expect(msg).toContain('modo roleta')
     expect(msg).toContain('Perguntar o nome')
     expect(msg).toContain('Time: Ana, Beto')
     expect(msg).toContain('Oi {nome}, sou da equipe!')
     expect(msg).toContain('Palavras-chave de ativação: corte, agendar')
-    expect(msg).not.toContain('Horário de atendimento: NÃO INFORMADO')
+    expect(msg).not.toContain('Horário da equipe humana: NÃO INFORMADO')
   })
 
   it('appends the validator-correction block only on retry', () => {
@@ -481,7 +483,7 @@ describe('parsePromptSections', () => {
   it('does not leak an extra optional section into the previous body', () => {
     const withHours = wellFormedMarkdown.replace(
       /# Encerramento/,
-      '# Horário de atendimento\nAtendemos das 9 às 18.\n\n# Encerramento',
+      '# Horário da equipe\nAtendemos das 9 às 18.\n\n# Encerramento',
     )
     const { sections, missing } = parsePromptSections(withHours)
     expect(missing).toEqual([])

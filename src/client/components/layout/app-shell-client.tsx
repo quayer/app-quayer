@@ -9,7 +9,7 @@ import {
 } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Menu } from "lucide-react"
+import { PanelLeftOpen } from "lucide-react"
 import { BuilderSidebar } from "./builder-sidebar"
 import { SidebarProvider } from "@/client/components/ui/sidebar"
 import {
@@ -200,22 +200,21 @@ export function AppShellClient({
               <button
                 type="button"
                 onClick={toggle}
-                className="fixed left-4 top-4 z-40 inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-semibold transition-all hover:bg-white/5"
+                className="fixed left-4 top-4 z-40 inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-all hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                 style={{
                   backgroundColor: "var(--color-bg-surface, #060402)",
                   borderColor:
-                    "var(--color-border-default, rgba(255,255,255,0.1))",
-                  color: "var(--color-text-secondary, rgba(255,255,255,0.75))",
+                    "var(--color-border-strong, rgba(255,255,255,0.24))",
+                  color: "var(--color-text-primary, rgba(255,255,255,0.92))",
                   boxShadow: "0 4px 12px -2px rgba(0,0,0,0.4)",
                 }}
-                aria-label={`Abrir menu (${shortcutLabel})`}
+                aria-label={`Abrir navegação lateral (${shortcutLabel})`}
               >
-                <Menu className="h-4 w-4" aria-hidden="true" />
-                <span>Menu</span>
+                <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              Abrir menu ({shortcutLabel})
+              Abrir navegação ({shortcutLabel})
             </TooltipContent>
           </Tooltip>
         )}

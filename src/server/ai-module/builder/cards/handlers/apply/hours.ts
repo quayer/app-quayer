@@ -2,7 +2,7 @@
  * Builder Module — `business_hours` card application (W3, Revisar).
  *
  * Pure `(state, payload) => CardApplication`: stores the (opaque) schedule + preset
- * + timezone and the additive `outOfHours` behavior, then flips the `hours`
+ * + timezone and the additive `outOfHours` behavior for the human team, then flips the `hours`
  * sentinel. Extracted from `apply-card-submit.ts` (T22) to keep the entrypoint a
  * thin dispatch under the 800-line service ceiling. ZERO behavior change — same
  * signature/copy as before.
@@ -38,18 +38,18 @@ export function applyBusinessHours(
   const next = applyConfirmation(patchBuilderState(state, patch), 'hours')
 
   const presetLabel = payload.preset ? `preset "${payload.preset}"` : 'horário manual'
-  // Onda 3d — descreve o comportamento fora do horário na copy do ACK.
+  // Onda 3d — descreve expectativa de atendimento humano fora do horário.
   const outOfHoursNote =
     payload.outOfHours === 'silent'
-      ? ' Fora do horário, o agente fica em SILÊNCIO (não responde).'
+      ? ' Fora do horário da equipe, a IA continua respondendo sozinha e não promete retorno humano imediato.'
       : payload.outOfHours === 'reply_notice'
-        ? ' Fora do horário, o agente RESPONDE avisando que está fora do expediente.'
+        ? ' Fora do horário da equipe, a IA continua respondendo e avisa quando a equipe humana retorna.'
         : ''
   return {
     next,
     cardInstruction:
-      `O usuário DEFINIU o horário de atendimento via card (${presetLabel}).${outOfHoursNote} ` +
-      'Considere esse horário no comportamento do agente e siga para o próximo passo. ' +
+      `O usuário DEFINIU o horário da equipe humana via card (${presetLabel}).${outOfHoursNote} ` +
+      'Considere esse horário apenas para handoff/expectativa de retorno humano e siga para o próximo passo. ' +
       'Não reabra o card de horários.',
   }
 }

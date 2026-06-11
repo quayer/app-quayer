@@ -199,13 +199,13 @@ export const REQUIRED_PROMPT_SECTIONS: readonly PromptSectionChecklistItem[] = [
 
 export const OPTIONAL_PROMPT_SECTIONS: readonly PromptOptionalSectionItem[] = [
   {
-    name: 'Horário de atendimento',
+    name: 'Horário da equipe humana',
     description:
-      'Operating hours definition — recommended when agent has a `humano` transfer tool',
+      'Human team operating hours — recommended when agent has a `humano` transfer tool',
     detectPattern:
       /\b(hor[aá]rio\s+de\s+(atendimento|funcionamento)|atendemos?\s+(das?|de)\s+\d|fora\s+do\s+hor[aá]rio|\$now\.hour|\$now\.weekday)\b/i,
     writerHint:
-      'Quando o contexto trouxer horário de atendimento, inclua uma seção "# Horário de atendimento" com os horários e o comportamento fora do horário.',
+      'Quando o contexto trouxer horário da equipe humana, inclua uma seção "# Horário da equipe" com os horários e a expectativa de retorno humano fora do horário. A IA continua respondendo 24/7.',
   },
   {
     name: 'Resumo de handoff',

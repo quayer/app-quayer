@@ -239,7 +239,7 @@ export function computeSummaryWarnings(value: BuilderState): SummaryWarning[] {
   if (!value.hours.preset && value.hours.schedule == null) {
     warnings.push({
       area: SUMMARY_AREA.hours,
-      message: "Horário de atendimento a definir",
+      message: "Horário da equipe humana a definir",
     })
   }
 

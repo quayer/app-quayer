@@ -171,8 +171,8 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
   },
   {
     id: 'business_hours',
-    title: 'Horário de atendimento',
-    ask: 'Qual o horário de atendimento? Use o card de horários.',
+    title: 'Horário da equipe humana',
+    ask: 'Qual o horário da equipe humana? A IA continua respondendo 24/7; use o card de horários para definir handoff e expectativa de retorno.',
     requiredPaths: ['confirmations.hours'],
     isDone: (s) => confirmed(s, 'hours'),
     missing: (s) => (confirmed(s, 'hours') ? [] : ['confirmations.hours']),

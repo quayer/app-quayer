@@ -9,7 +9,7 @@
  *                    (`capturedProposals.handoff`) = badge + reason.
  *   - Preços       — `pricing.items` + `disclosureStyle`.
  *   - Agenda       — `handoff.alsoSchedule` + `calendarConnected` + share delegável (FR-34).
- *   - Fotos        — `mediaImagesCount` (link p/ Mídias).
+ *   - Fotos        — `mediaImagesCount` + `sourceImagesCount` (Mídias/fontes).
  *   - Integrações  — `customTools` (empty state).
  *
  * Estados derivam do builderState do readiness — ZERO fetch extra além do
@@ -112,7 +112,27 @@ export function CapabilitiesSection({
   const calendarConnected = caps.data?.calendarConnected === true
   const calendarActive = handoff.alsoSchedule || calendarConnected
   const mediaCount = caps.data?.mediaImagesCount ?? 0
+  const sourceImagesCount = caps.data?.sourceImagesCount ?? 0
+  const sourceImagesPendingCount = caps.data?.sourceImagesPendingCount ?? 0
   const customTools = caps.data?.customTools ?? []
+  const hasExtractedImages = sourceImagesCount > 0
+  const photosActive = mediaCount > 0 || hasExtractedImages
+  const photosStatusLabel =
+    mediaCount > 0
+      ? "Ativo"
+      : hasExtractedImages
+        ? sourceImagesPendingCount > 0
+          ? "Para revisar"
+          : "Aprovadas"
+        : "Vazio"
+  const photosSummary =
+    mediaCount > 0
+      ? `O agente pode enviar ${mediaCount} ${mediaCount === 1 ? "foto confirmada" : "fotos confirmadas"} do catálogo.`
+      : hasExtractedImages
+        ? sourceImagesPendingCount > 0
+          ? `Encontrei ${sourceImagesCount} ${sourceImagesCount === 1 ? "foto" : "fotos"} nas fontes. Revise no card de Fontes para liberar o envio.`
+          : `${sourceImagesCount} ${sourceImagesCount === 1 ? "foto aprovada" : "fotos aprovadas"} nas fontes. Elas entram no catálogo do agente na publicação.`
+        : "Nenhuma foto encontrada ainda. Adicione fotos manualmente na aba Mídias."
 
   const toggle = React.useCallback((key: CardKey) => {
     setOpenKey((prev) => (prev === key ? null : key))
@@ -220,12 +240,8 @@ export function CapabilitiesSection({
         tokens={tokens}
         icon={<ImageIcon className="h-4 w-4" />}
         title="Fotos"
-        summary={
-          mediaCount > 0
-            ? `O agente pode enviar ${mediaCount} ${mediaCount === 1 ? "foto" : "fotos"} do seu catálogo.`
-            : "Nenhuma foto enviável ainda. Adicione fotos na aba Mídias."
-        }
-        status={{ label: mediaCount > 0 ? "Ativo" : "Vazio", active: mediaCount > 0 }}
+        summary={photosSummary}
+        status={{ label: photosStatusLabel, active: photosActive }}
         action={{ label: "Abrir Mídias", onClick: () => onTabChange?.("media") }}
       />
 

@@ -219,6 +219,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v)
 }
 
+/** Unwrap Igniter/fetch envelopes like `{ data: ... }` and array-wrapped bodies. */
+function unwrapDataEnvelope(v: unknown): unknown {
+  if (Array.isArray(v)) return unwrapDataEnvelope(v[0])
+  if (isRecord(v) && "data" in v) return unwrapDataEnvelope(v.data)
+  return v
+}
+
 /** Coerce an unknown value into a `SourceImagesPhase` (undefined when absent). */
 function coerceImagesPhase(v: unknown): SourceImagesPhase | undefined {
   if (
@@ -253,8 +260,9 @@ function coerceRetrySynthesisAction(v: unknown): RetrySynthesisAction | null {
 
 /** Coerce an unknown JSON body into `StatusEndpointSource[]` (never throws). */
 function parseStatusSources(body: unknown): StatusEndpointSource[] {
-  if (!isRecord(body)) return []
-  const raw = body.sources
+  const root = unwrapDataEnvelope(body)
+  if (!isRecord(root)) return []
+  const raw = root.sources
   if (!Array.isArray(raw)) return []
   const out: StatusEndpointSource[] = []
   for (const entry of raw) {
@@ -291,8 +299,9 @@ function parseStatusSources(body: unknown): StatusEndpointSource[] {
 
 /** Extract the (optional) proposal from a status response (never throws). */
 function parseStatusProposed(body: unknown): SourceProposal | undefined {
-  if (!isRecord(body)) return undefined
-  const p = body.proposed
+  const root = unwrapDataEnvelope(body)
+  if (!isRecord(root)) return undefined
+  const p = root.proposed
   if (!isRecord(p)) return undefined
   const businessName = typeof p.businessName === "string" ? p.businessName : undefined
   const audience = typeof p.audience === "string" ? p.audience : undefined
@@ -396,12 +405,12 @@ function normalizeImageUrl(raw: unknown): string | null {
 
 /**
  * Tolerant unwrap of the `listSourceImages` response into `CuratedImage[]`.
- * Igniter may hand back the `response.success({ images })` payload DIRECTLY
- * (`{ images }`) or array-wrapped (`[{ images }]`) depending on the caller path —
- * we accept both and never throw, returning `[]` for any unexpected shape.
+ * Igniter/fetch may hand back the `response.success({ images })` payload directly
+ * (`{ images }`), enveloped (`{ data: { images } }`) or array-wrapped depending
+ * on the caller path. Accept all of them and never throw.
  */
 function parseCuratedImages(data: unknown): CuratedImage[] {
-  const root: unknown = Array.isArray(data) ? data[0] : data
+  const root = unwrapDataEnvelope(data)
   if (!isRecord(root)) return []
   const raw = root.images
   if (!Array.isArray(raw)) return []
@@ -999,7 +1008,7 @@ function SourceImagesEmptyState({
     ? "Não consegui carregar as fotos agora."
     : extractionFailed
       ? "Não consegui ler as fotos desta fonte."
-      : "Não encontrei fotos no seu site."
+      : "Não encontrei fotos prontas para mostrar aqui."
 
   return (
     <div
@@ -1019,8 +1028,8 @@ function SourceImagesEmptyState({
         <div className="flex flex-col gap-1">
           <span style={{ color: tokens.textPrimary }}>{headline}</span>
           <span style={{ color: tokens.textTertiary }}>
-            Você pode adicionar fotos manualmente. Seu agente pode enviá-las nas
-            conversas com clientes.
+            Adicione fotos manualmente se quiser. Fotos aprovadas ficam
+            disponíveis para a IA enviar nas conversas com clientes.
           </span>
         </div>
       </div>

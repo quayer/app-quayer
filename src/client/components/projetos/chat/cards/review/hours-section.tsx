@@ -18,9 +18,9 @@
  * PREFILL PRECEDENCE (plan §7, line 153 — `owned > capturedProposals > default`):
  *   1. owned        — a persisted/confirmed `value.hours` (preset/schedule/tz)
  *   2. capturedProposals — `value.capturedProposals.hours.preset` (preset only)
- *   3. default      — "sempre aberto" (24/7), spec §9 decisão 3. The default lives
+ *   3. default      — equipe humana 24/7, spec §9 decisão 3. The default lives
  *                     HERE in the component (not in the handler), so an untouched
- *                     review opens with the agent always available.
+ *                     review does not imply the AI ever stops answering.
  *
  * The submit payload SHAPE is unchanged from the pre-T42 card:
  * `{ preset, schedule, timezone, outOfHours }`.
@@ -54,7 +54,7 @@ import {
   type WeeklySchedule,
 } from "../business-hours/schedule-shape"
 
-/** Comportamento do agente FORA do horário de atendimento (Onda 3d). */
+/** Comportamento quando a equipe humana está fora do horário (Onda 3d). */
 export type OutOfHoursBehavior = "reply_notice" | "silent"
 
 /** EXACT submit payload for cardKey 'business_hours'. */
@@ -62,8 +62,8 @@ export interface BusinessHoursPayload {
   preset: HoursPreset
   schedule: WeeklySchedule
   timezone: string
-  // Onda 3d — fora do horário: responde avisando ('reply_notice') ou fica em
-  // silêncio ('silent'). Pré-preenchido de value.hours.outOfHours (default reply_notice).
+  // Onda 3d — fora do horário da equipe: a IA continua 24/7; este campo define
+  // como ela gerencia expectativa de atendimento humano.
   outOfHours: OutOfHoursBehavior
 }
 
@@ -74,13 +74,13 @@ const OUT_OF_HOURS_OPTIONS: ReadonlyArray<{
 }> = [
   {
     key: "reply_notice",
-    label: "Responde avisando",
-    hint: "Fora do horário, avisa que está fora do expediente",
+    label: "Avisar prazo humano",
+    hint: "A IA continua atendendo e informa quando a equipe retorna",
   },
   {
     key: "silent",
-    label: "Fica em silêncio",
-    hint: "Fora do horário, não responde até reabrir",
+    label: "Não acionar humano",
+    hint: "A IA responde sozinha e não promete retorno imediato da equipe",
   },
 ]
 
@@ -89,10 +89,10 @@ const PRESET_OPTIONS: ReadonlyArray<{
   label: string
   hint: string
 }> = [
-  { key: "24_7", label: "24/7", hint: "Sempre disponível, todos os dias" },
+  { key: "24_7", label: "Equipe 24/7", hint: "Há pessoas disponíveis todos os dias" },
   {
     key: "commercial",
-    label: "Comercial",
+    label: "Equipe comercial",
     hint: "Seg a Sex, 09:00 às 18:00",
   },
   {
@@ -148,7 +148,7 @@ function resolveInitialPreset(value: HoursSectionProps["value"]): {
     return { preset: normalizePreset(proposed), origin: "proposed" }
   }
 
-  // Default: "sempre aberto" (24/7) — no owned data, no proposal.
+  // Default: equipe humana 24/7 — no owned data, no proposal.
   return { preset: "24_7", origin: "default" }
 }
 
@@ -580,12 +580,12 @@ export function HoursSection({
           className="mb-1 block text-[12px] font-medium"
           style={{ color: tokens.textSecondary }}
         >
-          Fora do horário
+          Fora do horário da equipe
         </span>
         <div
           className="grid gap-2 sm:grid-cols-2"
           role="radiogroup"
-          aria-label="Comportamento fora do horário"
+          aria-label="Comportamento fora do horário da equipe"
         >
           {OUT_OF_HOURS_OPTIONS.map((option) => {
             const active = outOfHours === option.key

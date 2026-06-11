@@ -18,7 +18,7 @@
  * 10.  Encerramento         — explicit end condition (FIM / PARAR / handoff)
  *
  * Optional (detected but only warn):
- *  O1. Horário de atendimento
+ *  O1. Horário da equipe humana
  *  O2. Resumo de handoff
  *
  * Capability Profiles — replace the false Tipo1/Tipo2 binary:
