@@ -464,6 +464,39 @@ export function useChatStream({
     return () => window.removeEventListener("builder:focus-chat", handleFocusChat)
   }, [sendMessage])
 
+  // ── Capability toggle (FR-29, T45) ─────────────────────────────
+  // A toggle flipped from the Overview's Capabilities surface persists via the
+  // SILENT card-submit path (ackMode: 'silent') — NO chat POST, NO SSE, zero LLM
+  // turn. The Overview dispatches a lightweight `builder:capability-toggled`
+  // event with the local line text; we translate it into a `system_banner`
+  // message in the LIVE history (the same cheap centered pill the server uses
+  // for info lines) so the chat reflects the change with no reload. We also
+  // refetch readiness so the journey/banner re-resolve off the persisted flip.
+  React.useEffect(() => {
+    const handleCapabilityToggled = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      const line = detail?.message?.trim()
+      if (!line) return
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          role: "system_banner" as const,
+          content: line,
+          createdAt: new Date().toISOString(),
+        },
+      ])
+      void refetchReadinessRef.current?.()
+    }
+
+    window.addEventListener("builder:capability-toggled", handleCapabilityToggled)
+    return () =>
+      window.removeEventListener(
+        "builder:capability-toggled",
+        handleCapabilityToggled,
+      )
+  }, [])
+
   // ── Auto-trigger initial message ───────────────────────────────
   // When a project is first created, the initial prompt is persisted as a
   // user message by createProject. On mount, if the last loaded message is

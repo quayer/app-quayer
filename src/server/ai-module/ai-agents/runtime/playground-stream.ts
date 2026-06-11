@@ -102,11 +102,14 @@ export async function* processPlaygroundStream(
 
   // 2·rag: paridade com o runtime real (prepare-agent-call.ts §2c) — retrieval
   // pgvector da mensagem do turno injetado no system prompt, MESMO formato
-  // (buildContextBlock). Diferença deliberada do playground: o agente pode ainda
-  // não estar deployado (useRAG=false / ragCollectionId NULL — o vínculo acontece
-  // na saga de deploy), então aceitamos o collectionId do PROJETO resolvido pelo
-  // caller como fallback. Fail-open TOTAL: qualquer falha (sem collection, sem
-  // embeddings, pgvector fora) → segue SEM RAG, nunca quebra o stream.
+  // (buildContextBlock). Diferença deliberada do playground: o vínculo
+  // useRAG/ragCollectionId é garantido em DOIS pontos (backfill no create_agent +
+  // passo materialize_knowledge da saga de deploy), mas o playground pode rodar
+  // ANTES de qualquer um deles ter ligado (ex.: agente recém-criado sem fonte no
+  // momento da criação, fonte colada depois e ainda sem deploy) — então aceitamos o
+  // collectionId do PROJETO resolvido pelo caller como fallback. Fail-open TOTAL:
+  // qualquer falha (sem collection, sem embeddings, pgvector fora) → segue SEM RAG,
+  // nunca quebra o stream.
   const pgRagCollectionId =
     (agentConfig.useRAG ? agentConfig.ragCollectionId : null) ??
     params.knowledgeCollectionId ??

@@ -289,6 +289,32 @@ export const silencedContactsPayloadSchema = z.object({
 })
 
 /**
+ * Jornada v2 (T31, plan §3.3) — knowledge/media acks: cartões da fase Revisar que
+ * o usuário usa para RECONHECER explicitamente o passo opcional de base de
+ * conhecimento / catálogo de mídia (espelha o padrão `silenced_contacts`/
+ * `source_progress`: a única ação é um `'ack'`). Os steps `knowledge`/`media`
+ * também são satisfeitos por dados REAIS (fonte/texto ingerido, imagesCount > 0)
+ * sem card obrigatório — o ack é só o caminho "não vou anexar nada, seguir".
+ *
+ * Cada um flipa o sentinel server-side homônimo (`confirmations.knowledge` /
+ * `confirmations.media`) via `applyConfirmation` — nunca pelo body. São toggles
+ * leves: entram na allowlist de silent-submit (T90), então o flip persiste sem
+ * turno LLM. NÃO entram no `cardSubmitBodySchema` (a união consumida pelo
+ * `applyCardSubmit`); o `card-submit.routes.ts` os despacha para handlers próprios
+ * em `handlers/apply/journey-v2.ts` (que possuem o write org-scoped) — assim o
+ * exhaustiveness guard do entrypoint segue intocado.
+ */
+export const knowledgeAckPayloadSchema = z.object({
+  cardKey: z.literal('knowledge'),
+  action: z.literal('ack'),
+})
+
+export const mediaAckPayloadSchema = z.object({
+  cardKey: z.literal('media'),
+  action: z.literal('ack'),
+})
+
+/**
  * Jornada v2 (T19, FR-03) — business_identity: o usuário conta sobre o negócio
  * SEM colar uma fonte (nome + endereço + descrição). É o caminho ALTERNATIVO ao
  * accept do `source_progress` (que satisfaz a identidade pelo site/IG). `name` é
@@ -372,6 +398,11 @@ export const CARD_PAYLOAD_SCHEMAS = {
   silenced_contacts: silencedContactsPayloadSchema,
   business_identity: businessIdentityPayloadSchema,
   agent_review: agentReviewPayloadSchema,
+  // T31 — acks dos passos opcionais Conhecimento/Mídia. Registrados aqui para que
+  // `CARD_KEYS`/`cardSubmitParamsSchema` reconheçam os cardKeys da rota; o despacho
+  // vive no `card-submit.routes.ts` (handlers próprios), fora do `applyCardSubmit`.
+  knowledge: knowledgeAckPayloadSchema,
+  media: mediaAckPayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -399,8 +430,13 @@ export const cardSubmitParamsSchema = z.object({
 export type CardSubmitParams = z.infer<typeof cardSubmitParamsSchema>
 
 /**
- * Discriminated union over `cardKey` of every registered card payload. New
- * variants flow in from CARD_PAYLOAD_SCHEMAS without rewriting this line.
+ * Discriminated union over `cardKey` of the cards dispatched by `applyCardSubmit`.
+ *
+ * INTENTIONALLY does NOT list `knowledge`/`media` (T31): those are sentinel-only
+ * acks routed directly by `card-submit.routes.ts` to handlers in
+ * `handlers/apply/journey-v2.ts`, so the entrypoint's exhaustiveness guard
+ * (`const _never: never = body`) stays valid without editing it. The ROUTE accepts
+ * them via `cardSubmitRouteBodySchema` below (the wider parse gate).
  */
 export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   agentApprovalPayloadSchema,
@@ -421,6 +457,75 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   agentReviewPayloadSchema,
 ])
 export type CardSubmitBody = z.infer<typeof cardSubmitBodySchema>
+
+// ==========================================
+// Silent-submit (T90, FR-29) — ackMode + route body + allowlist
+// ==========================================
+
+/**
+ * FR-29 — modo de ACK do card-submit. `conversational` (default) mantém o
+ * comportamento atual: aplica o estado E transmite o turno do meta-agente pela
+ * SSE. `silent` aplica o estado e responde JSON simples (`{ ok, builderState }`)
+ * SEM `ensureBuilderAgent`/`buildSseResponse` — zero turno/custo LLM. É o modo
+ * OBRIGATÓRIO dos toggles da superfície de Capacidades (plan §4.3).
+ */
+export const ackModeSchema = z
+  .enum(['conversational', 'silent'])
+  .default('conversational')
+export type AckMode = z.infer<typeof ackModeSchema>
+
+/**
+ * Esquema TOP-LEVEL para extrair só o `ackMode` do corpo (parse independente do
+ * payload do card — `ackMode` não é discriminador). `.passthrough()` deixa o
+ * restante do corpo intocado; o card em si é validado pelo `cardSubmitRouteBodySchema`.
+ */
+export const cardSubmitAckEnvelopeSchema = z
+  .object({ ackMode: ackModeSchema })
+  .passthrough()
+
+/**
+ * Allowlist SERVER-SIDE de cardKeys que aceitam `ackMode: 'silent'` (T90/plan §4.3 +
+ * §5): os toggles da superfície de Capacidades. Qualquer card da JORNADA com
+ * `silent` é rejeitado com 400 — o ACK conversacional é parte do contrato da
+ * jornada e não pode ser pulado. `knowledge`/`media` são opt-in leves (acks), então
+ * entram aqui junto de handoff/pricing/calendar/tool_selection.
+ */
+export const SILENT_ALLOWED_CARD_KEYS: ReadonlySet<string> = new Set<string>([
+  'handoff',
+  'pricing',
+  'calendar_connect',
+  'tool_selection',
+  'knowledge',
+  'media',
+])
+
+/**
+ * Payload de card aceito pela ROTA: a união do `applyCardSubmit` MAIS os acks
+ * `knowledge`/`media` (T31). É o gate de parse do `card-submit.routes.ts` — mais
+ * largo que `cardSubmitBodySchema` (que o entrypoint consome). Discriminado por
+ * `cardKey`, então o `safeParse` resolve a variante e o `ackMode` é lido à parte.
+ */
+export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
+  agentApprovalPayloadSchema,
+  toolSelectionPayloadSchema,
+  channelPayloadSchema,
+  agentPersonaPayloadSchema,
+  servicesPayloadSchema,
+  businessHoursPayloadSchema,
+  pricingPayloadSchema,
+  handoffPayloadSchema,
+  calendarConnectPayloadSchema,
+  activationModePayloadSchema,
+  previewSummaryPayloadSchema,
+  quickReplyChipsPayloadSchema,
+  sourceProgressPayloadSchema,
+  silencedContactsPayloadSchema,
+  businessIdentityPayloadSchema,
+  agentReviewPayloadSchema,
+  knowledgeAckPayloadSchema,
+  mediaAckPayloadSchema,
+])
+export type CardSubmitRouteBody = z.infer<typeof cardSubmitRouteBodySchema>
 
 // ==========================================
 // Inferred per-card payload types (exported for handler/FE reuse)
@@ -451,3 +556,5 @@ export type BusinessIdentityPayload = z.infer<
   typeof businessIdentityPayloadSchema
 >
 export type AgentReviewPayload = z.infer<typeof agentReviewPayloadSchema>
+export type KnowledgeAckPayload = z.infer<typeof knowledgeAckPayloadSchema>
+export type MediaAckPayload = z.infer<typeof mediaAckPayloadSchema>

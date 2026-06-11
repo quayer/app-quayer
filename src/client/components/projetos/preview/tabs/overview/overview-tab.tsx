@@ -25,6 +25,7 @@ import type {
 import { Skeleton } from "@/client/components/ui/skeleton"
 import { canOpenDeploy } from "../../deploy-gate"
 import { AgentIdentityHeader } from "./components/agent-identity-header"
+import { CapabilitiesSection } from "./components/capabilities-section"
 import { DeployReadinessCard } from "./components/deploy-readiness-card"
 import { EmptyState } from "./components/empty-state"
 import { FirstMessagePreviewCard } from "./components/first-message-preview"
@@ -176,6 +177,19 @@ export function OverviewTab({
             onTabChange={onTabChange}
             tokens={tokens}
           />
+
+          {/* Seção 3c: Capacidades (FR-06/07) — o que o agente sabe fazer +
+              toggles de configuração inline (silent-submit, FR-29). Derivada do
+              builderState do readiness; o getCapabilities cobre os insumos não
+              derivados (fotos/integrações/agenda conectada). */}
+          {readiness.builderState && (
+            <CapabilitiesSection
+              projectId={project.id}
+              builderState={readiness.builderState}
+              tokens={tokens}
+              onTabChange={onTabChange}
+            />
+          )}
         </>
       )}
 

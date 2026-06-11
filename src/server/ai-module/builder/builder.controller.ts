@@ -32,6 +32,7 @@ import { knowledgeRoutes } from './knowledge/knowledge.routes'
 import { knowledgeSourceRoutes } from './knowledge/knowledge-source.routes'
 import { pricingRoutes } from './pricing/pricing.routes'
 import { credentialRoutes } from './credential/credential.routes'
+import { capabilitiesRoutes } from './capabilities/capabilities.routes'
 
 export const builderController = igniter.controller({
   name: 'builder',
@@ -56,5 +57,6 @@ export const builderController = igniter.controller({
     ...knowledgeSourceRoutes,
     ...pricingRoutes,
     ...credentialRoutes,
+    ...capabilitiesRoutes,
   },
 })

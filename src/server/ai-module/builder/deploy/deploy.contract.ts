@@ -24,6 +24,7 @@ export type DeployStepName =
   | 'materialize_pricing'
   | 'materialize_team'
   | 'materialize_media'
+  | 'materialize_knowledge'
   | 'create_instance'
   | 'attach_connection'
 
@@ -78,6 +79,13 @@ export interface DeployContext {
      * gallery/pricing on the next deploy, never undone).
      */
     media?: { collectionId: string | null }
+    /**
+     * Light bookkeeping written by `materialize_knowledge`. Same semantics as the
+     * others: NOT persisted on the BuilderDeployment row — the compensation is a
+     * self-contained no-op (the RAG link reflects the user pasting a source; the
+     * create_agent backfill is the primary net, this step is the redundant one).
+     */
+    knowledge?: { collectionId: string | null }
   }
 }
 

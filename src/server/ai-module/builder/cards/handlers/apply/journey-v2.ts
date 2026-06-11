@@ -20,6 +20,7 @@ import {
   clearCapturedProposals,
   type BuilderState,
   type DeepPartial,
+  type ConfirmationKey,
 } from '../../builder-state'
 import type {
   AgentReviewPayload,
@@ -139,6 +140,93 @@ export async function applyBusinessIdentity(args: {
       'Use-os ao montar o agente e siga para o próximo passo da jornada. ' +
       'Não reabra o card "Sobre o negócio".',
   }
+}
+
+/**
+ * T31 (plan §3.3) — flip ATÔMICO e org-scoped de um único sentinel server-side
+ * para os acks `knowledge`/`media`. Self-contained (igual a `applyBusinessIdentity`):
+ * resolve a conversa por `projectId` org-scoped (prova de posse → `not_found` quando
+ * não existe), re-lê o estado MAIS recente DENTRO da transação para não atropelar um
+ * submit concorrente, flipa o sentinel via `applyConfirmation` (única fonte do flip —
+ * nada vem do body) e grava num único `updateMany` filtrado por organizationId.
+ *
+ * Não emite evento de funil: os passos `knowledge`/`media` são OPCIONAIS e não
+ * pertencem ao vocabulário fechado de `trackJourneyEvent`. O router (silent ou
+ * conversacional) só despacha e repassa este `ApplyCardSubmitResult`.
+ */
+async function applySentinelAck(args: {
+  projectId: string
+  organizationId: string
+  sentinel: ConfirmationKey
+  cardInstruction: string
+}): Promise<ApplyCardSubmitResult> {
+  const { projectId, organizationId, sentinel, cardInstruction } = args
+
+  const conversation = await database.builderProjectConversation.findUnique({
+    where: { projectId },
+    select: { id: true, organizationId: true },
+  })
+  if (!conversation) {
+    return { ok: false, reason: 'not_found', message: 'Conversa do Builder não encontrada' }
+  }
+  if (conversation.organizationId !== organizationId) {
+    return { ok: false, reason: 'forbidden', message: 'Acesso negado a esta conversa' }
+  }
+
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversation.id, organizationId },
+      select: { builderState: true },
+    })
+    // null/garbage/legado → DEFAULT_BUILDER_STATE (parseBuilderState nunca lança).
+    const fresh = parseBuilderState(row?.builderState)
+    const next = applyConfirmation(fresh, sentinel)
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversation.id, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  return { ok: true, conversationId: conversation.id, cardInstruction }
+}
+
+/**
+ * T31 — knowledge ack: o usuário RECONHECEU o passo opcional de base de
+ * conhecimento (flipa `confirmations.knowledge`). O passo também é satisfeito por
+ * dados reais (fonte/texto ingerido) sem card — este é o caminho "seguir sem anexar".
+ */
+export async function applyKnowledgeAck(args: {
+  projectId: string
+  organizationId: string
+}): Promise<ApplyCardSubmitResult> {
+  return applySentinelAck({
+    ...args,
+    sentinel: 'knowledge',
+    cardInstruction:
+      'O usuário reconheceu o passo de base de conhecimento. ' +
+      'Considere o conteúdo já anexado (se houver) ao responder e siga para o próximo passo. ' +
+      'Não reabra o card de Conhecimento.',
+  })
+}
+
+/**
+ * T31 — media ack: o usuário RECONHECEU o passo opcional de catálogo de mídia
+ * (flipa `confirmations.media`). O passo também é satisfeito por dados reais
+ * (`imagesCount > 0`) sem card. Mesmo contrato/idiom do `applyKnowledgeAck`.
+ */
+export async function applyMediaAck(args: {
+  projectId: string
+  organizationId: string
+}): Promise<ApplyCardSubmitResult> {
+  return applySentinelAck({
+    ...args,
+    sentinel: 'media',
+    cardInstruction:
+      'O usuário reconheceu o passo de catálogo de mídia. ' +
+      'Use as fotos/vídeos já cadastrados (se houver) quando fizer sentido e siga para o próximo passo. ' +
+      'Não reabra o card de Mídia.',
+  })
 }
 
 /**

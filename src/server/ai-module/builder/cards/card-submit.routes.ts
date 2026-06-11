@@ -27,9 +27,14 @@ import { getReadiness } from '../state/readiness-resolver'
 import type { Readiness } from '../state/readiness.types'
 
 import { applyCardSubmit } from './handlers/apply-card-submit'
+import { applyKnowledgeAck, applyMediaAck } from './handlers/apply/journey-v2'
+import { parseBuilderState } from './builder-state'
 import {
   cardSubmitParamsSchema,
-  cardSubmitBodySchema,
+  cardSubmitRouteBodySchema,
+  cardSubmitAckEnvelopeSchema,
+  SILENT_ALLOWED_CARD_KEYS,
+  type CardSubmitBody,
 } from './card-submit.schemas'
 
 // ---------------------------------------------------------------------------
@@ -65,17 +70,20 @@ type SseParamsWithCardInstruction = StreamAgentResponseParams & {
 const submitCard = igniter.mutation({
   name: 'Submit Builder Card',
   description:
-    'Apply a card payload deterministically to the conversation builderState (flips the matching *_confirmed sentinel) and stream the agent ACK turn via SSE. Replaces the legacy approval-by-regex flow.',
+    'Apply a card payload deterministically to the conversation builderState (flips the matching *_confirmed sentinel). In the default `conversational` ackMode it then streams the agent ACK turn via SSE; in `silent` ackMode (allowlisted Capabilities toggles only) it returns plain JSON with no LLM turn. Replaces the legacy approval-by-regex flow.',
   path: '/projects/:id/cards/:cardKey/submit' as const,
   method: 'POST',
   use: [authOrApiKeyProcedure({ required: true })],
-  body: cardSubmitBodySchema,
+  // Wider than the apply-card-submit union: also accepts the knowledge/media acks
+  // (T31), which the route dispatches to their own handlers (never the entrypoint).
+  body: cardSubmitRouteBodySchema,
   handler: async ({ request, context, response }) => {
     const user = getUser(context)
     if (!user) return response.unauthorized('Não autenticado')
     if (!user.currentOrgId) {
       return response.badRequest('Organização não selecionada')
     }
+    const organizationId = user.currentOrgId
 
     // Validate path params (UUID id + registered cardKey).
     const parsedParams = cardSubmitParamsSchema.safeParse(request.params)
@@ -85,12 +93,18 @@ const submitCard = igniter.mutation({
     const { id: projectId, cardKey } = parsedParams.data
 
     // Re-parse the body through the schema so defaults are applied and the type
-    // resolves to the OUTPUT shape (toolKeys/capabilityKeys non-optional).
-    const parsedBody = cardSubmitBodySchema.safeParse(request.body)
+    // resolves to the OUTPUT shape (toolKeys/capabilityKeys non-optional). The
+    // route schema is wider (includes knowledge/media acks — T31).
+    const parsedBody = cardSubmitRouteBodySchema.safeParse(request.body)
     if (!parsedBody.success) {
       return response.badRequest('Corpo do card inválido')
     }
     const body = parsedBody.data
+
+    // `ackMode` is a top-level field (not part of any card discriminator), parsed
+    // independently so the per-card schemas stay untouched (T90). Default applied.
+    const ackEnvelope = cardSubmitAckEnvelopeSchema.safeParse(request.body)
+    const ackMode = ackEnvelope.success ? ackEnvelope.data.ackMode : 'conversational'
 
     // Guard: the path cardKey must match the body discriminator (no spoofing
     // a channel payload at the agent_approval URL).
@@ -98,12 +112,31 @@ const submitCard = igniter.mutation({
       return response.badRequest('cardKey do corpo não confere com a rota')
     }
 
+    // FR-29 — `silent` is accepted ONLY for the Capabilities-toggle allowlist; any
+    // journey card with `silent` is a 400 (the conversational ACK is part of the
+    // journey contract and cannot be skipped). Enforced BEFORE any state write.
+    const isSilent = ackMode === 'silent'
+    if (isSilent && !SILENT_ALLOWED_CARD_KEYS.has(cardKey)) {
+      return response.badRequest(
+        'ackMode "silent" não é permitido para este card',
+      )
+    }
+
     // Deterministic state application (tenant-scoped + server-side re-validation).
-    const applied = await applyCardSubmit({
-      projectId,
-      organizationId: user.currentOrgId,
-      body,
-    })
+    // knowledge/media acks (T31) own their own write in journey-v2.ts and are NOT
+    // part of the apply-card-submit union, so route them directly here.
+    const applied =
+      body.cardKey === 'knowledge'
+        ? await applyKnowledgeAck({ projectId, organizationId })
+        : body.cardKey === 'media'
+          ? await applyMediaAck({ projectId, organizationId })
+          : await applyCardSubmit({
+              projectId,
+              organizationId,
+              // Narrowed: the two non-union acks were handled above, so `body` here
+              // is exactly the apply-card-submit `CardSubmitBody`.
+              body: body as CardSubmitBody,
+            })
 
     if (!applied.ok) {
       switch (applied.reason) {
@@ -116,8 +149,23 @@ const submitCard = igniter.mutation({
       }
     }
 
+    // FR-29 silent path: the flip already persisted via the SAME applyCardSubmit
+    // path; respond with plain JSON (current builderState) — NO ensureBuilderAgent,
+    // NO buildSseResponse, zero LLM turn. The client renders a cheap local system
+    // line ("✓ Preços ativados") instead of consuming an SSE stream.
+    if (isSilent) {
+      const conversation = await database.builderProjectConversation.findUnique({
+        where: { id: applied.conversationId },
+        select: { builderState: true },
+      })
+      return response.success({
+        ok: true,
+        builderState: parseBuilderState(conversation?.builderState),
+      })
+    }
+
     // Lazy-init the Builder meta-agent (idempotent), same as chat.sendMessage.
-    const builderAgent = await ensureBuilderAgent(user.currentOrgId)
+    const builderAgent = await ensureBuilderAgent(organizationId)
 
     // Re-read minimal conversation fields for the ACK turn (stateSummary banner).
     const conversation = await database.builderProjectConversation.findUnique({
@@ -132,7 +180,7 @@ const submitCard = igniter.mutation({
     // `undefined`, which makes buildJourneyBanner degrade gracefully.
     let readiness: Readiness | undefined
     try {
-      readiness = await getReadiness(applied.conversationId, user.currentOrgId)
+      readiness = await getReadiness(applied.conversationId, organizationId)
     } catch (err) {
       console.warn('[cardSubmit] getReadiness failed:', err)
       readiness = undefined
@@ -143,7 +191,7 @@ const submitCard = igniter.mutation({
     const sseParams: SseParamsWithCardInstruction = {
       agentConfigId: builderAgent.id,
       conversationId: applied.conversationId,
-      organizationId: user.currentOrgId,
+      organizationId,
       userId: user.id,
       projectId,
       userMessage: applied.cardInstruction,

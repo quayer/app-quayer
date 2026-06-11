@@ -22,6 +22,7 @@ import { publishVersion } from './publish-version.handler'
 import { materializePricing } from './materialize-pricing.handler'
 import { materializeTeam } from './materialize-team.handler'
 import { materializeMedia } from './materialize-media.handler'
+import { materializeKnowledge } from './materialize-knowledge.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -209,6 +210,23 @@ export async function executeDeployFlow(
       () => materializeMedia(context),
     )
     context.state.media = { collectionId: materializedMedia.collectionId }
+
+    // Materialize the KNOWLEDGE link (Onda 4, risco 7 / FR-13): GARANTE
+    // AIAgentConfig.ragCollectionId + useRAG quando o projeto tem a collection
+    // kb:${projectId}. REDE DUPLA com o backfill do create_agent (que liga no
+    // nascimento do agente): aqui re-confirmamos no deploy, idempotente (zero
+    // UPDATE quando já vinculado). Sem isto, na jornada v2 a fonte colada ANTES de
+    // o agente existir não acenderia o RAG no runtime (gate prepare-agent-call.ts:208).
+    // Runs BEFORE provisioning the WhatsApp instance, for the SAME reason as
+    // materialize_pricing/team/media: a failure leaves no orphan UAZapi instance to
+    // compensate. Status reuses 'publishing' (still pre-infra "config" phase); the
+    // real step name 'materialize_knowledge' lives in `activeStep` for attribution.
+    const materializedKnowledge = await runStep(
+      'materialize_knowledge',
+      'publishing',
+      () => materializeKnowledge(context),
+    )
+    context.state.knowledge = { collectionId: materializedKnowledge.collectionId }
 
     const instance = await runStep(
       'create_instance',
