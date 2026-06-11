@@ -4,6 +4,34 @@
  * (no behavior change): every function/value here is dependency-free TS.
  */
 
+import type { LucideIcon } from "lucide-react"
+import {
+  ImageIcon,
+  Keyboard,
+  Languages,
+  Mic,
+  Timer,
+  Volume2,
+} from "lucide-react"
+
+/** One capability tile rendered in the `propose_agent_creation` proposal card. */
+export interface AgentCapabilityTile {
+  icon: LucideIcon
+  title: string
+  detail: string
+  state: string
+}
+
+/** Static capability tiles for the agent-proposal card (pure presentational data). */
+export const AGENT_PROPOSAL_CAPABILITIES: readonly AgentCapabilityTile[] = [
+  { icon: ImageIcon, title: "Mídia", detail: "imagem, áudio, documento e vídeo", state: "ativo" },
+  { icon: Timer, title: "Buffer", detail: "concatenação de mensagens", state: "ativo" },
+  { icon: Keyboard, title: "Digitando", detail: "presença antes da resposta", state: "ativo" },
+  { icon: Languages, title: "Idioma", detail: "detecção opcional", state: "opcional" },
+  { icon: Volume2, title: "Áudio", detail: "callback com ElevenLabs", state: "opcional" },
+  { icon: Mic, title: "Custos", detail: "leitura de mídia pode ser desligada", state: "controle" },
+]
+
 // Human-readable labels for builder tool names.
 const TOOL_LABELS: Record<string, string> = {
   generate_prompt_anatomy:   "Gerando prompt",

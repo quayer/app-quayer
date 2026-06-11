@@ -315,6 +315,32 @@ export const mediaAckPayloadSchema = z.object({
 })
 
 /**
+ * Integration Builder (W2) — integration_proposal: the user CONFIRMS the
+ * proposed integration. Confirm-only, exactly like `agent_approval`: there is no
+ * client-supplied data to trust. The proposal itself (which integration, scopes,
+ * config) lives in `builderState` server-side and is NEVER read from the body.
+ * Like the T31 acks, this is registered in the map (so `CARD_KEYS`/the param enum
+ * recognize the route) but its dispatch lives outside `applyCardSubmit`'s union.
+ */
+export const integrationProposalPayloadSchema = z.object({
+  cardKey: z.literal('integration_proposal'),
+  action: z.literal('confirm'),
+})
+
+/**
+ * Integration Builder (W2) — integration_credentials: field-by-field credential
+ * values the user fills for the chosen integration. `values` is an opaque
+ * string→string map (e.g. `{ apiKey: '...', accountSid: '...' }`); the handler
+ * ENCRYPTS each value before persistence and they are NEVER stored in
+ * `builderState`. Registered in the map only (dispatch outside the entrypoint
+ * union), same as the T31 acks.
+ */
+export const integrationCredentialsPayloadSchema = z.object({
+  cardKey: z.literal('integration_credentials'),
+  values: z.record(z.string(), z.string()),
+})
+
+/**
  * Jornada v2 (T19, FR-03) — business_identity: o usuário conta sobre o negócio
  * SEM colar uma fonte (nome + endereço + descrição). É o caminho ALTERNATIVO ao
  * accept do `source_progress` (que satisfaz a identidade pelo site/IG). `name` é
@@ -487,6 +513,12 @@ export const CARD_PAYLOAD_SCHEMAS = {
   // vive no `card-submit.routes.ts` (handlers próprios), fora do `applyCardSubmit`.
   knowledge: knowledgeAckPayloadSchema,
   media: mediaAckPayloadSchema,
+  // Integration Builder (W2) — confirm + credential cards. Registrados aqui para
+  // que `CARD_KEYS`/`cardSubmitParamsSchema` reconheçam os cardKeys da rota; o
+  // despacho vive em handlers próprios (fora do `applyCardSubmit`), igual aos
+  // acks T31 — assim o exhaustiveness guard do entrypoint segue intocado.
+  integration_proposal: integrationProposalPayloadSchema,
+  integration_credentials: integrationCredentialsPayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -614,6 +646,11 @@ export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
   publishedNextStepsPayloadSchema,
   knowledgeAckPayloadSchema,
   mediaAckPayloadSchema,
+  // Integration Builder (W2) — confirm + credential cards, despachados por
+  // handler próprio (`apply-integration-cards.ts`) via `card-submit.routes.ts`,
+  // fora da união do entrypoint (exhaustiveness guard intocado, igual T31).
+  integrationProposalPayloadSchema,
+  integrationCredentialsPayloadSchema,
 ])
 export type CardSubmitRouteBody = z.infer<typeof cardSubmitRouteBodySchema>
 
@@ -655,3 +692,9 @@ export type PublishedNextStepsPayload = z.infer<
 >
 export type KnowledgeAckPayload = z.infer<typeof knowledgeAckPayloadSchema>
 export type MediaAckPayload = z.infer<typeof mediaAckPayloadSchema>
+export type IntegrationProposalPayload = z.infer<
+  typeof integrationProposalPayloadSchema
+>
+export type IntegrationCredentialsPayload = z.infer<
+  typeof integrationCredentialsPayloadSchema
+>

@@ -148,6 +148,7 @@ Decisões de card NÃO chegam como texto do usuário. Quando o usuário age num 
 5. Para alerta interno sem pausar a IA, use a capacidade "Avisar responsável" (transfer_to_human com routing:queue e pauseAI:false). Para encaminhar a um setor com roleta, use "Encaminhar para departamento" (transfer_to_human com routing:department).
 6. NÃO recomende send_pricing para advocacia, saúde ou áreas reguladas salvo pedido explícito.
 7. "Enviar resumo para meu WhatsApp" não é built-in: explique que precisa criar ferramenta custom via create_custom_tool/webhook.
+8. Para integrar com sistemas externos/CRMs (ex.: RD Station, Pipedrive, "manda os leads pro meu CRM", "conecta com meu webhook"), PREFIRA propose_integration em vez de create_custom_tool: ela propõe uma integração baseada em modelo (template) com fluxo guiado de credenciais + teste, e mostra ao usuário o que é enviado antes de confirmar. Use create_custom_tool só para webhooks genéricos quando não houver caminho de integração adequado.
 
 # Fluxo de canal e publicação
 1. Depois do agente criado e ferramentas definidas, chame select_channel para exibir o card de canais.

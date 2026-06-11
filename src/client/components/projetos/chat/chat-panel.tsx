@@ -70,17 +70,23 @@ export function ChatPanel({
 
   const isEmpty = messages.length === 0 && !streamingText && !error
 
-  // Prefill do ToolSelectionCard inline (reabrir mostra a decisão atual, não os
-  // recommended). Deriva do builderState carregado junto do readiness.
-  const toolSelectionPrefill = React.useMemo(() => {
+  // Canonical BuilderState carregado junto do readiness. Fonte única do
+  // prefill do picker E do slice de integração lido pelos cards inline (W2).
+  const builderState = React.useMemo(() => {
     const candidate = (readiness as { builderState?: unknown } | undefined)
       ?.builderState
-    const parsed = parseBuilderState(candidate)
-    return {
-      selectedCapabilityKeys: parsed.selectedCapabilityKeys ?? [],
-      selectedToolKeys: parsed.selectedToolKeys ?? [],
-    }
+    return parseBuilderState(candidate)
   }, [readiness])
+
+  // Prefill do ToolSelectionCard inline (reabrir mostra a decisão atual, não os
+  // recommended).
+  const toolSelectionPrefill = React.useMemo(
+    () => ({
+      selectedCapabilityKeys: builderState.selectedCapabilityKeys ?? [],
+      selectedToolKeys: builderState.selectedToolKeys ?? [],
+    }),
+    [builderState],
+  )
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -112,6 +118,8 @@ export function ChatPanel({
                   onSubmitCard={stableSubmitCard}
                   isStreaming={isStreaming}
                   toolSelectionPrefill={toolSelectionPrefill}
+                  projectId={projectId}
+                  builderState={builderState}
                 />
               ))}
 
@@ -124,6 +132,8 @@ export function ChatPanel({
                   onDraft={setInput}
                   onSubmitCard={stableSubmitCard}
                   toolSelectionPrefill={toolSelectionPrefill}
+                  projectId={projectId}
+                  builderState={builderState}
                 />
               )}
 

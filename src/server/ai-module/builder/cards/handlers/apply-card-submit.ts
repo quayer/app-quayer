@@ -55,6 +55,16 @@ import { applyServices } from './apply/services'
 import { applyBusinessHours } from './apply/hours'
 import { applyChannel } from './apply/channel'
 import { applyHandoff } from './apply/handoff'
+// Integration Builder (W2, T24) — the two integration cards own their write
+// (encrypt + CustomIntegration.credentials + test) OUTSIDE this switch, same as
+// the T31 knowledge/media acks. They are NOT in `CardSubmitBody`, so the branch
+// below dispatches them BEFORE the union switch (keeping the exhaustiveness guard
+// intact). 🚨 No credential value ever reaches builderState / the ACK turn.
+import { applyIntegrationCard } from './apply-integration-cards'
+import type {
+  IntegrationProposalPayload,
+  IntegrationCredentialsPayload,
+} from '../card-submit.schemas'
 
 // ---------------------------------------------------------------------------
 // Args / result
@@ -65,8 +75,19 @@ export interface ApplyCardSubmitArgs {
   projectId: string
   /** Tenant boundary — the caller's currentOrgId. */
   organizationId: string
-  /** Already-validated card payload (discriminated on cardKey). */
-  body: CardSubmitBody
+  /**
+   * Already-validated card payload. Discriminated on cardKey: the union switch
+   * handles `CardSubmitBody`; the two integration cards (W2, T24) are dispatched
+   * to their own handler BEFORE the switch (they own their write — encrypt +
+   * CustomIntegration.credentials + test — and never touch builderState).
+   */
+  body: CardSubmitBody | IntegrationProposalPayload | IntegrationCredentialsPayload
+  /**
+   * Acting user id — stamped as `createdById`/`requestedById` by the integration
+   * card handlers (W2, T24). Optional so the existing journey/Revisar cards (which
+   * never need it) keep their call sites untouched.
+   */
+  userId?: string
 }
 
 /**
@@ -716,6 +737,28 @@ export async function applyCardSubmit(
   }
   if (conversation.organizationId !== organizationId) {
     return { ok: false, reason: 'forbidden', message: 'Acesso negado a esta conversa' }
+  }
+
+  // Integration Builder (W2, T24) — the two integration cards DIVERT from the
+  // generic builderState patch: their handler does its own org-scoped write
+  // (encrypt + CustomIntegration.credentials + validation test) and NEVER touches
+  // builderState with a credential value. They are not part of `CardSubmitBody`,
+  // so dispatch them here (org ownership already proven above) before the union
+  // switch — mirrors how the route routes the T31 knowledge/media acks.
+  if (
+    body.cardKey === 'integration_proposal' ||
+    body.cardKey === 'integration_credentials'
+  ) {
+    return applyIntegrationCard(
+      {
+        projectId,
+        organizationId,
+        conversationId: conversation.id,
+        // The route always threads the acting user for integration cards.
+        userId: args.userId ?? '',
+      },
+      body,
+    )
   }
 
   // null/garbage/partial → DEFAULT_BUILDER_STATE (never throws).

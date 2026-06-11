@@ -37,6 +37,9 @@ import { editPromptSectionTool } from './edit-prompt-section.tool'
 import { revertPromptTool } from './revert-prompt.tool'
 import { setProjectBasicsTool } from './set-project-basics.tool'
 import { proposeFieldValuesTool } from './propose-field-values.tool'
+import { proposeIntegrationTool } from './propose-integration.tool'
+import { testIntegrationTool } from './test-integration.tool'
+import { isIntegrationBuilderEnabled } from '@/lib/feature-flags/integration-builder'
 
 export type { BuilderToolExecutionContext }
 
@@ -74,6 +77,15 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     // T23 (FR-02) — captura propostas de texto livre em capturedProposals.*; NUNCA
     // flipa sentinel (proposta ≠ confirmação). Card prefilla e o usuário confirma.
     propose_field_values: proposeFieldValuesTool(ctx),
+    // Integration Builder Wave 2 (T22/T23/T25) — GATED por feature flag (por org).
+    // Com a flag OFF, o spread vira {} e o toolset fica byte-idêntico ao de hoje.
+    // create_custom_tool (v1) continua registrado acima independente da flag (compat).
+    ...(isIntegrationBuilderEnabled(ctx.organizationId)
+      ? {
+          propose_integration: proposeIntegrationTool(ctx),
+          test_integration: testIntegrationTool(ctx),
+        }
+      : {}),
     // Instagram agora é configurado pelo card de credenciais (deploy tab), não
     // por um wizard no chat — o wizard antigo foi removido (dead UI).
   }

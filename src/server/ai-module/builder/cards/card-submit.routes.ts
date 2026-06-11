@@ -35,6 +35,8 @@ import {
   cardSubmitAckEnvelopeSchema,
   SILENT_ALLOWED_CARD_KEYS,
   type CardSubmitBody,
+  type IntegrationProposalPayload,
+  type IntegrationCredentialsPayload,
 } from './card-submit.schemas'
 
 // ---------------------------------------------------------------------------
@@ -133,9 +135,17 @@ const submitCard = igniter.mutation({
           : await applyCardSubmit({
               projectId,
               organizationId,
-              // Narrowed: the two non-union acks were handled above, so `body` here
-              // is exactly the apply-card-submit `CardSubmitBody`.
-              body: body as CardSubmitBody,
+              // Narrowed: the two non-union acks (knowledge/media) were handled
+              // above. What remains is the apply-card-submit `CardSubmitBody` OR
+              // the two Integration Builder cards (W2, T24) which `applyCardSubmit`
+              // dispatches to their own handler before the union switch.
+              body: body as
+                | CardSubmitBody
+                | IntegrationProposalPayload
+                | IntegrationCredentialsPayload,
+              // Acting user — stamped as createdById/requestedById by the
+              // integration card handlers (no-op for journey/Revisar cards).
+              userId: user.id,
             })
 
     if (!applied.ok) {

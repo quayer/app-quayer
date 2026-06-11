@@ -14,7 +14,7 @@ import { Card } from "@/client/components/ui/card"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { MarkdownContent } from "./markdown-content"
 
-import type { CardKey } from "./cards/types"
+import type { BuilderState, CardKey } from "./cards/types"
 import { ToolCallCard } from "./tool-call-card"
 import type { ToolCallView } from "./use-chat-stream"
 
@@ -60,6 +60,8 @@ export function MessageBubble({
   onSubmitCard,
   isStreaming = false,
   toolSelectionPrefill,
+  projectId,
+  builderState,
 }: {
   message: ChatMessage
   tokens: ReturnType<typeof useAppTokens>["tokens"]
@@ -76,6 +78,10 @@ export function MessageBubble({
     selectedCapabilityKeys: string[]
     selectedToolKeys: string[]
   }
+  /** BuilderProject id — threaded to ToolCallCard for integration cards. */
+  projectId: string
+  /** Canonical BuilderState — threaded to ToolCallCard for integration cards. */
+  builderState: BuilderState
 }) {
   if (message.role === "user") {
     return (
@@ -146,6 +152,8 @@ export function MessageBubble({
             onDraft={onDraft}
             onSubmitCard={onSubmitCard}
             toolSelectionPrefill={toolSelectionPrefill}
+            projectId={projectId}
+            builderState={builderState}
           />
         ))}
       </div>
@@ -160,6 +168,8 @@ export function StreamingBubble({
   onDraft,
   onSubmitCard,
   toolSelectionPrefill,
+  projectId,
+  builderState,
 }: {
   text: string
   toolCalls: ToolCallView[]
@@ -173,6 +183,10 @@ export function StreamingBubble({
     selectedCapabilityKeys: string[]
     selectedToolKeys: string[]
   }
+  /** BuilderProject id — threaded to ToolCallCard for integration cards. */
+  projectId: string
+  /** Canonical BuilderState — threaded to ToolCallCard for integration cards. */
+  builderState: BuilderState
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -211,6 +225,8 @@ export function StreamingBubble({
             onDraft={onDraft}
             onSubmitCard={onSubmitCard}
             toolSelectionPrefill={toolSelectionPrefill}
+            projectId={projectId}
+            builderState={builderState}
           />
         ))}
       </div>

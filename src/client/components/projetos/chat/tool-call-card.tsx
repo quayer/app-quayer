@@ -8,24 +8,14 @@
  */
 
 import * as React from "react"
-import {
-  Check,
-  ImageIcon,
-  Keyboard,
-  Languages,
-  Loader2,
-  Mic,
-  Pencil,
-  Sparkles,
-  Timer,
-  Volume2,
-} from "lucide-react"
+import { Check, Loader2, Pencil, Sparkles } from "lucide-react"
 
 import { Button } from "@/client/components/ui/button"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 
-import type { CardKey } from "./cards/types"
+import type { BuilderState, CardKey } from "./cards/types"
 import {
+  AGENT_PROPOSAL_CAPABILITIES,
   getAgentProposal,
   getChannelSelection,
   getQrResult,
@@ -36,6 +26,7 @@ import {
 import { ToolSelectionCard } from "./tool-selection-card"
 import { ChannelSelectionCard } from "./channel-selection-card"
 import { WhatsAppQrCard } from "./whatsapp-qr-card"
+import { renderIntegrationToolCard } from "./cards/integration/integration-tool-cards"
 
 export function ToolCallCard({
   toolName,
@@ -47,11 +38,16 @@ export function ToolCallCard({
   onDraft,
   onSubmitCard,
   toolSelectionPrefill,
+  projectId,
+  builderState,
 }: {
   toolName: string
   args: unknown
   result?: unknown
   tokens: ReturnType<typeof useAppTokens>["tokens"]
+  /** BuilderProject id + canonical BuilderState — fed to the W2 integration cards. */
+  projectId: string
+  builderState: BuilderState
   /** This specific tool call is still streaming (no result yet). */
   streaming?: boolean
   /** The chat as a whole is streaming — disables interactive card actions. */
@@ -108,44 +104,7 @@ export function ToolCallCard({
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {[
-            {
-              icon: ImageIcon,
-              title: "Mídia",
-              detail: "imagem, áudio, documento e vídeo",
-              state: "ativo",
-            },
-            {
-              icon: Timer,
-              title: "Buffer",
-              detail: "concatenação de mensagens",
-              state: "ativo",
-            },
-            {
-              icon: Keyboard,
-              title: "Digitando",
-              detail: "presença antes da resposta",
-              state: "ativo",
-            },
-            {
-              icon: Languages,
-              title: "Idioma",
-              detail: "detecção opcional",
-              state: "opcional",
-            },
-            {
-              icon: Volume2,
-              title: "Áudio",
-              detail: "callback com ElevenLabs",
-              state: "opcional",
-            },
-            {
-              icon: Mic,
-              title: "Custos",
-              detail: "leitura de mídia pode ser desligada",
-              state: "controle",
-            },
-          ].map((item) => {
+          {AGENT_PROPOSAL_CAPABILITIES.map((item) => {
             const Icon = item.icon
             return (
               <div
@@ -222,6 +181,16 @@ export function ToolCallCard({
       </div>
     )
   }
+
+  // Integration Builder (W2, T41) — mode-4 inline cards (NOT in CARD_REGISTRY).
+  // Returns null for non-integration tools (falls through to the branches below).
+  const integrationCard = streaming
+    ? null
+    : renderIntegrationToolCard({
+        toolName, result, projectId, value: builderState,
+        disabled: isStreaming, tokens, onSubmitCard,
+      })
+  if (integrationCard) return integrationCard
 
   if (toolName === "propose_tool_selection" && !streaming) {
     const selection = getToolSelection(result)

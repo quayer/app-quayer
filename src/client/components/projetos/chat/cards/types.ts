@@ -60,6 +60,9 @@ export type CardKey =
   | "whatsapp_connect"
   | "instagram_connect"
   | "published_next_steps"
+  // Integration Builder (W2)
+  | "integration_proposal"
+  | "integration_credentials"
 
 /**
  * Compile-time assertion that every backend-registered key is also a valid FE
