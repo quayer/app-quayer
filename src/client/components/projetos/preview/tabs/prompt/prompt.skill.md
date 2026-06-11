@@ -1,60 +1,84 @@
+---
+Criado: 2026-02-01
+Atualizado: 2026-06-11
+Revisar em: quando mudar o contrato de PATCH /builder/projects/:id/prompt ou o fluxo de conflito
+Relacionados:
+  - src/server/ai-module/builder/projects/routes/prompt.routes.ts
+  - src/server/ai-module/builder/projects/projects.repository.ts
+  - src/client/components/projetos/preview/tabs/identity/identity-tab.tsx
+---
+
 # Skill: prompt/ — Editor do System Prompt do Agente
 
-## Proposito
-Aba "Prompt" do workspace de projetos. Permite ao usuario editar o system
+## Propósito
+Aba "Prompt" do workspace de projetos. Permite ao usuário editar o system
 prompt do agente gerado pelo Builder IA, com insights em tempo real, auto-save
-debounced e historico de versoes (ainda placeholder).
+debounced **user-driven** com detecção de conflito, e histórico de versões real.
 
-Padrao: **Modular Monolith** — cada arquivo = uma intencao unica.
+Padrão: **Modular Monolith** — cada arquivo = uma intenção única.
 Tudo abaixo de 400 linhas. Zero `any`.
 
 ## Entry Point
 - `prompt-tab.tsx` — orquestrador fino. Exporta `PromptTab` e `PromptTabProps`.
 - Registrado em `src/client/components/projetos/preview/tab-registry.tsx`
-  com `visibleFor: ['ai_agent']`.
+  com `visibleFor: ['ai_agent']` e `requiresAgent: true` (a tab nunca monta sem
+  agente — por isso não existe empty state aqui).
 
-## Inventario de Arquivos
+## Inventário de Arquivos
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `prompt-tab.tsx` | Orquestrador. Estado (value, expanded, insightsOpen) e composicao. |
-| `prompt-types.ts` | Types: `PromptTabProps`, `SaveState`, `PromptInsights`, `AppTokens`. |
+| `prompt-tab.tsx` | Orquestrador. Baseline do servidor (`baselineRef`), flag de edição do usuário (`userEditedRef`), banner de conflito, composição. |
+| `prompt-types.ts` | Types: `PromptTabProps`, `SaveState`, `PromptInsights`, `VersionListItem`, `VersionHistoryProps`. |
 | `prompt-utils.ts` | `analyzePrompt(text)` e `formatNumber(n)` — puros, sem React. |
-| `prompt-header.tsx` | Titulo + badge "Gerado pelo Builder" + contador + indicador de save. |
+| `prompt-header.tsx` | Título + contador + indicador de save. |
 | `prompt-editor.tsx` | Toolbar (Regenerar/Copiar/Expandir) + Textarea + gutter `LineNumbers`. |
-| `toolbar-button.tsx` | Botao reusavel da toolbar do editor. |
-| `prompt-insights-section.tsx` | Card colapsavel com metricas + pills de qualidade. |
-| `version-history.tsx` | Placeholder de versoes anteriores (graceful empty). |
-| `prompt-actions.tsx` | Botoes primarios "Regenerar com Builder" e "Copiar Prompt". |
-| `prompt-empty-state.tsx` | Estado vazio quando `project.aiAgent` nao existe. |
-| `hooks/use-prompt-autosave.ts` | Debounce 2s + ticker 1s para "salvo ha Ns". |
+| `toolbar-button.tsx` | Botão reusável da toolbar do editor. |
+| `prompt-insights-section.tsx` | Card colapsável com métricas + pills de qualidade. |
+| `version-history.tsx` | Histórico real (`GET /projects/:id/versions`), diff vs editor, rollback com `onRestored(content)`. |
+| `hooks/use-prompt-autosave.ts` | Debounce 2s user-driven + precondição otimista (`baseUpdatedAt` → 409) + `forceSave`/`acceptServerState`. |
 | `hooks/use-prompt-actions.ts` | `handleCopy` (clipboard + toast) + `handleRegenerate` (event). |
+
+A seção "Identidade & Comportamento" no topo é a `IdentityTab`
+(`../identity/identity-tab.tsx`) — autosave próprio; salvar lá reescreve o
+bloco `# Identidade` do systemPrompt (por isso o sync de conflito abaixo).
+
+## Auto-save — invariantes
+
+1. **User-driven**: só agenda PATCH quando a mudança veio do textarea
+   (`userEditedRef` setado no onChange). Mudanças programáticas (sync do
+   snapshot RSC, rollback, adoção de conflito) realinham `baselineRef` e nunca
+   salvam.
+2. **Precondição otimista**: o PATCH envia `baseUpdatedAt` (updatedAt do último
+   save). O servidor responde **409** se o prompt mudou desde então — o banner
+   oferece "Usar versão do Builder" vs "Manter minha edição" (`forceSave` sem
+   precondição).
+3. **Versão manual**: todo save mantém UMA `BuilderPromptVersion` draft
+   reutilizável com `createdBy: 'manual'` (upsert no repository) — edição
+   manual é publicável pela saga de deploy.
 
 ## Data Flow
 
 ```
-project.aiAgent?.systemPrompt
+project.aiAgent?.systemPrompt (snapshot RSC)
         |
         v
-  [PromptTab] ──────────────────┐
-   value, setValue              │
-   expanded, insightsOpen       │
-        │                       │
-        ├─> usePromptAutosave ──┼─> saveState, tick
-        ├─> usePromptActions ───┼─> handleCopy, handleRegenerate
-        ├─> analyzePrompt ──────┼─> insights (char/line/section/tokens/qualidade)
-        │                       │
-        ├─> PromptHeader (insights.charCount, saveState, tick)
-        ├─> PromptEditor (value, onChange, lineCount, expanded, actions)
-        ├─> PromptInsightsSection (insights, open)
-        ├─> VersionHistory
-        └─> PromptActions (onRegenerate, onCopy)
+  [PromptTab] baselineRef / userEditedRef / conflict
+        ├─> usePromptAutosave({ value, dirty, projectId, onSaved, onConflict })
+        ├─> usePromptActions ──> handleCopy, handleRegenerate
+        ├─> analyzePrompt ─────> insights
+        ├─> PromptHeader (charCount, saveState, now)
+        ├─> PromptEditor (value, onChange=user edit, ...)
+        ├─> PromptInsightsSection (insights, messages)
+        └─> VersionHistory (editorValue, onRestored → adoptServer)
 ```
 
 Evento disparado pelo "Regenerar": `window.dispatchEvent(new CustomEvent('builder:focus-chat', { detail: { message } }))`.
 
 ## Regras
-- Tema sempre via `useAppTokens()` — nao hardcode cores (exceto brand green/red das pills).
-- Auto-save hoje e stub (TODO: `PATCH /api/v1/builder/agents/:id/prompt`).
-- Version history: nao popular com mock — deixar vazio ate termos endpoint real.
-- Textarea controlada pelo orquestrador; hooks nao tocam DOM.
+- Tema sempre via `useAppTokens()` — não hardcodar cores (exceto brand green/red das pills).
+- Endpoint real: `PATCH /api/v1/builder/projects/:id/prompt` via fetch direto
+  (mesmo padrão da IdentityTab) para tratar o corpo do 409.
+- "Atual" no histórico é por CONTEÚDO (`version.content === editorValue`),
+  nunca por posição na lista.
+- Textarea controlada pelo orquestrador; hooks não tocam DOM.

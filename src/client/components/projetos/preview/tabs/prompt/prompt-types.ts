@@ -14,8 +14,6 @@ export interface PromptTabProps {
    * block.
    */
   messages?: ChatMessage[]
-  /** Optional callback to open the chat panel from the empty state. */
-  onOpenChat?: () => void
 }
 
 export type SaveState =
@@ -55,4 +53,12 @@ export interface VersionListItem {
 export interface VersionHistoryProps {
   tokens: AppTokens
   projectId: string
+  /**
+   * Conteúdo VIVO do editor — usado para marcar "Atual" apenas na versão cujo
+   * conteúdo bate com o que está em uso, e como lado direito do diff
+   * ("Editor (atual)"). Evita o badge enganoso quando o editor divergiu.
+   */
+  editorValue: string
+  /** Rollback confirmado — o pai sincroniza o editor com o conteúdo restaurado. */
+  onRestored?: (content: string) => void
 }

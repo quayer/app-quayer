@@ -28,11 +28,14 @@ export function ProgressHeader({
         >
           Progresso
         </span>
+        {/* Texto e barra derivam do MESMO número: o completenessPct exclui
+            passos não-aplicáveis do denominador, então "X de N" com N bruto
+            contradizia a barra (ex.: "13 de 15" com barra em 93%). */}
         <span
           className="text-[12px] font-medium"
           style={{ color: tokens.textSecondary }}
         >
-          {doneCount} de {totalCount} concluídas
+          {Math.round(barPct)}% concluído
         </span>
       </div>
       <div

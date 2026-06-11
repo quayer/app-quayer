@@ -12,6 +12,13 @@
  *     1x por mudança de sinal, via ref-guard. O sinal é derivado de
  *     `messages.length` + contagem de tool-results, estável durante o
  *     streaming token-a-token (não refaz a cada chunk).
+ *
+ * DEPENDÊNCIA IMPLÍCITA DE REMOUNT: mudanças feitas em OUTRAS tabs (conectar
+ * canal no wizard de publicação, salvar prompt/identidade) não geram turno nem
+ * focus — o snapshot só atualiza porque o Radix Tabs DESMONTA o conteúdo
+ * inativo e o useQuery refaz no mount ao voltar para a Overview. Se algum dia
+ * usarmos `forceMount` nas tabs, invalidar esta query nos onSuccess das
+ * mutações que afetam blockers (attach de canal, updatePrompt, publish).
  */
 
 import * as React from "react"

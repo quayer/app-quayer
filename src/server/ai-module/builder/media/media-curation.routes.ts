@@ -12,8 +12,10 @@
  *                 no BUCKETS.MEDIA → assina on-read.
  *   - 'gallery' → materializadas das KnowledgeImage confirmadas (Onda D). storageKey
  *                 no BUCKETS.MEDIA → assina on-read.
- *   - 'pricing' → materializadas de PriceItem.imageUrl (M2). externalUrl https direto
- *                 (URL externa, hospedada fora) → usada SEM assinar.
+ *   - 'pricing' → materializadas de PriceItem.imageUrl (M2). Foto SUBIDA pelo app →
+ *                 storageKey (assina on-read; o materialize converte a URL estável
+ *                 de /builder/pricing-image/view em key); URL realmente externa
+ *                 (colada) → externalUrl https direto, usada SEM assinar.
  *
  *   GET   /projects/:id/media
  *     Lista os MediaAsset da collection do projeto (deletedAt IS NULL), org-scoped +
@@ -114,7 +116,7 @@ function toMediaSource(value: string): MediaSource {
 
 /**
  * Resolve a `url` de UMA mídia on-read. FAIL-SAFE (espelha signImageRow do D2):
- *   1. externalUrl != null  → usa-a DIRETO (pricing; URL https externa, não assina).
+ *   1. externalUrl != null  → usa-a DIRETO (URL https realmente externa, não assina).
  *   2. senão storageKey != null → assina via storage.getSignedUrl(BUCKETS.MEDIA, …)
  *      dentro de try/catch — qualquer erro (storage indisponível, key inexistente,
  *      hiccup de rede) vira `url=null` para AQUELE item, nunca propaga, nunca derruba

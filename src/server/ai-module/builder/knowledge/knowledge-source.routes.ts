@@ -126,6 +126,25 @@ const deleteSource = igniter.mutation({
     })
     if (!source) return response.notFound('Fonte não encontrada')
 
+    // Fotos da fonte que já viraram MediaAsset (materialização gallery) ficariam
+    // ÓRFÃS no catálogo do agente até o próximo deploy — soft-delete junto.
+    // sourceRef do asset gallery = KnowledgeImage.id (1:1 na materialização).
+    const images = await db.knowledgeImage.findMany({
+      where: { sourceId: source.id, organizationId: user.currentOrgId },
+      select: { id: true },
+    })
+    if (images.length > 0) {
+      await db.mediaAsset.updateMany({
+        where: {
+          source: 'gallery',
+          sourceRef: { in: images.map((i) => i.id) },
+          organizationId: user.currentOrgId,
+          deletedAt: null,
+        },
+        data: { deletedAt: new Date() },
+      })
+    }
+
     await db.knowledgeSource.delete({ where: { id: source.id } })
     return response.success({ deleted: true })
   },

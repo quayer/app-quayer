@@ -1,8 +1,9 @@
 "use client"
 
 /**
- * AgentConfigSection — bloco "Config" do agente: escolha de MODELO (lista
- * curada LiteLLM) + DROPDOWN da CHAVE BYOK que o agente usa.
+ * AgentConfigSection — bloco "Config" do agente: MODELO (somente leitura —
+ * quem define é o Builder durante a conversa) + DROPDOWN da CHAVE BYOK que o
+ * agente usa.
  *
  * Data + persistência vivem em ./use-agent-credential.ts (fetch só por URL,
  * sem importar server). Este arquivo é só apresentação.
@@ -18,15 +19,15 @@ import {
 } from "@/client/components/ui/select"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { ProviderKey } from "@/client/components/integracoes/providers-catalog"
-import { CURATED_MODELS, findModelById } from "./model-catalog"
 import {
+  ORG_DEFAULT_KEY,
   useAgentCredential,
   type CredentialSaveState,
   type ProviderKeyOption,
 } from "./use-agent-credential"
 
 function keyLabel(opt: ProviderKeyOption): string {
-  if (opt.label) return opt.label
+  if (opt.name) return opt.name
   if (opt.lastFour) return `••••••${opt.lastFour}`
   return opt.id
 }
@@ -35,7 +36,6 @@ export interface AgentConfigSectionProps {
   projectId: string
   provider: ProviderKey | null
   currentModelId: string | null
-  organizationProviderId?: string | null
   tokens: AppTokens
 }
 
@@ -43,16 +43,13 @@ export function AgentConfigSection({
   projectId,
   provider,
   currentModelId,
-  organizationProviderId,
   tokens,
 }: AgentConfigSectionProps) {
   const { keys, selectedKey, saveState, selectKey } = useAgentCredential(
     projectId,
     provider,
-    organizationProviderId,
   )
 
-  const activeModel = findModelById(currentModelId)
   const labelStyle = { color: tokens.textSecondary }
 
   return (
@@ -67,23 +64,21 @@ export function AgentConfigSection({
         </h3>
       </div>
 
-      {/* MODELO — curated LiteLLM list, current model preselected. */}
+      {/* MODELO — somente leitura: definido pelo Builder durante a conversa. */}
       <div className="flex flex-col gap-1.5">
         <span className="text-[11px] font-medium" style={labelStyle}>
           Modelo
         </span>
-        <Select value={activeModel?.id ?? ""} disabled>
-          <SelectTrigger className="h-9 text-[13px]">
-            <SelectValue placeholder={currentModelId ?? "Definido pelo Builder"} />
-          </SelectTrigger>
-          <SelectContent>
-            {CURATED_MODELS.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {m.label} — {m.hint}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div
+          className="flex h-9 items-center rounded-md border px-3 font-mono text-[13px]"
+          style={{
+            borderColor: tokens.border,
+            backgroundColor: tokens.bgElevated,
+            color: currentModelId ? tokens.textPrimary : tokens.textTertiary,
+          }}
+        >
+          {currentModelId ?? "Definido pelo Builder"}
+        </div>
         <span className="text-[11px]" style={{ color: tokens.textTertiary }}>
           O modelo é definido pelo Builder durante a conversa.
         </span>
@@ -107,10 +102,16 @@ export function AgentConfigSection({
             />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={ORG_DEFAULT_KEY}>Padrão da organização</SelectItem>
             {keys.map((opt) => (
-              <SelectItem key={opt.id} value={opt.id}>
+              <SelectItem
+                key={opt.id}
+                value={opt.id}
+                disabled={opt.isActive === false}
+              >
                 {keyLabel(opt)}
-                {opt.isDefault ? " · padrão" : ""}
+                {opt.isPrimary ? " · principal" : ""}
+                {opt.isActive === false ? " · inativa" : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -148,7 +149,7 @@ function SaveHint({
     )
   return (
     <span className="text-[11px]" style={{ color: tokens.dangerText }}>
-      Erro ao salvar a chave.
+      Erro ao salvar — a seleção anterior foi mantida.
     </span>
   )
 }

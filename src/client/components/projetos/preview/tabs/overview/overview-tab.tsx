@@ -14,7 +14,7 @@
  */
 
 import * as React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type {
@@ -53,24 +53,52 @@ export function OverviewTab({
     project.id,
     messages,
   )
-  const firstMessage = deriveFirstMessage(project, messages)
+  // Greeting canônico vem do readiness (builderState.persona.greeting) — o
+  // mesmo hook acima, com refetch por activity-signal (pós-submit do card).
+  const firstMessage = deriveFirstMessage(project, readiness)
   const deployGate = canOpenDeploy(project)
 
   const [showCelebration, setShowCelebration] = useState(false)
-  const prevAgentRef = useRef(project.aiAgent)
+  // Compara por id (não por identidade de objeto): cada router.refresh cria um
+  // objeto novo e re-celebrava "Agente criado" em eventos que não são criação.
+  const prevAgentIdRef = useRef<string | null>(project.aiAgent?.id ?? null)
 
   useEffect(() => {
-    if (!prevAgentRef.current && project.aiAgent) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    // Atualiza a ref INCONDICIONALMENTE antes de qualquer return — o cleanup
+    // do setTimeout fazia a antiga atribuição nunca rodar após a 1ª celebração.
+    const prevId = prevAgentIdRef.current
+    const currentId = project.aiAgent?.id ?? null
+    prevAgentIdRef.current = currentId
+    if (!prevId && currentId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- celebração one-shot disparada pela transição null→agente do snapshot RSC
       setShowCelebration(true)
       const t = setTimeout(() => setShowCelebration(false), 3000)
       return () => clearTimeout(t)
     }
-    prevAgentRef.current = project.aiAgent
-  }, [project.aiAgent])
+  }, [project.aiAgent?.id])
+
+  // "Editar" da primeira mensagem → chat com rascunho pré-preenchido (o card
+  // de persona é o dono do greeting; a tab Prompt não tem campo de saudação).
+  const handleEditGreeting = useCallback(() => {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("builder:focus-chat", {
+        detail: {
+          message:
+            "Quero ajustar a saudação inicial que o agente envia aos clientes",
+        },
+      }),
+    )
+  }, [])
 
   const doneCount = stages.filter((s) => s.status === "done").length
   const hasAnyActivity = messages.length > 0 || project.aiAgent !== null
+
+  // Canal: prefere o readiness (fonte única, cobre conexão feita pelo wizard
+  // sem router.refresh); o snapshot SSR fica como fallback enquanto carrega.
+  const hasChannel = readiness
+    ? !readiness.blockers.some((b) => b.check === "channel")
+    : project.hasWhatsAppConnection
 
   /* -- Estado 1: sem nenhuma atividade → instrui o usuário a começar -- */
   if (!hasAnyActivity) {
@@ -113,7 +141,7 @@ export function OverviewTab({
           tokens={tokens}
           firstMessage={firstMessage.text}
           source={firstMessage.source}
-          onEdit={onTabChange ? () => onTabChange("prompt") : undefined}
+          onEdit={handleEditGreeting}
         />
       )}
 
@@ -157,7 +185,7 @@ export function OverviewTab({
       {/* -- Seção 4: Ações rápidas (contextuais ao estado do projeto) -- */}
       <QuickActions
         hasAgent={!!aiAgent}
-        hasWhatsAppConnection={project.hasWhatsAppConnection}
+        hasWhatsAppConnection={hasChannel}
         status={status}
         deployGate={deployGate}
         onTabChange={onTabChange}

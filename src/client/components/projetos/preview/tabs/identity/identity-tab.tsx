@@ -45,6 +45,12 @@ export function IdentityTab({ project }: IdentityTabProps) {
   const [saveState, setSaveState] = React.useState<"idle" | "saving" | "saved" | "error">("idle")
   const [humanAccepted, setHumanAccepted] = React.useState(false)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  /**
+   * Patches acumulados aguardando o debounce. UM timer global com merge — sem
+   * isso, editar dois campos dentro da janela de 800ms cancelava o PATCH do
+   * primeiro e a edição era perdida silenciosamente (SaveIndicator "Salvo").
+   */
+  const pendingRef = React.useRef<Partial<AgentIdentityCard>>({})
 
   // Load
   React.useEffect(() => {
@@ -63,26 +69,56 @@ export function IdentityTab({ project }: IdentityTabProps) {
     }
   }, [project.id])
 
+  const flush = React.useCallback(async () => {
+    const body = pendingRef.current
+    if (Object.keys(body).length === 0) return
+    pendingRef.current = {}
+    try {
+      const res = await fetch(`/api/v1/builder/identity/${project.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSaveState("saved")
+    } catch {
+      // Devolve o patch à fila (sem sobrescrever edições mais novas) para a
+      // próxima tentativa — e sinaliza o erro em vez de fingir "Salvo".
+      pendingRef.current = { ...body, ...pendingRef.current }
+      setSaveState("error")
+    }
+  }, [project.id])
+
   const persist = React.useCallback(
     (patch: Partial<AgentIdentityCard>) => {
+      pendingRef.current = { ...pendingRef.current, ...patch }
       if (timerRef.current) clearTimeout(timerRef.current)
       setSaveState("saving")
-      timerRef.current = setTimeout(async () => {
-        try {
-          const res = await fetch(`/api/v1/builder/identity/${project.id}`, {
-            method: "PATCH",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(patch),
-          })
-          setSaveState(res.ok ? "saved" : "error")
-        } catch {
-          setSaveState("error")
-        }
+      timerRef.current = setTimeout(() => {
+        void flush()
       }, 800)
     },
-    [project.id],
+    [flush],
   )
+
+  // Flush no unmount (troca de tab desmonta o conteúdo): envia o que ficou na
+  // fila com keepalive para a edição não se perder ao navegar.
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      const body = pendingRef.current
+      if (Object.keys(body).length === 0) return
+      pendingRef.current = {}
+      void fetch(`/api/v1/builder/identity/${project.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        keepalive: true,
+      })
+    }
+  }, [project.id])
 
   const update = React.useCallback(
     (patch: Partial<AgentIdentityCard>) => {
@@ -105,11 +141,17 @@ export function IdentityTab({ project }: IdentityTabProps) {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold" style={fieldStyle}>
-          Identidade & Comportamento
-        </h2>
-        <SaveIndicator state={saveState} tokens={tokens} />
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold" style={fieldStyle}>
+            Identidade & Comportamento
+          </h2>
+          <SaveIndicator state={saveState} tokens={tokens} />
+        </div>
+        <p className="text-[12px]" style={{ color: tokens.textTertiary }}>
+          Salvar aqui reescreve automaticamente o bloco &ldquo;# Identidade&rdquo;
+          das instruções do agente (aba Prompt, logo abaixo).
+        </p>
       </div>
 
       {/* Objetivo + nome */}
@@ -219,6 +261,12 @@ export function IdentityTab({ project }: IdentityTabProps) {
                 política do WhatsApp. Você assume a responsabilidade legal.
               </span>
             </p>
+            {!humanAccepted && (
+              <p className="mt-1.5 text-[11px] font-medium" style={{ color: tokens.warningText }}>
+                Pendente de aceite — este modo ainda NÃO foi salvo; o modo
+                anterior continua valendo até você aceitar abaixo.
+              </p>
+            )}
             <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px]" style={{ color: tokens.warningText }}>
               <input
                 type="checkbox"

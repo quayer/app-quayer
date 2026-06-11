@@ -10,8 +10,9 @@
  * legenda (debounce → PATCH) e soft-delete (PATCH { deleted:true }).
  *
  * Responsabilidades (espelha o panel da D3):
- *   - dispara `api.builder.patchMediaAsset` (delete / caption com debounce 600ms)
- *     e, no sucesso, pede ao pai um `onRefetch()` para repuxar a lista canônica;
+ *   - dispara `api.builder.patchMediaAsset` (delete / caption com debounce 600ms /
+ *     confirmed para liberar mídia pendente ao agente) e, no sucesso, pede ao pai
+ *     um `onRefetch()` para repuxar a lista canônica;
  *   - mantém o estado local de curadoria: `drafts` (legenda em edição por id) +
  *     `deletingIds` (Set — fade-out enquanto o soft-delete está em voo);
  *   - um timer de debounce por mediaId (`captionTimers`), limpo no unmount;
@@ -180,6 +181,19 @@ export function MediaGrid({
     [clearDeleting, disabled, patchMedia],
   )
 
+  /**
+   * Confirma UMA mídia pendente (PATCH { confirmed: true }) — o runtime só envia
+   * mídia com confirmedAt preenchido, então confirmar = liberar para o agente.
+   * No sucesso o `onSuccess` do hook repuxa a lista (badge "Pendente" some).
+   */
+  const handleConfirm = React.useCallback(
+    (mediaId: string) => {
+      if (disabled) return
+      void patchMedia.mutate({ params: { mediaId }, body: { confirmed: true } })
+    },
+    [disabled, patchMedia],
+  )
+
   /** Edição de legenda com debounce por id → PATCH { caption }. */
   const handleCaptionChange = React.useCallback(
     (mediaId: string, next: string) => {
@@ -216,6 +230,7 @@ export function MediaGrid({
           tokens={tokens}
           onCaptionChange={(next) => handleCaptionChange(item.id, next)}
           onDelete={() => handleDelete(item.id)}
+          onConfirm={() => handleConfirm(item.id)}
         />
       ))}
     </div>

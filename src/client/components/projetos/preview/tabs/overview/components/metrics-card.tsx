@@ -148,7 +148,7 @@ export function MetricsCard({
             />
             {totalTokens !== null && (
               <Metric
-                label="Tokens consumidos"
+                label="Uso de IA (tokens)"
                 value={fmt(totalTokens)}
                 tokens={tokens}
               />

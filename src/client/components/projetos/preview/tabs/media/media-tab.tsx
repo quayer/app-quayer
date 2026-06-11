@@ -9,8 +9,10 @@
  * `buscar_media`), nunca desta UI.
  *
  * Espelha `knowledge-tab.tsx` (orquestrador dono do data): loading com spinner
- * Loader2, empty-state PT-BR, e um único `refetch` propagado para os filhos
- * (<MediaUpload onUploaded> e <MediaGrid onRefetch>) repuxar a lista canônica.
+ * Loader2, empty-state PT-BR, estado de ERRO honesto (falha da lista ≠ catálogo
+ * vazio — bloco com "Tentar de novo" em vez do empty-state), e um único
+ * `refetch` propagado para os filhos (<MediaUpload onUploaded> e
+ * <MediaGrid onRefetch>) repuxar a lista canônica.
  *
  * Responsabilidades (este componente é o DONO do `useQuery`):
  *   - `api.builder.listProjectMedia.useQuery({ params: { id } })` → lista canônica
@@ -26,7 +28,7 @@
  */
 
 import * as React from "react"
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { api } from "@/igniter.client"
@@ -107,7 +109,9 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
   const { tokens } = useAppTokens()
 
   // ── Lista canônica (este componente é o dono do data) ──────────────────────
-  const { data, isLoading, refetch } = api.builder.listProjectMedia.useQuery({
+  // `isError` é consumido de propósito (audit médio): sem ele, uma falha de API
+  // virava lista vazia e a aba mentia "Nenhuma mídia no catálogo ainda".
+  const { data, isLoading, isError, refetch } = api.builder.listProjectMedia.useQuery({
     params: { id: project.id },
   })
 
@@ -186,8 +190,9 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
     )
   }
 
-  const isEmpty = media.length === 0
-  const isFilteredEmpty = !isEmpty && filtered.length === 0
+  // Erro da LISTA ≠ catálogo vazio: com isError nada de empty-state mentiroso.
+  const isEmpty = !isError && media.length === 0
+  const isFilteredEmpty = !isError && !isEmpty && filtered.length === 0
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -206,7 +211,7 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
       <MediaUpload projectId={project.id} onUploaded={handleRefetch} />
 
       {/* Barra de filtro por tipo — só quando há mídia para filtrar */}
-      {!isEmpty && (
+      {!isError && !isEmpty && (
         <div
           role="tablist"
           aria-label="Filtrar mídias por tipo"
@@ -244,7 +249,7 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
 
       {/* Barra de filtro por categoria — só quando há ao menos uma categoria.
           Combina com o filtro de tipo (AND). Deriva da lista em memória, sem query. */}
-      {!isEmpty && categories.length > 0 && (
+      {!isError && !isEmpty && categories.length > 0 && (
         <div
           role="group"
           aria-label="Filtrar mídias por categoria"
@@ -280,6 +285,35 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
         </div>
       )}
 
+      {/* Erro de carregamento da lista — honesto, com retry (audit médio) */}
+      {isError && (
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed px-4 py-8 text-center"
+          style={{ borderColor: tokens.divider }}
+        >
+          <AlertTriangle className="h-5 w-5" style={{ color: tokens.dangerText }} />
+          <p className="text-[13px] font-medium" style={{ color: tokens.textSecondary }}>
+            Não foi possível carregar o catálogo de mídias
+          </p>
+          <p className="text-[12px]" style={{ color: tokens.textTertiary }}>
+            Verifique sua conexão ou tente novamente em instantes.
+          </p>
+          <button
+            type="button"
+            onClick={handleRefetch}
+            className="mt-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
+            style={{
+              borderColor: tokens.brand,
+              backgroundColor: tokens.brand,
+              color: "#fff",
+            }}
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
       {/* Empty-state geral (nenhuma mídia no catálogo) */}
       {isEmpty && (
         <div
@@ -305,8 +339,8 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
         </p>
       )}
 
-      {/* Grade (dona das mutations de legenda/soft-delete) */}
-      {!isEmpty && !isFilteredEmpty && (
+      {/* Grade (dona das mutations de legenda/confirmação/soft-delete) */}
+      {!isError && !isEmpty && !isFilteredEmpty && (
         <MediaGrid items={filtered} tokens={tokens} onRefetch={handleRefetch} />
       )}
     </div>

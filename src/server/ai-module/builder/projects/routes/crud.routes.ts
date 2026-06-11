@@ -8,11 +8,20 @@
 import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
+import { getDatabase } from '@/server/services/database'
+import {
+  getAgentRuntimeSettingsFromMetadata,
+  normalizeAgentRuntimeSettings,
+} from '@/lib/agent-runtime-settings'
 import {
   listProjectsQuerySchema,
   createProjectInputSchema,
 } from '../../builder.schemas'
 import { builderProjectRepository } from '../projects.repository'
+import {
+  agentRuntimeSettingsPatchSchema,
+  applyAgentRuntimeSettingsPatch,
+} from './agent-settings-patch'
 
 // ---------------------------------------------------------------------------
 // Schemas locais (pequenos — mantidos inline para não poluir builder.schemas.ts)
@@ -64,7 +73,8 @@ export const duplicateProjectBodySchema = z.object({
 export const updateAgentSettingsParamsSchema = z.object({
   id: z.string().uuid('ID de projeto inválido'),
 })
-export const updateAgentSettingsBodySchema = z.record(z.unknown())
+/** PATCH parcial tipado — ver agent-settings-patch.ts (nada de z.record). */
+export const updateAgentSettingsBodySchema = agentRuntimeSettingsPatchSchema
 
 // ---------------------------------------------------------------------------
 // Derivação de nome do projeto (FR-04 — jornada-builder-v2)
@@ -479,7 +489,7 @@ export const crudRoutes = {
   updateAgentSettings: igniter.mutation({
     name: 'Update Agent Runtime Settings',
     description:
-      'Atualiza flags avançadas do agente: typing, idioma, mídia, buffer e áudio/TTS.',
+      'PATCH parcial das flags avançadas do agente: typing, idioma, mídia, buffer e áudio/TTS. Campos omitidos preservam o valor atual.',
     path: '/projects/:id/agent-settings',
     method: 'PATCH',
     use: [authOrApiKeyProcedure({ required: true })],
@@ -493,11 +503,42 @@ export const crudRoutes = {
       if (!parseResult.success) return response.badRequest('ID de projeto inválido')
       const { id } = parseResult.data
 
+      const patch = updateAgentSettingsBodySchema.safeParse(request.body)
+      if (!patch.success) {
+        return response.badRequest('Configurações inválidas')
+      }
+
       try {
+        // PATCH parcial REAL: lê o estado ATUAL (metadata + colunas TTS do
+        // agente — a mesma visão que a UI exibe via getProjectDetail) e aplica
+        // o patch sobre ele. Sem isso, campos ausentes voltavam aos defaults.
+        const projectRow = await getDatabase().builderProject.findFirst({
+          where: { id, organizationId: user.currentOrgId },
+          select: {
+            metadata: true,
+            aiAgent: {
+              select: {
+                enableTTS: true,
+                ttsProvider: true,
+                ttsVoiceId: true,
+                ttsModel: true,
+                ttsSpeechRate: true,
+              },
+            },
+          },
+        })
+        if (!projectRow) return response.notFound('Projeto não encontrado')
+
+        const current = normalizeAgentRuntimeSettings(
+          getAgentRuntimeSettingsFromMetadata(projectRow.metadata),
+          projectRow.aiAgent,
+        )
+        const merged = applyAgentRuntimeSettingsPatch(current, patch.data)
+
         const settings = await builderProjectRepository.updateAgentRuntimeSettings(
           id,
           user.currentOrgId,
-          request.body,
+          merged,
         )
         if (!settings) return response.notFound('Projeto não encontrado')
 

@@ -55,7 +55,12 @@ export function DeployReadinessCard({
 
         <div className="flex flex-col gap-2.5">
           {items.map((item) => (
-            <ReadinessRow key={item.label} item={item} tokens={tokens} />
+            <ReadinessRow
+              key={item.label}
+              item={item}
+              tokens={tokens}
+              onTabChange={onTabChange}
+            />
           ))}
         </div>
 

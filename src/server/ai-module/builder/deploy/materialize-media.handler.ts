@@ -15,14 +15,22 @@
  *      source='gallery', sourceRef=image.id, mediaType='image', storageKey=image.storageKey
  *      (assina on-read; nunca persiste URL).
  *   2. PRICING — `PriceItem.imageUrl` (M2) da PriceList `pricing:${projectId}` →
- *      source='pricing', sourceRef=item.id, mediaType='image', externalUrl=item.imageUrl
- *      (URL externa https válida; usada direto). A legenda é o NOME do serviço.
+ *      source='pricing', sourceRef=item.id, mediaType='image'. Quando a URL é a
+ *      URL ESTÁVEL gerada pelo app (rota /builder/pricing-image/view, ou a signed
+ *      URL LEGADA do Supabase — healing) ela é convertida em storageKey (assina
+ *      on-read, nunca persiste URL que expira); URL realmente externa (colada
+ *      pelo usuário) segue como externalUrl. A legenda é o NOME do serviço.
  *
  * Idempotência: upsert por @@unique([source, sourceRef]) (GLOBAL, não por collection).
- * Re-rodar converge ao mesmo estado: reativa (deletedAt=null) os que voltaram, reescreve
- * os campos mutáveis e DESATIVA (soft, deletedAt=now()) os que sumiram do desired. NUNCA
- * toca source='upload' (uploads são do usuário, fora do controle do materialize) nem
- * hard-delete (preserva histórico, reversível).
+ * Re-rodar converge ao mesmo estado: reescreve os campos CONTROLADOS PELA ORIGEM
+ * (arquivo/tipo/categoria/posição) e DESATIVA (soft, deletedAt=now()) os que sumiram
+ * do desired. CURADORIA DO USUÁRIO NA ABA MÍDIAS É PRESERVADA (audit alto): caption
+ * só é gravada no create, e deletedAt/confirmedAt NUNCA são sobrescritos no update —
+ * o deploy não ressuscita um asset soft-deletado nem desfaz a legenda editada.
+ * Trade-off conhecido (sem coluna p/ distinguir intenção do usuário do reconcile):
+ * um asset desativado por um reconcile anterior que VOLTA ao desired não é
+ * re-ativado automaticamente. NUNCA toca source='upload' (uploads são do usuário,
+ * fora do controle do materialize) nem hard-delete (preserva histórico).
  *
  * RESOLUÇÃO DA COLLECTION: o `DeployContext` NÃO carrega collectionId. Resolve via
  * `loadProject` + `resolveCollectionId` (knowledge-helpers). Se `null` (projeto sem KB
@@ -44,6 +52,7 @@
 
 import { database } from '@/server/services/database'
 import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
+import { extractPricingStorageKey } from '../media/pricing-image-url'
 import {
   reconcileMediaAssets,
   sanitizeGalleryAssets,
@@ -104,10 +113,16 @@ export async function materializeMedia(
   ]
 
   // 3. Upsert por @@unique([source, sourceRef]) (GLOBAL). Para cada desired:
-  //    - create: carimba collectionId, organizationId, confirmedAt=now, position.
-  //    - update: reescreve campos mutáveis, RE-ATIVA (deletedAt=null) se voltou, e
-  //      preserva confirmedAt existente (coalesce) — materializado é intencional →
-  //      visível ao runtime desde a criação.
+  //    - create: carimba collectionId, organizationId, caption, confirmedAt=now,
+  //      position — materializado é intencional → visível ao runtime desde a criação.
+  //    - update: reescreve SÓ os campos controlados pela ORIGEM (arquivo/tipo/
+  //      categoria/posição). Curadoria do usuário na aba Mídias é PRESERVADA
+  //      (audit alto — antes o deploy desfazia a curadoria silenciosamente):
+  //        · caption: só no create — legenda editada na grade não é sobrescrita
+  //          (trade-off: renomear o serviço/legenda na ORIGEM não re-propaga);
+  //        · deletedAt: NUNCA tocado aqui — o soft-delete do usuário sobrevive ao
+  //          deploy (o reconcile do passo 4 só DESATIVA órfãos, nunca ressuscita);
+  //        · confirmedAt: NÃO sobrescreve (update sem o campo preserva o existente).
   let upserted = 0
   for (let i = 0; i < desired.length; i += 1) {
     const item = desired[i]
@@ -132,20 +147,17 @@ export async function materializeMedia(
         confirmedAt: new Date(),
       },
       update: {
-        // Re-aponta a collection (ex.: o projeto migrou de KB) + reescreve mutáveis.
+        // Re-aponta a collection (ex.: o projeto migrou de KB) + reescreve os
+        // campos controlados pela origem. caption/deletedAt/confirmedAt ficam
+        // FORA de propósito (curadoria do usuário — ver comentário do passo 3).
         collectionId,
         mediaType: item.mediaType,
         storageKey: item.storageKey,
         externalUrl: item.externalUrl,
         mimeType: item.mimeType,
-        caption: item.caption,
         category: item.category,
         sizeBytes: item.sizeBytes,
         position: i,
-        // Re-ativa se tinha sido desativado num deploy anterior (item voltou).
-        deletedAt: null,
-        // confirmedAt: NÃO sobrescreve (o `update` sem o campo preserva o existente).
-        // Se o registro nasceu via materialize/upload ele já está confirmado; manter.
       },
     })
     upserted += 1
@@ -259,7 +271,13 @@ async function loadGalleryDesired(
  * PRICING — resolve a PriceList `pricing:${projectId}` ORG-SCOPED (PriceItem não tem
  * organizationId — chega via PriceList), lê os itens ativos com foto e delega a
  * normalização ao helper PURO `sanitizePricingAssets` (só sobrevive item com `imageUrl`
- * https válida; externalUrl=imageUrl, caption=name (legenda = nome do serviço)).
+ * https válida; caption=name (legenda = nome do serviço)).
+ *
+ * Pós-sanitize: quando o `imageUrl` é uma URL gerada pelo APP — a URL estável da
+ * rota /builder/pricing-image/view (formato novo) ou a signed URL LEGADA do
+ * Supabase (expirava ~7 dias; healing de dados antigos) — converte para
+ * `storageKey` (assinado on-read pela aba Mídias e pelo `buscar_media`), nunca
+ * persistindo URL vencível. URL realmente externa segue como `externalUrl`.
  *
  * Fail-open: erro de DB no read degrada para `[]` (a galeria ainda materializa).
  */
@@ -280,7 +298,13 @@ async function loadPricingDesired(
       select: { id: true, name: true, imageUrl: true, category: true },
     })
     // Sanitização (https válida; legenda=nome; descarta URL inválida) no helper PURO.
-    return sanitizePricingAssets(items)
+    // Em seguida, URL gerada pelo app → storageKey (sign-on-read; ver docstring).
+    return sanitizePricingAssets(items).map((asset) => {
+      const storageKey = asset.externalUrl
+        ? extractPricingStorageKey(asset.externalUrl)
+        : null
+      return storageKey ? { ...asset, storageKey, externalUrl: null } : asset
+    })
   } catch (error) {
     console.warn(
       '[deploy/materialize_media] falha ao ler pricing (PriceItem.imageUrl) — pulando origem pricing (degradando):',

@@ -7,10 +7,22 @@
  * ligar/desligar o uso da base pelo agente (useRAG). Quando o agente recebe uma
  * mensagem, os trechos mais relevantes são injetados no system prompt
  * automaticamente (ver knowledge-retrieval.service.ts).
+ *
+ * Estados do load (audit médio — erro de fetch NÃO vira empty-state mentiroso):
+ *   - state=null + loadError=false → spinner (1º fetch em voo);
+ *   - state=null + loadError=true  → bloco de erro honesto com "Tentar de novo"
+ *     (antes, 401/500/rede viravam "Nenhuma fonte ainda" e induziam re-adicionar
+ *     fontes duplicadas);
+ *   - state!=null → lista normal (um reload em erro mantém a última lista boa).
+ *
+ * Retry de fonte com erro (audit médio): para type='url' re-postamos a MESMA URL
+ * em /source/url (cria fonte nova e re-ingere) e removemos a fonte antiga com
+ * erro — sem isso o usuário precisava deletar e readicionar na mão. PDF/texto
+ * não têm retry aqui: o buffer/texto original não é persistido no servidor.
  */
 
 import * as React from "react"
-import { Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
 import { KnowledgeAddSource } from "./knowledge-add-source"
@@ -29,21 +41,25 @@ export interface KnowledgeTabProps {
 export function KnowledgeTab({ project }: KnowledgeTabProps) {
   const { tokens } = useAppTokens()
   const [state, setState] = React.useState<KnowledgeState | null>(null)
+  const [loadError, setLoadError] = React.useState(false)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
+  const [retryingId, setRetryingId] = React.useState<string | null>(null)
   const base = `/api/v1/builder/knowledge/${project.id}`
 
   const load = React.useCallback(async () => {
-    const fallback = { collection: null, sources: [], useRAG: false }
     try {
       const res = await fetch(base, { credentials: "same-origin" })
       if (!res.ok) {
-        setState(fallback)
+        // Erro HTTP (sessão expirada, 500…) NÃO é "base vazia" — sinaliza erro
+        // honesto em vez de renderizar o empty-state de "Nenhuma fonte ainda".
+        setLoadError(true)
         return
       }
       const json = (await res.json()) as { data?: KnowledgeState }
-      setState(json.data ?? fallback)
+      setState(json.data ?? { collection: null, sources: [], useRAG: false })
+      setLoadError(false)
     } catch {
-      setState(fallback)
+      setLoadError(true)
     }
   }, [base])
 
@@ -86,6 +102,65 @@ export function KnowledgeTab({ project }: KnowledgeTabProps) {
     }
   }
 
+  /**
+   * Re-ingere uma fonte URL que falhou: POST da MESMA URL (cria fonte nova e
+   * dispara a ingestão) e, se o servidor aceitou, remove a fonte antiga com
+   * erro para a lista não duplicar. Se a nova ingestão também falhar, a fonte
+   * nova aparece com o erro atualizado (substitui a antiga).
+   */
+  const retrySource = async (source: KnowledgeSource) => {
+    if (source.type !== "url") return
+    setRetryingId(source.id)
+    try {
+      const res = await fetch(`${base}/source/url`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: source.source }),
+      })
+      if (res.ok) {
+        await fetch(`${base}/source/${source.id}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        })
+      }
+      await load()
+    } finally {
+      setRetryingId(null)
+    }
+  }
+
+  // ── Erro de carregamento (sem lista boa anterior) — honesto, com retry ──────
+  if (!state && loadError) {
+    return (
+      <div
+        role="alert"
+        className="mx-auto flex max-w-2xl flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center"
+        style={{ borderColor: tokens.divider }}
+      >
+        <AlertTriangle className="h-5 w-5" style={{ color: tokens.dangerText }} />
+        <p className="text-[13px] font-medium" style={{ color: tokens.textSecondary }}>
+          Não foi possível carregar a base de conhecimento
+        </p>
+        <p className="text-[12px]" style={{ color: tokens.textTertiary }}>
+          Verifique sua conexão ou tente novamente em instantes.
+        </p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-1 rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors hover:opacity-80"
+          style={{
+            borderColor: tokens.brand,
+            backgroundColor: tokens.brand,
+            color: "#fff",
+          }}
+        >
+          Tentar de novo
+        </button>
+      </div>
+    )
+  }
+
   if (!state) {
     return (
       <div className="flex items-center justify-center py-10">
@@ -119,12 +194,26 @@ export function KnowledgeTab({ project }: KnowledgeTabProps) {
         )}
       </div>
 
+      {/* Reload em erro com lista boa anterior: banner discreto, lista preservada. */}
+      {loadError && (
+        <p
+          role="alert"
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px]"
+          style={{ backgroundColor: tokens.dangerSubtle, color: tokens.dangerText }}
+        >
+          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+          Falha ao atualizar a lista — mostrando a última versão carregada.
+        </p>
+      )}
+
       <KnowledgeAddSource projectId={project.id} onAdded={() => void load()} />
 
       <KnowledgeSourceList
         sources={state.sources}
         onDelete={(id) => void deleteSource(id)}
         deletingId={deletingId}
+        onRetry={(source) => void retrySource(source)}
+        retryingId={retryingId}
       />
     </div>
   )

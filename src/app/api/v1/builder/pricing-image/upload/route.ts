@@ -6,7 +6,13 @@
  * multipart bem), mesmo padrão de /api/v1/knowledge/upload e /api/transcribe.
  *
  * Fluxo: valida JWT → resolve projeto (org) → valida assinatura real da imagem
- * (magic bytes) → sobe para BUCKETS.MEDIA → devolve URL assinada.
+ * (magic bytes) → sobe para BUCKETS.MEDIA → devolve a URL ESTÁVEL da rota irmã
+ * /view (sign-on-read), que é o que o FE persiste em PriceItem.imageUrl.
+ *
+ * NUNCA devolve a signed URL crua: ela expira (~7 dias no Supabase) e era
+ * persistida — a foto quebrava na grade e no envio do WhatsApp (audit alto).
+ * O materialize_media converte a URL estável de volta em storageKey
+ * (ver media/pricing-image-url.ts).
  *
  * Auth: JWT direto (middleware exclui /api). Isolamento por currentOrgId.
  *
@@ -20,6 +26,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { verifyAccessToken, extractTokenFromHeader } from '@/lib/auth/jwt'
 import { loadProject } from '@/server/ai-module/builder/knowledge/knowledge-helpers'
+import { buildPricingImageViewUrl } from '@/server/ai-module/builder/media/pricing-image-url'
 import { BUCKETS, storage } from '@/server/services/storage'
 import { sniffImage } from '@/lib/images/sniff-image'
 
@@ -93,14 +100,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'project_not_found' }, { status: 404 })
   }
 
-  // ── Upload + URL assinada ────────────────────────────────────────────────────
+  // ── Upload + URL ESTÁVEL (sign-on-read na rota /view) ────────────────────────
   const path = `pricing/${organizationId}/${projectId}/${randomUUID()}.${kind.ext}`
   try {
     await storage.upload(BUCKETS.MEDIA, path, buffer, {
       contentType: kind.contentType,
       upsert: true,
     })
-    const imageUrl = await storage.getSignedUrl(BUCKETS.MEDIA, path)
+    // NEXT_PUBLIC_APP_URL é a base pública autoritativa (mesmo padrão do webhook
+    // uazapi); req.nextUrl.origin cobre o dev local em porta alternativa.
+    const origin = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+    const imageUrl = buildPricingImageViewUrl(origin, path)
     return NextResponse.json({ imageUrl })
   } catch (err) {
     console.error('[builder/pricing-image/upload] falha no storage:', err)

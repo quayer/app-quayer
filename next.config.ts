@@ -53,6 +53,22 @@ const nextConfig: NextConfig = {
     'import-in-the-middle',
     'require-in-the-middle',
   ],
+  // serverExternalPackages exige o pacote no node_modules do standalone em
+  // runtime, mas o tracer do build Turbopack (prod NÃO passa --webpack; ver
+  // vercel/next.js#88844) omite os externals do .next/standalone/node_modules →
+  // o `await import('pdf-parse')` de text-extraction.ts lança MODULE_NOT_FOUND
+  // e TODO upload de PDF da base de conhecimento falha em prod ("Erro · Cannot
+  // find module…"). Homol builda com --webpack e passa, mascarando o bug.
+  // Força a inclusão dos pacotes no trace da rota de upload (Turbopack 16.1
+  // suporta outputFileTracingIncludes nativamente). @napi-rs/** cobre o
+  // @napi-rs/canvas (dep dura do pdf-parse v2) e seus binários por plataforma.
+  outputFileTracingIncludes: {
+    '/api/v1/knowledge/upload': [
+      './node_modules/pdf-parse/**/*',
+      './node_modules/pdfjs-dist/**/*',
+      './node_modules/@napi-rs/**/*',
+    ],
+  },
   turbopack: {},
   images: {
     remotePatterns: [],

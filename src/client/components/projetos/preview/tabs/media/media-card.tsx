@@ -20,6 +20,11 @@
  * Badge de origem no canto: `source` ('upload'|'gallery'|'pricing') → rótulo PT-BR
  * (Upload|Galeria|Preços), pintado com tokens de marca.
  *
+ * Pendência visível: `confirmedAt == null` → badge "Pendente" (tokens warning) +
+ * botão "Liberar para o agente" (PATCH { confirmed: true } via pai). O runtime SÓ
+ * envia mídia confirmada — sem o badge, a aba mostrava o item idêntico aos demais
+ * enquanto o agente o ignorava (catálogo da aba ≠ catálogo do agente).
+ *
  * Segurança de mídia: `<img src>` / `<video src>` recebem APENAS `item.url`
  * (signed URL https on-read OU externalUrl https, vindas do backend). Quando
  * `url == null` (assinatura falhou — fail-safe por item da rota E4) renderizamos
@@ -28,7 +33,7 @@
  */
 
 import * as React from "react"
-import { FileText, ImageOff, Play, VideoOff, X } from "lucide-react"
+import { Check, FileText, ImageOff, Play, VideoOff, X } from "lucide-react"
 
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 
@@ -131,6 +136,8 @@ export interface MediaCardProps {
   onCaptionChange: (next: string) => void
   /** Pai dispara patchMediaAsset `{ deleted:true }`. */
   onDelete: () => void
+  /** Pai dispara patchMediaAsset `{ confirmed:true }` (libera mídia pendente). */
+  onConfirm: () => void
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -150,6 +157,7 @@ export function MediaCard({
   tokens,
   onCaptionChange,
   onDelete,
+  onConfirm,
 }: MediaCardProps): React.JSX.Element {
   const interactionsDisabled = disabled || deleting
 
@@ -158,6 +166,8 @@ export function MediaCard({
   const hasMedia = typeof item.url === "string" && item.url.length > 0
   const altText = documentLabel(item)
   const sourceLabel = SOURCE_LABEL[item.source]
+  // Pendente de curadoria: o runtime NÃO envia esta mídia até ser confirmada.
+  const isPending = item.confirmedAt === null
 
   return (
     <div
@@ -190,6 +200,19 @@ export function MediaCard({
         >
           {sourceLabel}
         </span>
+
+        {/* Badge "Pendente" (canto superior esquerdo) — runtime não envia até confirmar. */}
+        {isPending && (
+          <span
+            className="absolute left-1.5 top-1.5 z-10 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-none"
+            style={{
+              backgroundColor: tokens.warningSubtle,
+              color: tokens.warningText,
+            }}
+          >
+            Pendente
+          </span>
+        )}
       </div>
 
       {/* ── [x] remover (hover desktop / sempre em touch) ────────────────── */}
@@ -229,6 +252,25 @@ export function MediaCard({
           color: tokens.textSecondary,
         }}
       />
+
+      {/* ── Confirmação de mídia pendente (libera para o agente enviar) ───── */}
+      {isPending && (
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={interactionsDisabled}
+          aria-label={`Liberar ${altText} para o agente`}
+          className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            backgroundColor: tokens.bgElevated,
+            borderColor: tokens.divider,
+            color: tokens.successText,
+          }}
+        >
+          <Check className="h-3 w-3" aria-hidden="true" />
+          Liberar para o agente
+        </button>
+      )}
     </div>
   )
 }

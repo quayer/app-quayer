@@ -17,14 +17,14 @@ export function usePromptActions(value: string): UsePromptActionsResult {
     }
     try {
       await navigator.clipboard.writeText(value)
-      toast.success("Prompt copiado para a area de transferencia")
+      toast.success("Prompt copiado para a área de transferência")
     } catch {
       toast.error("Falha ao copiar. Tente novamente.")
     }
   }, [value])
 
   const handleRegenerate = useCallback(() => {
-    toast.info("Va para o chat e peca ao Builder para regenerar o prompt")
+    toast.info("Vá para o chat e peça ao Builder para regenerar o prompt")
     window.dispatchEvent(
       new CustomEvent("builder:focus-chat", {
         detail: { message: "Regenere o prompt do agente com melhorias" },

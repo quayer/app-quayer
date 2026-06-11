@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   AlertCircle,
@@ -20,6 +20,7 @@ import {
   type ProviderRecord,
 } from "@/client/components/integracoes/providers-catalog"
 import { useProviders } from "@/client/components/integracoes/use-providers"
+import { getCsrfHeaders } from "@/client/hooks/use-csrf-token"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
 import { AgentConfigSection } from "./agent-config-section"
@@ -43,8 +44,47 @@ function providerRecordLabel(record: ProviderRecord): string {
 
 export function CredentialsTab({ project }: CredentialsTabProps) {
   const { tokens } = useAppTokens()
-  const { records, loading, backendMissing, error, saveKey } = useProviders()
+  const { groups, records, loading, backendMissing, error, createKey, refetch } =
+    useProviders()
   const [editingProvider, setEditingProvider] = useState<ProviderKey | null>(null)
+
+  /**
+   * Salva a chave do modal: quando o provider JÁ tem chave, faz um UPDATE real
+   * da chave exibida no card (a primária) — preservando o rótulo digitado e
+   * sem criar uma credencial duplicada a cada "Atualizar chave". Sem chave
+   * ainda, cria uma nova rotulada.
+   */
+  const handleSaveKey = useCallback(
+    async (provider: ProviderKey, apiKey: string, name: string) => {
+      const group = groups.find((item) => item.provider === provider)
+      const primary =
+        group?.keys.find((key) => key.isPrimary) ?? group?.keys[0] ?? null
+
+      if (!primary) {
+        await createKey(provider, apiKey, name)
+        return
+      }
+
+      const res = await fetch(`/api/v1/builder/credential/keys/${primary.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          ...getCsrfHeaders(),
+        },
+        body: JSON.stringify({ apiKey, name }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          message?: string
+          error?: string
+        }
+        throw new Error(body.message || body.error || `Erro ${res.status}`)
+      }
+      await refetch()
+    },
+    [groups, createKey, refetch],
+  )
 
   const activeProvider = normalizeProvider(project.aiAgent?.provider)
   const activeMeta = activeProvider
@@ -61,14 +101,21 @@ export function CredentialsTab({ project }: CredentialsTabProps) {
     ? records.find((record) => record.provider === editingProvider) ?? null
     : null
 
+  // Conta apenas chaves LLM — voz/STT não são "credenciais do agente".
   const configuredCount = useMemo(
-    () => records.filter((record) => record.isConfigured).length,
+    () =>
+      records.filter(
+        (record) =>
+          record.isConfigured &&
+          PROVIDERS.find((meta) => meta.key === record.provider)?.category ===
+            "llm",
+      ).length,
     [records],
   )
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-3 flex flex-col gap-5 py-2 duration-500">
-      {/* Config do agente: modelo (curado) + chave BYOK que o agente usa. */}
+      {/* Config do agente: modelo (somente leitura) + chave BYOK em uso. */}
       <AgentConfigSection
         projectId={project.id}
         provider={activeProvider}
@@ -297,7 +344,7 @@ export function CredentialsTab({ project }: CredentialsTabProps) {
         currentRecord={editingRecord}
         open={editingProvider !== null}
         onClose={() => setEditingProvider(null)}
-        onSave={saveKey}
+        onSave={handleSaveKey}
       />
     </div>
   )

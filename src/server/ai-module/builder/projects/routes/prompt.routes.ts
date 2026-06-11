@@ -3,6 +3,7 @@
  * Actions: updatePrompt, listVersions, rollbackPrompt
  */
 
+import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import {
@@ -13,6 +14,16 @@ import {
   rollbackPromptBodySchema,
 } from '../../builder.schemas'
 import { builderProjectRepository } from '../projects.repository'
+
+/**
+ * Body do PATCH com precondição otimista: `baseUpdatedAt` é o `updatedAt`
+ * retornado pelo último save bem-sucedido. Quando presente e o agente mudou
+ * desde então (regeneração via chat, rollback, disclosure da identidade), o
+ * endpoint responde 409 em vez de sobrescrever silenciosamente.
+ */
+const updatePromptWithPreconditionSchema = updatePromptBodySchema.extend({
+  baseUpdatedAt: z.string().datetime().optional(),
+})
 
 // ---------------------------------------------------------------------------
 // Tipagem mínima do usuário autenticado — evita `any` espalhado.
@@ -36,11 +47,13 @@ export const promptRoutes = {
     name: 'Update Agent System Prompt',
     description:
       'Auto-save do system prompt do AIAgentConfig vinculado ao projeto. ' +
+      'Mantém uma BuilderPromptVersion draft "manual" reutilizável (edição manual vira versão publicável). ' +
+      'Aceita precondição otimista via baseUpdatedAt e responde 409 quando o prompt mudou no servidor. ' +
       'Verifica posse por org. Retorna 404 se o projeto não existir ou não tiver agente vinculado.',
     path: '/projects/:id/prompt',
     method: 'PATCH',
     use: [authOrApiKeyProcedure({ required: true })],
-    body: updatePromptBodySchema,
+    body: updatePromptWithPreconditionSchema,
     handler: async ({ request, context, response }) => {
       const user = context.auth?.session?.user as AuthedUser | undefined
       if (!user) return response.unauthorized('Não autenticado')
@@ -50,25 +63,40 @@ export const promptRoutes = {
       if (!parseResult.success) return response.badRequest('ID de projeto inválido')
       const { id } = parseResult.data
 
-      const { systemPrompt } = request.body
+      const { systemPrompt, baseUpdatedAt } = request.body
 
       try {
-        const agent = await builderProjectRepository.updateAgentSystemPrompt(
+        const result = await builderProjectRepository.updateAgentSystemPrompt(
           id,
           user.currentOrgId,
           systemPrompt,
+          baseUpdatedAt ? { baseUpdatedAt: new Date(baseUpdatedAt) } : undefined,
         )
 
-        if (!agent) {
+        if (!result) {
           return response.notFound('Projeto ou agente não encontrado')
+        }
+
+        if (result.conflict) {
+          return response.status(409).json({
+            success: false,
+            error: 'prompt_conflict',
+            data: {
+              id: result.current.id,
+              systemPrompt: result.current.systemPrompt,
+              updatedAt: result.current.updatedAt,
+            },
+            message:
+              'O prompt foi alterado no servidor desde a sua última edição.',
+          })
         }
 
         return response.json({
           success: true,
           data: {
-            id: agent.id,
-            systemPrompt: agent.systemPrompt,
-            updatedAt: agent.updatedAt,
+            id: result.agent.id,
+            systemPrompt: result.agent.systemPrompt,
+            updatedAt: result.agent.updatedAt,
           },
           message: 'Prompt salvo',
         })

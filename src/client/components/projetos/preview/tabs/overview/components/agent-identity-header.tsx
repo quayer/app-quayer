@@ -14,6 +14,26 @@ interface AgentIdentityHeaderProps {
   tokens: AppTokens
 }
 
+/** Nomes amigáveis dos provedores — IDs crus são jargão para leigo (NFR-07). */
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+}
+
+/**
+ * Nomes amigáveis dos modelos curados (IDs LiteLLM persistidos no agente).
+ * Fallback: o ID cru, para modelos fora da lista.
+ */
+const MODEL_LABELS: Record<string, string> = {
+  "gpt-4o": "GPT-4o",
+  "gpt-4o-mini": "GPT-4o mini",
+  "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+  "claude-3-5-haiku-20241022": "Claude 3.5 Haiku",
+  "gemini-2.0-flash": "Gemini 2.0 Flash",
+  "gemini-1.5-pro": "Gemini 1.5 Pro",
+}
+
 export function AgentIdentityHeader({
   aiAgent,
   status,
@@ -21,6 +41,9 @@ export function AgentIdentityHeader({
 }: AgentIdentityHeaderProps) {
   const statusStyle = getProjectStatusStyle(status)
   const statusLabel = PROJECT_STATUS_LABEL[status]
+  const providerLabel =
+    PROVIDER_LABELS[aiAgent.provider.toLowerCase()] ?? aiAgent.provider
+  const modelLabel = MODEL_LABELS[aiAgent.model.toLowerCase()] ?? aiAgent.model
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -45,7 +68,7 @@ export function AgentIdentityHeader({
             className="mt-0.5 text-[12px]"
             style={{ color: tokens.textTertiary }}
           >
-            {aiAgent.provider} · {aiAgent.model}
+            {providerLabel} · {modelLabel}
           </p>
         </div>
       </div>

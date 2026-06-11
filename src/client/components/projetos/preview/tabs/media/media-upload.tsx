@@ -23,9 +23,15 @@ import { UploadCloud, Loader2, X } from "lucide-react"
 
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 
-/** Tipos declarados aceitos (espelha ACCEPTED_DECLARED do route handler E1). */
+/**
+ * Tipos declarados aceitos. Vídeo SÓ MP4 de propósito (audit baixo): o WhatsApp
+ * Cloud API não toca webm/quicktime — um .mov/.webm viraria item de catálogo que
+ * o agente tentaria enviar e falharia no outbound. A cópia da dropzone ("vídeo
+ * MP4") agora bate com o accept. O route handler ainda tolera webm/mov (fora do
+ * escopo deste FE); o filtro aqui evita o caminho infeliz na origem.
+ */
 const ACCEPT =
-  "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,application/pdf"
+  "image/jpeg,image/png,image/webp,image/gif,video/mp4,application/pdf"
 
 /** Famílias de mídia para a pré-checagem de cap (espelha CAPS_BY_TYPE do E1). */
 type MediaFamily = "image" | "video" | "document"
@@ -50,6 +56,19 @@ function familyFromMime(mime: string): MediaFamily | null {
   if (m.startsWith("image/")) return "image"
   if (m.startsWith("video/")) return "video"
   if (m === "application/pdf") return "document"
+  return null
+}
+
+/**
+ * Erro do FE de formato de vídeo — devolve null se passar. Necessário além do
+ * `accept` do input porque o drag-and-drop NÃO respeita o accept: um .mov/.webm
+ * arrastado chegaria aqui mesmo com o filtro do file-picker.
+ */
+function precheckVideoFormat(file: File): string | null {
+  const mime = file.type.toLowerCase()
+  if (mime.startsWith("video/") && mime !== "video/mp4") {
+    return "Vídeo precisa ser MP4 (o WhatsApp não reproduz esse formato)"
+  }
   return null
 }
 
@@ -162,6 +181,12 @@ export function MediaUpload({
   const handleFile = React.useCallback(
     async (file: File) => {
       setError(null)
+
+      const formatError = precheckVideoFormat(file)
+      if (formatError) {
+        setError(formatError)
+        return
+      }
 
       const sizeError = precheckSize(file)
       if (sizeError) {

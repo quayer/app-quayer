@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, Check, Hash, Loader2, Sparkles } from "lucide-react"
+import { AlertCircle, Check, Hash, Loader2 } from "lucide-react"
 import type { AppTokens, SaveState } from "./prompt-types"
 import { formatNumber } from "./prompt-utils"
 
@@ -31,24 +31,12 @@ export function PromptHeader({
           >
             Prompt do agente
           </h2>
-          {value.length > 0 && (
-            <span
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
-              style={{
-                backgroundColor: tokens.brandSubtle,
-                color: tokens.brand,
-              }}
-            >
-              <Sparkles className="h-2.5 w-2.5" />
-              Gerado pelo Builder
-            </span>
-          )}
         </div>
         <p
           className="mt-0.5 text-[13px]"
           style={{ color: tokens.textSecondary }}
         >
-          Edite o system prompt. Alteracoes sao salvas automaticamente.
+          Edite as instruções do agente. Alterações são salvas automaticamente.
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-3">
@@ -134,7 +122,7 @@ function SaveIndicator({
         style={{ color: tokens.textTertiary }}
       >
         <Check className="h-3 w-3" style={{ color: tokens.textDisabled }} />
-        sem alteracoes
+        sem alterações
       </span>
     )
   }

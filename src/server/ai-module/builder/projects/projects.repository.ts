@@ -238,15 +238,34 @@ export const builderProjectRepository = {
   /**
    * Atualiza o `systemPrompt` do `AIAgentConfig` vinculado a um projeto.
    *
-   * Retorna `{ id, systemPrompt, updatedAt }` do agente atualizado, ou `null`
-   * se o projeto não existir, não pertencer à organização ou não tiver um
-   * agente vinculado. Retornar `null` é intencional para não vazar existência.
+   * Precondição otimista (`baseUpdatedAt`): quando informada e o agente foi
+   * alterado desde então com um systemPrompt DIFERENTE do que está sendo
+   * gravado, retorna `{ conflict: true, current }` sem escrever — o caller
+   * devolve 409 e a UI decide entre recarregar ou manter a edição. Sem a
+   * precondição (primeiro save da sessão), grava direto.
+   *
+   * Versionamento de edição manual: toda gravação mantém UMA
+   * `BuilderPromptVersion` draft reutilizável com `createdBy: 'manual'` —
+   * se a versão mais recente já é uma draft manual não-publicada, atualiza o
+   * conteúdo dela; caso contrário cria a próxima versão. Assim a edição
+   * manual é publicável pela saga de deploy (que publica VERSÕES, nunca o
+   * `systemPrompt` cru).
+   *
+   * Retorna `{ conflict: false, agent }` no sucesso, `{ conflict: true, current }`
+   * na falha de precondição, ou `null` se o projeto não existir, não pertencer
+   * à organização ou não tiver um agente vinculado (intencional, não vaza
+   * existência).
    */
   async updateAgentSystemPrompt(
     projectId: string,
     organizationId: string,
     systemPrompt: string,
-  ) {
+    options?: { baseUpdatedAt?: Date },
+  ): Promise<
+    | null
+    | { conflict: true; current: { id: string; systemPrompt: string | null; updatedAt: Date } }
+    | { conflict: false; agent: { id: string; systemPrompt: string | null; updatedAt: Date } }
+  > {
     const database = getDatabase()
 
     const project = await database.builderProject.findFirst({
@@ -255,11 +274,66 @@ export const builderProjectRepository = {
     })
 
     if (!project?.aiAgentId) return null
+    const aiAgentId = project.aiAgentId
 
-    return database.aIAgentConfig.update({
-      where: { id: project.aiAgentId },
-      data: { systemPrompt },
-      select: { id: true, systemPrompt: true, updatedAt: true },
+    return database.$transaction(async (tx) => {
+      const agent = await tx.aIAgentConfig.findUnique({
+        where: { id: aiAgentId },
+        select: { id: true, systemPrompt: true, updatedAt: true },
+      })
+      if (!agent) return null
+
+      // No-op: nada mudou — não cria versão nem bumpa updatedAt.
+      if ((agent.systemPrompt ?? '') === systemPrompt) {
+        return { conflict: false as const, agent }
+      }
+
+      // Precondição otimista: o agente mudou desde o último save confirmado
+      // E o systemPrompt do servidor diverge do que vamos gravar → conflito.
+      if (
+        options?.baseUpdatedAt &&
+        agent.updatedAt.getTime() !== options.baseUpdatedAt.getTime()
+      ) {
+        return { conflict: true as const, current: agent }
+      }
+
+      const updated = await tx.aIAgentConfig.update({
+        where: { id: aiAgentId },
+        data: { systemPrompt },
+        select: { id: true, systemPrompt: true, updatedAt: true },
+      })
+
+      // Upsert da draft manual reutilizável (1 por sequência de edição —
+      // nunca 1 por keystroke).
+      const latest = await tx.builderPromptVersion.findFirst({
+        where: { aiAgentId },
+        orderBy: { versionNumber: 'desc' },
+        select: {
+          id: true,
+          versionNumber: true,
+          createdBy: true,
+          publishedAt: true,
+        },
+      })
+
+      if (latest && latest.createdBy === 'manual' && latest.publishedAt === null) {
+        await tx.builderPromptVersion.update({
+          where: { id: latest.id },
+          data: { content: systemPrompt },
+        })
+      } else {
+        await tx.builderPromptVersion.create({
+          data: {
+            aiAgentId,
+            versionNumber: (latest?.versionNumber ?? 0) + 1,
+            content: systemPrompt,
+            description: 'Edição manual no editor de prompt',
+            createdBy: 'manual',
+          },
+        })
+      }
+
+      return { conflict: false as const, agent: updated }
     })
   },
 

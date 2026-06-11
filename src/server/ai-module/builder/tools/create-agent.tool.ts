@@ -22,6 +22,7 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import { BUILDER_RESERVED_NAME } from '../builder.constants'
+import { collectionNameFor } from '../knowledge/knowledge-helpers'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -119,6 +120,23 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
           }
         }
 
+        // Vínculo da base de conhecimento (audit alto): na jornada padrão o
+        // usuário cola fontes ANTES de aprovar o prompt — a KnowledgeCollection
+        // kb:<projectId> já existe quando o agente nasce, mas nenhum outro passo
+        // religava AIAgentConfig.ragCollectionId (o único write acontece quando
+        // a collection é CRIADA com agente já presente). Sem isto, RAG e
+        // buscar_media ficam mortos no WhatsApp enquanto o playground funciona
+        // via fallback próprio. Backfill barato no próprio create; a v2 fará o
+        // equivalente como passo da saga de deploy.
+        const existingCollection = await database.knowledgeCollection.findFirst({
+          where: {
+            organizationId: ctx.organizationId,
+            name: collectionNameFor(ctx.projectId),
+            isActive: true,
+          },
+          select: { id: true },
+        })
+
         // Transactional create: agent + version + project link
         const result = await database.$transaction(async (tx) => {
           const agent = await tx.aIAgentConfig.create({
@@ -131,6 +149,9 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
               systemPrompt: input.systemPrompt,
               enabledTools: input.enabledTools,
               isActive: true,
+              ...(existingCollection
+                ? { ragCollectionId: existingCollection.id, useRAG: true }
+                : {}),
             },
             select: { id: true, name: true },
           })

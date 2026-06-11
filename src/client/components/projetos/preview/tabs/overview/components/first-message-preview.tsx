@@ -20,7 +20,7 @@ export interface FirstMessagePreviewProps {
   /** The greeting text the agent will send; null when not yet defined. */
   firstMessage: string | null
   /** Where the greeting came from — drives the source badge. */
-  source?: "tool_result" | "manual" | null
+  source?: "card" | "prompt" | null
   /** Optional edit hook — when omitted the edit button is hidden. */
   onEdit?: () => void
 }
@@ -30,6 +30,20 @@ const BUBBLE_BG = "rgba(37, 211, 102, 0.12)" // WhatsApp green tint
 const BUBBLE_BORDER = "rgba(37, 211, 102, 0.28)"
 const BUBBLE_TEXT_DARK = "#1A0800"
 const BUBBLE_TEXT_LIGHT = "#E8FFE0"
+
+/**
+ * Luminância percebida (BT.601) — robusto a ajustes do token (#FAFAFA etc.),
+ * ao contrário de comparar literal com "#FFFFFF".
+ */
+function isDarkColor(hex: string): boolean {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!match || typeof match[1] !== "string") return false
+  const n = parseInt(match[1], 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return 0.299 * r + 0.587 * g + 0.114 * b < 128
+}
 
 export function FirstMessagePreviewCard({
   tokens,
@@ -41,8 +55,9 @@ export function FirstMessagePreviewCard({
   // Pick bubble text color based on contrast against BUBBLE_BG. On dark mode
   // the token background is near-black, so the green tint is dark too and
   // light text reads better; on light mode the tint is pale and dark text wins.
-  const bubbleTextColor =
-    tokens.textPrimary === "#FFFFFF" ? BUBBLE_TEXT_LIGHT : BUBBLE_TEXT_DARK
+  const bubbleTextColor = isDarkColor(tokens.textPrimary)
+    ? BUBBLE_TEXT_DARK
+    : BUBBLE_TEXT_LIGHT
 
   return (
     <Card
@@ -104,8 +119,6 @@ export function FirstMessagePreviewCard({
                 backgroundColor: BUBBLE_BG,
                 border: `1px solid ${BUBBLE_BORDER}`,
                 color: bubbleTextColor,
-                fontFamily:
-                  '"Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif',
               }}
             >
               <p className="whitespace-pre-wrap text-[13px] leading-relaxed">
@@ -145,9 +158,10 @@ function SourceBadge({
   source,
 }: {
   tokens: AppTokens
-  source: "tool_result" | "manual"
+  source: "card" | "prompt"
 }) {
-  const label = source === "tool_result" ? "Gerado pelo Builder" : "Manual"
+  const label =
+    source === "card" ? "Definida no card de persona" : "Encontrada nas instruções"
   return (
     <span
       className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium"

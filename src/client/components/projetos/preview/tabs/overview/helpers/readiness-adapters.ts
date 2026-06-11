@@ -65,28 +65,34 @@ export function stepsToStages(readiness: Readiness): Stage[] {
 const BLOCKER_CHECKLIST: ReadonlyArray<{
   check: ReadinessBlockerCheck
   label: string
+  /** Checks resolvíveis DENTRO do workspace navegam para esta tab. */
+  tab?: "deploy"
 }> = [
   { check: "plan", label: "Plano ativo" },
-  { check: "byok", label: "Chave de IA (BYOK) configurada" },
+  { check: "byok", label: "Chave do provedor de IA conectada" },
   { check: "agent", label: "Agente criado" },
   { check: "prompt", label: "Prompt configurado" },
-  { check: "version", label: "Versão do prompt gerada" },
-  { check: "channel", label: "Canal WhatsApp conectado" },
+  { check: "version", label: "Versão do prompt gerada", tab: "deploy" },
+  { check: "channel", label: "Canal WhatsApp conectado", tab: "deploy" },
 ]
 
 /**
  * Blockers tipados do step-engine → checklist da "Prontidão para publicar".
  * Itens não atendidos carregam o CTA/mensagem REAL do blocker como detalhe —
- * a mesma copy que o chat usa, sem contradição.
+ * a mesma copy que o chat usa, sem contradição — e a AÇÃO para resolver:
+ * `tab` quando o fix mora no workspace (wizard de publicação) ou `redirect`
+ * quando mora fora (plano em /conta, BYOK em /integracoes).
  */
 export function blockersToChecklist(readiness: Readiness): ReadinessItem[] {
   const byCheck = new Map(readiness.blockers.map((b) => [b.check, b]))
-  return BLOCKER_CHECKLIST.map(({ check, label }) => {
+  return BLOCKER_CHECKLIST.map(({ check, label, tab }) => {
     const blocker = byCheck.get(check)
     return {
       label,
       met: blocker === undefined,
       detail: blocker ? blocker.cta ?? blocker.message : undefined,
+      tab: blocker ? tab : undefined,
+      redirect: blocker && !tab ? blocker.redirect : undefined,
     }
   })
 }

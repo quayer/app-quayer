@@ -1,6 +1,6 @@
 ---
 Criado: 2026-06-10
-Atualizado: 2026-06-10
+Atualizado: 2026-06-11
 Revisar em: mudança no step-engine (next-pending-step.ts) ou no contrato de Readiness
 Relacionados:
   - src/server/ai-module/builder/state/next-pending-step.ts
@@ -39,14 +39,20 @@ callbacks `onTabChange`. Registrado em
 
 ### `components/`
 - `empty-state.tsx` — Estado vazio quando não há agente nem conversa.
-- `agent-identity-header.tsx` — Nome, provider/modelo e badge de status.
-- `first-message-preview.tsx` — Bolha WhatsApp com a saudação do agente.
-- `progress-header.tsx` — Barra de progresso; a largura usa o
-  `completenessPct` canônico do readiness.
+- `agent-identity-header.tsx` — Nome, provider/modelo (nomes amigáveis via
+  `model-catalog`) e badge de status.
+- `first-message-preview.tsx` — Bolha WhatsApp com a saudação do agente
+  (sources: `card` = builderState.persona.greeting; `prompt` = regex no
+  systemPrompt). "Editar" abre o chat com rascunho pré-preenchido.
+- `progress-header.tsx` — Barra + texto de progresso, AMBOS derivados do
+  `completenessPct` canônico (nunca "X de N" com N bruto — contradiz a barra,
+  que exclui passos não-aplicáveis do denominador).
 - `stage-list.tsx` / `stage-row.tsx` — Checklist da jornada (done/active/pending).
 - `deploy-readiness-card.tsx` — "Prontidão para publicar": espelha os
   `blockers` reais; CTA gated por `canOpenDeploy` (gate único, ver abaixo).
-- `readiness-row.tsx` — Linha de requisito (check/x + detalhe do blocker).
+- `readiness-row.tsx` — Linha de requisito; o detalhe do blocker é AÇÃO:
+  Link (`redirect` para /conta, /integracoes) ou navegação interna
+  (`tab: 'deploy'` para canal/versão).
 - `quick-actions.tsx` — CTAs contextuais; os que navegam para "Publicar"
   usam o MESMO `DeployGate`.
 - `action-button.tsx` — Botão primário/secundário (suporta `disabled`+`title`).
@@ -62,7 +68,10 @@ callbacks `onTabChange`. Registrado em
   view-models (`unwrapReadiness`, `stepsToStages`, `blockersToChecklist`).
   Substituíram os antigos `derive-stages.ts`/`derive-readiness.ts`/
   `tool-stage-map.ts` (progresso re-derivado de tool-calls — removidos).
-- `derive-first-message.ts` — Extrai a saudação (tool call ou system prompt).
+- `derive-first-message.ts` — Extrai a saudação: 1º o greeting canônico de
+  `readiness.builderState.persona.greeting` (card de persona); fallback regex
+  no system prompt. O antigo caminho por tool-call era código morto (nenhum
+  tool do Builder bate no padrão) e foi removido.
 
 ## Gate único da publicação
 

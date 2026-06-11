@@ -1,14 +1,16 @@
 "use client"
 
 /**
- * VersionHistory — lista de versoes publicadas do system prompt.
+ * VersionHistory — histórico de versões do system prompt (drafts + publicadas).
  *
  * Consome `GET /api/v1/builder/projects/:id/versions` via `api.builder.listVersions`.
- * O client Igniter e auto-gerado; usamos cast caso o tipo ainda nao tenha
- * propagado (padrao ja aplicado em use-prompt-autosave.ts).
+ * O client Igniter é auto-gerado; usamos cast caso o tipo ainda não tenha
+ * propagado.
  *
- * Loading: 3 skeletons. Empty: mensagem + icone History. Lista: botao clicavel
- * por item (no-op hoje, reservado para diff/rollback da fase 3).
+ * "Atual" é por CONTEÚDO (version.content === editorValue) — nunca por posição
+ * na lista, que mente quando o editor divergiu. O diff compara a versão
+ * selecionada com o conteúdo vivo do editor. Rollback notifica o pai via
+ * `onRestored(content)` para o editor sincronizar sem F5.
  */
 
 import { formatDistanceToNow } from "date-fns"
@@ -52,14 +54,19 @@ interface RollbackPromptClient {
   mutate: (
     args: { params: { id: string }; body: { targetVersionId: string } },
     options: {
-      onSuccess: (data: { versionNumber: number }) => void
+      onSuccess: (data: { versionNumber: number; content: string }) => void
       onError: (err: unknown) => void
     },
   ) => void
   isPending: boolean
 }
 
-export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
+export function VersionHistory({
+  tokens,
+  projectId,
+  editorValue,
+  onRestored,
+}: VersionHistoryProps) {
   const [selectedVersion, setSelectedVersion] =
     useState<VersionListItem | null>(null)
   const [rollbackTarget, setRollbackTarget] =
@@ -81,7 +88,8 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
     return [...rows].sort((a, b) => b.versionNumber - a.versionNumber)
   }, [data])
 
-  const currentVersion = versions[0] ?? null
+  /** Versão mais recente por número — referência para a numeração do rollback. */
+  const latestVersion = versions[0] ?? null
 
   function handleRollbackConfirm() {
     if (!rollbackTarget) return
@@ -97,6 +105,9 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
           )
           setRollbackTarget(null)
           void refetch()
+          // Sincroniza o editor com o conteúdo restaurado — sem isso o editor
+          // mantém o texto antigo e o próximo autosave desfaria o rollback.
+          onRestored?.(result.content)
         },
         onError: (err) => {
           const msg = err instanceof Error ? err.message : "Erro ao restaurar prompt"
@@ -113,7 +124,7 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
         className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em]"
         style={{ color: tokens.textTertiary }}
       >
-        Versoes anteriores
+        Versões anteriores
       </h3>
 
       <Card
@@ -148,8 +159,8 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
                 className="text-[13px]"
                 style={{ color: tokens.textSecondary }}
               >
-                Ainda não há versões publicadas. Publique pela primeira vez
-                para começar o histórico.
+                O histórico começa quando o Builder gera o prompt do agente —
+                ou na sua primeira edição manual.
               </p>
             </div>
           ) : (
@@ -158,7 +169,7 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
                 key={v.id}
                 version={v}
                 tokens={tokens}
-                currentVersionId={currentVersion?.id ?? null}
+                isCurrent={v.content === editorValue}
                 rollbackPending={rollbackPrompt.isPending}
                 onInspect={() => setSelectedVersion(v)}
                 onRollback={() => setRollbackTarget(v)}
@@ -168,7 +179,7 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
         </CardContent>
       </Card>
 
-      {selectedVersion && currentVersion && (
+      {selectedVersion && (
         <Dialog
           open={selectedVersion !== null}
           onOpenChange={(open) => {
@@ -179,20 +190,20 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
             <DialogHeader>
               <DialogTitle>Comparar prompt v{selectedVersion.versionNumber}</DialogTitle>
               <DialogDescription>
-                Compare a versão selecionada com a versão mais recente do histórico.
+                Compare a versão selecionada com o conteúdo atual do editor.
               </DialogDescription>
             </DialogHeader>
             <PromptDiff
               oldContent={selectedVersion.content}
-              newContent={currentVersion.content}
+              newContent={editorValue}
               oldLabel={`v${selectedVersion.versionNumber}`}
-              newLabel={`v${currentVersion.versionNumber} (atual)`}
+              newLabel="Editor (atual)"
             />
           </DialogContent>
         </Dialog>
       )}
 
-      {rollbackTarget && currentVersion && (
+      {rollbackTarget && latestVersion && (
         <AlertDialog
           open={rollbackTarget !== null}
           onOpenChange={(open) => {
@@ -205,7 +216,7 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
                 Restaurar v{rollbackTarget.versionNumber}?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Isso cria uma nova versão v{currentVersion.versionNumber + 1}
+                Isso cria uma nova versão v{latestVersion.versionNumber + 1}
                 com o conteúdo de v{rollbackTarget.versionNumber}. O histórico
                 existente não é alterado.
               </AlertDialogDescription>
@@ -234,19 +245,19 @@ export function VersionHistory({ tokens, projectId }: VersionHistoryProps) {
 function VersionRow({
   version,
   tokens,
-  currentVersionId,
+  isCurrent,
   rollbackPending,
   onInspect,
   onRollback,
 }: {
   version: VersionListItem
   tokens: VersionHistoryProps["tokens"]
-  currentVersionId: string | null
+  /** True quando o conteúdo da versão é exatamente o conteúdo em uso no editor. */
+  isCurrent: boolean
   rollbackPending: boolean
   onInspect: () => void
   onRollback: () => void
 }) {
-  const isCurrent = version.id === currentVersionId
   const isPublished = version.publishedAt !== null
   const statusLabel = isPublished ? "Publicada" : "Rascunho"
   const statusBg = isPublished ? tokens.brandSubtle : tokens.hoverBg
@@ -303,7 +314,7 @@ function VersionRow({
             className="mt-1 truncate text-[12px]"
             style={{ color: tokens.textSecondary }}
           >
-            {version.description ?? "Sem descricao"}
+            {version.description ?? "Sem descrição"}
           </p>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
