@@ -105,11 +105,13 @@ Um agente investigador que transforma um pedido em linguagem natural ("quero con
 
 ## 9. Perguntas em aberto
 
-1. **Priorização de templates:** quais 3-5 integrações curadas primeiro? (RD Station citado; candidatos: Google Sheets, webhook genérico, CRM X — decidir por demanda real dos clientes.)
-2. **Gate por plano:** criação de integrações é livre em qualquer plano ou capacidade de plano pago? Limite de integrações ativas por org?
-3. **Quem roda a investigação paga** (busca web): custo absorvido pela plataforma com limite por org, ou consome cota do plano?
-4. **Aprovação humana da plataforma:** integrações geradas por investigação automática entram em produção direto após validação técnica, ou passam por curadoria do time Quayer nas primeiras N execuções?
-5. **Retry/fila em produção:** falha transitória da API externa re-tenta em background (fila) ou só sinaliza erro? (Toca a arquitetura de outbound existente.)
+> **Decisões registradas em 2026-06-10** (defaults do time técnico, reversíveis no /plan):
+>
+> 1. **Templates iniciais:** RD Station (citado pelo founder) + webhook genérico; Google Sheets na sequência. Demais por demanda.
+> 2. **Gate por plano:** MVP sem gate novo — criação livre, limite de salvaguarda de 3 integrações ativas por org; o gate de plano continua sendo o de publicação já existente.
+> 3. **Custo da investigação:** absorvido pela plataforma, com cache por plataforma investigada e limite de 10 investigações/org/dia.
+> 4. **Curadoria humana:** nenhuma no MVP — validação técnica obrigatória + telemetria; curadoria entra se a taxa de falha em produção justificar.
+> 5. **Retry em produção:** MVP sem fila nova — 1 retry inline com timeout e estado "com erro" visível; fila durável fica para a proposta FSM de outbound (separada).
 
 ---
 

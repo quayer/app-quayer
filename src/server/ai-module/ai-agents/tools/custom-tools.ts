@@ -19,6 +19,7 @@
 import { tool, type Tool } from 'ai'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { decrypt } from '@/lib/crypto'
 import type { ToolExecutionContext } from './builtin-tools'
 
 // ---------------------------------------------------------------------------
@@ -176,7 +177,14 @@ export async function getCustomTools(
             'Content-Type': 'application/json',
           }
           if (row.webhookSecret) {
-            headers['X-Webhook-Secret'] = row.webhookSecret
+            // O segredo é gravado CIFRADO (create-custom-tool.tool.ts → encrypt);
+            // sem decrypt aqui o webhook do cliente recebia o ciphertext e a
+            // validação nunca passava. Fail-open para rows legadas em claro.
+            try {
+              headers['X-Webhook-Secret'] = decrypt(row.webhookSecret)
+            } catch {
+              headers['X-Webhook-Secret'] = row.webhookSecret
+            }
           }
 
           const res = await fetch(webhookUrl, {
