@@ -94,6 +94,14 @@ export function OverviewTab({
   const doneCount = stages.filter((s) => s.status === "done").length
   const hasAnyActivity = messages.length > 0 || project.aiAgent !== null
 
+  // T101b (FR-32): na revelação da Visão geral (projetos v2) cada seção monta
+  // em cascata (~100ms de stagger via CSS). Atrelado a `phases` (presente só em
+  // v2) → em v1 retorna "" e o render fica byte-idêntico (NFR-03). O
+  // `prefers-reduced-motion` global salta direto pro estado final.
+  const isJourneyV2 = phases !== null
+  const stagger = (n: number) =>
+    isJourneyV2 ? `builder-section-in builder-stagger-${n}` : ""
+
   // Canal: prefere o readiness (fonte única, cobre conexão feita pelo wizard
   // sem router.refresh); o snapshot SSR fica como fallback enquanto carrega.
   const hasChannel = readiness
@@ -128,21 +136,25 @@ export function OverviewTab({
 
       {/* -- Seção 1: Identidade do agente -- */}
       {aiAgent && (
-        <AgentIdentityHeader
-          aiAgent={aiAgent}
-          status={status}
-          tokens={tokens}
-        />
+        <div className={stagger(1)}>
+          <AgentIdentityHeader
+            aiAgent={aiAgent}
+            status={status}
+            tokens={tokens}
+          />
+        </div>
       )}
 
       {/* -- Seção 2: Primeira mensagem do WhatsApp -- */}
       {aiAgent && (
-        <FirstMessagePreviewCard
-          tokens={tokens}
-          firstMessage={firstMessage.text}
-          source={firstMessage.source}
-          onEdit={handleEditGreeting}
-        />
+        <div className={stagger(2)}>
+          <FirstMessagePreviewCard
+            tokens={tokens}
+            firstMessage={firstMessage.text}
+            source={firstMessage.source}
+            onEdit={handleEditGreeting}
+          />
+        </div>
       )}
 
       {/* -- Seções 3 + 3b: progresso da jornada + prontidão (fonte única) -- */}
@@ -156,39 +168,47 @@ export function OverviewTab({
 
       {readiness && (
         <>
-          <ProgressHeader
-            doneCount={doneCount}
-            totalCount={stages.length}
-            pct={readiness.completenessPct}
-            tokens={tokens}
-          />
+          <div className={stagger(3)}>
+            <ProgressHeader
+              doneCount={doneCount}
+              totalCount={stages.length}
+              pct={readiness.completenessPct}
+              tokens={tokens}
+            />
+          </div>
           {/* v2: render por fases (Journey "Configure por exceção"); v1: lista
               plana intocada (render byte-idêntico, NFR-03). */}
-          {phases ? (
-            <PhaseList phases={phases} tokens={tokens} />
-          ) : (
-            <StageList stages={stages} tokens={tokens} />
-          )}
+          <div className={stagger(4)}>
+            {phases ? (
+              <PhaseList phases={phases} tokens={tokens} />
+            ) : (
+              <StageList stages={stages} tokens={tokens} />
+            )}
+          </div>
 
-          <DeployReadinessCard
-            items={checklist}
-            isDeployReady={readiness.isDeployReady}
-            deployGate={deployGate}
-            onTabChange={onTabChange}
-            tokens={tokens}
-          />
+          <div className={stagger(5)}>
+            <DeployReadinessCard
+              items={checklist}
+              isDeployReady={readiness.isDeployReady}
+              deployGate={deployGate}
+              onTabChange={onTabChange}
+              tokens={tokens}
+            />
+          </div>
 
           {/* Seção 3c: Capacidades (FR-06/07) — o que o agente sabe fazer +
               toggles de configuração inline (silent-submit, FR-29). Derivada do
               builderState do readiness; o getCapabilities cobre os insumos não
               derivados (fotos/integrações/agenda conectada). */}
           {readiness.builderState && (
-            <CapabilitiesSection
-              projectId={project.id}
-              builderState={readiness.builderState}
-              tokens={tokens}
-              onTabChange={onTabChange}
-            />
+            <div className={stagger(6)}>
+              <CapabilitiesSection
+                projectId={project.id}
+                builderState={readiness.builderState}
+                tokens={tokens}
+                onTabChange={onTabChange}
+              />
+            </div>
           )}
         </>
       )}
@@ -202,18 +222,22 @@ export function OverviewTab({
       )}
 
       {/* -- Seção 4: Ações rápidas (contextuais ao estado do projeto) -- */}
-      <QuickActions
-        hasAgent={!!aiAgent}
-        hasWhatsAppConnection={hasChannel}
-        status={status}
-        deployGate={deployGate}
-        onTabChange={onTabChange}
-        tokens={tokens}
-      />
+      <div className={stagger(7)}>
+        <QuickActions
+          hasAgent={!!aiAgent}
+          hasWhatsAppConnection={hasChannel}
+          status={status}
+          deployGate={deployGate}
+          onTabChange={onTabChange}
+          tokens={tokens}
+        />
+      </div>
 
       {/* -- Seção 5: Métricas (apenas para agentes publicados) -- */}
       {status !== "draft" && (
-        <MetricsCard tokens={tokens} projectId={project.id} />
+        <div className={stagger(8)}>
+          <MetricsCard tokens={tokens} projectId={project.id} />
+        </div>
       )}
     </div>
   )

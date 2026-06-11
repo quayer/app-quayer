@@ -244,6 +244,17 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
     [readiness, project],
   )
 
+  // ── T55 + T101a (FR-32): chat fullscreen na fase Conhecer ────────────────────
+  // Branch ESTRITAMENTE atrás de `readiness.journey !== undefined` (zero impacto
+  // v1): na 1ª fase o usuário só conversa; o split (preview à direita) só é
+  // revelado ao entrar em Revisar. A revelação anima em CSS puro — a coluna do
+  // chat encolhe de full→50% (`builder-chat-column`) e o painel entra da direita
+  // com fade (`builder-reveal-panel`); o `prefers-reduced-motion` global salta
+  // direto pro estado final.
+  const journeyActive = readiness?.journey !== undefined
+  const isConhecerPhase =
+    journeyActive && readiness?.journey?.activePhaseId === "conhecer"
+
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = React.useState(false)
@@ -690,11 +701,16 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
       <ReadinessContext.Provider value={readinessContextValue}>
         <main className="flex min-h-0 flex-1 overflow-hidden">
           <section
-            className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
+            className={`flex min-h-0 min-w-0 flex-1 flex-col ${
+              isConhecerPhase ? "md:max-w-full" : "md:max-w-[50%]"
+            } ${journeyActive ? "builder-chat-column" : ""} ${
               mobilePanel === "chat" ? "flex" : "hidden md:flex"
             }`}
             style={{
-              borderRight: `1px solid ${tokens.divider}`,
+              // Sem painel à direita na fase Conhecer → sem divisória.
+              borderRight: isConhecerPhase
+                ? "1px solid transparent"
+                : `1px solid ${tokens.divider}`,
             }}
           >
             <ChatPanel
@@ -704,18 +720,23 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
             />
           </section>
 
-          <section
-            className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
-              mobilePanel === "preview" ? "flex" : "hidden md:flex"
-            }`}
-          >
-            <PreviewPanel
-              project={project}
-              activeTab={activeTab}
-              onTabChange={handleTabChange}
-              messages={liveMessages}
-            />
-          </section>
+          {/* T55: na fase Conhecer (v2) o preview NÃO monta — chat fullscreen.
+              Ao entrar em Revisar, monta com a animação de entrada (T101a). Em
+              v1 (`journeyActive === false`) monta sempre, sem animação. */}
+          {!isConhecerPhase && (
+            <section
+              className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
+                journeyActive ? "builder-reveal-panel" : ""
+              } ${mobilePanel === "preview" ? "flex" : "hidden md:flex"}`}
+            >
+              <PreviewPanel
+                project={project}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                messages={liveMessages}
+              />
+            </section>
+          )}
         </main>
       </ReadinessContext.Provider>
     </div>

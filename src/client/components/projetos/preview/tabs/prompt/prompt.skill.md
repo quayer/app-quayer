@@ -5,7 +5,7 @@ Revisar em: quando mudar o contrato de PATCH /builder/projects/:id/prompt ou o f
 Relacionados:
   - src/server/ai-module/builder/projects/routes/prompt.routes.ts
   - src/server/ai-module/builder/projects/projects.repository.ts
-  - src/client/components/projetos/preview/tabs/identity/identity-tab.tsx
+  - docs/deprecated/IDENTITY_TAB.md
 ---
 
 # Skill: prompt/ — Editor do System Prompt do Agente
@@ -39,9 +39,11 @@ Tudo abaixo de 400 linhas. Zero `any`.
 | `hooks/use-prompt-autosave.ts` | Debounce 2s user-driven + precondição otimista (`baseUpdatedAt` → 409) + `forceSave`/`acceptServerState`. |
 | `hooks/use-prompt-actions.ts` | `handleCopy` (clipboard + toast) + `handleRegenerate` (event). |
 
-A seção "Identidade & Comportamento" no topo é a `IdentityTab`
-(`../identity/identity-tab.tsx`) — autosave próprio; salvar lá reescreve o
-bloco `# Identidade` do systemPrompt (por isso o sync de conflito abaixo).
+> **Removido (Jornada v2, 2026-06-11):** a antiga seção embutida `IdentityTab`
+> foi deletada — o disclosure agora vive no card `agent_review` e é injetado no
+> systemPrompt pelo `create_agent` (ver `docs/deprecated/IDENTITY_TAB.md`). O
+> endpoint `PATCH /builder/identity/:projectId` permanece para edição pós-criação.
+> O sync de conflito 409 abaixo continua valendo (regenerações/rollback do prompt).
 
 ## Auto-save — invariantes
 

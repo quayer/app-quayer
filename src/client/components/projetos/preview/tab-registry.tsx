@@ -25,7 +25,10 @@ import type {
   PreviewTab,
   WorkspaceProject,
 } from "@/client/components/projetos/types"
-import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
+import type {
+  PhaseId,
+  Readiness,
+} from "@/server/ai-module/builder/state/readiness.types"
 
 import { canOpenDeploy } from "./deploy-gate"
 import { OverviewTab } from "./tabs/overview/overview-tab"
@@ -74,7 +77,34 @@ export interface TabDescriptor {
    * there is no production activity to show until the agent goes live.
    */
   requiresPublished?: boolean
+  /**
+   * v2-only visibility predicate (T53/T54, FR-19, plan §4.4). When the project
+   * runs the Journey v2 (`readiness.journey` present), a tab is rendered ONLY if
+   * this returns true — non-actionable tabs are made INVISIBLE (filtered out),
+   * never shown as locked. The journey reveals tabs phase by phase instead of
+   * locking them.
+   *
+   * Omit it and the tab is always visible in v2. In v1 (`readiness.journey`
+   * absent) this predicate is NEVER consulted — the legacy `requiresAgent` /
+   * `requiresPublished` locking applies unchanged (NFR-03).
+   */
+  visibleWhen?: (ctx: { project: WorkspaceProject; readiness: Readiness }) => boolean
   render: (ctx: TabRenderContext) => ReactNode
+}
+
+/**
+ * Phase order for the v2 journey, so `visibleWhen` predicates can ask
+ * "are we at phase X or later?" without re-deriving the ordering. Mirrors the
+ * `PhaseId` union order in `readiness.types.ts` (conhecer → revisar → testar →
+ * lançar).
+ */
+const PHASE_ORDER: readonly PhaseId[] = ["conhecer", "revisar", "testar", "lancar"]
+
+/** True once the active journey phase has reached `min` (or passed it). */
+function phaseAtLeast(readiness: Readiness, min: PhaseId): boolean {
+  const active = readiness.journey?.activePhaseId
+  if (active === undefined) return false
+  return PHASE_ORDER.indexOf(active) >= PHASE_ORDER.indexOf(min)
 }
 
 /**
@@ -104,6 +134,8 @@ export const TAB_REGISTRY: TabDescriptor[] = [
   {
     value: "overview",
     label: "Visão geral",
+    // v2: a Visão geral abre quando a revisão começa (fase Revisar+).
+    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
     render: ({ project, onTabChange, messages }) => (
       <OverviewTab
         project={project}
@@ -117,6 +149,8 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Prompt",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
+    // v2: o Prompt acompanha o agente — visível assim que ele existe.
+    visibleWhen: ({ project }) => project.aiAgent !== null,
     render: ({ project, messages }) => (
       <PromptTab project={project} messages={messages} />
     ),
@@ -125,12 +159,14 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     value: "knowledge",
     label: "Conhecimento",
     visibleFor: ["ai_agent"],
+    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
     render: ({ project }) => <KnowledgeTab project={project} />,
   },
   {
     value: "media",
     label: "Mídias",
     visibleFor: ["ai_agent"],
+    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
     render: ({ project }) => <MediaTab project={project} />,
   },
   {
@@ -138,6 +174,8 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Testar",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
+    // v2: Testar surge quando há agente para testar (agentExists).
+    visibleWhen: ({ project }) => project.aiAgent !== null,
     render: ({ project }) => <PlaygroundTab project={project} />,
   },
   {
@@ -145,6 +183,8 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Atividade",
     visibleFor: ["ai_agent"],
     requiresPublished: true,
+    // v2: idem v1 — só há atividade depois que o agente vai ao ar.
+    visibleWhen: ({ project }) => isProjectPublished(project),
     render: ({ project, messages }) => (
       <ActivityTab project={project} messages={messages} />
     ),
@@ -154,12 +194,16 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Publicar",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
+    // v2: Publicar segue o MESMO gate compartilhado do v1 (deploy-gate.ts) —
+    // tab e CTAs nunca discordam.
+    visibleWhen: ({ project }) => canOpenDeploy(project).allowed,
     render: ({ project }) => <DeployTab project={project} />,
   },
   {
     value: "credentials",
     label: "Config",
     visibleFor: ["ai_agent"],
+    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
     render: ({ project }) => <CredentialsTab project={project} />,
   },
   {
@@ -167,6 +211,7 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Avançado",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
+    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
     render: ({ project, onTabChange }) => (
       <AdvancedTab project={project} onTabChange={onTabChange} />
     ),
@@ -185,18 +230,42 @@ const AGENT_LOCK_REASON =
   "Disponível após o Builder criar o agente — continue a conversa no chat."
 
 /**
- * Returns all eligible tabs for the project type, each with a `locked` flag
- * and the human reason why. Locked tabs are shown in the strip but never
- * activate — this avoids layout shift when the agent is created mid-session.
+ * Returns the eligible tabs for the project type, each with a `locked` flag and
+ * the human reason why.
+ *
+ * Two regimes (T53/T54, FR-19, plan §4.4), selected by `readiness.journey`:
+ *
+ *   - **v2** (`readiness?.journey` present): the journey REVEALS tabs phase by
+ *     phase. Each tab's `visibleWhen({ project, readiness })` is consulted and
+ *     non-actionable tabs are FILTERED OUT (invisible) instead of shown locked —
+ *     so there is never a "visible but blocked" tab. The visible ones are always
+ *     unlocked (`locked: false`).
+ *
+ *   - **v1** (no `readiness.journey`): the legacy behavior is untouched (NFR-03)
+ *     — locked tabs are shown in the strip but never activate, avoiding layout
+ *     shift when the agent is created mid-session. `visibleWhen` is ignored.
  *
  * The "Publicar" tab delegates to the SHARED `canOpenDeploy` gate — the same
- * predicate the Overview CTAs use, so tab and buttons can never disagree.
+ * predicate the Overview CTAs use, so tab and buttons can never disagree (in
+ * both v1 lock copy and v2 `visibleWhen`).
  */
 export function getTabsForProjectWithLocked(
   project: WorkspaceProject,
+  readiness?: Readiness,
 ): TabDescriptorWithState[] {
   const hasAgent = project.aiAgent !== null
   const published = isProjectPublished(project)
+
+  // ── v2: revelação progressiva — filtra por `visibleWhen`, nunca trava ──
+  if (readiness?.journey) {
+    return TAB_REGISTRY.filter((tab) => {
+      if (tab.visibleFor && !tab.visibleFor.includes(project.type)) return false
+      // Sem `visibleWhen` = sempre visível na v2; com ele, o predicado decide.
+      return tab.visibleWhen ? tab.visibleWhen({ project, readiness }) : true
+    }).map((tab) => ({ ...tab, locked: false, lockedReason: null }))
+  }
+
+  // ── v1: comportamento locked legado (intocado) ──
   return TAB_REGISTRY.filter((tab) => {
     if (tab.visibleFor && !tab.visibleFor.includes(project.type)) return false
     // Post-publish-only tabs (e.g. Atividade) are removed from the strip

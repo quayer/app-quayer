@@ -406,6 +406,59 @@
   .audio-bar-3 { animation-delay: 320ms; }
 
   /* ========================================
+     Builder Journey v2 — revelação progressiva (FR-32, T101)
+     CSS puro, zero lib. As 3 animações abaixo são automaticamente
+     desativadas pelo bloco @media (prefers-reduced-motion: reduce)
+     acima (transition/animation-duration → 0.01ms !important): o
+     elemento salta direto pro estado final, sem movimento.
+     ======================================== */
+
+  /* (a) Transição Conhecer→Revisar: a coluna do chat anima a largura
+     (full → 50%) ao revelar o split. Aplicada SÓ no branch v2. */
+  .builder-chat-column {
+    transition:
+      max-width 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 0.5s ease;
+  }
+
+  /* (a) O painel da direita entra deslizando da direita + fade ao revelar.
+     Reusa a curva de slide-in-right; one-shot via animation `both`. */
+  .builder-reveal-panel {
+    animation: slide-in-right 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* (b) Visão geral monta em cascata — cada seção atrasa ~100ms via a
+     classe builder-stagger-N abaixo. */
+  @keyframes builder-section-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .builder-section-in {
+    animation: builder-section-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .builder-stagger-1 { animation-delay: 0ms; }
+  .builder-stagger-2 { animation-delay: 100ms; }
+  .builder-stagger-3 { animation-delay: 200ms; }
+  .builder-stagger-4 { animation-delay: 300ms; }
+  .builder-stagger-5 { animation-delay: 400ms; }
+  .builder-stagger-6 { animation-delay: 500ms; }
+  .builder-stagger-7 { animation-delay: 600ms; }
+  .builder-stagger-8 { animation-delay: 700ms; }
+
+  /* (c) Tab recém-liberada (Testar/Publicar) ganha UM pulso de destaque.
+     One-shot: a classe é aplicada por controle local (ref) e removida no
+     animationend, então nunca repete em re-render. */
+  @keyframes builder-tab-pulse {
+    0%   { box-shadow: 0 0 0 0 var(--p-amber-a35); }
+    60%  { box-shadow: 0 0 0 4px var(--p-amber-a20); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 214, 10, 0); }
+  }
+  .builder-tab-pulse {
+    animation: builder-tab-pulse 1.1s cubic-bezier(0.16, 1, 0.3, 1) 1;
+    border-radius: var(--radius-md);
+  }
+
+  /* ========================================
      Auth page specific styles
      ======================================== */
 
