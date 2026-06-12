@@ -25,7 +25,7 @@ export const projectStateSchema = z.object({
   objective: z.string().optional(),
 })
 
-/** Agent proposal (name + one-liner) approved via agent_approval card. */
+/** Agent proposal (name + one-liner) approved via agent_review/agent_approval. */
 export const proposalStateSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),

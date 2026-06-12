@@ -5,7 +5,7 @@
  * GARANTE o vínculo da base de conhecimento (`AIAgentConfig.ragCollectionId` +
  * `useRAG=true`) quando o projeto JÁ tem uma `KnowledgeCollection` `kb:${projectId}`.
  * Na jornada v2 a fonte é colada na fase "Conhecer" ANTES de o agente existir
- * (agent_approval é fase 2), então o único write histórico de `ragCollectionId`
+ * (o review final cria o agente depois), então o único write histórico de `ragCollectionId`
  * (em `wireCollectionToProject`, que só roda `if (project.aiAgentId)`) NÃO acontece
  * no momento da ingestão — o agente publicado nasceria SEM RAG (gate do runtime em
  * `prepare-agent-call.ts:208`).

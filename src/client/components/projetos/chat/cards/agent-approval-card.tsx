@@ -1,12 +1,12 @@
 "use client"
 
 /**
- * agent_approval — deterministic approval card for the active journey step.
+ * agent_approval — legacy/fallback deterministic approval card.
  *
  * The old flow only rendered this through the `propose_agent_creation` tool. If
  * the LLM said "approve the card" without calling that tool, the journey got
- * stuck with no visible card. This card makes approval step-driven like the rest
- * of Jornada v2 while keeping the legacy inline tool card compatible.
+ * stuck with no visible card. Jornada v2 now approves creation from
+ * `agent_review`; this card stays compatible with legacy inline proposals.
  */
 
 import * as React from "react"

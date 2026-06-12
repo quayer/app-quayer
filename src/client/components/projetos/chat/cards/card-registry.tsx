@@ -123,9 +123,8 @@ export type RegisteredW3CardKey =
  */
 export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
   agent_approval: {
-    // Jornada v2: deterministic card for the approval step. The legacy
-    // `propose_agent_creation` tool can still render an inline proposal, but the
-    // step no longer depends on the LLM calling that tool to show a card.
+    // Legacy/fallback inline approval. Jornada v2 normal approves creation from
+    // `agent_review`, but `propose_agent_creation` can still render this card.
     cardKey: "agent_approval",
     stepId: "agent_approval",
     title: "Aprovar agente",
@@ -140,13 +139,11 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     component: AgentPersonaCard as ComponentType<CardComponentProps>,
   },
   agent_review: {
-    // Jornada v2 (T43, FR-05/FR-22) — ACTIVE-STEP card da fase "Revisar". Card
-    // COMPOSTO que funde persona + serviços + horários numa única confirmação
-    // (NFR-07) + seção avançada de disclosure. Surfa como step `agent_review`,
-    // cujo isDone (journey-v2 engine) exige persona && services && hours.
+    // Jornada v2 — ACTIVE-STEP card da fase "Revisar". Card COMPOSTO que funde
+    // voz + escopo + equipe humana + aprovação de criação numa única confirmação.
     cardKey: "agent_review",
     stepId: "agent_review",
-    title: "Revisar o agente",
+    title: "Revisar e criar agente",
     icon: <Sparkles className="h-4 w-4" />,
     component: AgentReviewCard as ComponentType<CardComponentProps>,
   },

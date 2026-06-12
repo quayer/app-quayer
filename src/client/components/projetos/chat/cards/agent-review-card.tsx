@@ -1,31 +1,16 @@
 "use client"
 
 /**
- * Builder Cards — agent_review (Jornada v2 · T43, FR-05/FR-22/FR-23)
+ * Builder Cards — agent_review (Jornada v2)
  *
- * Card COMPOSTO da fase "Revisar": orquestrador FINO que funde persona + serviços +
- * horários numa ÚNICA confirmação (NFR-07: 1 decisão/1 ACK em vez de 3), reusando as
- * MESMAS seções dos cards individuais (`review/{persona,services,hours}-section.tsx`)
- * — zero duplicação — + a seção avançada de DISCLOSURE (`review/disclosure-section.tsx`,
- * migrada da IdentityTab, FR-21). Dispara UM POST único (cardKey `agent_review`).
- *
- * PREFILL POR EXCEÇÃO (T39/FR-02): `owned > capturedProposals.<domínio> > default`;
- * valor vindo de `capturedProposals` ganha o badge "sugerido da conversa". PROPOSTA
- * TARDIA (T95/FR-23): prefill congelado no MOUNT (`captureProposalSnapshot`); proposta
- * que chega depois NÃO re-prefilla — `detectLateProposals` a expõe e a seção mostra o
- * chip "Usar sugestão" por campo (aplicar é sempre explícito). ERROS GRANULARES (FR-22):
- * em falha o handler retorna `{ errors: { persona?, services?, hours? } }` sem write
- * parcial; este card (prop opcional `reviewErrors`) destaca SÓ a seção que falhou e
- * preserva o estado local das válidas (as seções não remontam).
- *
- * Presentational only: lê seu slice de `props.value` e dispara o payload via
- * `props.onSubmit` (chat-panel owns POST + SSE). Token-driven, copy PT-BR.
- *   cardKey 'agent_review' · owns persona.*+services.*+hours.*(+identityCard) ·
- *   sentinel confirmations.{persona,services,hours}.
+ * Card final da fase Revisar: mostra o resumo do pacote do agente e permite
+ * editar voz, escopo, equipe humana e transparência antes de confirmar. O submit
+ * continua sendo um único POST `agent_review`, mas agora também autoriza a
+ * criação do agente no backend (`agentApproved`).
  */
 
 import * as React from "react"
-import { AlertTriangle, Check, Sparkles } from "lucide-react"
+import { AlertTriangle, Check, Pencil, Sparkles } from "lucide-react"
 
 import { CardShell } from "./card-shell"
 import type { CardComponentProps } from "./types"
@@ -44,18 +29,22 @@ import {
   DisclosureSection,
   type DisclosureValue,
 } from "./review/disclosure-section"
+import { SPEECH_MODES } from "./persona/speech-mode"
+import {
+  DEFAULT_TIMEZONE,
+  build24x7,
+  buildCommercial,
+  coerceSchedule,
+  normalizePreset,
+  type HoursPreset,
+  type WeeklySchedule,
+} from "./business-hours/schedule-shape"
 import {
   captureProposalSnapshot,
   detectLateProposals,
   readProposal,
 } from "./prefill"
 
-/**
- * FR-22 — per-section validation errors mirrored from the handler's
- * `AgentReviewSectionErrors` (apply-card-submit.ts). Declared locally so the client
- * bundle never reaches into a server module that imports `database`. A failed submit
- * returns these; the card highlights only the failing section(s) and keeps the rest.
- */
 export interface AgentReviewSectionErrors {
   persona?: string
   services?: string
@@ -81,20 +70,88 @@ export interface AgentReviewPayload {
   disclosure?: DisclosureValue
 }
 
-/**
- * Props the ActiveStepCard widens this card with (errors backflow). It is OPTIONAL
- * and additive — the base `CardComponentProps` contract (types.ts) stays untouched;
- * the gate wires `reviewErrors` through. Until then it's simply `undefined`.
- */
 type AgentReviewCardProps = CardComponentProps<AgentReviewPayload> & {
-  /** FR-22 — per-section errors from the last failed submit (no partial write). */
   reviewErrors?: AgentReviewSectionErrors
 }
 
-/**
- * AgentReviewCard — orquestrador fino. Compõe as 3 seções + disclosure avançado e
- * submete UM payload. Erro granular destaca só a seção que falhou e preserva o resto.
- */
+type EditableSection = "voice" | "scope" | "team" | "presentation" | null
+
+const EMPTY_SCOPE = "Ainda sem escopo definido"
+
+function scheduleForPreset(
+  preset: HoursPreset,
+  custom: WeeklySchedule,
+): WeeklySchedule {
+  if (preset === "24_7") return build24x7()
+  if (preset === "commercial") return buildCommercial()
+  return custom
+}
+
+function buildInitialHoursPayload(
+  value: CardComponentProps["value"],
+): BusinessHoursPayload {
+  const ownedPreset =
+    typeof value.hours.preset === "string" && value.hours.preset.length > 0
+      ? value.hours.preset
+      : undefined
+  const proposedPreset =
+    typeof value.capturedProposals?.hours?.preset === "string" &&
+    value.capturedProposals.hours.preset.length > 0
+      ? value.capturedProposals.hours.preset
+      : undefined
+  const rawPreset =
+    ownedPreset ??
+    (value.confirmations.hours ? value.hours.preset : undefined) ??
+    proposedPreset
+  const preset = rawPreset ? normalizePreset(rawPreset) : "24_7"
+  const persisted = coerceSchedule(value.hours.schedule)
+  const custom = persisted ?? buildCommercial()
+
+  return {
+    preset,
+    schedule: scheduleForPreset(preset, custom),
+    timezone: value.hours.timezone?.trim() || DEFAULT_TIMEZONE,
+    outOfHours: value.hours.outOfHours === "silent" ? "silent" : "reply_notice",
+  }
+}
+
+function compactList(items: readonly string[], empty: string): string {
+  const clean = items.map((item) => item.trim()).filter(Boolean)
+  if (clean.length === 0) return empty
+  const head = clean.slice(0, 3).join(" · ")
+  return clean.length > 3 ? `${head} · +${clean.length - 3}` : head
+}
+
+function speechModeLabel(mode: AgentReviewPayload["persona"]["speechMode"]) {
+  return (
+    SPEECH_MODES.find((option) => option.key === mode)?.label ??
+    "Assistente virtual"
+  )
+}
+
+function hoursSummary(hours: BusinessHoursPayload): string[] {
+  const preset =
+    hours.preset === "24_7"
+      ? "Equipe humana sempre disponível"
+      : hours.preset === "commercial"
+        ? "Equipe humana em horário comercial"
+        : "Equipe humana com horário manual"
+  const outOfHours =
+    hours.outOfHours === "silent"
+      ? "Fora do horário: IA responde sem prometer retorno humano imediato"
+      : "Fora do horário: IA continua 24/7 e informa quando a equipe retorna"
+  return ["IA atende 24/7", preset, outOfHours]
+}
+
+function disclosureSummary(value: DisclosureValue | undefined): string {
+  if (!value) return "Padrão: IA transparente no atendimento"
+  if (value.mode === "human_passthrough") return "Apresentação humanizada"
+  if (value.mode === "custom") {
+    return value.customText?.trim() || "Texto próprio configurado"
+  }
+  return "IA transparente no atendimento"
+}
+
 export function AgentReviewCard({
   value,
   disabled = false,
@@ -102,9 +159,6 @@ export function AgentReviewCard({
   tokens,
   reviewErrors,
 }: AgentReviewCardProps) {
-  // ── Prefill por exceção (T39): proposta de cada domínio lida UMA vez no mount. ──
-  // Snapshot congela o que entrou no prefill inicial; o vivo (`value`) compara a cada
-  // refetch para achar propostas TARDIAS (FR-23) — sem re-prefillar.
   const mountSnapshot = React.useMemo(
     () => captureProposalSnapshot(value),
     // Mount-only: congela o snapshot do prefill inicial (regra FR-23).
@@ -120,7 +174,6 @@ export function AgentReviewCard({
     [],
   )
 
-  // Propostas TARDIAS (vivas, mudadas desde o mount) → chips "Usar sugestão".
   const late = detectLateProposals(value, mountSnapshot)
   const lateOf = (domain: "persona" | "services" | "hours") =>
     late.find((p) => p.domain === domain)?.value
@@ -128,7 +181,6 @@ export function AgentReviewCard({
   const lateServices = lateOf("services") as ServicesProposal | undefined
   const lateHours = lateOf("hours") as { preset?: string } | undefined
 
-  // ── Persona (o card é dono do hook, igual ao card individual). ──
   const persona = usePersonaSection({
     value,
     disabled,
@@ -137,39 +189,6 @@ export function AgentReviewCard({
     lateProposal: latePersona,
   })
 
-  // ── Serviços + horários + disclosure: estado vive nas seções; espelhamos via ref
-  //    para submeter exatamente o que o editor mostra sem re-render por tecla. ──
-  const servicesRef = React.useRef<ServicesSectionValue>(value.services)
-  const handleServicesChange = React.useCallback((v: ServicesSectionValue) => {
-    servicesRef.current = v
-  }, [])
-  const hoursRef = React.useRef<BusinessHoursPayload | null>(null)
-  const handleHoursChange = React.useCallback((p: BusinessHoursPayload) => {
-    hoursRef.current = p
-  }, [])
-  const disclosureRef = React.useRef<DisclosureValue | undefined>(undefined)
-  const handleDisclosureChange = React.useCallback((d?: DisclosureValue) => {
-    disclosureRef.current = d
-  }, [])
-
-  const handleConfirm = React.useCallback(() => {
-    if (disabled) return
-    const hours = hoursRef.current
-    onSubmit({
-      cardKey: "agent_review",
-      persona: persona.buildPayload().persona,
-      offered: servicesRef.current.offered,
-      notOffered: servicesRef.current.notOffered,
-      preset: hours?.preset,
-      schedule: hours?.schedule,
-      timezone: hours?.timezone,
-      outOfHours: hours?.outOfHours,
-      disclosure: disclosureRef.current,
-    })
-  }, [disabled, onSubmit, persona])
-
-  // Prefill por exceção do domínio services (T39): owned > proposta > vazio,
-  // congelado no mount (proposta tardia vira chip, não re-seed).
   const servicesOfferedFromProposal =
     value.services.offered.length === 0 &&
     (mountProposals.services?.offered?.length ?? 0) > 0
@@ -183,16 +202,82 @@ export function AgentReviewCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
+  const [servicesValue, setServicesValue] =
+    React.useState<ServicesSectionValue>(servicesInitialValue)
+  const servicesRef = React.useRef<ServicesSectionValue>(servicesInitialValue)
+  const handleServicesChange = React.useCallback((v: ServicesSectionValue) => {
+    servicesRef.current = v
+    setServicesValue(v)
+  }, [])
+
+  const initialHoursValue = React.useMemo(
+    () => buildInitialHoursPayload(value),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  const [hoursValue, setHoursValue] =
+    React.useState<BusinessHoursPayload>(initialHoursValue)
+  const hoursRef = React.useRef<BusinessHoursPayload>(initialHoursValue)
+  const handleHoursChange = React.useCallback((p: BusinessHoursPayload) => {
+    hoursRef.current = p
+    setHoursValue(p)
+  }, [])
+
+  const [disclosureValue, setDisclosureValue] =
+    React.useState<DisclosureValue | undefined>(undefined)
+  const disclosureRef = React.useRef<DisclosureValue | undefined>(undefined)
+  const handleDisclosureChange = React.useCallback((d?: DisclosureValue) => {
+    disclosureRef.current = d
+    setDisclosureValue(d)
+  }, [])
+
+  const [editingSection, setEditingSection] =
+    React.useState<EditableSection>(null)
+
+  React.useEffect(() => {
+    if (reviewErrors?.persona) setEditingSection("voice")
+    else if (reviewErrors?.services) setEditingSection("scope")
+    else if (reviewErrors?.hours) setEditingSection("team")
+  }, [reviewErrors?.hours, reviewErrors?.persona, reviewErrors?.services])
+
+  const handleConfirm = React.useCallback(() => {
+    if (disabled) return
+    const hours = hoursRef.current
+    onSubmit({
+      cardKey: "agent_review",
+      persona: persona.buildPayload().persona,
+      offered: servicesRef.current.offered,
+      notOffered: servicesRef.current.notOffered,
+      preset: hours.preset,
+      schedule: hours.schedule,
+      timezone: hours.timezone,
+      outOfHours: hours.outOfHours,
+      disclosure: disclosureRef.current,
+    })
+  }, [disabled, onSubmit, persona])
+
+  const voicePayload = persona.buildPayload().persona
+  const voiceSummary = [
+    voicePayload.name || value.project.name || "Nome do agente a definir",
+    `${speechModeLabel(voicePayload.speechMode)} · ${voicePayload.tone || "tom consultivo"}`,
+    voicePayload.style || "Sem regra extra de estilo",
+  ]
+  const scopeSummary = [
+    compactList(servicesValue.offered, EMPTY_SCOPE),
+    servicesValue.notOffered.length > 0
+      ? `Não promete: ${compactList(servicesValue.notOffered, "nada")}`
+      : "Sem limites negativos cadastrados",
+  ]
 
   return (
     <CardShell
       tokens={tokens}
       icon={<Sparkles className="h-4 w-4" />}
-      title="Revisar o agente"
-      reason="Última decisão antes de montar. Confira como o lead vai perceber o atendimento: voz, escopo e quando chamar alguém da equipe."
+      title="Revisar e criar agente"
+      reason="Pacote final antes da criação. Confira o resumo; abra uma seção só se precisar ajustar."
       actions={[
         {
-          label: "Confirmar e montar agente",
+          label: "Criar agente",
           onClick: handleConfirm,
           variant: "primary",
           icon: <Check className="h-3.5 w-3.5" />,
@@ -200,19 +285,33 @@ export function AgentReviewCard({
         },
       ]}
     >
-      <div className="flex flex-col gap-5">
-        <ReviewSection
-          title="Voz do atendimento"
+      <div className="flex flex-col gap-0">
+        <ReviewBlock
+          id="voice"
+          title="Voz"
+          summary={voiceSummary}
           error={reviewErrors?.persona}
+          editing={editingSection === "voice"}
           tokens={tokens}
+          disabled={disabled}
+          onToggle={() =>
+            setEditingSection((current) => (current === "voice" ? null : "voice"))
+          }
         >
           <PersonaSection state={persona} />
-        </ReviewSection>
+        </ReviewBlock>
 
-        <ReviewSection
-          title="Escopo de atendimento"
+        <ReviewBlock
+          id="scope"
+          title="Escopo"
+          summary={scopeSummary}
           error={reviewErrors?.services}
+          editing={editingSection === "scope"}
           tokens={tokens}
+          disabled={disabled}
+          onToggle={() =>
+            setEditingSection((current) => (current === "scope" ? null : "scope"))
+          }
         >
           <ServicesSection
             initialValue={servicesInitialValue}
@@ -222,12 +321,19 @@ export function AgentReviewCard({
             offeredFromProposal={servicesOfferedFromProposal}
             lateProposal={lateServices}
           />
-        </ReviewSection>
+        </ReviewBlock>
 
-        <ReviewSection
+        <ReviewBlock
+          id="team"
           title="Equipe humana"
+          summary={hoursSummary(hoursValue)}
           error={reviewErrors?.hours}
+          editing={editingSection === "team"}
           tokens={tokens}
+          disabled={disabled}
+          onToggle={() =>
+            setEditingSection((current) => (current === "team" ? null : "team"))
+          }
         >
           <HoursSection
             value={value}
@@ -236,53 +342,100 @@ export function AgentReviewCard({
             onChange={handleHoursChange}
             lateProposal={lateHours}
           />
-        </ReviewSection>
+        </ReviewBlock>
 
-        <DisclosureSection
-          disabled={disabled}
+        <ReviewBlock
+          id="presentation"
+          title="Transparência"
+          summary={[disclosureSummary(disclosureValue)]}
+          editing={editingSection === "presentation"}
           tokens={tokens}
-          onChange={handleDisclosureChange}
-        />
+          disabled={disabled}
+          onToggle={() =>
+            setEditingSection((current) =>
+              current === "presentation" ? null : "presentation",
+            )
+          }
+        >
+          <DisclosureSection
+            disabled={disabled}
+            tokens={tokens}
+            onChange={handleDisclosureChange}
+          />
+        </ReviewBlock>
       </div>
     </CardShell>
   )
 }
 
-/**
- * One titled review section + the FR-22 granular error banner. Wraps a section
- * body; when `error` is set it highlights the section (danger border) and shows the
- * message — the section's OWN state is preserved (no remount), so a re-submit fixes
- * only the failing section.
- */
-function ReviewSection({
+function ReviewBlock({
+  id,
   title,
+  summary,
   error,
+  editing,
+  disabled,
   tokens,
+  onToggle,
   children,
 }: {
+  id: Exclude<EditableSection, null>
   title: string
+  summary: string[]
   error?: string
+  editing: boolean
+  disabled: boolean
   tokens: CardComponentProps["tokens"]
+  onToggle: () => void
   children: React.ReactNode
 }) {
   return (
     <section
-      className="flex flex-col gap-3 rounded-lg border p-3"
-      style={{
-        borderColor: error ? tokens.danger : tokens.divider,
-        backgroundColor: tokens.bgBase,
-      }}
+      className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0"
+      style={{ borderColor: tokens.divider }}
+      aria-labelledby={`agent-review-${id}`}
     >
-      <h3
-        className="text-[12px] font-semibold uppercase tracking-wide"
-        style={{ color: tokens.textTertiary }}
-      >
-        {title}
-      </h3>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h3
+            id={`agent-review-${id}`}
+            className="text-[12px] font-semibold uppercase tracking-wide"
+            style={{ color: tokens.textTertiary }}
+          >
+            {title}
+          </h3>
+          <div className="mt-1 flex flex-col gap-0.5">
+            {summary.map((line) => (
+              <p
+                key={line}
+                className="break-words text-[13px] leading-relaxed"
+                style={{ color: tokens.textPrimary }}
+              >
+                {line}
+              </p>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onToggle}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            borderColor: editing ? tokens.brand : tokens.divider,
+            color: editing ? tokens.brandText : tokens.textSecondary,
+            backgroundColor: editing ? tokens.brandSubtle : tokens.bgBase,
+          }}
+        >
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          {editing ? "Fechar" : "Editar"}
+        </button>
+      </div>
+
       {error && (
         <p
           role="alert"
-          className="flex items-start gap-1.5 text-[12px] leading-relaxed"
+          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed"
           style={{ color: tokens.dangerText }}
         >
           <AlertTriangle
@@ -292,7 +445,10 @@ function ReviewSection({
           {error}
         </p>
       )}
-      {children}
+
+      <div className={editing ? "mt-3" : "hidden"} aria-hidden={!editing}>
+        {children}
+      </div>
     </section>
   )
 }

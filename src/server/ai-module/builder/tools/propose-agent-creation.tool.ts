@@ -6,7 +6,9 @@
  * named/configured wrong after a quick chat.
  *
  * Presentational only — it does NOT write to the database. The LLM calls this
- * right before it would otherwise call create_agent. Confirmation no longer
+ * right before it would otherwise call create_agent. In Jornada v2, the normal
+ * path approves creation in the `agent_review` card; this tool remains as a
+ * legacy/fallback inline proposal. Confirmation no longer
  * arrives as synthetic user text: the card's "Criar Agente" CTA submits the
  * `agent_approval` card, which flips the `agentApproved` sentinel in
  * `builderState` and seeds an authoritative card-action system note. The LLM

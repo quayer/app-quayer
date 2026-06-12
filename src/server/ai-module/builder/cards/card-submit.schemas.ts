@@ -438,8 +438,8 @@ export const publishedNextStepsPayloadSchema = z.object({
 
 /**
  * Jornada v2 (T24, FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar que
- * funde persona + serviços + horários numa única confirmação consolidada (NFR-07:
- * 1 decisão obrigatória, 1 ACK turn em vez de 3). Reusa os MESMOS shapes dos cards
+ * funde persona + serviços + horários + aprovação de criação numa única confirmação
+ * consolidada (NFR-07: 1 decisão obrigatória, 1 ACK turn em vez de 4). Reusa os MESMOS shapes dos cards
  * individuais (`persona` espelha `agentPersonaPayloadSchema.persona`; `offered`/
  * `notOffered` espelham `services`; `preset`/`schedule`/`timezone`/`outOfHours`
  * espelham `business_hours`) — o handler compõe os exports puros de
@@ -452,7 +452,10 @@ export const publishedNextStepsPayloadSchema = z.object({
  *
  * O default de horários ("sempre aberto", decisão 3 da spec §9) vive no COMPONENTE
  * (T43), não aqui — `schedule` é opaco/`unknown` igual ao card individual.
- * → confirmations `persona` + `services` + `hours` (validação granular FR-22).
+ * O handler também deriva/preserva `proposal.{name,description}` e flipa
+ * `confirmations.agentApproved`, removendo a necessidade de um segundo card
+ * `agent_approval` no fluxo v2 normal.
+ * → confirmations `persona` + `services` + `hours` + `agentApproved` (validação granular FR-22).
  */
 export const agentReviewPayloadSchema = z.object({
   cardKey: z.literal('agent_review'),

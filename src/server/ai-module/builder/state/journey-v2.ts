@@ -183,9 +183,10 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
 
 /**
  * Steps of the "Revisar" phase. The creator reviews the consolidated proposal.
- *  - `agent_review`  : COMPOSITE (FR-05) — isDone derives from the three EXISTING
- *                      sentinels (`persona && services && hours`); NO new sentinel.
- *  - `agent_approval`: creates the agent + prompt after deterministic approval.
+ *  - `agent_review`  : COMPOSITE (FR-05) — final review + create intent. isDone
+ *                      derives from the section sentinels AND the existing
+ *                      `agentApproved` sentinel (`persona && services && hours &&
+ *                      agentApproved`). There is no second v2 approval step.
  *  - `knowledge`     : OPTIONAL — real data (a source) OR the `knowledge` ack.
  *  - `media`         : OPTIONAL — real data (`imagesCount > 0`) OR the `media` ack.
  *
@@ -195,32 +196,28 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
 const REVISAR_STEPS: readonly JourneyV2Step[] = [
   {
     id: 'agent_review',
-    title: 'Revisar o agente',
-    ask: 'Revise a proposta do agente — persona, o que oferece e horários — e confirme no card.',
+    title: 'Revisar e criar agente',
+    ask: 'Confira o pacote final do agente — voz, escopo e equipe humana — e confirme no card para criar.',
     requiredPaths: [
       'confirmations.persona',
       'confirmations.services',
       'confirmations.hours',
+      'confirmations.agentApproved',
     ],
-    // FR-05 — composto: deriva dos 3 sentinels existentes, sem sentinel novo.
+    // FR-05 — composto: usa os sentinels existentes e também autoriza criação.
     isDone: (s) =>
-      confirmed(s, 'persona') && confirmed(s, 'services') && confirmed(s, 'hours'),
+      confirmed(s, 'persona') &&
+      confirmed(s, 'services') &&
+      confirmed(s, 'hours') &&
+      confirmed(s, 'agentApproved'),
     missing: (s) => {
       const out: string[] = []
       if (!confirmed(s, 'persona')) out.push('confirmations.persona')
       if (!confirmed(s, 'services')) out.push('confirmations.services')
       if (!confirmed(s, 'hours')) out.push('confirmations.hours')
+      if (!confirmed(s, 'agentApproved')) out.push('confirmations.agentApproved')
       return out
     },
-  },
-  {
-    id: 'agent_approval',
-    title: 'Aprovação do agente',
-    ask: 'Revise a proposta do agente no card e aprove para eu criar.',
-    requiredPaths: ['confirmations.agentApproved'],
-    isDone: (s) => confirmed(s, 'agentApproved'),
-    missing: (s) =>
-      confirmed(s, 'agentApproved') ? [] : ['confirmations.agentApproved'],
   },
   {
     id: 'knowledge',

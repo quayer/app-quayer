@@ -875,8 +875,9 @@ export async function applyCardSubmit(
       })
     case 'agent_review':
       // Journey v2 (T24/FR-05/FR-22): composite card. Owns its OWN transactional
-      // write (persona+services+hours in 1 updateMany + optional disclosure on
-      // metadata.identityCard), clears capturedProposals, and emits `review_done`.
+      // write (persona+services+hours+agentApproved in 1 updateMany + optional
+      // disclosure on metadata.identityCard), clears capturedProposals, and emits
+      // `review_done`.
       // Granular per-section validation → no partial write. Return early.
       return applyAgentReview({
         conversationId: conversation.id,

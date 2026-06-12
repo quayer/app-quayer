@@ -36,7 +36,10 @@ describe('BUILDER_SYSTEM_PROMPT — regras duras', () => {
 
   it('não depende de propose_agent_creation para mostrar aprovação na jornada v2', () => {
     expect(BUILDER_SYSTEM_PROMPT).toContain(
-      'a interface exibe o card de aprovação pelo step-engine',
+      'a interface exibe o card final de revisão pelo step-engine',
+    )
+    expect(BUILDER_SYSTEM_PROMPT).toContain(
+      'A confirmação desse card já revisa voz/escopo/equipe humana E aprova a criação',
     )
     expect(BUILDER_SYSTEM_PROMPT).toContain(
       'NÃO diga que o card apareceu se não houver card ativo',

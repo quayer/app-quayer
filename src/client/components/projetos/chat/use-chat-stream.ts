@@ -129,7 +129,7 @@ function cardSubmitReceipt(
     case "source_progress":
       return sourceReceipt(payload, readiness)
     case "agent_review":
-      return "Enviando revisão: personalidade, serviços e horário da equipe"
+      return "Criando agente com a revisão final"
     case "business_hours":
       return "Enviando horário da equipe"
     case "services":

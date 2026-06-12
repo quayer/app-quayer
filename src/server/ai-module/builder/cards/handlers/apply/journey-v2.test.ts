@@ -333,13 +333,14 @@ describe('applyBusinessIdentity — T63 (FR-03)', () => {
 // T66 (jornada-builder-v2, Onda 3) — unit do handler `applyAgentReview`.
 //
 // O `agent_review` é o card COMPOSTO da fase Revisar: funde persona + serviços +
-// horários numa ÚNICA confirmação consolidada (NFR-07: 1 decisão/1 ACK em vez de
-// 3) e opcionalmente aplica o disclosure no MESMO handler. Os mocks de `database`
+// horários + aprovação da criação numa ÚNICA confirmação consolidada (NFR-07:
+// 1 decisão/1 ACK em vez de 4) e opcionalmente aplica o disclosure no MESMO handler.
+// Os mocks de `database`
 // e `journey-events` são os mesmos do bloco acima; o lib `agent-identity-card` é
 // PURO e usado de verdade (prova o merge real do disclosure no metadata).
 //
 // Cobre (critério da tarefa T66):
-//   - exatamente 3 sentinels (persona/services/hours) flipados em UM único write;
+//   - exatamente 4 sentinels (persona/services/hours/agentApproved) flipados em UM único write;
 //   - clearCapturedProposals chamado nos 3 domínios (zumbi removido do JSONB);
 //   - disclosure aplicado no metadata.identityCard (1 POST real, sem 2º request);
 //   - erro em UMA seção → { errors: { <secao> } } SEM nenhum write parcial;
@@ -422,13 +423,13 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // 3 sentinels num único write
+  // 4 sentinels num único write
   // -------------------------------------------------------------------------
-  it('flipa EXATAMENTE persona+services+hours num ÚNICO updateMany org-scoped', async () => {
+  it('flipa persona+services+hours+agentApproved num ÚNICO updateMany org-scoped', async () => {
     const res = await submitReview()
 
     expect(res.ok).toBe(true)
-    // Tudo numa só transação, com UM write de conversa (3 flips, 1 write).
+    // Tudo numa só transação, com UM write de conversa (4 flips, 1 write).
     expect(mockTransaction).toHaveBeenCalledOnce()
     expect(mockConvUpdateMany).toHaveBeenCalledOnce()
 
@@ -436,7 +437,8 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
     expect(next.confirmations.persona).toBe(true)
     expect(next.confirmations.services).toBe(true)
     expect(next.confirmations.hours).toBe(true)
-    // NENHUM outro sentinel da jornada é tocado por este handler.
+    expect(next.confirmations.agentApproved).toBe(true)
+    // Nenhum sentinel de capacidades/canais é tocado por este handler.
     expect(next.confirmations.businessIdentity).toBe(false)
     expect(next.confirmations.pricing).toBe(false)
     expect(next.confirmations.handoff).toBe(false)
@@ -468,6 +470,58 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
     expect(next.services.notOffered).toEqual(['coloração'])
     expect(next.hours.preset).toBe('comercial')
     expect(next.hours.timezone).toBe('America/Sao_Paulo')
+  })
+
+  it('carimba proposal.{name,description} e autoriza create_agent no mesmo write', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        project: {
+          name: 'Vibra Butantã',
+          objective: 'Captar leads interessados no empreendimento',
+        },
+      }),
+    })
+
+    const res = await submitReview(
+      reviewPayload({
+        persona: { name: 'SDR Vibra', tone: 'consultivo' },
+        offered: ['plantas', 'localização', 'visitas'],
+      }),
+    )
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.proposal.name).toBe('SDR Vibra')
+    expect(next.proposal.description).toContain(
+      'Captar leads interessados no empreendimento',
+    )
+    expect(next.proposal.description).toContain('plantas, localização, visitas')
+    expect(next.confirmations.agentApproved).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/prossiga com create_agent/i)
+      expect(res.cardInstruction).toMatch(/não peça nova aprovação/i)
+    }
+  })
+
+  it('preserva proposal já proposto pelo LLM ao aprovar no review', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        proposal: {
+          name: 'Consultor Vibra Butantã',
+          description: 'Qualifica leads do Vibra Butantã e encaminha para vendas.',
+        },
+      }),
+    })
+
+    await submitReview()
+
+    const next = writtenConvState()
+    expect(next.proposal.name).toBe('Consultor Vibra Butantã')
+    expect(next.proposal.description).toBe(
+      'Qualifica leads do Vibra Butantã e encaminha para vendas.',
+    )
   })
 
   // -------------------------------------------------------------------------
@@ -710,12 +764,14 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
 
     expect(res.ok).toBe(true)
     const next = writtenConvState()
-    // Os 3 flips aconteceram sobre o `current` (fallback), sem perder subtrees.
+    // Os 4 flips aconteceram sobre o `current` (fallback), sem perder subtrees.
     expect(next.confirmations.persona).toBe(true)
     expect(next.confirmations.services).toBe(true)
     expect(next.confirmations.hours).toBe(true)
+    expect(next.confirmations.agentApproved).toBe(true)
     expect(next.journeyVersion).toBe(2)
     expect(next.persona.greeting).toBe('Olá!')
+    expect(next.proposal.name).toBe('Marina')
   })
 })
 

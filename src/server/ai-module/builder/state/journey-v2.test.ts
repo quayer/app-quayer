@@ -98,7 +98,6 @@ function stateUpTo(step: StepId): BuilderState {
     { id: 'objective', free: true },
     { id: 'business_identity', confirm: 'businessIdentity' },
     { id: 'agent_review', confirm: 'persona' }, // composite — see below
-    { id: 'agent_approval', confirm: 'agentApproved' },
     { id: 'test_drive', confirm: 'testDrive' },
     { id: 'activation', confirm: 'activation' },
     { id: 'channel_platform', confirm: 'channelPlatform' },
@@ -114,10 +113,11 @@ function stateUpTo(step: StepId): BuilderState {
     if (entry.free) {
       s = patchBuilderState(s, { project: { name: 'X', objective: 'Y' } })
     } else if (entry.id === 'agent_review') {
-      // Composite: persona + services + hours.
+      // Composite: persona + services + hours + agentApproved.
       s = confirm(s, 'persona')
       s = confirm(s, 'services')
       s = confirm(s, 'hours')
+      s = confirm(s, 'agentApproved')
     } else if (entry.id === 'whatsapp_connect') {
       // Satisfied via the sentinel-mirror so we can step past it deterministically.
       s = confirm(s, 'whatsappConnectedOnce')

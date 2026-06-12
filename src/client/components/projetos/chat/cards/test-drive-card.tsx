@@ -64,9 +64,10 @@ export interface TestDriveCardProps
    */
   onTabChange?: (tab: PreviewTab) => void
   /**
-   * Se o agente JÁ foi criado. OPCIONAL — a jornada v2 só surfa este passo
-   * depois de `agent_approval`, então o default é `true`; o wiring passa `false`
-   * explicitamente para honrar a borda em que o agente ainda não existe (FR-20).
+   * Se o agente JÁ foi criado. OPCIONAL — a jornada v2 só surfa este passo depois
+   * do review final aprovar/criar o agente, então o default é `true`; o wiring
+   * passa `false` explicitamente para honrar a borda em que o agente ainda não
+   * existe (FR-20).
    */
   agentExists?: boolean
 }

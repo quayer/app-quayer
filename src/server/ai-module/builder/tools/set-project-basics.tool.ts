@@ -125,7 +125,7 @@ export function setProjectBasicsTool(ctx: BuilderToolExecutionContext) {
         '(campos de captura livre — os steps "project_identity" e "objective" da jornada só destravam ' +
         'quando esses campos são gravados; o tom capturado pré-preenche o card de persona, onde a confirmação acontece). ' +
         'Quando o nome vem, atualiza também o nome do projeto. ' +
-        'NÃO use para aprovar a criação do agente (card agent_approval).',
+        'NÃO use para aprovar a criação do agente (isso acontece no card agent_review/agent_approval).',
       inputSchema: setProjectBasicsInputSchema,
       execute: async (input) => {
         try {

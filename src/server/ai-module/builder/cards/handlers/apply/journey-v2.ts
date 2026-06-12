@@ -50,6 +50,47 @@ function sanitizeText(raw: string | undefined, max: number): string | undefined 
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+/** Compact a list for an approved proposal description. */
+function summarizeList(items: readonly string[], fallback: string): string {
+  const clean = items
+    .map((item) => sanitizeText(item, 90))
+    .filter((item): item is string => item !== undefined)
+  if (clean.length === 0) return fallback
+  const head = clean.slice(0, 3).join(', ')
+  const extra = clean.length > 3 ? ` e mais ${clean.length - 3}` : ''
+  return `${head}${extra}`
+}
+
+/**
+ * Derive the proposal stamped by the final review card. This replaces the old v2
+ * dependency on a separate `propose_agent_creation` card: if the LLM already
+ * proposed a name/description we preserve them; otherwise we create a conservative
+ * summary from the reviewed state.
+ */
+function deriveApprovedAgentProposal(state: BuilderState): {
+  name: string
+  description: string
+} {
+  const businessName =
+    sanitizeText(state.project.name, 80) ??
+    sanitizeText(state.sourceIngestion.proposed?.businessName, 80) ??
+    'seu negócio'
+  const name =
+    sanitizeText(state.proposal.name, 100) ??
+    sanitizeText(state.persona.name, 100) ??
+    `SDR ${businessName}`
+  const objective =
+    sanitizeText(state.project.objective, 180) ??
+    'captar e qualificar leads pelo WhatsApp'
+  const tone = sanitizeText(state.persona.tone, 120) ?? 'consultivo e direto'
+  const scope = summarizeList(state.services.offered, 'as principais dúvidas')
+  const description =
+    sanitizeText(state.proposal.description, 800) ??
+    `Atende leads pelo WhatsApp para ${objective}. Responde sobre ${scope}, conduz a conversa com tom ${tone} e encaminha oportunidades para a equipe quando fizer sentido.`
+
+  return { name, description }
+}
+
 /**
  * T19 (FR-03) — business_identity: o usuário descreveu o negócio SEM colar uma
  * fonte (nome obrigatório + endereço/descrição opcionais). É o caminho equivalente
@@ -449,9 +490,9 @@ function validateAgentReviewSections(
 
 /**
  * T24 (FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar. Funde persona +
- * serviços + horários numa ÚNICA confirmação consolidada (NFR-07: 1 decisão, 1 ACK
- * em vez de 3) e, opcionalmente, aplica o disclosure (seção avançada — antiga
- * IdentityTab) no MESMO handler.
+ * serviços + horários + APROVAÇÃO DE CRIAÇÃO numa ÚNICA confirmação consolidada
+ * (NFR-07: 1 decisão, 1 ACK em vez de 4) e, opcionalmente, aplica o disclosure
+ * (seção avançada — antiga IdentityTab) no MESMO handler.
  *
  * Fluxo:
  *  1. VALIDAÇÃO GRANULAR (FR-22) — antes de qualquer escrita. Em falha de uma
@@ -461,12 +502,14 @@ function validateAgentReviewSections(
  *     state encadeado (cada um flipa seu sentinel) e LIMPA explicitamente
  *     `capturedProposals.{persona,services,hours}` via `clearCapturedProposals`
  *     (o deepMerge nunca deleta — o clear precisa ser explícito).
- *  3. Persiste em UM `updateMany` org-scoped (3 sentinels num só write) e, quando
+ *  3. Deriva/preserva `proposal.{name,description}` e flipa `agentApproved`, então
+ *     o LLM pode chamar `create_agent` sem abrir um segundo card.
+ *  4. Persiste em UM `updateMany` org-scoped (4 sentinels num só write) e, quando
  *     há `disclosure`, aplica `normalizeIdentityCard`+`mergeIdentityCardIntoMetadata`
  *     sobre `BuilderProject.metadata.identityCard` na MESMA transação — 1 POST real,
  *     sem segundo request ao PATCH /builder/identity. A injeção no prompt acontece
  *     depois, no `create_agent` (o agente ainda não existe no agent_review).
- *  4. Emite `review_done` (funil), fire-and-forget.
+ *  5. Emite `review_done` (funil), fire-and-forget.
  * Re-lê o state FRESCO dentro da transação (igual a `applyBusinessIdentity`) para
  * não atropelar um submit concorrente. Org-scoped em TODO write. No `any`.
  */
@@ -494,10 +537,12 @@ export async function applyAgentReview(args: {
   // avançada — fora dela, `metadata.identityCard` permanece intocado.
   const disclosure = payload.disclosure
 
-  // 2 + 3. Read-modify-write atômico org-scoped: compõe os 3 cards num único state
-  // (cada export puro flipa seu sentinel), limpa as propostas capturadas e grava
-  // tudo num só `updateMany`. O disclosure (quando presente) vai no metadata do
-  // projeto NA MESMA transação (1 POST real).
+  let approvedProposal = deriveApprovedAgentProposal(current)
+
+  // 2-4. Read-modify-write atômico org-scoped: compõe os 3 cards num único state
+  // (cada export puro flipa seu sentinel), limpa as propostas capturadas, carimba
+  // a proposta aprovada + agentApproved e grava tudo num só `updateMany`. O
+  // disclosure (quando presente) vai no metadata do projeto NA MESMA transação.
   await database.$transaction(async (tx) => {
     const row = await tx.builderProjectConversation.findFirst({
       where: { id: conversationId, organizationId },
@@ -525,6 +570,10 @@ export async function applyAgentReview(args: {
     next = clearCapturedProposals(next, 'persona')
     next = clearCapturedProposals(next, 'services')
     next = clearCapturedProposals(next, 'hours')
+
+    approvedProposal = deriveApprovedAgentProposal(next)
+    next = patchBuilderState(next, { proposal: approvedProposal })
+    next = applyConfirmation(next, 'agentApproved')
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversationId, organizationId },
@@ -578,9 +627,10 @@ export async function applyAgentReview(args: {
     ok: true,
     conversationId,
     cardInstruction:
-      'O usuário CONFIRMOU a revisão consolidada do agente via card (persona, serviços e horário de atendimento).' +
+      'O usuário CONFIRMOU a revisão final e AUTORIZOU a criação do agente via card (voz, escopo e equipe humana).' +
       `${disclosureNote} ` +
-      'Esses dados já estão no contexto do agente — não reabra os cards de persona, serviços ou horários. ' +
-      'Prossiga para a aprovação/criação do agente e siga para o próximo passo da jornada.',
+      `Proposta aprovada: nome "${approvedProposal.name}", descrição "${approvedProposal.description}". ` +
+      'Esses dados já estão no contexto do agente — não reabra os cards de persona, serviços, horários, agent_review ou agent_approval. ' +
+      'Prossiga com create_agent usando o nome e a descrição aprovados; não peça nova aprovação. Depois siga para o próximo passo da jornada.',
   }
 }
