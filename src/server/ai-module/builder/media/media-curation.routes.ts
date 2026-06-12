@@ -50,6 +50,7 @@ import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.pro
 import { BUCKETS, storage } from '@/server/services/storage'
 
 import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
+import { syncGalleryMediaAssets } from './gallery-media-sync'
 import {
   mediaCurationRepository,
   type MediaAssetRow,
@@ -216,6 +217,15 @@ const listProjectMediaRoute = igniter.query({
     // não há collection alvo, logo nada a curar (igual ao materialize).
     const collectionId = await resolveCollectionId(project, organizationId)
     if (!collectionId) return response.success({ media: [] })
+
+    try {
+      await syncGalleryMediaAssets(collectionId, organizationId)
+    } catch (err) {
+      console.warn(
+        '[media-curation] sync gallery->media falhou (fail-safe, listando existente):',
+        err instanceof Error ? err.message : String(err),
+      )
+    }
 
     // Lista org-scoped (deletadas omitidas; SEMPRE filtra organizationId além do
     // collectionId — defense-in-depth).

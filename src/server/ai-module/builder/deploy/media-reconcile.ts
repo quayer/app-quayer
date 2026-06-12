@@ -76,6 +76,12 @@ export interface DesiredMediaAsset {
   sizeBytes: number | null
   /** Categoria livre; `null` quando ausente/vazia. */
   category: string | null
+  /**
+   * Curadoria herdada da origem. Usado pela galeria para materializar também
+   * fotos pendentes na aba Mídias sem liberar o runtime antes da confirmação.
+   * Pricing segue intencional e é confirmado no create pelo handler.
+   */
+  confirmedAt?: Date | null
 }
 
 /**
@@ -88,6 +94,7 @@ export interface GalleryImageRow {
   caption: string | null
   mimeType: string | null
   sizeBytes: number | null
+  confirmedAt?: Date | null
 }
 
 /**
@@ -194,6 +201,7 @@ export function sanitizeGalleryAssets(
       mimeType: nullableText(image.mimeType),
       sizeBytes,
       category: null,
+      confirmedAt: image.confirmedAt ?? null,
     })
   }
   return out

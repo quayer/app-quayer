@@ -50,6 +50,37 @@ export interface MediaAssetRow {
   createdAt: Date
 }
 
+interface MediaAssetLinkRow {
+  source: string
+  sourceRef: string | null
+}
+
+async function findActiveMediaAssetLink(
+  mediaId: string,
+  organizationId: string,
+): Promise<MediaAssetLinkRow | null> {
+  return database.mediaAsset.findFirst({
+    where: { id: mediaId, organizationId, deletedAt: null },
+    select: { source: true, sourceRef: true },
+  })
+}
+
+async function patchLinkedGalleryImage(
+  link: MediaAssetLinkRow | null,
+  organizationId: string,
+  data: {
+    caption?: string | null
+    confirmedAt?: Date | null
+    deletedAt?: Date
+  },
+): Promise<void> {
+  if (link?.source !== 'gallery' || !link.sourceRef) return
+  await database.knowledgeImage.updateMany({
+    where: { id: link.sourceRef, organizationId, deletedAt: null },
+    data,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // 1) Lista os MediaAsset de UMA collection, deletadas excluídas, org-scoped.
 //    A rota já resolveu o collectionId (loadProject + resolveCollectionId) — se
@@ -91,10 +122,15 @@ export async function softDelete(
   mediaId: string,
   organizationId: string,
 ): Promise<number> {
+  const link = await findActiveMediaAssetLink(mediaId, organizationId)
+  const now = new Date()
   const { count } = await database.mediaAsset.updateMany({
     where: { id: mediaId, organizationId, deletedAt: null },
-    data: { deletedAt: new Date() },
+    data: { deletedAt: now },
   })
+  if (count > 0) {
+    await patchLinkedGalleryImage(link, organizationId, { deletedAt: now })
+  }
   return count
 }
 
@@ -109,10 +145,15 @@ export async function setConfirmed(
   confirmed: boolean,
   organizationId: string,
 ): Promise<number> {
+  const link = await findActiveMediaAssetLink(mediaId, organizationId)
+  const confirmedAt = confirmed ? new Date() : null
   const { count } = await database.mediaAsset.updateMany({
     where: { id: mediaId, organizationId, deletedAt: null },
-    data: { confirmedAt: confirmed ? new Date() : null },
+    data: { confirmedAt },
   })
+  if (count > 0) {
+    await patchLinkedGalleryImage(link, organizationId, { confirmedAt })
+  }
   return count
 }
 
@@ -128,10 +169,15 @@ export async function patchCaption(
   organizationId: string,
 ): Promise<number> {
   const trimmed = caption.trim()
+  const nextCaption = trimmed.length > 0 ? trimmed : null
+  const link = await findActiveMediaAssetLink(mediaId, organizationId)
   const { count } = await database.mediaAsset.updateMany({
     where: { id: mediaId, organizationId, deletedAt: null },
-    data: { caption: trimmed.length > 0 ? trimmed : null },
+    data: { caption: nextCaption },
   })
+  if (count > 0) {
+    await patchLinkedGalleryImage(link, organizationId, { caption: nextCaption })
+  }
   return count
 }
 

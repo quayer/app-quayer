@@ -38,7 +38,8 @@ import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { BUCKETS, storage } from '@/server/services/storage'
 
-import { loadProject } from '../knowledge/knowledge-helpers'
+import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
+import { syncGalleryMediaAssets } from '../media/gallery-media-sync'
 import {
   knowledgeImagesRepository,
   type KnowledgeImageRow,
@@ -299,6 +300,17 @@ const bulkSourceImages = igniter.mutation({
         projectId,
         organizationId,
       )
+      try {
+        const collectionId = await resolveCollectionId(project, organizationId)
+        if (collectionId) {
+          await syncGalleryMediaAssets(collectionId, organizationId)
+        }
+      } catch (err) {
+        console.warn(
+          '[source-images] sync gallery->media pós-approve_all falhou:',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
       return response.success({ action, confirmed })
     }
 

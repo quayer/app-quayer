@@ -11,9 +11,10 @@
  * (M1): o helper PURO decide o plano (sanitização + reconciliação), o handler faz a I/O.
  *
  * DUAS origens materializadas na collection do projeto (kb:${projectId}):
- *   1. GALLERY — `KnowledgeImage` CONFIRMADAS (Onda D) da collection do projeto →
- *      source='gallery', sourceRef=image.id, mediaType='image', storageKey=image.storageKey
- *      (assina on-read; nunca persiste URL).
+ *   1. GALLERY — `KnowledgeImage` da collection do projeto → source='gallery',
+ *      sourceRef=image.id, mediaType='image', storageKey=image.storageKey. Fotos
+ *      pendentes viram `MediaAsset.confirmedAt=null`, aparecem na curadoria, mas
+ *      o runtime ainda nao envia.
  *   2. PRICING — `PriceItem.imageUrl` (M2) da PriceList `pricing:${projectId}` →
  *      source='pricing', sourceRef=item.id, mediaType='image'. Quando a URL é a
  *      URL ESTÁVEL gerada pelo app (rota /builder/pricing-image/view, ou a signed
@@ -52,10 +53,10 @@
 
 import { database } from '@/server/services/database'
 import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
+import { loadGalleryDesiredMediaAssets } from '../media/gallery-media-sync'
 import { extractPricingStorageKey } from '../media/pricing-image-url'
 import {
   reconcileMediaAssets,
-  sanitizeGalleryAssets,
   sanitizePricingAssets,
   type DesiredMediaAsset,
   type ExistingMediaRow,
@@ -86,7 +87,7 @@ export interface MaterializeMediaResult {
  *
  * Resolve a collection do projeto; se ausente, retorna no-op (collectionId=null) sem
  * desativar nada (não há alvo onde reconciliar). Caso contrário, calcula o conjunto
- * DESEJADO a partir das `KnowledgeImage` confirmadas e dos `PriceItem.imageUrl`, faz
+ * DESEJADO a partir das `KnowledgeImage` ativas e dos `PriceItem.imageUrl`, faz
  * o upsert por (source, sourceRef) e desativa (soft) os órfãos via o plano PURO de
  * `reconcileMediaAssets`.
  *
@@ -114,7 +115,8 @@ export async function materializeMedia(
 
   // 3. Upsert por @@unique([source, sourceRef]) (GLOBAL). Para cada desired:
   //    - create: carimba collectionId, organizationId, caption, confirmedAt=now,
-  //      position — materializado é intencional → visível ao runtime desde a criação.
+  //      position — gallery respeita confirmedAt da foto; pricing é intencional
+  //      e já nasce visível ao runtime.
   //    - update: reescreve SÓ os campos controlados pela ORIGEM (arquivo/tipo/
   //      categoria/posição). Curadoria do usuário na aba Mídias é PRESERVADA
   //      (audit alto — antes o deploy desfazia a curadoria silenciosamente):
@@ -144,7 +146,8 @@ export async function materializeMedia(
         sourceRef: item.sourceRef,
         sizeBytes: item.sizeBytes,
         position: i,
-        confirmedAt: new Date(),
+        confirmedAt:
+          item.source === 'gallery' ? (item.confirmedAt ?? null) : new Date(),
       },
       update: {
         // Re-aponta a collection (ex.: o projeto migrou de KB) + reescreve os
@@ -158,6 +161,7 @@ export async function materializeMedia(
         category: item.category,
         sizeBytes: item.sizeBytes,
         position: i,
+        ...(item.confirmedAt ? { confirmedAt: item.confirmedAt } : {}),
       },
     })
     upserted += 1
@@ -227,7 +231,7 @@ export async function materializeMedia(
 // ==========================================
 
 /**
- * GALLERY — lê as `KnowledgeImage` CONFIRMADAS (Onda D) da collection do projeto e
+ * GALLERY — lê as `KnowledgeImage` ativas (Onda D) da collection do projeto e
  * delega a normalização ao helper PURO `sanitizeGalleryAssets` (descarta imagens sem
  * storageKey; storageKey assina on-read; externalUrl=null; category=null).
  *
@@ -240,24 +244,7 @@ async function loadGalleryDesired(
   organizationId: string,
 ): Promise<DesiredMediaAsset[]> {
   try {
-    const images = await database.knowledgeImage.findMany({
-      where: {
-        organizationId,
-        collectionId,
-        confirmedAt: { not: null },
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-        storageKey: true,
-        mimeType: true,
-        caption: true,
-        sizeBytes: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    })
-    // Sanitização (descarta sem storageKey, trima caption/mime, etc.) no helper PURO.
-    return sanitizeGalleryAssets(images)
+    return loadGalleryDesiredMediaAssets(collectionId, organizationId)
   } catch (error) {
     console.warn(
       '[deploy/materialize_media] falha ao ler galeria (KnowledgeImage) — pulando origem gallery (degradando):',
