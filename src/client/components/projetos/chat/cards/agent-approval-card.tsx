@@ -54,7 +54,13 @@ function deriveAgentProposal(value: CardComponentProps["value"]) {
     clean(value.proposal.description) ??
     `Atende leads pelo WhatsApp para ${objective}. Responde sobre ${offered}, conduz a conversa com tom ${tone} e encaminha oportunidades para a equipe quando fizer sentido.`
 
-  return { name, description, objective, offered, tone }
+  const tasks = [
+    `Conduzir conversas para ${objective}.`,
+    `Responder sobre ${offered}.`,
+    "Encaminhar oportunidades para a equipe quando fizer sentido.",
+  ]
+
+  return { name, description, objective, offered, tone, tasks }
 }
 
 export function AgentApprovalCard({
@@ -85,12 +91,12 @@ export function AgentApprovalCard({
   return (
     <CardShell
       icon={<Sparkles className="h-4 w-4" />}
-      title={proposal.name}
-      reason="Essa é a proposta que será criada agora. Se estiver certa, aprove; se não, ajuste antes de montar."
+      title="Aprovar criação do agente"
+      reason="Confira o agente que será criado. Se estiver certo, crie agora; se não, ajuste antes."
       tokens={tokens}
       actions={[
         {
-          label: "Aprovar e criar agente",
+          label: "Criar este agente",
           onClick: handleConfirm,
           variant: "primary",
           icon: <Check className="h-3.5 w-3.5" />,
@@ -105,37 +111,80 @@ export function AgentApprovalCard({
         },
       ]}
     >
-      <div
-        className="rounded-md border px-3 py-3"
-        style={{
-          backgroundColor: tokens.bgBase,
-          borderColor: tokens.divider,
-        }}
-      >
-        <p
-          className="text-[13px] leading-relaxed"
-          style={{ color: tokens.textPrimary }}
+      <div className="space-y-4">
+        <div>
+          <p
+            className="text-[11px] font-semibold uppercase tracking-[0.12em]"
+            style={{ color: tokens.textTertiary }}
+          >
+            Agente proposto
+          </p>
+          <h3
+            className="mt-1 text-[15px] font-semibold leading-snug"
+            style={{ color: tokens.textPrimary }}
+          >
+            {proposal.name}
+          </h3>
+          <p
+            className="mt-1 text-[13px] leading-relaxed"
+            style={{ color: tokens.textSecondary }}
+          >
+            {proposal.description}
+          </p>
+        </div>
+
+        <div
+          className="border-t pt-3"
+          style={{ borderColor: tokens.divider }}
         >
-          {proposal.description}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {[
-            `Objetivo: ${proposal.objective}`,
-            `Escopo: ${proposal.offered}`,
-            `Tom: ${proposal.tone}`,
-          ].map((item) => (
-            <span
-              key={item}
-              className="rounded-full border px-2 py-1 text-[11px]"
-              style={{
-                backgroundColor: tokens.bgSurface,
-                borderColor: tokens.divider,
-                color: tokens.textSecondary,
-              }}
-            >
-              {item}
-            </span>
-          ))}
+          <p
+            className="text-[12px] font-semibold"
+            style={{ color: tokens.textPrimary }}
+          >
+            O agente vai
+          </p>
+          <div className="mt-2 space-y-2">
+            {proposal.tasks.map((task) => (
+              <div key={task} className="flex gap-2">
+                <span
+                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: tokens.successSubtle,
+                    color: tokens.successText,
+                  }}
+                >
+                  <Check className="h-3 w-3" aria-hidden="true" />
+                </span>
+                <span
+                  className="text-[12px] leading-relaxed"
+                  style={{ color: tokens.textSecondary }}
+                >
+                  {task}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="border-t pt-3"
+          style={{ borderColor: tokens.divider }}
+        >
+          <p
+            className="text-[11px] font-semibold uppercase tracking-[0.12em]"
+            style={{ color: tokens.brandText }}
+          >
+            Como vai falar
+          </p>
+          <p
+            className="mt-2 inline-flex rounded-full px-2.5 py-1 text-[12px] font-medium"
+            style={{
+              backgroundColor: tokens.brandSubtle,
+              color: tokens.brandText,
+            }}
+          >
+            {proposal.tone}
+          </p>
         </div>
       </div>
     </CardShell>
