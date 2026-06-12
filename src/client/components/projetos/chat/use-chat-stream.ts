@@ -595,6 +595,17 @@ export function useChatStream({
     return () => window.removeEventListener("builder:focus-chat", handleFocusChat)
   }, [sendMessage])
 
+  React.useEffect(() => {
+    const handleReopenCard = (event: Event) => {
+      const detail = (event as CustomEvent<{ cardKey?: CardKey }>).detail
+      if (!detail?.cardKey) return
+      setReopenedCardKey(detail.cardKey)
+    }
+
+    window.addEventListener("builder:reopen-card", handleReopenCard)
+    return () => window.removeEventListener("builder:reopen-card", handleReopenCard)
+  }, [])
+
   // ── Capability toggle (FR-29, T45) ─────────────────────────────
   // A toggle flipped from the Overview's Capabilities surface persists via the
   // SILENT card-submit path (ackMode: 'silent') — NO chat POST, NO SSE, zero LLM

@@ -7,7 +7,7 @@
  *   - `tab-registry.tsx` → trava a tab "Publicar" + fornece o `lockedReason`
  *   - `preview-panel.tsx` → feedback de clique em tab travada (toast/title)
  *   - `overview/components/deploy-readiness-card.tsx` → CTA "Publicar"
- *   - `overview/components/quick-actions.tsx` → CTAs que navegam para deploy
+ *   - `overview/components/next-step-card.tsx` → CTA "Publicar agora"
  *
  * Vive em arquivo próprio (não no tab-registry) para evitar import circular:
  * o registry importa a OverviewTab, que importa os componentes que precisam

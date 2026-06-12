@@ -14,8 +14,8 @@ Relacionados:
 
 ## Propósito
 
-Tab "Visão Geral" do workspace do Builder IA. Mostra a identidade do agente,
-o progresso da jornada e a prontidão para publicar — TUDO espelhado do
+Tab "Visão Geral" do workspace do Builder IA. Mostra o próximo passo, a
+identidade do agente, o progresso da jornada e a prontidão para publicar — TUDO espelhado do
 step-engine determinístico do servidor (FR-18 da spec jornada-builder-v2:
 fonte única de progresso, a mesma do banner do chat e do active-step card).
 
@@ -47,17 +47,21 @@ como tab _core.
 - `first-message-preview.tsx` — Bolha WhatsApp com a saudação do agente
   (sources: `card` = builderState.persona.greeting; `prompt` = regex no
   systemPrompt). "Editar" abre o chat com rascunho pré-preenchido.
+- `next-step-card.tsx` — CTA dominante do próximo passo da jornada; navega para
+  a tab dona do passo ou foca o chat quando a ação é conversacional.
 - `progress-header.tsx` — Barra + texto de progresso, AMBOS derivados do
   `completenessPct` canônico (nunca "X de N" com N bruto — contradiz a barra,
   que exclui passos não-aplicáveis do denominador).
 - `stage-list.tsx` / `stage-row.tsx` — Checklist da jornada (done/active/pending).
+- `capabilities-section.tsx` — Resumo "O que o agente faz"; não configura inline.
+  Cada linha navega para a tab dona do detalhe ou reabre o card correto no chat.
+- `capabilities-helpers.tsx` — Query `getCapabilities` com fallback nativo e a
+  primitiva visual `CapabilityRow`.
 - `deploy-readiness-card.tsx` — "Prontidão para publicar": espelha os
   `blockers` reais; CTA gated por `canOpenDeploy` (gate único, ver abaixo).
 - `readiness-row.tsx` — Linha de requisito; o detalhe do blocker é AÇÃO:
   Link (`redirect` para /conta, /integracoes) ou navegação interna
   (`tab: 'deploy'` para canal/versão).
-- `quick-actions.tsx` — CTAs contextuais; os que navegam para "Publicar"
-  usam o MESMO `DeployGate`.
 - `action-button.tsx` — Botão primário/secundário (suporta `disabled`+`title`).
 - `metrics-card.tsx` — Card de métricas (apenas publicado).
 
@@ -92,8 +96,9 @@ Tab e botões nunca podem discordar.
    `journeyToPhases` e `blockersToChecklist`.
 3. Sem atividade → `<EmptyState />`. Carregando → skeletons. Falha →
    parágrafo honesto (NFR-06), nunca progresso inventado.
-4. Com readiness: `ProgressHeader` + `StageList` + `DeployReadinessCard` +
-   `QuickActions` + `MetricsCard` (se publicado).
+4. Com readiness: `NextStepCard` + identidade/saudação + progresso por fases +
+   `CapabilitiesSection`. `DeployReadinessCard` aparece só na fase "Lançar" ou
+   quando o deploy já está pronto. `MetricsCard` aparece se publicado.
 
 ## Convenções
 

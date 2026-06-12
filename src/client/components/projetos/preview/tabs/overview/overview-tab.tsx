@@ -32,9 +32,9 @@ import { DeployReadinessCard } from "./components/deploy-readiness-card"
 import { EmptyState } from "./components/empty-state"
 import { FirstMessagePreviewCard } from "./components/first-message-preview"
 import { MetricsCard } from "./components/metrics-card"
+import { NextStepCard } from "./components/next-step-card"
 import { PhaseList } from "./components/phase-list"
 import { ProgressHeader } from "./components/progress-header"
-import { QuickActions } from "./components/quick-actions"
 import { StageList } from "./components/stage-list"
 import { deriveFirstMessage } from "./helpers/derive-first-message"
 import {
@@ -115,6 +115,10 @@ export function OverviewTab({
 
   const doneCount = stages.filter((s) => s.status === "done").length
   const hasAnyActivity = messages.length > 0 || project.aiAgent !== null
+  const showDeployReadiness =
+    !readiness?.journey ||
+    readiness.journey.activePhaseId === "lancar" ||
+    readiness.isDeployReady
 
   // T101b (FR-32): na revelação da Visão geral (projetos v2) cada seção monta
   // em cascata (~100ms de stagger via CSS). Atrelado a `phases` (presente só em
@@ -123,12 +127,6 @@ export function OverviewTab({
   const isJourneyV2 = phases !== null
   const stagger = (n: number) =>
     isJourneyV2 ? `builder-section-in builder-stagger-${n}` : ""
-
-  // Canal: prefere o readiness (fonte única, cobre conexão feita pelo wizard
-  // sem router.refresh); o snapshot SSR fica como fallback enquanto carrega.
-  const hasChannel = readiness
-    ? !readiness.blockers.some((b) => b.check === "channel")
-    : project.hasWhatsAppConnection
 
   /* -- Estado 1: sem nenhuma atividade → instrui o usuário a começar -- */
   if (!hasAnyActivity) {
@@ -156,9 +154,21 @@ export function OverviewTab({
         </div>
       )}
 
-      {/* -- Seção 1: Identidade do agente -- */}
-      {aiAgent && (
+      {/* -- Seção 1: próximo passo dominante -- */}
+      {readiness && (
         <div className={stagger(1)}>
+          <NextStepCard
+            readiness={readiness}
+            deployGate={deployGate}
+            onTabChange={onTabChange}
+            tokens={tokens}
+          />
+        </div>
+      )}
+
+      {/* -- Seção 2: Identidade do agente -- */}
+      {aiAgent && (
+        <div className={stagger(2)}>
           <AgentIdentityHeader
             aiAgent={aiAgent}
             status={status}
@@ -167,9 +177,9 @@ export function OverviewTab({
         </div>
       )}
 
-      {/* -- Seção 2: Primeira mensagem do WhatsApp -- */}
+      {/* -- Seção 3: Primeira mensagem do WhatsApp -- */}
       {aiAgent && (
-        <div className={stagger(2)}>
+        <div className={stagger(3)}>
           <FirstMessagePreviewCard
             tokens={tokens}
             firstMessage={firstMessage.text}
@@ -179,7 +189,7 @@ export function OverviewTab({
         </div>
       )}
 
-      {/* -- Seções 3 + 3b: progresso da jornada + prontidão (fonte única) -- */}
+      {/* -- Seções 4 + 5: progresso da jornada + capacidades -- */}
       {isLoading && (
         <div className="flex flex-col gap-3" aria-busy="true">
           <Skeleton className="h-6 w-full rounded-md" />
@@ -190,7 +200,7 @@ export function OverviewTab({
 
       {readiness && (
         <>
-          <div className={stagger(3)}>
+          <div className={stagger(4)}>
             <ProgressHeader
               doneCount={doneCount}
               totalCount={stages.length}
@@ -200,7 +210,7 @@ export function OverviewTab({
           </div>
           {/* v2: render por fases (Journey "Configure por exceção"); v1: lista
               plana intocada (render byte-idêntico, NFR-03). */}
-          <div className={stagger(4)}>
+          <div className={stagger(5)}>
             {phases ? (
               <PhaseList phases={phases} tokens={tokens} />
             ) : (
@@ -208,20 +218,8 @@ export function OverviewTab({
             )}
           </div>
 
-          <div className={stagger(5)}>
-            <DeployReadinessCard
-              items={checklist}
-              isDeployReady={readiness.isDeployReady}
-              deployGate={deployGate}
-              onTabChange={onTabChange}
-              tokens={tokens}
-            />
-          </div>
-
-          {/* Seção 3c: Capacidades (FR-06/07) — o que o agente sabe fazer +
-              toggles de configuração inline (silent-submit, FR-29). Derivada do
-              builderState do readiness; o getCapabilities cobre os insumos não
-              derivados (fotos/integrações/agenda conectada). */}
+          {/* Seção 6: o que o agente faz (FR-06/07). Resumo + ações curtas;
+              configuração detalhada vive no chat ou na tab dona do recurso. */}
           {readiness.builderState && (
             <div className={stagger(6)}>
               <CapabilitiesSection
@@ -229,6 +227,18 @@ export function OverviewTab({
                 builderState={readiness.builderState}
                 tokens={tokens}
                 onTabChange={onTabChange}
+              />
+            </div>
+          )}
+
+          {showDeployReadiness && (
+            <div className={stagger(7)}>
+              <DeployReadinessCard
+                items={checklist}
+                isDeployReady={readiness.isDeployReady}
+                deployGate={deployGate}
+                onTabChange={onTabChange}
+                tokens={tokens}
               />
             </div>
           )}
@@ -244,19 +254,7 @@ export function OverviewTab({
         </p>
       )}
 
-      {/* -- Seção 4: Ações rápidas (contextuais ao estado do projeto) -- */}
-      <div className={stagger(7)}>
-        <QuickActions
-          hasAgent={!!aiAgent}
-          hasWhatsAppConnection={hasChannel}
-          status={status}
-          deployGate={deployGate}
-          onTabChange={onTabChange}
-          tokens={tokens}
-        />
-      </div>
-
-      {/* -- Seção 5: Métricas (apenas para agentes publicados) -- */}
+      {/* -- Seção final: Métricas (apenas para agentes publicados) -- */}
       {status !== "draft" && (
         <div className={stagger(8)}>
           <MetricsCard tokens={tokens} projectId={project.id} />

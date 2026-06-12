@@ -6,7 +6,7 @@ import {
 } from '../auth/helpers'
 
 /**
- * T68 — E2E: Capacidades (spec §8 itens 4-6) + silent-submit (FR-29) +
+ * T68 — E2E: Capacidades (spec §8 itens 4-6) + card-submit silent (FR-29) +
  *           share da Agenda delegado (FR-34).
  *
  * specs/jornada-builder-v2/tasks.md T68 (Onda 4, plan §4.3 / §7.2):
@@ -15,20 +15,19 @@ import {
  *     • Conhecimento SEMPRE ativo (sem toggle de desligar) — FR-07.
  *     • Transferir OFF por default: o projeto publica e o agente responde sozinho
  *       (solo) sem nenhuma configuração de handoff.
- *     • Ligar a ROLETA pela Overview expõe a config inline E persiste via
- *       silent-submit (FR-29): o flip do `handoff.mode` é aplicado pelo MESMO
+ *     • Ligar a ROLETA pelo card-submit persiste via silent-submit (FR-29):
+ *       o flip do `handoff.mode` é aplicado pelo MESMO
  *       caminho do card-submit, a resposta é JSON simples (`{ ok, builderState }`)
- *       SEM turno LLM/SSE, e a linha de sistema local "✓ ..." aparece no chat
- *       aberto SEM reload (consumo silent — sem turno do meta-agente).
+ *       SEM turno LLM/SSE (consumo silent — sem turno do meta-agente).
  *     • Share de agenda delegado (FR-34): "Enviar link para o profissional" gera
  *       um connect-link `/conectar-agenda/<token>` copiável; ANTES de conectar o
  *       status nunca confirma (FR-11); com o status flipado para CONNECTED
  *       (seed/stub — sem OAuth real no E2E) "Verificar conexão" confirma o card.
  *
  * ── Sinais canônicos (load-bearing) ──────────────────────────────────────────
- * A UI da superfície de Capacidades (T49–T51: `capabilities-section.tsx` na
- * Overview, toggles que expandem cards inline) roda em tarefas PARALELAS que podem
- * não estar no disco quando esta spec executa. Por isso o backbone determinístico
+ * A UI de "O que o agente faz" (T49–T51: `capabilities-section.tsx` na
+ * Overview) resume estados e leva o usuário para a tab/card dono da configuração.
+ * Por isso o backbone determinístico
  * ancora nos MESMOS endpoints que a UI v2 consome — o contrato server-side é
  * estável e suficiente para os critérios §8 itens 4-6:
  *
@@ -43,7 +42,7 @@ import {
  *      no readiness recém-criado (resolver:
  *      src/server/ai-module/builder/state/readiness-resolver.ts). Sem handoff
  *      configurado, o agente atende SOLO; a jornada NÃO exige o handoff para
- *      publicar (handoff/pricing/calendar são opt-in pela superfície de Capacidades,
+ *      publicar (handoff/pricing/calendar são opt-in pela superfície de capacidades,
  *      NÃO steps da v2 — plan §3.2). Confirmamos lendo o readiness: nenhum sentinel
  *      de handoff bloqueia o deploy.
  *
@@ -53,8 +52,8 @@ import {
  *      `SILENT_ALLOWED_CARD_KEYS` em card-submit.schemas.ts inclui 'handoff'). O
  *      flip de `handoff.mode = 'roleta'` persiste pelo MESMO `applyCardSubmit`; a
  *      resposta é JSON simples `{ ok: true, builderState }` SEM SSE (zero turno
- *      LLM). É a prova de FR-29: o toggle de Capacidade muda o estado sem custo de
- *      um turno do meta-agente, e a UI mostra apenas uma linha de sistema LOCAL.
+ *      LLM). É a prova de FR-29: a capacidade muda de estado sem custo de um
+ *      turno do meta-agente.
  *      Contra-prova: o MESMO cardKey 'handoff' com `silent` em um card da JORNADA
  *      não existe; mas um cardKey FORA da allowlist com `silent` é 400 — asserido
  *      contra `business_identity` (card da jornada → silent proibido).
@@ -72,18 +71,16 @@ import {
  *      cenário então faz skip honesto (contrato tolerante de T68).
  *
  * ── Linha de sistema "✓ …" no chat aberto sem reload (consumo silent) ─────────
- * A asserção de DOM tenta abrir o workspace e, após o silent-submit, confirmar que
- * a linha de sistema local aparece SEM navegação/reload. Como a superfície de
- * Capacidades (T49–T51) pode não estar no disco, a asserção de DOM é TOLERANTE: se
- * a seção/linha não estiver presente, o cenário recai no backbone determinístico
- * (resposta JSON sem SSE) que JÁ prova o consumo silent (sem turno LLM). Corpo
- * completo e funcional preservado — exatamente o contrato de T68.
+ * A asserção de DOM é legada e tolerante: se alguma superfície ainda traduzir o
+ * silent-submit em linha local, validamos que apareceu sem reload; se não aparecer,
+ * o cenário recai no backbone determinístico (resposta JSON sem SSE), que já prova
+ * o consumo silent sem turno LLM.
  *
  * ── Dependências de infra (skip honesto, plan §7.2 / NFR-09) ─────────────────
  * Roda com o provider LLM mock (T89, `E2E_LLM_MOCK=1`) contra o `npm run dev`
  * local com o test DB exposto (TEST_DATABASE_URL/DATABASE_URL). NENHUM cenário
- * abaixo depende de resposta real de modelo: os toggles de Capacidade usam
- * silent-submit (sem turno LLM por design — FR-29) e o share de agenda usa stub de
+ * abaixo depende de resposta real de modelo: o card-submit silent não abre turno
+ * LLM (FR-29) e o share de agenda usa stub de
  * status. O `npx playwright test --list` reconhece a spec independente de env.
  *
  *   E2E_LLM_MOCK=1               → provider mock ativo (NFR-09); habilita o
@@ -314,8 +311,8 @@ async function enableRoletaSilently(
 }
 
 /**
- * Create the calendar connect-link via the SAME endpoint the Agenda inline config
- * uses (POST /calendar/connect-link). Returns the result, OR null when the
+ * Create the calendar connect-link via the SAME endpoint the Agenda card uses
+ * (POST /calendar/connect-link). Returns the result, OR null when the
  * CalendarConnection table is not provisioned in this environment (the route 404s
  * defensively — getCalendarConnection() == null) so the caller can skip honestly.
  */
@@ -477,8 +474,7 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
   })
 
   // ───────────────────────────────────────────────────────────────────────────
-  // §8 item: ligar a ROLETA pela Overview expõe a config inline E persiste via
-  //          silent-submit (FR-29) — sem turno LLM; linha de sistema local no chat.
+  // §8 item: ligar a ROLETA persiste via silent-submit (FR-29) — sem turno LLM.
   // ───────────────────────────────────────────────────────────────────────────
   test('ligar a roleta via silent-submit (FR-29): persiste sem turno LLM, linha de sistema sem reload', async ({
     page,
@@ -516,7 +512,7 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
       'o flip do handoff.mode persistiu no MESMO caminho do card-submit',
     ).toBe('roleta')
 
-    // ── A config inline da roleta foi gravada (os membros do roster persistiram). ─
+    // ── A config da roleta foi gravada (os membros do roster persistiram). ─
     const after = await fetchReadiness(page, projectId)
     expect(
       after.builderState?.confirmations?.handoff,
@@ -528,14 +524,13 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
     ).toBe('roleta')
     expect(
       (after.builderState?.handoff?.members ?? []).length,
-      'a config inline da roleta gravou o roster (atendentes nome + WhatsApp)',
+      'a config da roleta gravou o roster (atendentes nome + WhatsApp)',
     ).toBe(ROLETA_MEMBERS.length)
 
     // ── Linha de sistema local "✓ …" no chat aberto SEM reload (consumo silent). ─
-    // A superfície de Capacidades (T49–T51) traduz o silent-submit numa linha de
-    // sistema LOCAL (evento `builder:capability-toggled`) — sem POST de chat, sem
-    // SSE. A asserção de DOM é TOLERANTE: a UI pode não estar no disco quando esta
-    // spec roda; nesse caso o contrato JSON-sem-SSE acima já prova o consumo silent.
+    // Asserção legada e tolerante: se uma superfície ativa ainda traduzir o
+    // silent-submit em evento local, validamos a linha; se não, o contrato
+    // JSON-sem-SSE acima já prova o consumo silent.
     const systemLine = page
       .getByText(/✓\s.*(?:transfer|roleta|rodízio|atend)/i)
       .first()

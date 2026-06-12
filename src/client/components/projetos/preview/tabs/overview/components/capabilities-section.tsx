@@ -1,22 +1,20 @@
 "use client"
 
 /**
- * CapabilitiesSection — superfície de Capacidades na Overview (FR-06/07, T44/T45/T107).
+ * CapabilitiesSection — resumo "O que o agente faz" na Overview (FR-06/07).
  *
- * Decisão (plan §4.3): SEÇÃO da Overview, NÃO tab nova. Linhas:
+ * Decisão de UX: a Overview orienta, não configura. Linhas:
  *   - Conhecimento — SEMPRE ativo, sem toggle, link p/ a tab Conhecimento (FR-07).
  *   - Transferir   — `builderState.handoff.mode`; proposta de nicho regulado
  *                    (`capturedProposals.handoff`) = badge + reason.
  *   - Preços       — `pricing.items` + `disclosureStyle`.
- *   - Agenda       — `handoff.alsoSchedule` + `calendarConnected` + share delegável (FR-34).
+ *   - Agenda       — `handoff.alsoSchedule` + `calendarConnected`.
  *   - Fotos        — `mediaImagesCount` + `sourceImagesCount` (Mídias/fontes).
  *   - Integrações  — `customTools` (empty state).
  *
- * Estados derivam do builderState do readiness — ZERO fetch extra além do
- * getCapabilities (NFR-05). Ligar um toggle (T45/FR-29) EXPANDE inline o card e
- * submete pelo MESMO card-submit com `ackMode:'silent'` (flip sem turno LLM/SSE;
- * linha de sistema local no chat via `builder:capability-toggled`). As funções
- * PURAS de T27 dizem "o que o agente vai saber fazer" — sem 2ª fonte de verdade.
+ * Estados derivam do builderState do readiness + getCapabilities. A seção não
+ * abre formulários inline: ações reabrem o card no chat ou levam para a tab dona
+ * do detalhe. Assim a Overview permanece painel de decisão, não cockpit.
  */
 
 import * as React from "react"
@@ -42,12 +40,9 @@ import {
 import type { PreviewTab } from "@/client/components/projetos/types"
 import type { CardKey } from "@/client/components/projetos/chat/cards/types"
 
-import { CalendarShareRow } from "./calendar-share-row"
 import {
   CapabilityRow,
-  InlineCard,
   useCapabilities,
-  useSilentCardSubmit,
 } from "./capabilities-helpers"
 
 // ── "O que o agente vai saber fazer" (pure-fn driven, T27) ──────────────────
@@ -99,8 +94,6 @@ export function CapabilitiesSection({
   onTabChange,
 }: CapabilitiesSectionProps) {
   const caps = useCapabilities(projectId)
-  const submitSilent = useSilentCardSubmit(projectId)
-  const [openKey, setOpenKey] = React.useState<CardKey | null>(null)
 
   const handoff = builderState.handoff
   const pricing = builderState.pricing
@@ -134,17 +127,23 @@ export function CapabilitiesSection({
           : `${sourceImagesCount} ${sourceImagesCount === 1 ? "foto aprovada" : "fotos aprovadas"} nas fontes. Elas entram no catálogo do agente na publicação.`
         : "Nenhuma foto encontrada ainda. Adicione fotos manualmente na aba Mídias."
 
-  const toggle = React.useCallback((key: CardKey) => {
-    setOpenKey((prev) => (prev === key ? null : key))
+  const reopenCard = React.useCallback((cardKey: CardKey) => {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("builder:reopen-card", {
+        detail: { cardKey },
+      }),
+    )
+    window.dispatchEvent(new CustomEvent("builder:focus-chat"))
   }, [])
 
   return (
-    <section aria-label="Capacidades do agente" className="flex flex-col gap-3">
+    <section aria-label="O que o agente faz" className="flex flex-col gap-3">
       <h2
         className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em]"
         style={{ color: tokens.textSecondary }}
       >
-        Capacidades
+        O que o agente faz
       </h2>
 
       {/* Conhecimento — SEMPRE ativo, sem toggle (FR-07). */}
@@ -154,7 +153,7 @@ export function CapabilitiesSection({
         title="Conhecimento"
         summary="O agente sempre responde com base no que sabe do seu negócio. Sempre ativo."
         status={{ label: "Sempre ativo", active: true }}
-        action={{ label: "Abrir Conhecimento", onClick: () => onTabChange?.("knowledge") }}
+        action={{ label: "Abrir", onClick: () => onTabChange?.("knowledge") }}
       />
 
       {/* Transferir para humano. */}
@@ -167,23 +166,11 @@ export function CapabilitiesSection({
         badge={
           !handoffActive && proposedHandoff?.mode ? "Sugerido para seu nicho" : undefined
         }
-        expandable
-        expanded={openKey === "handoff"}
-        onToggle={() => toggle("handoff")}
-      >
-        {proposedHandoff?.reason && !handoffActive && (
-          <p className="mb-3 text-[12px] leading-relaxed" style={{ color: tokens.textSecondary }}>
-            {proposedHandoff.reason}
-          </p>
-        )}
-        <InlineCard
-          cardKey="handoff"
-          builderState={builderState}
-          projectId={projectId}
-          tokens={tokens}
-          onSilentSubmit={submitSilent}
-        />
-      </CapabilityRow>
+        action={{
+          label: handoffActive ? "Ajustar" : "Ativar",
+          onClick: () => reopenCard("handoff"),
+        }}
+      />
 
       {/* Preços. */}
       <CapabilityRow
@@ -192,20 +179,13 @@ export function CapabilitiesSection({
         title="Preços"
         summary={pricingSummary(pricing)}
         status={{ label: pricingActive ? "Ativo" : "Desligado", active: pricingActive }}
-        expandable
-        expanded={openKey === "pricing"}
-        onToggle={() => toggle("pricing")}
-      >
-        <InlineCard
-          cardKey="pricing"
-          builderState={builderState}
-          projectId={projectId}
-          tokens={tokens}
-          onSilentSubmit={submitSilent}
-        />
-      </CapabilityRow>
+        action={{
+          label: pricingActive ? "Ajustar" : "Configurar",
+          onClick: () => reopenCard("pricing"),
+        }}
+      />
 
-      {/* Agenda — share delegável (FR-34) acima do card de conexão. */}
+      {/* Agenda. */}
       <CapabilityRow
         tokens={tokens}
         icon={<CalendarClock className="h-4 w-4" />}
@@ -215,25 +195,11 @@ export function CapabilitiesSection({
           label: calendarConnected ? "Conectada" : calendarActive ? "Ativa" : "Desligada",
           active: calendarActive,
         }}
-        expandable
-        expanded={openKey === "calendar_connect"}
-        onToggle={() => toggle("calendar_connect")}
-      >
-        <div className="flex flex-col gap-4">
-          <CalendarShareRow
-            projectId={projectId}
-            tokens={tokens}
-            onConnected={() => caps.refetch()}
-          />
-          <InlineCard
-            cardKey="calendar_connect"
-            builderState={builderState}
-            projectId={projectId}
-            tokens={tokens}
-            onSilentSubmit={submitSilent}
-          />
-        </div>
-      </CapabilityRow>
+        action={{
+          label: calendarActive ? "Ajustar" : "Ativar",
+          onClick: () => reopenCard("calendar_connect"),
+        }}
+      />
 
       {/* Fotos. */}
       <CapabilityRow
@@ -242,7 +208,10 @@ export function CapabilitiesSection({
         title="Fotos"
         summary={photosSummary}
         status={{ label: photosStatusLabel, active: photosActive }}
-        action={{ label: "Abrir Mídias", onClick: () => onTabChange?.("media") }}
+        action={{
+          label: sourceImagesPendingCount > 0 ? "Revisar" : "Abrir",
+          onClick: () => onTabChange?.("media"),
+        }}
       />
 
       {/* Integrações (custom tools). */}
@@ -256,6 +225,10 @@ export function CapabilitiesSection({
             : "Nenhuma integração. Peça ao assistente para conectar uma ferramenta externa."
         }
         status={{ label: customTools.length > 0 ? "Ativo" : "Vazio", active: customTools.length > 0 }}
+        action={{
+          label: customTools.length > 0 ? "Abrir" : "Conectar",
+          onClick: () => onTabChange?.("advanced"),
+        }}
       />
     </section>
   )
