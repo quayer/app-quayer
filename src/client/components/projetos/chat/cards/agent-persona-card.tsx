@@ -66,8 +66,8 @@ export function AgentPersonaCard({
       title="Personalidade do agente"
       reason={
         section.step === "voice"
-          ? "Passo 1 de 2 — escolha o jeito de falar e a identidade do agente."
-          : "Passo 2 de 2 — ajuste a saudação. Ela aparece em tempo real como o cliente vai ver no WhatsApp."
+          ? "Defina como o agente se apresenta, o tom e as instruções de conversa."
+          : "Ajuste a primeira mensagem. Ela aparece em tempo real como o cliente vai ver no WhatsApp."
       }
       tokens={tokens}
       actions={personaCardActions(section, submit)}

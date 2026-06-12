@@ -344,7 +344,7 @@ export function personaCardActions(
   return step === "voice"
     ? [
         {
-          label: "Avançar",
+          label: "Ajustar saudação",
           onClick: () => setStep("greeting"),
           variant: "primary" as const,
           icon: <ArrowRight className="h-3.5 w-3.5" />,
@@ -400,6 +400,10 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
     isPreviewPlaceholder,
     agentName,
   } = state
+  const selectedSpeechMode =
+    SPEECH_MODES.find((option) => option.key === speechMode) ?? SPEECH_MODES[0]
+  const toneSummary = tone.trim() || "tom ainda não definido"
+  const styleSummary = style.trim() || "instruções opcionais"
 
   if (step === "voice") {
     return (
@@ -408,13 +412,13 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
         <div
           className="flex flex-col gap-2"
           role="radiogroup"
-          aria-label="Jeito de falar do agente"
+          aria-label="Como o agente se apresenta"
         >
           <span
             className="text-[12px] font-medium"
             style={{ color: tokens.textSecondary }}
           >
-            Quem o lead acha que respondeu
+            Como o agente se apresenta
           </span>
           <div className="grid gap-2 sm:grid-cols-3">
             {SPEECH_MODES.map((option) => {
@@ -530,7 +534,7 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
             className="text-[12px] font-medium"
             style={{ color: tokens.textSecondary }}
           >
-            Regras de escrita
+            Instruções de conversa
           </Label>
           <Input
             id="persona-style"
@@ -545,6 +549,31 @@ export function PersonaSection({ state }: { state: PersonaSectionState }) {
               color: tokens.textPrimary,
             }}
           />
+        </div>
+
+        <div className="border-t pt-3" style={{ borderColor: tokens.divider }}>
+          <p
+            className="text-[11px] font-semibold uppercase tracking-[0.12em]"
+            style={{ color: tokens.textTertiary }}
+          >
+            Vai falar como
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {[selectedSpeechMode.label, toneSummary, styleSummary].map(
+              (item) => (
+                <span
+                  key={item}
+                  className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                  style={{
+                    backgroundColor: tokens.brandSubtle,
+                    color: tokens.brandText,
+                  }}
+                >
+                  {item}
+                </span>
+              ),
+            )}
+          </div>
         </div>
       </div>
     )
