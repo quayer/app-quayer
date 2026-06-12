@@ -337,7 +337,7 @@ export function PreviewSummaryCard({
   const warnAreas = new Set<SummaryArea>(warnings.map((w) => w.area))
 
   // Uma seção fica "genérica" se QUALQUER warning de uma de suas áreas estiver
-  // aberto. Persona agrega nome + saudação; Serviços e Preços têm seções
+  // aberto. Persona agrega nome + saudação; Escopo e Preços têm seções
   // próprias. "Passagem para humano" fica amber quando o modo não foi definido.
   const personaWarn =
     warnAreas.has(SUMMARY_AREA.persona) || warnAreas.has(SUMMARY_AREA.greeting)
@@ -355,7 +355,7 @@ export function PreviewSummaryCard({
     },
     {
       icon: <ListChecks className="h-4 w-4" />,
-      title: "Serviços",
+      title: "Escopo",
       detail: summarizeServices(value.services),
       confirmed: confirmations.services,
       warn: warnAreas.has(SUMMARY_AREA.services),

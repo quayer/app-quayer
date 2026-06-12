@@ -443,7 +443,8 @@ export async function applyChannelPlatform(args: {
  * qualquer write. Regra mínima de "revisado o suficiente para confirmar", espelho
  * do que cada card individual carrega quando preenchido de verdade:
  *   - persona: ao menos um campo com texto (nome/tom/estilo/saudação).
- *   - services: ao menos um serviço OFERECIDO (o "não oferece" é só complemento).
+ *   - services: ao menos um assunto que a IA pode responder/conduzir (o "não
+ *     deve prometer" é só complemento).
  *   - hours: um preset OU um schedule não-vazio (o default "sempre aberto" vive no
  *     componente — o body sempre chega com algo a confirmar).
  * Retorna `undefined` quando todas passam; caso contrário um objeto granular SÓ
@@ -467,7 +468,8 @@ function validateAgentReviewSections(
 
   const hasOffered = payload.offered.some((s) => s.trim().length > 0)
   if (!hasOffered) {
-    errors.services = 'Informe ao menos um serviço que o negócio oferece.'
+    errors.services =
+      'Informe ao menos um assunto que a IA pode responder ou conduzir.'
   }
 
   const hasPreset =
@@ -630,7 +632,7 @@ export async function applyAgentReview(args: {
       'O usuário CONFIRMOU a revisão final e AUTORIZOU a criação do agente via card (voz, escopo e equipe humana).' +
       `${disclosureNote} ` +
       `Proposta aprovada: nome "${approvedProposal.name}", descrição "${approvedProposal.description}". ` +
-      'Esses dados já estão no contexto do agente — não reabra os cards de persona, serviços, horários, agent_review ou agent_approval. ' +
+      'Esses dados já estão no contexto do agente — não reabra os cards de persona, escopo, horários, agent_review ou agent_approval. ' +
       'Prossiga com create_agent usando o nome e a descrição aprovados; não peça nova aprovação. Depois siga para o próximo passo da jornada.',
   }
 }

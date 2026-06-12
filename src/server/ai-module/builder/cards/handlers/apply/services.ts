@@ -3,10 +3,8 @@
  *
  * Pure `(state, payload) => CardApplication`: sanitizes the offered/notOffered
  * lists, applies them via the builder-state helpers and flips the `services`
- * sentinel. Extracted from `apply-card-submit.ts` (T22) to keep the entrypoint a
- * thin dispatch under the 800-line service ceiling. ZERO behavior change — same
- * signature/copy as before. `sanitizeStringList` stays a transversal helper in the
- * entrypoint (also used by handoff/activation/source) and is imported from there.
+ * sentinel. Product copy calls this "Escopo do atendimento"; the persisted
+ * contract remains `services` for compatibility.
  */
 
 import {
@@ -35,8 +33,8 @@ export function applyServices(
   return {
     next,
     cardInstruction:
-      `O usuário INFORMOU os serviços via card. Oferece: ${offeredLabel}. Não oferece: ${notOfferedLabel}. ` +
+      `O usuário INFORMOU o escopo do atendimento via card. Pode responder/conduzir: ${offeredLabel}. Não deve prometer: ${notOfferedLabel}. ` +
       'Incorpore isso ao escopo do agente e siga para o próximo passo. ' +
-      'Não reabra o card de serviços.',
+      'Não reabra o card de escopo.',
   }
 }

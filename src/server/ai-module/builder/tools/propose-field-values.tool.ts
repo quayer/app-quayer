@@ -56,7 +56,7 @@ export const proposeFieldValuesInputSchema = z
     services: capturedServicesProposalSchema
       .optional()
       .describe(
-        'Serviços propostos: { offered?: string[] }. Pré-preenche o card de serviços para CONFIRMAÇÃO.',
+        'Escopo proposto: { offered?: string[] }. Pré-preenche o card de escopo para CONFIRMAÇÃO.',
       ),
     hours: capturedHoursProposalSchema
       .optional()
@@ -107,7 +107,7 @@ export function proposeFieldValuesTool(ctx: BuilderToolExecutionContext) {
     metadata: { isReadOnly: false, isConcurrencySafe: false, requiresApproval: false },
     tool: tool({
       description:
-        'Use quando o usuário mencionar horários/serviços/preços/transferência (ou persona/ativação) em texto livre — ' +
+        'Use quando o usuário mencionar horários/escopo/preços/transferência (ou persona/ativação) em texto livre — ' +
         'a proposta aparece prefillada no card para CONFIRMAÇÃO; nunca confirme por ele. ' +
         'Grava SOMENTE builderState.capturedProposals.<domínio> (proposta, não confirmação): ' +
         'NÃO destrava nenhum passo da jornada e NÃO substitui o submit do card.',
@@ -161,7 +161,7 @@ export function proposeFieldValuesTool(ctx: BuilderToolExecutionContext) {
 
           const labels: Record<ProposedDomain, string> = {
             persona: 'persona',
-            services: 'serviços',
+            services: 'escopo',
             hours: 'horários',
             pricing: 'preços',
             handoff: 'transferência',

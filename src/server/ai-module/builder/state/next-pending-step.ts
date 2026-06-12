@@ -163,8 +163,8 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
   },
   {
     id: 'services',
-    title: 'O que oferece (e o que não)',
-    ask: 'O que o agente oferece e o que ele NÃO faz? Use o card de serviços.',
+    title: 'Escopo do atendimento',
+    ask: 'Sobre o que a IA pode responder e o que ela não deve prometer? Use o card de escopo.',
     requiredPaths: ['confirmations.services'],
     isDone: (s) => confirmed(s, 'services'),
     missing: (s) => (confirmed(s, 'services') ? [] : ['confirmations.services']),

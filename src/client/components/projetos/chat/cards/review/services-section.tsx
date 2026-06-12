@@ -1,12 +1,12 @@
 "use client"
 
 /**
- * Builder Cards — Agent scope section: does / does not (jornada-builder-v2, Onda 3)
+ * Builder Cards — Escopo do atendimento section: pode / não deve (jornada-builder-v2, Onda 3)
  *
  * Reusable form body extracted from `services-offered-card.tsx` (T41). Owns the
  * two editable chip lists that define the agent's SCOPE:
- *   - "Faz / oferece" → services.offered    (brand-subtle chips)
- *   - "NÃO faz"       → services.notOffered (danger-subtle chips)
+ *   - "Pode responder e conduzir" → services.offered    (brand-subtle chips)
+ *   - "Não deve prometer"         → services.notOffered (danger-subtle chips)
  *
  * It is PRESENTATIONAL and SHELL-AGNOSTIC: it renders no CardShell and owns no
  * confirm button, so it can be embedded BOTH by the individual `services` card
@@ -264,7 +264,7 @@ export function ServicesSection({
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <ChipList
-          heading="Responde e conduz"
+          heading="Pode responder e conduzir"
           headingBadge={
             offeredFromProposal ? <SuggestedBadge tokens={tokens} /> : null
           }
@@ -286,7 +286,7 @@ export function ServicesSection({
         )}
       </div>
       <ChipList
-        heading="Não promete"
+        heading="Não deve prometer"
         placeholder="Ex.: desconto garantido, crédito aprovado, reserva..."
         items={notOffered}
         onAdd={addNotOffered}
@@ -303,8 +303,8 @@ export function ServicesSection({
           style={{ color: tokens.warningText }}
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          As duas listas estão vazias — o agente não vai saber o que você
-          deve responder. Você pode confirmar mesmo assim e completar depois pela
+          O escopo está vazio — a IA pode improvisar ou prometer o que não
+          deveria. Você pode confirmar mesmo assim e completar depois pela
           conversa.
         </p>
       )}

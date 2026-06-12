@@ -82,15 +82,16 @@ export function summarizePersona(persona: BuilderState["persona"]): string {
 }
 
 /**
- * Resumo de serviços: "Oferece: …" e "Não oferece: …" em linhas separadas
+ * Resumo de escopo: "Pode responder: …" e "Não deve prometer: …" em linhas
+ * separadas.
  * (o card renderiza com `whitespace-pre-line`, preservando o `\n`).
  */
 export function summarizeServices(services: BuilderState["services"]): string {
   const offered = joinList(services.offered)
   const notOffered = joinList(services.notOffered)
   const lines: string[] = []
-  if (offered) lines.push(`Oferece: ${offered}`)
-  if (notOffered) lines.push(`Não oferece: ${notOffered}`)
+  if (offered) lines.push(`Pode responder: ${offered}`)
+  if (notOffered) lines.push(`Não deve prometer: ${notOffered}`)
   return lines.join("\n")
 }
 
@@ -195,7 +196,7 @@ export function summarizeActivation(
  * Regras (cada uma = 1 warning amber):
  *  1. persona sem nome próprio → atendente soa genérico.
  *  2. saudação vazia → sem boas-vindas personalizadas.
- *  3. nenhum serviço cadastrado → o agente improvisa.
+ *  3. nenhum escopo cadastrado → o agente improvisa.
  *  4. sem tabela de preços → não responde valores.
  *  5. horário não definido (sem preset E sem schedule) → a definir.
  *  6. passagem para humano sem modo definido → comportamento genérico.
@@ -219,11 +220,11 @@ export function computeSummaryWarnings(value: BuilderState): SummaryWarning[] {
     })
   }
 
-  // 3. Nenhum serviço cadastrado.
+  // 3. Nenhum escopo cadastrado.
   if (value.services.offered.length === 0) {
     warnings.push({
       area: SUMMARY_AREA.services,
-      message: "Nenhum serviço cadastrado — o agente improvisa",
+      message: "Escopo vazio — o agente improvisa",
     })
   }
 

@@ -1,10 +1,10 @@
 "use client"
 
 /**
- * Builder Cards — Agent scope: does / does not (Orayon Uplift, W3)
+ * Builder Cards — Escopo do atendimento: pode / não deve (Orayon Uplift, W3)
  *
- * cardKey `services`. Defines the agent's SCOPE — what it DOES and what it does
- * NOT do — useful for any agent type (support, FAQ, etc.), not only services.
+ * cardKey `services`. Defines the agent's SCOPE — what it can answer/conduct and
+ * what it must not promise — useful for any agent type, not only services.
  * The two editable chip lists live in the reusable `review/services-section.tsx`
  * (extracted in T41, jornada-builder-v2): this card is the SHELL + confirm flow
  * and the composite `agent_review` card reuses the same section (zero
@@ -69,13 +69,13 @@ export function ServicesOfferedCard({
   return (
     <CardShell
       icon={<Wrench className="h-4 w-4" />}
-      title="O que o agente faz"
-      reason="Liste o que o agente FAZ e o que ele NÃO faz, para evitar promessas indevidas nas conversas."
+      title="Escopo do atendimento"
+      reason="Defina o contrato da IA: sobre o que ela pode conduzir a conversa e quais promessas ficam proibidas."
       tokens={tokens}
       // FR-20 (jornada-builder-v2) — passo OBRIGATÓRIO: sem "Agora não"/dismiss.
       actions={[
         {
-          label: showEmptyWarning ? "Confirmar mesmo assim" : "Confirmar serviços",
+          label: showEmptyWarning ? "Confirmar vazio" : "Confirmar escopo",
           onClick: handleConfirm,
           variant: "primary",
           icon: <Check className="h-3.5 w-3.5" />,

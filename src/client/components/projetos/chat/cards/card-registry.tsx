@@ -150,7 +150,7 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
   services: {
     cardKey: "services",
     stepId: "services",
-    title: "Serviços do agente",
+    title: "Escopo do atendimento",
     icon: <Wrench className="h-4 w-4" />,
     component: ServicesOfferedCard as ComponentType<CardComponentProps>,
   },

@@ -133,7 +133,7 @@ function cardSubmitReceipt(
     case "business_hours":
       return "Enviando horário da equipe"
     case "services":
-      return "Enviando serviços ao agente"
+      return "Enviando escopo do atendimento"
     case "agent_persona":
       return "Enviando persona do agente"
     case "pricing":

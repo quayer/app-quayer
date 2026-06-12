@@ -168,14 +168,14 @@ describe('PreviewSummaryCard v2 branch render (T98, FR-31)', () => {
   })
 })
 
-// ── T98 — v1 render stays byte-intact (NFR-03) ───────────────────────────────
+// ── T98 — v1 render keeps the same fixed sections with updated product copy ──
 
-describe('PreviewSummaryCard v1 path unchanged (T98, NFR-03)', () => {
+describe('PreviewSummaryCard v1 path fixed sections (T98, NFR-03)', () => {
   it('still renders the 6 fixed v1 sections for a journeyVersion:1 project', () => {
     render(<SummaryHarness value={v1State()} />)
 
     expect(screen.getByText('Personalidade')).toBeInTheDocument()
-    expect(screen.getByText('Serviços')).toBeInTheDocument()
+    expect(screen.getByText('Escopo')).toBeInTheDocument()
     expect(screen.getByText('Horários')).toBeInTheDocument()
     expect(screen.getByText('Preços')).toBeInTheDocument()
     expect(screen.getByText('Passagem para humano')).toBeInTheDocument()
