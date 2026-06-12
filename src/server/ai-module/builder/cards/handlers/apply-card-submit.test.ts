@@ -75,6 +75,84 @@ describe('applyPricing — G5a min ticket (wholesale clear)', () => {
   })
 })
 
+describe('applyCardSubmit — agent_approval deterministic card', () => {
+  const PROJECT_ID = 'proj-1'
+  const ORG_ID = 'org-1'
+  const CONV_ID = 'conv-1'
+
+  function seedConversation(builderState: unknown): void {
+    mockFindUnique.mockResolvedValue({
+      id: CONV_ID,
+      organizationId: ORG_ID,
+      builderState,
+    })
+    mockUpdateMany.mockResolvedValue({ count: 1 })
+  }
+
+  function writtenState(): BuilderState {
+    expect(mockUpdateMany).toHaveBeenCalledTimes(1)
+    const arg = mockUpdateMany.mock.calls[0][0] as {
+      data: { builderState: BuilderState }
+    }
+    return arg.data.builderState
+  }
+
+  beforeEach(() => {
+    mockFindUnique.mockReset()
+    mockUpdateMany.mockReset()
+  })
+
+  it('persists approved proposal name/description and flips agentApproved', async () => {
+    seedConversation(null)
+
+    const res = await applyCardSubmit({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      body: {
+        cardKey: 'agent_approval',
+        action: 'confirm',
+        name: 'SDR Vibra Butantã',
+        description:
+          'Atende leads do empreendimento Vibra Butantã, tira dúvidas, qualifica interesse e encaminha oportunidades para o time comercial.',
+      },
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.confirmations.agentApproved).toBe(true)
+    expect(next.proposal.name).toBe('SDR Vibra Butantã')
+    expect(next.proposal.description).toContain('Vibra Butantã')
+    if (res.ok) {
+      expect(res.cardInstruction).toContain('nome "SDR Vibra Butantã"')
+      expect(res.cardInstruction).toContain('descrição "')
+    }
+  })
+
+  it('falls back to an existing server-side proposal when body omits details', async () => {
+    seedConversation(
+      patchBuilderState(parseBuilderState(undefined), {
+        proposal: {
+          name: 'SDR Existente',
+          description:
+            'Proposta já existente no estado para criar o agente sem depender de texto livre.',
+        },
+      }),
+    )
+
+    const res = await applyCardSubmit({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      body: { cardKey: 'agent_approval', action: 'confirm' },
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenState()
+    expect(next.confirmations.agentApproved).toBe(true)
+    expect(next.proposal.name).toBe('SDR Existente')
+    if (res.ok) expect(res.cardInstruction).toContain('SDR Existente')
+  })
+})
+
 /**
  * Onda 2 — the unified `handoff` card (FUSÃO of the 4 retired handlers:
  * qualification_action + qualification_steps + team_structure + handoff_pairing).

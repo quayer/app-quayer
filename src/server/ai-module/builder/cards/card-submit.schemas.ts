@@ -49,6 +49,8 @@ export type ChannelKey = z.infer<typeof channelKeySchema>
 export const agentApprovalPayloadSchema = z.object({
   cardKey: z.literal('agent_approval'),
   action: z.literal('confirm'),
+  name: z.string().min(3).max(80).optional(),
+  description: z.string().min(20).max(800).optional(),
 })
 
 /**

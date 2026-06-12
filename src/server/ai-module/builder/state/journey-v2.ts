@@ -185,7 +185,7 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
  * Steps of the "Revisar" phase. The creator reviews the consolidated proposal.
  *  - `agent_review`  : COMPOSITE (FR-05) — isDone derives from the three EXISTING
  *                      sentinels (`persona && services && hours`); NO new sentinel.
- *  - `agent_approval`: creates the agent + prompt (legacy inline card kept).
+ *  - `agent_approval`: creates the agent + prompt after deterministic approval.
  *  - `knowledge`     : OPTIONAL — real data (a source) OR the `knowledge` ack.
  *  - `media`         : OPTIONAL — real data (`imagesCount > 0`) OR the `media` ack.
  *

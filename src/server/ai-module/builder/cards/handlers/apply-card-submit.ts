@@ -36,6 +36,7 @@ import {
   type PricingItemPayload,
   type CalendarConnectPayload,
   type ActivationModePayload,
+  type AgentApprovalPayload,
   type QuickReplyChipsPayload,
   type SourceProgressPayload,
   type SilencedContactsPayload,
@@ -312,13 +313,43 @@ export interface CardApplication {
   cardInstruction: string
 }
 
-function applyAgentApproval(state: BuilderState): CardApplication {
-  const next = applyConfirmation(state, 'agentApproved')
+function cleanText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : undefined
+}
+
+function applyAgentApproval(
+  state: BuilderState,
+  payload: Pick<AgentApprovalPayload, 'name' | 'description'>,
+): CardApplication {
+  const name = cleanText(payload.name) ?? cleanText(state.proposal.name)
+  const description =
+    cleanText(payload.description) ?? cleanText(state.proposal.description)
+  const patched =
+    name || description
+      ? patchBuilderState(state, {
+          proposal: {
+            ...(name ? { name } : {}),
+            ...(description ? { description } : {}),
+          },
+        })
+      : state
+  const next = applyConfirmation(patched, 'agentApproved')
+  const proposalNote =
+    name || description
+      ? ` Proposta aprovada: ${[
+          name ? `nome "${name}"` : null,
+          description ? `descrição "${description}"` : null,
+        ]
+          .filter(Boolean)
+          .join(', ')}.`
+      : ''
   return {
     next,
     cardInstruction:
       'O usuário CONFIRMOU a criação do agente proposto pelo card de aprovação. ' +
-      'Prossiga com create_agent usando o nome e a descrição já propostos — não peça nova confirmação. ' +
+      (proposalNote ? `${proposalNote} ` : '') +
+      'Prossiga com create_agent usando o nome e a descrição aprovados — não peça nova confirmação. ' +
       'Depois siga para o próximo passo da jornada.',
   }
 }
@@ -767,7 +798,7 @@ export async function applyCardSubmit(
   let application: CardApplication
   switch (body.cardKey) {
     case 'agent_approval':
-      application = applyAgentApproval(current)
+      application = applyAgentApproval(current, body)
       break
     case 'tool_selection':
       application = applyToolSelection(current, body.toolKeys, body.capabilityKeys)

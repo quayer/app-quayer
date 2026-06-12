@@ -54,7 +54,7 @@ type AdjustableCardProps = CardComponentProps & {
  * wiring its `onSubmit` to chat-panel's `submitCard(cardKey, payload)` (which
  * owns POST + SSE). Renders nothing when the step has no card (free-text steps
  * like `project_identity`/`objective`, or legacy steps still served inline by
- * ToolCallCard: tools/channel/agent_approval).
+ * ToolCallCard: tools/channel).
  *
  * REOPEN PRECEDENCE (FR-17): when `reopenedCardKey` is set, the reopened card
  * SUBSTITUTES the active-step card in this single in-flow slot — no stacking

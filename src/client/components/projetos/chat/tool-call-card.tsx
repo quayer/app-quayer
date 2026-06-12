@@ -165,7 +165,11 @@ export function ToolCallCard({
             // meta-agent may proceed with create_agent. (Was: free-text onSend,
             // which never advanced the deterministic journey.)
             onClick={() =>
-              onSubmitCard("agent_approval", { action: "confirm" })
+              onSubmitCard("agent_approval", {
+                action: "confirm",
+                name: proposal.name,
+                description: proposal.description,
+              })
             }
             disabled={isStreaming}
           >

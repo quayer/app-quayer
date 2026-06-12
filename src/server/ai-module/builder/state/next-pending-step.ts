@@ -259,7 +259,7 @@ export const QUAYER_STEPS: readonly StepDefinition[] = [
   {
     id: 'agent_approval',
     title: 'Aprovação do agente',
-    // Inline card (ToolCallCard renders propose_agent) is the surface here.
+    // Deterministic active-step card; the legacy propose_agent tool is optional.
     ask: 'Revise a proposta do agente no card e aprove para eu criar.',
     requiredPaths: ['confirmations.agentApproved'],
     isDone: (s) => confirmed(s, 'agentApproved'),

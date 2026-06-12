@@ -34,6 +34,15 @@ describe('BUILDER_SYSTEM_PROMPT — regras duras', () => {
     )
   })
 
+  it('não depende de propose_agent_creation para mostrar aprovação na jornada v2', () => {
+    expect(BUILDER_SYSTEM_PROMPT).toContain(
+      'a interface exibe o card de aprovação pelo step-engine',
+    )
+    expect(BUILDER_SYSTEM_PROMPT).toContain(
+      'NÃO diga que o card apareceu se não houver card ativo',
+    )
+  })
+
   it('proíbe generate_prompt_anatomy antes de objetivo + persona', () => {
     expect(BUILDER_SYSTEM_PROMPT).toContain(
       'NUNCA chame generate_prompt_anatomy antes de o objetivo estar definido E o tom/persona conhecidos',

@@ -32,7 +32,7 @@
  *     emit it through the `quick_reply_chips` tool, and ToolCallCard renders the
  *     registered component inline. It is EXPLICITLY excluded from the active-step
  *     mapping (see {@link STEP_TO_CARD}) so it never surfaces in the pinned slot.
- *  4. INLINE / LEGACY (3 cards): `agent_approval`, `tool_selection`, `channel`
+ *  4. INLINE / LEGACY (2 cards): `tool_selection`, `channel`
  *     keep their inline rendering inside `ToolCallCard` (chat-panel.tsx) for
  *     backward compat — they are NOT in this registry at all.
  *
@@ -65,6 +65,7 @@ import type { StepId } from "@/server/ai-module/builder/state/readiness.types"
 
 import type { CardComponentProps, CardDescriptor, CardKey } from "./types"
 
+import { AgentApprovalCard } from "./agent-approval-card"
 import { AgentPersonaCard } from "./agent-persona-card"
 import { AgentReviewCard } from "./agent-review-card"
 import { ServicesOfferedCard } from "./services-offered-card"
@@ -85,11 +86,12 @@ import { InstagramConnectCard } from "./instagram-connect-card"
 import { PublishedNextStepsCard } from "./published-next-steps-card"
 
 /**
- * The `CardKey`s this registry renders — the catalog cards. Excludes the 3
+ * The `CardKey`s this registry renders — the catalog cards. Excludes the 2
  * legacy keys (rendered inline in ToolCallCard) and `byok_guided` (blocker-driven,
  * rendered outside the active-step slot — not a step/submit card).
  */
 export type RegisteredW3CardKey =
+  | "agent_approval"
   | "agent_persona"
   | "agent_review"
   | "services"
@@ -120,6 +122,16 @@ export type RegisteredW3CardKey =
  * prompt with no sentinel, so it never maps to an active step).
  */
 export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
+  agent_approval: {
+    // Jornada v2: deterministic card for the approval step. The legacy
+    // `propose_agent_creation` tool can still render an inline proposal, but the
+    // step no longer depends on the LLM calling that tool to show a card.
+    cardKey: "agent_approval",
+    stepId: "agent_approval",
+    title: "Aprovar agente",
+    icon: <Sparkles className="h-4 w-4" />,
+    component: AgentApprovalCard as ComponentType<CardComponentProps>,
+  },
   agent_persona: {
     cardKey: "agent_persona",
     stepId: "persona",
@@ -310,8 +322,8 @@ const STEP_TO_CARD: Partial<Record<StepId, CardDescriptor>> = (() => {
 
 /**
  * Look up a card descriptor by its `cardKey`. Returns `undefined` only for the
- * legacy keys (agent_approval/tool_selection/channel), which render inline in
- * ToolCallCard and are not in this registry. `quick_reply_chips` and
+ * legacy keys (tool_selection/channel), which render inline in ToolCallCard and
+ * are not in this registry. `quick_reply_chips` and
  * `source_progress` ARE registered, so they resolve here.
  *
  * This is ALSO the reopen lookup (drive mode 2 / FR-17): ActiveStepCard
@@ -326,8 +338,8 @@ export function getCardDescriptor(
 /**
  * Resolve the card to render for a given journey `stepId` (from
  * `readiness.step.id`). Returns `undefined` for steps with no card
- * (`project_identity`, `objective` — free-text; `tools`, `channel`,
- * `agent_approval` — rendered inline in ToolCallCard, not in this registry).
+ * (`project_identity`, `objective` — free-text; `tools`, `channel` — rendered
+ * inline in ToolCallCard, not in this registry).
  */
 export function getCardForStep(
   stepId: StepId,
