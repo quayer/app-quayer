@@ -23,6 +23,7 @@ function makeProject(overrides: Partial<WorkspaceProject> = {}): WorkspaceProjec
     name: 'Assistente WhatsApp',
     type: 'ai_agent',
     status: 'draft',
+    journeyVersion: 2,
     aiAgentId: 'agent-1',
     aiAgent: {
       id: 'agent-1',

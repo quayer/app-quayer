@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
@@ -291,14 +293,9 @@ async function withSeedClient<T>(
     test.skip(true, 'seeding requires TEST_DATABASE_URL / DATABASE_URL')
     throw new Error('unreachable')
   }
-  const mod = (await import('@prisma/client')) as {
-    PrismaClient: new (opts?: {
-      datasources?: { db: { url: string } }
-    }) => SeedPrismaClient
-  }
-  const prisma = new mod.PrismaClient({
-    datasources: { db: { url: databaseUrl } },
-  })
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
   try {
     await prisma.$connect()
     return await fn(prisma)

@@ -23,6 +23,12 @@ export default defineConfig({
   test: {
     globals: false,
     setupFiles: ['./test/setup.ts'],
+    // Default do Vitest (5000ms) é apertado para os testes de INTEGRAÇÃO que
+    // fazem dynamic-import de módulos pesados (ex.: a rota do webhook uazapi:
+    // `await import('./route')` compila um grafo grande). O first-import leva
+    // 11-16s sob saturação de I/O (OneDrive). 30s é teto seguro — em CI (sem
+    // OneDrive) os imports são rápidos, então não mascara hang real nem alonga.
+    testTimeout: 30000,
     // Persist machine-readable results so debugging-without-rerun is possible.
     // CI and `npm run test:debug:open` consume these. Per-project files are
     // suffixed via outputFile keys below.
@@ -50,6 +56,8 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           globals: false,
+          // Cobre o first-import pesado (webhook route/processor) — ver root.
+          testTimeout: 30000,
           setupFiles: ['./test/setup.ts'],
           include: [
             'test/unit/**/*.test.ts',
@@ -57,11 +65,14 @@ export default defineConfig({
             'src/**/sub-agents/**/*.test.ts',
             'src/server/ai-module/builder/state/**/*.test.ts',
             'src/server/ai-module/builder/cards/**/*.test.ts',
+            'src/server/ai-module/builder/capabilities/**/*.test.ts',
             'src/server/ai-module/builder/channel/**/*.test.ts',
             'src/server/ai-module/builder/sources/**/*.test.ts',
             'src/server/ai-module/builder/chat/handlers/**/*.test.ts',
             'src/server/ai-module/builder/tools/**/*.test.ts',
             'src/server/ai-module/builder/templates/**/*.test.ts',
+            'src/server/ai-module/builder/playbook/**/*.test.ts',
+            'src/server/ai-module/builder/refinement/**/*.test.ts',
             'src/server/ai-module/builder/integrations/**/*.test.ts',
             'src/server/ai-module/builder/media/**/*.test.ts',
             'src/server/ai-module/builder/prompts/**/*.test.ts',
@@ -88,6 +99,8 @@ export default defineConfig({
           name: 'react',
           environment: 'happy-dom',
           globals: false,
+          // Cobre componentes com userEvent/async lentos sob saturação — ver root.
+          testTimeout: 30000,
           setupFiles: ['./test/setup.ts', './test/setup-react.ts'],
           include: ['test/unit/react/**/*.test.tsx']
         }

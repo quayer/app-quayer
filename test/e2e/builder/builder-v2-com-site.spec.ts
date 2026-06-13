@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
+  getUserOrgId,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T67 — E2E: jornada v2 COM site (proposta consolidada, spec §8 itens 1 e 3).
@@ -11,10 +15,10 @@ import {
  * specs/jornada-builder-v2/tasks.md T67 (Onda 3, depende de T43/T23):
  *
  *   Fixture org seedada + cookie `builder-v2-override=on`: o usuário leigo COLA um
- *   site/Instagram → a fonte é aceita → o card composto `agent_review` aparece
- *   PREFILLADO (persona/serviços/horários sugeridos da fonte + conversa, badge
- *   "sugerido da conversa") → UMA única confirmação cria o agente → o agente de
- *   teste responde. Critérios:
+ *   site/Instagram → a fonte é aceita → o `conversation_blueprint` é aprovado →
+ *   o card composto `agent_review` aparece PREFILLADO (persona/serviços/horários
+ *   sugeridos da fonte + conversa, badge "sugerido da conversa") → UMA única
+ *   confirmação cria o agente → o agente de teste responde. Critérios:
  *     §8 item 1: "da primeira mensagem ao agente proposto respondendo no teste com
  *                 no máximo 2 perguntas respondidas" (a fonte + as proposals reduzem
  *                 as perguntas a uma confirmação consolidada).
@@ -38,7 +42,10 @@ import {
  *      (route: src/server/ai-module/builder/cards/card-submit.routes.ts). O accept
  *      flipa `confirmations.source` + grava `identity.*` a partir do `proposed`.
  *
- *  (3) UMA CONFIRMAÇÃO CONSOLIDADA — POST .../cards/agent_review/submit funde
+ *  (3) ROTEIRO APROVADO — POST .../cards/conversation_blueprint/submit grava o
+ *      ConversationBlueprint aprovado antes do prompt final/agente (R08).
+ *
+ *  (4) UMA CONFIRMAÇÃO CONSOLIDADA — POST .../cards/agent_review/submit funde
  *      persona + serviços + horários num único write (handler `applyAgentReview`,
  *      src/.../cards/handlers/apply/journey-v2.ts): flipa os TRÊS sentinels
  *      (`persona`+`services`+`hours`) de uma vez e LIMPA `capturedProposals`. É a
@@ -48,7 +55,7 @@ import {
  *      `applyCardSubmit` ANTES do ACK SSE, então a leitura do readiness logo após o
  *      submit reflete o write sem depender do turno LLM.
  *
- *  (4) O AGENTE RESPONDE — POST .../playground/stream
+ *  (5) O AGENTE RESPONDE — POST .../playground/stream
  *      (route: src/server/ai-module/builder/projects/routes/playground.routes.ts).
  *      Exige agente materializado (`aiAgentId`) + LLM mock (T89). Quando indisponível,
  *      o backbone determinístico acima já satisfaz §8 itens 1 e 3 (contrato tolerante
@@ -86,6 +93,7 @@ const BUSINESS_NAME = 'Clínica Aurora'
 const PERSONA_TONE = 'acolhedor e profissional'
 const SERVICE_OFFERED = 'Limpeza de pele'
 const HOURS_PRESET = 'comercial'
+const BLUEPRINT_QUESTION_TEXT = 'Qual tratamento voce quer fazer?'
 
 // Quantos turnos de "pergunta respondida" a jornada COM site pode gastar antes da
 // confirmação consolidada (spec §8 item 1: no máximo 2). Usado como teto de
@@ -122,6 +130,11 @@ interface ReadinessSnapshot {
     services?: { offered?: string[]; notOffered?: string[] }
     hours?: { preset?: string; schedule?: unknown }
     sourceIngestion?: { proposed?: SourceProposal | null }
+    conversationBlueprint?: {
+      status?: string
+      approvedAt?: string
+      questions?: Array<{ text?: string }>
+    }
     capturedProposals?: {
       persona?: { name?: string; tone?: string; greeting?: string }
       services?: { offered?: string[] }
@@ -135,6 +148,92 @@ interface ReadinessSnapshot {
     }
   }
   steps?: unknown[]
+}
+
+interface SeededSession {
+  email: string
+  userId: string
+  organizationId: string
+}
+
+interface SeedPrismaClient {
+  $connect: () => Promise<void>
+  $disconnect: () => Promise<void>
+  aIAgentConfig: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        isActive: boolean
+        provider: string
+        model: string
+        systemPrompt: string
+        enabledTools: string[]
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderPromptVersion: {
+    create: (args: {
+      data: {
+        aiAgentId: string
+        versionNumber: number
+        content: string
+        description: string
+        createdBy: 'chat'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderProject: {
+    update: (args: {
+      where: { id: string }
+      data: { aiAgentId: string }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+}
+
+const CONVERSATION_BLUEPRINT = {
+  objective: 'Qualificar clientes de estética e conduzir para atendimento.',
+  niche: 'clinica de estetica',
+  stages: [
+    {
+      id: 'qualificacao',
+      title: 'Qualificacao inicial',
+      goal: 'Entender o tratamento desejado e orientar o proximo passo.',
+      order: 0,
+    },
+  ],
+  questions: [
+    {
+      id: 'tratamento',
+      stageId: 'qualificacao',
+      text: BLUEPRINT_QUESTION_TEXT,
+      purpose: 'Descobrir o servico de interesse.',
+      variableKey: 'tratamento_desejado',
+      skipWhenKnown: 'Pular se o tratamento desejado ja estiver claro.',
+      required: true,
+      order: 0,
+    },
+  ],
+  variables: [
+    {
+      key: 'tratamento_desejado',
+      label: 'Tratamento desejado',
+      type: 'text',
+      source: 'user',
+      reviewRequired: false,
+    },
+  ],
+  skipRules: [],
+  successCriteria: ['Tratamento desejado e proximo passo claros.'],
+  handoffTriggers: [],
+  toolTriggers: [],
+  objectionRules: [],
+  doRules: ['Fazer uma pergunta por vez.'],
+  dontRules: ['Nunca prometer resultado medico.'],
+  sourceRefs: [{ type: 'user', label: 'E2E T67' }],
 }
 
 /**
@@ -162,7 +261,7 @@ async function setOverrideCookie(page: Page, value: 'on' | 'off'): Promise<void>
  * whole test when the test DB / OTP is not reachable from the runner — never a
  * hard failure outside the gate environment.
  */
-async function loginViaOtp(page: Page): Promise<void> {
+async function loginViaOtp(page: Page): Promise<SeededSession> {
   test.skip(
     process.env.E2E_SIGNUP_ENABLED === 'false',
     'login indisponível neste ambiente (E2E_SIGNUP_ENABLED=false)',
@@ -195,6 +294,15 @@ async function loginViaOtp(page: Page): Promise<void> {
 
   // Login lands on `/` (home Builder) or a deep-linked /projetos route.
   await waitForRedirect(page, /\/(?:$|\?|projetos)/)
+
+  try {
+    const ids = await getUserOrgId(email)
+    return { email, ...ids }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    test.skip(true, 'org lookup not reachable: ' + message)
+    throw new Error('unreachable')
+  }
 }
 
 /**
@@ -234,9 +342,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -273,10 +382,11 @@ async function pollSourceProposal(
       `/api/v1/builder/projects/${projectId}/sources/status`,
     )
     if (res.ok()) {
-      const body = (await res.json()) as {
-        data?: { sources?: SourceStatusEntry[]; proposed?: SourceProposal | null }
-      }
-      const data = body.data
+      const body = await res.json()
+      const data = unwrapIgniterData<{
+        sources?: SourceStatusEntry[]
+        proposed?: SourceProposal | null
+      }>(body)
       lastProposed = data?.proposed ?? null
       const proposalHasFields =
         !!lastProposed &&
@@ -327,6 +437,30 @@ async function acceptSourceProgress(
   expect(
     res.ok(),
     `card-submit source_progress falhou (${res.status()})`,
+  ).toBeTruthy()
+}
+
+/**
+ * Approve the ConversationBlueprint before `agent_review`/prompt creation. This
+ * is the same deterministic card-submit the active-step card uses.
+ */
+async function approveConversationBlueprint(
+  page: Page,
+  projectId: string,
+): Promise<void> {
+  const res = await page.request.post(
+    `/api/v1/builder/projects/${projectId}/cards/conversation_blueprint/submit`,
+    {
+      data: {
+        cardKey: 'conversation_blueprint',
+        action: 'approve',
+        blueprint: CONVERSATION_BLUEPRINT,
+      },
+    },
+  )
+  expect(
+    res.ok(),
+    `card-submit conversation_blueprint falhou (${res.status()})`,
   ).toBeTruthy()
 }
 
@@ -402,12 +536,65 @@ async function askPlayground(
   return assistantText
 }
 
+async function seedAgentAndPrompt(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'seeding requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
+
+  const systemPrompt =
+    `Voce e o agente de atendimento da ${BUSINESS_NAME}. ` +
+    `Responda sobre ${SERVICE_OFFERED} com tom ${PERSONA_TONE} e horario ${HOURS_PRESET}.`
+
+  try {
+    await prisma.$connect()
+    const suffix = projectId.slice(0, 8)
+    const agent = await prisma.aIAgentConfig.create({
+      data: {
+        organizationId: session.organizationId,
+        name: `E2E com site ${suffix}`,
+        isActive: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt,
+        enabledTools: [],
+      },
+      select: { id: true },
+    })
+    await prisma.builderPromptVersion.create({
+      data: {
+        aiAgentId: agent.id,
+        versionNumber: 1,
+        content: systemPrompt,
+        description: 'E2E com site prompt version',
+        createdBy: 'chat',
+      },
+      select: { id: true },
+    })
+    await prisma.builderProject.update({
+      where: { id: projectId },
+      data: { aiAgentId: agent.id },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
 test.describe('Builder v2 — jornada COM site (proposta consolidada / §8 itens 1 e 3)', () => {
   test('site → fonte aceita → agent_review prefillado → 1 confirmação cria o agente → teste responde', async ({
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     // Projeto v2 (override on congela journeyVersion: 2 na criação). O brief já cola
     // o site; ingerimos explicitamente em seguida para ancorar de forma determinística.
@@ -470,6 +657,17 @@ test.describe('Builder v2 — jornada COM site (proposta consolidada / §8 itens
       'nome do negócio (da fonte/edição) espelhado em project.name',
     ).toBe(BUSINESS_NAME)
 
+    // ── R08: aprova o roteiro conversacional antes de qualquer prompt/agente. ───
+    await approveConversationBlueprint(page, projectId)
+    const afterBlueprint = await fetchReadiness(page, projectId)
+    expect(afterBlueprint.builderState?.conversationBlueprint).toMatchObject({
+      status: 'approved',
+    })
+    expect(
+      afterBlueprint.builderState?.conversationBlueprint?.questions?.[0]?.text,
+      'blueprint aprovado preserva a pergunta do roteiro',
+    ).toBe(BLUEPRINT_QUESTION_TEXT)
+
     // ── §8 item 1: a jornada COM site exige no máximo 2 perguntas respondidas
     //    antes da confirmação consolidada. Os 3 domínios da Revisar continuam num
     //    ÚNICO card (agent_review) — não há 3 cards separados pedindo cada dado.
@@ -520,17 +718,16 @@ test.describe('Builder v2 — jornada COM site (proposta consolidada / §8 itens
     // ── §8 item 1 (ponta final): o agente de teste responde. Exige agente
     //    materializado + LLM mock; quando indisponível, o backbone determinístico
     //    acima já satisfaz §8 itens 1 e 3 (contrato tolerante — corpo preservado).
+    await seedAgentAndPrompt(session, projectId)
     const answer = await askPlayground(
       page,
       projectId,
       'Olá! O que vocês oferecem e qual o horário de atendimento?',
     )
-    test.skip(
-      answer === null,
-      'playground requer agente materializado + LLM mock (E2E_LLM_MOCK=1); ' +
-        'o backbone determinístico (sentinels + proposed consumido) já cobre ' +
-        '§8 itens 1 e 3. Corpo completo preservado.',
-    )
+    expect(
+      answer,
+      'playground deve responder após seed de agente materializado',
+    ).not.toBeNull()
     expect(
       (answer ?? '').trim().length,
       'o agente de teste responde algo após a proposta consolidada (§8 item 1)',

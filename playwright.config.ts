@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const localBaseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
+
 /**
  * Playwright E2E Test Configuration — Quayer Testing Pipeline (US-107A)
  *
@@ -49,7 +51,7 @@ export default defineConfig({
       name: 'local',
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:3000',
+        baseURL: localBaseURL,
       },
     },
     {

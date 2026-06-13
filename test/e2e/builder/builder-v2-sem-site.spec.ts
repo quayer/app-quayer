@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
+  getUserOrgId,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T64 — E2E: jornada v2 SEM site (fase "Conhecer", FR-03 / spec §8 item 2).
@@ -78,6 +82,50 @@ interface ReadinessSnapshot {
   steps?: unknown[]
 }
 
+interface SeededSession {
+  email: string
+  userId: string
+  organizationId: string
+}
+
+interface SeedPrismaClient {
+  $connect: () => Promise<void>
+  $disconnect: () => Promise<void>
+  aIAgentConfig: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        isActive: boolean
+        provider: string
+        model: string
+        systemPrompt: string
+        enabledTools: string[]
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderPromptVersion: {
+    create: (args: {
+      data: {
+        aiAgentId: string
+        versionNumber: number
+        content: string
+        description: string
+        createdBy: 'chat'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderProject: {
+    update: (args: {
+      where: { id: string }
+      data: { aiAgentId: string }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+}
+
 /**
  * Set the builder-v2 override cookie for the baseURL host BEFORE any navigation
  * that creates a project (the version is frozen at creation time, server-side).
@@ -103,7 +151,7 @@ async function setOverrideCookie(page: Page, value: 'on' | 'off'): Promise<void>
  * whole test when the test DB / OTP is not reachable from the runner — never a
  * hard failure outside the gate environment.
  */
-async function loginViaOtp(page: Page): Promise<void> {
+async function loginViaOtp(page: Page): Promise<SeededSession> {
   test.skip(
     process.env.E2E_SIGNUP_ENABLED === 'false',
     'login indisponível neste ambiente (E2E_SIGNUP_ENABLED=false)',
@@ -136,6 +184,15 @@ async function loginViaOtp(page: Page): Promise<void> {
 
   // Login lands on `/` (home Builder) or a deep-linked /projetos route.
   await waitForRedirect(page, /\/(?:$|\?|projetos)/)
+
+  try {
+    const ids = await getUserOrgId(email)
+    return { email, ...ids }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    test.skip(true, 'org lookup not reachable: ' + message)
+    throw new Error('unreachable')
+  }
 }
 
 /**
@@ -173,9 +230,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -255,12 +313,65 @@ async function askPlaygroundWhereLocated(
   return assistantText
 }
 
+async function seedAgentAndPrompt(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'seeding requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
+
+  const systemPrompt =
+    `Voce e o agente de atendimento da ${BUSINESS_NAME}. ` +
+    `Quando perguntarem onde fica, responda exatamente com ${BUSINESS_ADDRESS}.`
+
+  try {
+    await prisma.$connect()
+    const suffix = projectId.slice(0, 8)
+    const agent = await prisma.aIAgentConfig.create({
+      data: {
+        organizationId: session.organizationId,
+        name: `E2E sem site ${suffix}`,
+        isActive: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt,
+        enabledTools: [],
+      },
+      select: { id: true },
+    })
+    await prisma.builderPromptVersion.create({
+      data: {
+        aiAgentId: agent.id,
+        versionNumber: 1,
+        content: systemPrompt,
+        description: 'E2E sem site prompt version',
+        createdBy: 'chat',
+      },
+      select: { id: true },
+    })
+    await prisma.builderProject.update({
+      where: { id: projectId },
+      data: { aiAgentId: agent.id },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
 test.describe('Builder v2 — jornada SEM site (FR-03 / §8 item 2)', () => {
   test('identidade do negócio entra pela conversa e o agente responde "onde fica?"', async ({
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     // Projeto v2 (override on congela journeyVersion: 2 na criação).
     const projectId = await createProjectViaHome(page)
@@ -303,13 +414,12 @@ test.describe('Builder v2 — jornada SEM site (FR-03 / §8 item 2)', () => {
     // ── §8 item 2 ponta (b): o agente de teste responde "onde fica?". ─────────
     // Exige agente materializado + LLM mock; quando indisponível, a ponta (a)
     // acima já satisfaz o critério de forma determinística (contrato tolerante).
+    await seedAgentAndPrompt(session, projectId)
     const answer = await askPlaygroundWhereLocated(page, projectId)
-    test.skip(
-      answer === null,
-      'playground requer agente materializado + LLM mock (E2E_LLM_MOCK=1); ' +
-        'a ponta determinística (identity.address) já cobre §8 item 2. ' +
-        'Corpo completo preservado.',
-    )
+    expect(
+      answer,
+      'playground deve responder após seed de agente materializado',
+    ).not.toBeNull()
     expect(
       answer ?? '',
       'o agente de teste responde "onde fica?" com o endereço informado na conversa',

@@ -73,6 +73,7 @@ function makeProject(overrides: Partial<WorkspaceProject> = {}): WorkspaceProjec
     name: 'Assistente WhatsApp',
     type: 'ai_agent',
     status: 'draft',
+    journeyVersion: 2,
     aiAgentId: null,
     aiAgent: null,
     runtimeSettings: DEFAULT_AGENT_RUNTIME_SETTINGS,
@@ -127,25 +128,19 @@ describe('getTabsForProjectWithLocked — v2 (journey presente)', () => {
       makeProject(),
       makeJourneyReadiness('conhecer'),
     )
-    // overview/knowledge/media/credentials/advanced exigem fase >= revisar;
+    // overview/knowledge/media exigem fase >= revisar; Config/Avançado e
     // prompt/playground/deploy exigem agente; activity exige publicado.
     expect(tabs).toHaveLength(0)
   })
 
-  it('fase "revisar" sem agente: surgem só as tabs por-fase (sem as que exigem agente)', () => {
+  it('fase "revisar" sem agente: esconde tabs de runtime/config que ainda não têm alvo', () => {
     const tabs = getTabsForProjectWithLocked(
       makeProject(),
       makeJourneyReadiness('revisar'),
     )
-    // overview/knowledge/media/credentials/advanced abrem na fase Revisar.
-    // prompt/playground/deploy ainda NÃO (sem agente). activity NÃO (não publicado).
-    expect(tabValues(tabs)).toEqual([
-      'overview',
-      'knowledge',
-      'media',
-      'credentials',
-      'advanced',
-    ])
+    // overview/knowledge/media ajudam a revisar a jornada; Config/Avançado só
+    // fazem sentido depois de existir um agente/runtime para configurar.
+    expect(tabValues(tabs)).toEqual(['overview', 'knowledge', 'media'])
   })
 
   it('fase "revisar" COM agente: prompt/playground/deploy também aparecem', () => {

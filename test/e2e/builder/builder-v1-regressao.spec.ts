@@ -4,6 +4,7 @@ import {
   getLatestOtp,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T62 — E2E: regressão v1 (flag off) + kill-switch (NFR-08).
@@ -157,9 +158,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**

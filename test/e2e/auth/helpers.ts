@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 /**
  * Generate a unique disposable email for test runs.
@@ -39,6 +41,12 @@ interface MinimalPrismaClient {
   }
 }
 
+function createPrismaClient(databaseUrl: string): MinimalPrismaClient {
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as MinimalPrismaClient
+}
+
 /**
  * Fetch the latest OTP code emitted for a given identifier (email or phone).
  *
@@ -53,15 +61,7 @@ export async function getLatestOtp(email: string): Promise<string> {
       throw new Error('No database URL configured')
     }
 
-    // Lazy import so the spec file does not fail to load if Prisma is missing.
-    const mod = (await import('@prisma/client')) as {
-      PrismaClient: new (opts?: {
-        datasources?: { db: { url: string } }
-      }) => MinimalPrismaClient
-    }
-    const prisma: MinimalPrismaClient = new mod.PrismaClient({
-      datasources: { db: { url: databaseUrl } },
-    })
+    const prisma = createPrismaClient(databaseUrl)
 
     try {
       await prisma.$connect()
@@ -104,14 +104,7 @@ export async function getUserOrgId(
       throw new Error('No database URL configured')
     }
 
-    const mod = (await import('@prisma/client')) as {
-      PrismaClient: new (opts?: {
-        datasources?: { db: { url: string } }
-      }) => MinimalPrismaClient
-    }
-    const prisma: MinimalPrismaClient = new mod.PrismaClient({
-      datasources: { db: { url: databaseUrl } },
-    })
+    const prisma = createPrismaClient(databaseUrl)
 
     try {
       await prisma.$connect()

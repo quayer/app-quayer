@@ -15,7 +15,10 @@ import type { VersionListItem } from '@/client/components/projetos/preview/tabs/
 import { readinessToChecklist } from '@/client/components/projetos/preview/tabs/deploy/readiness-checklist'
 import { readErrorMessage } from '@/client/components/projetos/preview/tabs/deploy/read-error-message'
 import { formatCountdown } from '@/client/components/projetos/preview/tabs/deploy/use-whatsapp-provision'
+import { blockersToChecklist } from '@/client/components/projetos/preview/tabs/overview/helpers/readiness-adapters'
 import type { Readiness } from '@/server/ai-module/builder/state/readiness.types'
+
+type ReadinessBlocker = Readiness['blockers'][number]
 
 function makeVersion(overrides: Partial<VersionListItem>): VersionListItem {
   return {
@@ -31,7 +34,7 @@ function makeVersion(overrides: Partial<VersionListItem>): VersionListItem {
   }
 }
 
-function makeReadiness(blockers: Readiness['blockers']): Readiness {
+function makeReadiness(blockers: ReadinessBlocker[]): Readiness {
   return {
     step: { id: 'summary', title: 'Resumo', ask: 'Pronto?' },
     requiredMissing: [],
@@ -71,7 +74,7 @@ describe('unwrapVersions', () => {
 describe('readinessToChecklist', () => {
   it('marca tudo como met quando não há blockers', () => {
     const checklist = readinessToChecklist(makeReadiness([]))
-    expect(checklist).toHaveLength(6)
+    expect(checklist).toHaveLength(7)
     expect(checklist.every((item) => item.met)).toBe(true)
   })
 
@@ -90,6 +93,44 @@ describe('readinessToChecklist', () => {
     expect(byCheck.get('channel')?.hint).toBe('Sem canal WhatsApp')
     expect(byCheck.get('plan')?.met).toBe(true)
     expect(byCheck.get('version')?.met).toBe(true)
+  })
+
+  it('inclui refinement com copy leiga', () => {
+    const checklist = readinessToChecklist(
+      makeReadiness([
+        {
+          check: 'refinement',
+          message: 'Refinamento pendente',
+          cta: 'Aprove o refinamento',
+        },
+      ]),
+    )
+    const byCheck = new Map(checklist.map((item) => [item.key, item]))
+
+    expect(byCheck.get('refinement')?.label).toBe('Refinamento aprovado')
+    expect(byCheck.get('refinement')?.met).toBe(false)
+    expect(byCheck.get('refinement')?.hint).toBe('Aprove o refinamento')
+  })
+})
+
+describe('blockersToChecklist', () => {
+  it('inclui refinement na Overview sem exigir UI de detalhes', () => {
+    const checklist = blockersToChecklist(
+      makeReadiness([
+        {
+          check: 'refinement',
+          message: 'Revise e aprove os ajustes finais',
+        },
+      ]),
+    )
+    const refinement = checklist.find((item) => item.label === 'Refinamento aprovado')
+
+    expect(refinement).toMatchObject({
+      met: false,
+      detail: 'Revise e aprove os ajustes finais',
+    })
+    expect(refinement?.tab).toBeUndefined()
+    expect(refinement?.redirect).toBeUndefined()
   })
 })
 

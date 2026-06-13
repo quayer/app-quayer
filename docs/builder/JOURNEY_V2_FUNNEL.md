@@ -1,9 +1,10 @@
 ---
 Criado: 2026-06-11
-Atualizado: 2026-06-11
+Atualizado: 2026-06-13
 Revisar em: quando drafts v1 ativos = 0 (gatilho de sunset — seção 4), ou mudança no vocabulário de eventos (journey-events.ts)
 Relacionados:
   - specs/jornada-builder-v2/spec.md
+  - specs/jornada-builder-v2/mission-first-v3.md
   - specs/jornada-builder-v2/plan.md
   - src/server/services/journey-events.ts
   - src/server/services/jobs/journey-events-purge.job.ts
@@ -52,15 +53,20 @@ evento por projeto). Retenção: linhas > 180 dias são purgadas por cron no wor
 
 ### 1.2 Vocabulário de eventos (fechado — `journey-events.ts`)
 
-`journey_started` → `identity_done` → `review_done` → `agent_created` → `test_done` /
+`journey_started` → `identity_done` → `mission_selected` → `review_done` → `agent_created` → `test_done` /
 `test_skipped` → `channel_connected` → `published` → `next_steps_ack`.
+
+> **v3 (mission-first — `mission-first-v3.md`, FR-48):** `mission_selected` é emitido ao escolher a missão
+> (fase Conhecer), com `metadata` tipado `{ role, businessType, objective, framework }` (sem PII — NFR-02).
+> Permite quebrar o funil por papel/objetivo e ligar `AgentStrategy.successCriteria` aos marcos abaixo
+> (loop de resultado — moat de dado).
 
 Mapa fase (spec §2 / plan §3.2) → evento de entrada:
 
 | Fase | Evento "entrou/concluiu" | Origem |
 |---|---|---|
 | (start) | `journey_started` | criação + duplicação de projeto |
-| Conhecer | `identity_done` | submit `business_identity` OU accept de fonte |
+| Conhecer | `identity_done` → `mission_selected` | submit `business_identity`/accept de fonte → submit do card Missão (v3) |
 | Revisar | `review_done` | submit `agent_review` (+ `agent_created` na tool `create_agent`) |
 | Testar | `test_done` / `test_skipped` | `test_drive` ou auto-flip do playground |
 | Lançar | `channel_connected` → `published` → `next_steps_ack` | webhook UAZ → saga de deploy → ack |
@@ -299,7 +305,7 @@ ORDER BY versao;
 
 ---
 
-## 4. Sunset (T75) — critério de gatilho e issue a criar
+## 4. Sunset (T75) — critério de gatilho e issue criada
 
 A convergência destrava a remoção do código v1-only. **Critério de gatilho (testável):**
 
@@ -317,12 +323,11 @@ Quando o gatilho disparar, remover:
 3. **A flag de rollout** — `src/lib/feature-flags/builder-v2.ts`, a env `BUILDER_JOURNEY_V2` e o
    cookie `builder-v2-override` (+ cascata `.env.example` / `docs/infra/SECRETS.md`).
 
-### Issue a criar (sem acesso ao GitHub nesta execução)
+### Issue de sunset
 
-Esta execução não tem acesso a criar a issue no GitHub. Criar manualmente (via `gh issue create`)
-com o seguinte conteúdo:
+Issue criada: https://github.com/quayer/app-quayer/issues/17
 
-- **Título:** `chore(builder): sunset dos paths v1-only da Jornada Builder`
+- **Título:** `Sunset da jornada Builder v1`
 - **Gatilho (registrar no corpo):** "Disparar quando a query da seção 3 de
   `docs/builder/JOURNEY_V2_FUNNEL.md` (drafts v1 ATIVOS) retornar `0` por **60 dias consecutivos**.
   Conferir semanalmente via MCP Supabase."
@@ -330,9 +335,9 @@ com o seguinte conteúdo:
   env + cookie + cascata de docs).
 - **Pré-condições:** T106 (arquivamento de drafts v1 inativos por 90d) rodando; coorte v2 estável no
   funil (seção 2.5 sem regressão de conversão vs v1).
-- **Labels sugeridas:** `builder`, `tech-debt`, `cleanup`.
+- **Labels sugeridas, se o repositório tiver:** `builder`, `tech-debt`, `cleanup`.
 
-Comando de referência:
+Comando histórico de referência:
 
 ```bash
 gh issue create \

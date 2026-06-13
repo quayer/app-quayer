@@ -44,14 +44,16 @@ const PROTECTED_PATHS = [
  */
 function buildCSP(nonce: string): string {
   const isDev = process.env.NODE_ENV === 'development';
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com"
+    : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com`;
+
   return [
     "default-src 'self'",
-    // In development, Turbopack injects HMR/React-Refresh scripts without a nonce.
-    // 'unsafe-inline' is added only in dev so those scripts aren't blocked.
-    // Production stays strict: nonce + 'strict-dynamic' only.
-    isDev
-      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline' https://challenges.cloudflare.com`
-      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com`,
+    // Dev: Next/Turbopack injects inline/HMR scripts without a nonce. With a
+    // nonce or strict-dynamic present, browsers ignore unsafe-inline, so dev must
+    // omit them. Production stays strict: nonce + strict-dynamic only.
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",

@@ -29,6 +29,7 @@
  */
 
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 class RollbackSignal extends Error {
   constructor() {
@@ -45,7 +46,9 @@ export function getTestPrisma(): PrismaClient {
     if (!url) {
       throw new Error('TEST_DATABASE_URL or DATABASE_URL must be set for integration tests')
     }
-    _client = new PrismaClient({ datasources: { db: { url } } })
+    _client = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: url }),
+    })
   }
   return _client
 }

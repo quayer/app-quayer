@@ -18,8 +18,17 @@
  * filter them out via `email NOT LIKE '%@test.local'`.
  */
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient();
+const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error('TEST_DATABASE_URL or DATABASE_URL must be set for auth seed');
+}
+
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: databaseUrl }),
+});
 
 const PLACEHOLDER_BCRYPT = '$2a$10$testtesttesttesttesttuQpQpQpQpQpQpQpQpQpQpQpQpQpQpQ';
 

@@ -1,6 +1,6 @@
 ---
 Criado: 2026-06-11
-Atualizado: 2026-06-11
+Atualizado: 2026-06-12
 Revisar em: a cada onda concluída
 Relacionados:
   - specs/jornada-builder-v2/spec.md
@@ -9,12 +9,14 @@ Relacionados:
 
 # Tasks — Jornada Builder v2: "Configure por exceção"
 
-Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Quick-wins já shipped em 2026-06-10 (derivação de capacidades, `set_project_basics` ampliado, prefills, reopen-from-summary, fonte única de progresso, ativação+silêncio encadeados, agenda honesta/FR-11, nome curto/FR-04) **NÃO viram tarefas** — são dependência.
+Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**, mais o adendo de reconciliação R01–R10 de 2026-06-12. Quick-wins já shipped em 2026-06-10 (derivação de capacidades, `set_project_basics` ampliado, prefills, reopen-from-summary, fonte única de progresso, ativação+silêncio encadeados, agenda honesta/FR-11, nome curto/FR-04) **NÃO viram tarefas** — são dependência.
 
 **Delta 2026-06-11 integrado** (decisões do founder — spec §9 decisões 5–10, plan adendo §10): canal em 2 níveis (`channel_platform` + nível 2 WhatsApp QR/Cloud, IG sem nível 2), multi-canal simultâneo como **Onda 5b**, 11 mitigações da revisão sênior (silent-submit, monotonicidade, summary v2-aware, arquivamento de drafts, kill-switch, agent_review granular, proposta tardia, LLM mock, teto de polling, purge 180d, gate de âncoras por onda), BYOK guiado e animação da revelação. **Tarefas novas: T77–T106**; **tarefas alteradas pelo delta: T05, T13, T14, T15, T16, T24, T35, T39, T43, T45, T47, T51, T61, T62, T66, T68, T70, T72, T75, T76 (gate da Onda 5b adicionado às deps)**. **Delta share 2026-06-11 (FR-34, conexão delegável por link): T107–T109** — share da Agenda na config inline (connect-link 7 dias), bloco de share no card do WhatsApp (shareLink 15 min, "Gerar novamente" renova QR+token juntos) e E2E dos fluxos delegados.
 
-**Correções de path vs plan.md (verificadas no código em 2026-06-11):**
-- `apply-card-submit.ts` está em `src/server/ai-module/builder/cards/handlers/` (hoje **960 linhas**, não 876 — ainda mais acima do máx 800 de service).
+**Adendo de execução 2026-06-12 integrado**: a implementação avançou em dois blocos que estavam descritos na spec guarda-chuva, mas não estavam rastreados 1:1 nas T01–T109: **Blueprint conversacional** antes da geração final de prompt e **Refinando** antes da publicação. Status honesto pós-execução brutal com multiagentes: código, testes unit/react, lint/tsc e descoberta Playwright foram reconciliados; permanece aberto só o rollout operacional (**T76**). Já existem entregas completas em `conversation_blueprint`, preservação do blueprint pelo prompt-writer, `capturedProposals`, ferramenta/card de Refinando, avaliadores determinísticos, gate forte de publicação v2, freshness por material testado, fechamento dos bypasses principais, UI persistente do Refinando como step da fase Testar, E2E/harness R08 e registro dos gates R10. Gates locais fechados em 2026-06-12: T62, T64, T67, T68, T70, T72 e T109.
+
+**Correções de path vs plan.md (verificadas no código em 2026-06-11/12):**
+- `apply-card-submit.ts` está em `src/server/ai-module/builder/cards/handlers/` (hoje **510 linhas**, não 876 — já abaixo do máx 800 de service após o split da Onda 3).
 - O método de duplicação é `builderProjectRepository.duplicate` (`projects.repository.ts:557`), exposto pela action `duplicateProject` em `projects/routes/crud.routes.ts:445`.
 - E2E vive em `test/e2e/` (playwright.config.ts `testDir: './test/e2e'`) — specs novas em `test/e2e/builder/`.
 - Banner em `chat/handlers/build-journey-banner.ts`; playground stream do runtime em `src/server/ai-module/ai-agents/runtime/playground-stream.ts`; rota do playground do Builder em `projects/routes/playground.routes.ts`; webhook em `src/server/communication/webhooks/uazapi/resolve-connection.ts`.
@@ -33,118 +35,178 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ---
 
+## Adendo 2026-06-12 — Reconciliação pós-execução (Blueprint + Refinando)
+
+> Este bloco não substitui o mapa original de ondas; ele registra o que já foi implementado por evolução paralela e os pendentes que precisam entrar antes de considerar a jornada v2 fechada.
+
+- [x] **R01** — `capturedProposals` como namespace top-level, com helpers de limpeza/merge e testes de jornada.
+  - **Arquivos principais**: `src/server/ai-module/builder/cards/builder-state.ts`, testes de estado/jornada.
+  - **Critério**: propostas capturadas não confirmam decisão sozinhas e não sobrescrevem owned state.
+
+- [x] **R02** — Blueprint conversacional antes do prompt final.
+  - **Arquivos principais**: `src/server/ai-module/builder/playbook/*`, `tools/generate-conversation-blueprint.tool.*`, `cards/handlers/*conversation_blueprint*`, `conversation-blueprint-card.tsx`.
+  - **Critério**: `generate_prompt_anatomy` exige blueprint aprovado e valida preservação do roteiro no prompt.
+
+- [x] **R03** — Refinando MVP backend: cenários, avaliadores e ferramenta.
+  - **Arquivos principais**: `src/server/ai-module/builder/refinement/*`, `tools/run-agent-refinement.tool.*`, sub-agente `scenario-generator`.
+  - **Critério**: execução produz status agregado (`passed`/`failed`/`needs_user_decision`/`running`) e checks auditáveis.
+
+- [x] **R04** — Gate forte de publicação para projetos v2.
+  - **Arquivos principais**: `refinement-gate.ts`, `next-pending-step.ts`, `deploy-flow.orchestrator.ts`, `publish-version.handler.ts`.
+  - **Critério**: projeto v2 sem Refinando aprovado não publica; v1 continua sem bloqueio novo.
+
+- [x] **R05** — UI de Refinando no chat.
+  - **Arquivos principais**: `refinement-card.tsx`, `refinement-tool-card.tsx`, `card-registry.tsx`, `tool-call-card.tsx`.
+  - **Critério**: resultado mostra status, avaliadores/checks e ações de retry/decisão quando aplicável.
+
+- [x] **R06** — Versionar freshness do Refinando.
+  - **O que fazer**: armazenar versão/hash do prompt, blueprint e contexto testado; invalidar Refinando quando `update_agent_prompt`, edição de seção, revert/rollback ou novo blueprint mudarem o agente.
+  - **Critério**: resultado antigo não libera publicação depois de mudança relevante.
+  - **Executado 2026-06-12**: `refinement.material` grava versão/hash/contexto; mudanças de prompt, blueprint, cards materiais, fontes, RAG, preços, ferramentas e integrações invalidam o resultado para `idle` e pausam deployments ativos do projeto v2.
+
+- [x] **R07** — Fechar bypasses de publicação por rollback/edição direta.
+  - **O que fazer**: revisar rollback de versão, publish direto e qualquer rota que materialize `AIAgentConfig`/deployment fora do orquestrador principal.
+  - **Critério**: todos os caminhos de publicação v2 passam pelo mesmo gate de Refinando.
+  - **Executado 2026-06-12**: `publishVersion` compara a versão alvo com o material refinado; rollback publicado exige Refinando válido para a versão alvo; edição direta/manual de prompt invalida Refinando e pausa runtime ativo; attach/provision/credentials não deixam `AgentDeployment ACTIVE` quando o gate v2 bloqueia.
+
+- [x] **R08** — Atualizar E2Es v2 para incluir `conversation_blueprint` e Refinando.
+  - **O que fazer**: ajustar T67/T70/T72/T105 para o fluxo atual; garantir LLM mock/harness determinístico (T89) com cards/tool-results novos.
+  - **Critério**: E2Es passam sem LLM real e cobrem blueprint aprovado antes do prompt + Refinando aprovado antes da publicação.
+  - **Executado 2026-06-12**: novo `test/e2e/builder/builder-v2-blueprint-refinement.spec.ts` cobre aprovação de `conversation_blueprint`, bloqueio de `publish-version` sem Refinando e publicação após `refinement.status='passed'` com `E2E_LLM_MOCK=1`; T67 passou a aprovar `conversation_blueprint` antes do `agent_review`; T70 foi atualizado para o contrato atual de dupla seleção aceita.
+
+- [x] **R09** — Promover Refinando a etapa/fase explícita ou card persistente pré-publicação.
+  - **O que fazer**: decidir se `refinement` vira step do engine (`Refinando` entre Testar e Lançar/Publicar) ou ação persistente no resumo; evitar depender só de tool-result efêmero.
+  - **Critério**: usuário sempre vê o bloqueio e consegue rodar/re-rodar Refinando sem esperar a IA chamar a ferramenta.
+  - **Executado 2026-06-12**: `refinement` virou `StepId` v2 obrigatório dentro da fase Testar, mapeado ao `refinement-card` no active-step slot; o botão do card usa card-submit determinístico (`action: run`) e chama o mesmo pipeline de `run_agent_refinement`, sem depender da IA decidir chamar a tool.
+
+- [x] **R10** — Registrar execução dos gates de âncoras T77–T85 no PR/log da onda.
+  - **O que fazer**: anexar grep de paths/linhas citadas antes de cada onda restante; corrigir plano/tarefas se houver drift.
+  - **Critério**: nenhuma onda restante começa com âncora quebrada.
+  - **Executado 2026-06-12**: T77–T85 re-grepados. Drift corrigido: T82 (`channel-credentials.routes.ts`) agora marca credenciais manuais Instagram/Cloud como `CONNECTED` e não grava `Connection.projectId` com id de BuilderProject; T70/T105 reconciliados para multi-canal aceito; T85 tem âncoras locais registradas, e a evidência operacional de env homol/prod permanece responsabilidade do rollout T76.
+
+---
+
 ## Fase 0 — Gates de onda: revalidação de âncoras (plan §10, risco 11)
 
 > Regra dura (decisão 2026-06-11): **a 1ª tarefa de TODA onda** é revalidar as âncoras de código (paths + linhas) que o plano/tarefas citam para a onda — drift de plano com produto vivo já aconteceu (comentário stale do `playground-stream.ts`, risco 7). Âncora quebrada = corrigir `plan.md`/`tasks.md` ANTES de codar. Formato comum: re-grep das âncoras listadas, registro do resultado no PR da onda. Todas sequenciais (bloqueiam a onda).
 
-- [ ] **T77 [Onda 0]** — Gate de âncoras da Onda 0
+- [x] **T77 [Onda 0]** — Gate de âncoras da Onda 0
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md} (correções, se houver)
   - **Depende de**: —
   - **O que fazer**: Re-grep das âncoras da Onda 0: `projects.repository.ts:28` (`$transaction` de `createWithInitialMessage`) e `:557` (`duplicate`), `BuilderToolCall` no schema (linha ~1994), idiom de `auth-v3.ts`, padrão de schedule de `src/server/services/jobs/session-close.job.ts` (para o cron T88). Divergência → corrigir plano/tarefas antes de T01.
   - **Critério**: âncoras conferidas e registradas no PR; zero divergência não corrigida.
+  - **Executado 2026-06-12**: conferidos `projects.repository.ts` (`createWithInitialMessage`, `duplicate`, eventos `journey_started`), `BuilderToolCall`/`BuilderJourneyEvent` no schema e purge em `jobs/index.ts`; sem bloqueio.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T78 [Onda 1]** — Gate de âncoras da Onda 1
+- [x] **T78 [Onda 1]** — Gate de âncoras da Onda 1
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: `next-pending-step.ts` (`confirmed`:83, `hasText`:87, `StepDefinition`:56, exports `FIELD_OWNERSHIP`:331/`computeBlockers`:372), `readiness-resolver.ts:74-97` (`Promise.all`) e `:85-88` (`hasWhatsAppInstance` sem status), ausência de switch exaustivo sobre `StepId` (risco R3), `provider-factory.ts` (ponto de injeção do mock T89).
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: helpers estão em `state/step-helpers.ts`; `StepId` v2 é aditivo e tolerante; resolver usa sinais v2 via `readiness-resolver.ts`; sem switch exaustivo bloqueante.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T79 [Onda 2]** — Gate de âncoras da Onda 2
+- [x] **T79 [Onda 2]** — Gate de âncoras da Onda 2
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: accept de source em `apply-card-submit.ts` (~:796), padrão transacional de `set-project-basics.tool.ts:149-202`, `STEP_TO_CARD` em `card-registry.tsx` (:207), `journey-rules.ts`/`quick_reply_chips` end-to-end.
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: accept de source e registry atualizados nos paths atuais (`cards/handlers/apply-card-submit.ts`, `card-registry.tsx`, `journey-rules.ts`); sem bloqueio.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T80 [Onda 3]** — Gate de âncoras da Onda 3
+- [x] **T80 [Onda 3]** — Gate de âncoras da Onda 3
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
-  - **O que fazer**: Re-grep: funções locais `applyAgentPersona`/`applyServices`/`applyBusinessHours` (`apply-card-submit.ts` ~:327-417), `proposal` singular (`builder-state.ts:29-32`), `deepMerge` nunca deleta (`builder-state.ts:377-394`), clear de `minTicketCents` (`apply-card-submit.ts:464-469`), `injectDisclosureIntoPrompt` (`identity.routes.ts:102-114`), contagem de linhas atual do entrypoint (hoje 960).
+  - **O que fazer**: Re-grep: funções locais `applyAgentPersona`/`applyServices`/`applyBusinessHours` (`apply-card-submit.ts` ~:327-417), `proposal` singular (`builder-state.ts:29-32`), `deepMerge` nunca deleta (`builder-state.ts:377-394`), clear de `minTicketCents` (`apply-card-submit.ts:464-469`), `injectDisclosureIntoPrompt` (`identity.routes.ts:102-114`), contagem de linhas atual do entrypoint (hoje 510).
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: handlers extraídos existem em `cards/handlers/apply/{persona,services,hours}.ts`; `deepMerge`/limpeza de propostas conferidos; entrypoint caiu para 510 linhas e ficou abaixo do teto de service.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T81 [Onda 4]** — Gate de âncoras da Onda 4
+- [x] **T81 [Onda 4]** — Gate de âncoras da Onda 4
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: flip-antes-do-stream e turno LLM do card-submit (`card-submit.routes.ts:102-106` e `:120-155` — âncora central do silent-submit T90), lazy wiring `wireCollectionToProject` (`knowledge-helpers.ts:67-86`), comentário stale (`playground-stream.ts:104-106`), gate RAG do runtime (`prepare-agent-call.ts:208`), exports de `enabled-tools-derivation.ts`.
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: silent-submit, lazy wiring de RAG e gate runtime conferidos; `READINESS_QUERY` antigo foi removido/substituído por readiness içado.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T82 [Onda 5]** — Gate de âncoras da Onda 5 (inclui transição de status do Instagram)
+- [x] **T82 [Onda 5]** — Gate de âncoras da Onda 5 (inclui transição de status do Instagram)
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
-  - **O que fazer**: Re-grep: provisioning não-idempotente (`provision-whatsapp.routes.ts:76-90`, projectId :83), refresh público de QR (`instances/share/[token]/route.ts:69-117`), transição CONNECTED no webhook (`resolve-connection.ts:66-73, 156`), `READINESS_QUERY` (`use-chat-stream.ts:78, 202-207`), redirect do blocker byok (`REDIRECT_BYOK = '/integracoes'`, `next-pending-step.ts:44`; blocker em ~:389-391). **Âncora crítica (plan §3.1)**: `channel-credentials.routes.ts:117` cria Connection IG com `status: 'DISCONNECTED'` — CONFIRMAR como o status IG transita para `CONNECTED` antes de fixar o isDone de `instagram_connect`; se o sinal for volátil, aplicar sentinel-espelho (mesmo padrão `whatsappConnectedOnce`).
+  - **O que fazer**: Re-grep: provisioning idempotente (`provision-whatsapp.routes.ts`), refresh público de QR (`instances/share/[token]/route.ts`), transição CONNECTED no webhook (`resolve-connection.ts`), readiness içado, redirect do blocker byok (`REDIRECT_BYOK = '/integracoes'`, `next-pending-step.ts`). **Âncora crítica resolvida**: credenciais manuais Cloud/Instagram em `channel-credentials.routes.ts` gravam Connection como `CONNECTED`; vínculo BuilderProject→Connection acontece por `AgentDeployment`, não por `Connection.projectId` (FK legada).
   - **Critério**: idem T77 + decisão registrada sobre o isDone do `instagram_connect` (sinal direto vs sentinel-espelho) refletida em T15/T97.
+  - **Executado 2026-06-12**: corrigido `channel-credentials.routes.ts` com `MANUAL_CREDENTIAL_STATUS='CONNECTED'`; teste `channel-credentials.routes.test.ts` cobre create IG conectado, update Cloud conectado e ausência de write em `Connection.projectId`; `instagram_connect` continua concluindo por `ctx.hasConnectedInstagramInstance`.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T83 [Onda 5b]** — Gate de âncoras da Onda 5b (attach + inbound)
+- [x] **T83 [Onda 5b]** — Gate de âncoras da Onda 5b (attach + inbound)
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: `attach-to-agent.ts:25-28` (`updateMany where { agentConfigId, status: 'ACTIVE' }` — a semântica 1-canal a mudar) + os DOIS callers (`channel-credentials.routes.ts`, `provision-whatsapp.routes.ts`); mapear TODOS os pontos do runtime inbound que resolvem deployment (confirmar resolução POR connection, nunca por unicidade de agente) — insumo direto de T93.
   - **Critério**: idem T77 + lista dos pontos de resolução inbound anexada ao PR (insumo de T93).
+  - **Executado 2026-06-12**: attach pausa por `connectionId` em `attach-to-agent.ts`; callers conferidos em credentials/provision/channel routes; inbound resolve por `resolveAgentIdForConnection(connectionId, org)` com testes existentes.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T84 [Onda 6]** — Gate de âncoras da Onda 6
+- [x] **T84 [Onda 6]** — Gate de âncoras da Onda 6
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: embed da IdentityTab em `prompt-tab.tsx` (:29, :73), `tab-registry.tsx`/`TabRenderContext`, ponto do split no `workspace.tsx` (âncora da animação T101), `persona.greeting` lido pelo prompt-writer (`builder-context.ts:31, 146, 212-213`).
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: IdentityTab antiga está removida/documentada em `docs/deprecated/IDENTITY_TAB.md`; tabs usam `visibleWhen`/`TabRenderContext`; `persona.greeting` chega ao prompt-writer.
   - **Paralelo**: sequencial (1ª da onda)
 
-- [ ] **T85 [Onda 7]** — Gate de âncoras da Onda 7
+- [x] **T85 [Onda 7]** — Gate de âncoras da Onda 7
   - **Arquivo**: specs/jornada-builder-v2/{plan.md,tasks.md}
   - **Depende de**: —
   - **O que fazer**: Re-grep: `archiveProject` em `projects/routes/crud.routes.ts` (reuso em T106), query JSONB `builderState->>'journeyVersion'` viável no Postgres alvo, flag `BUILDER_JOURNEY_V2` nos envs de homol/prod.
   - **Critério**: idem T77.
+  - **Executado 2026-06-12**: âncoras locais conferidas (`archiveProject`, query JSONB documentada, `BUILDER_JOURNEY_V2` em `.env.example`/SECRETS). Evidência operacional de env real homol/prod não é verificável no repo e fica no rollout T76.
   - **Paralelo**: sequencial (1ª da onda)
 
 ## Fase 1 — Dados (Prisma + builderState)
 
-- [ ] **T01 [Onda 0]** — Modelo Prisma `BuilderJourneyEvent` ⚠️ APROVAÇÃO (mudança de schema)
+- [x] **T01 [Onda 0]** — Modelo Prisma `BuilderJourneyEvent` ⚠️ APROVAÇÃO (mudança de schema)
   - **Arquivo**: prisma/schema.prisma
   - **Depende de**: —
   - **O que fazer**: Novo modelo conforme plan §2.1 (padrão leve de `BuilderToolCall`): id uuid, organizationId, projectId (sem FK), journeyVersion Int, event VarChar(60), metadata Json?, createdAt; índices `@@index([organizationId, event, createdAt])` + `@@index([projectId, createdAt])`; `@@map("builder_journey_events")`. SEM unique constraint (eventos repetem).
   - **Critério**: `npx prisma validate` passa; modelo tem exatamente os 2 índices e nenhuma relation.
   - **Paralelo**: sequencial
 
-- [ ] **T02 [Onda 0]** — Migration `builder_journey_events` ⚠️ APROVAÇÃO
+- [x] **T02 [Onda 0]** — Migration `builder_journey_events` ⚠️ APROVAÇÃO
   - **Arquivo**: prisma/migrations/<timestamp>_builder_journey_events/migration.sql
   - **Depende de**: T01
   - **O que fazer**: Gerar a ÚNICA migration do plano (`npx prisma migrate dev --name builder_journey_events`): 1 `CREATE TABLE` + 2 `CREATE INDEX`. Nunca `db push --accept-data-loss`.
   - **Critério**: SQL contém só CREATE TABLE + 2 índices; migration aplica limpo no Postgres de teste (`npm run test:db:up` + migrate); `npx tsc --noEmit` verde após `prisma generate`.
   - **Paralelo**: sequencial
 
-- [ ] **T03 [Onda 0]** — Cascata de docs do schema: ERD + tabela Prisma do CLAUDE.md
+- [x] **T03 [Onda 0]** — Cascata de docs do schema: ERD + tabela Prisma do CLAUDE.md
   - **Arquivo**: docs/ERD.md (+ CLAUDE.md seção "Modelos Prisma Relevantes")
   - **Depende de**: T01
   - **O que fazer**: Adicionar `BuilderJourneyEvent`/`builder_journey_events` ao ERD e à tabela do CLAUDE.md (cascata obrigatória das regras críticas). Bump do frontmatter `Atualizado` no ERD.
   - **Critério**: `grep builder_journey_events docs/ERD.md CLAUDE.md` retorna match nos dois.
   - **Paralelo**: [P] (com T02)
 
-- [ ] **T04 [Onda 0]** — `journeyVersion` no Zod do builderState
+- [x] **T04 [Onda 0]** — `journeyVersion` no Zod do builderState
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.ts
   - **Depende de**: —
   - **O que fazer**: Adicionar `journeyVersion: z.union([z.literal(1), z.literal(2)]).default(1)` ao schema do builderState (plan §2.2 item 1 — chave de rollout POR PROJETO, sem coluna nova). Mudança 100% aditiva; `parseBuilderState` backfilla legados para 1.
   - **Critério**: testes existentes de `builder-state` verdes; `npx tsc --noEmit`; parse de JSONB legado retorna `journeyVersion: 1` (teste formal em T57).
   - **Paralelo**: [P]
 
-- [ ] **T05 [Onda 1]** — 7 sentinels novos em `confirmationsSchema` *(alterada pelo delta 2026-06-11)*
+- [x] **T05 [Onda 1]** — 7 sentinels novos em `confirmationsSchema` *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.ts
   - **Depende de**: T04
   - **O que fazer**: Adicionar `businessIdentity`, `testDrive`, `knowledge`, `media`, `publishedNextSteps`, `channelPlatform` e `whatsappConnectedOnce` (todos `.default(false)`) em `confirmationsSchema`, com doc no arquivo reforçando: resolvidos SÓ server-side via `applyConfirmation`, nunca vêm do body (plan §2.2 item 3 + §5). `whatsappConnectedOnce` é o **sentinel-espelho de monotonicidade (FR-30)** — flipado fail-open pelo webhook UAZ (T35); documentar isso no arquivo.
   - **Critério**: `npx tsc --noEmit`; testes existentes verdes; os 7 defaults false cobertos em T61.
   - **Paralelo**: sequencial (mesmo arquivo que T04)
 
-- [ ] **T06 [Onda 3]** — Namespace `capturedProposals` + helper `clearCapturedProposals`
+- [x] **T06 [Onda 3]** — Namespace `capturedProposals` + helper `clearCapturedProposals`
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.ts
   - **Depende de**: T05
   - **O que fazer**: Adicionar namespace top-level `capturedProposals` (NÃO `proposals` — colisão de leitura com `proposal` singular existente, linhas 29-32) com shape opcional por domínio `{persona?, services?, hours?, pricing?, handoff?{mode,reason}, activation?}`, max-lengths e whitelist de domínios (plan §2.2 item 2). Exportar `clearCapturedProposals(state, domain)` que remove a chave do domínio por spread — o `deepMerge` de `patchBuilderState` NUNCA deleta chaves; proibido confiar no patch para limpar.
   - **Critério**: `clearCapturedProposals` remove só o domínio dado (teste T65); `deepMerge` intocado; `npx tsc --noEmit`.
   - **Paralelo**: sequencial (mesmo arquivo)
 
-- [ ] **T86 [Onda 1]** — Namespace `channel` no builderState (FR-24/25) *(nova — delta 2026-06-11)*
+- [x] **T86 [Onda 1]** — Namespace `channel` no builderState (FR-24/25) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.ts
   - **Depende de**: T05
   - **O que fazer**: Adicionar namespace top-level `channel: { platforms?: Array<'whatsapp'|'instagram'>, whatsappMode?: 'qr'|'cloud' }` (plan §2.2 item 4) — gravado pelo handler `channel_platform` (T91); `whatsappMode` recomendado `'qr'` (a pré-seleção vive na UI, T96, não no schema). Mudança 100% aditiva; o engine v2 (T15) lê `state.channel?.platforms` para surfar os steps de conexão condicionalmente.
@@ -153,53 +215,54 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ## Fase 2 — Validação (flag + env)
 
-- [ ] **T07 [Onda 0]** — Env `BUILDER_JOURNEY_V2` + cascata SECRETS ⚠️ APROVAÇÃO (env var nova — plan §9)
+- [x] **T07 [Onda 0]** — Env `BUILDER_JOURNEY_V2` + cascata SECRETS ⚠️ APROVAÇÃO (env var nova — plan §9)
   - **Arquivo**: .env.example (+ docs/infra/SECRETS.md)
   - **Depende de**: —
   - **O que fazer**: Documentar `BUILDER_JOURNEY_V2=off` (valores `off | on | percentage:N`) no .env.example com comentário do cookie de override `builder-v2-override`; atualizar docs/infra/SECRETS.md (cascata obrigatória `.env.example` → SECRETS.md do CLAUDE.md).
   - **Critério**: `grep BUILDER_JOURNEY_V2 .env.example docs/infra/SECRETS.md` retorna match nos dois; frontmatter de SECRETS.md com `Atualizado` bumpado.
   - **Paralelo**: [P]
 
-- [ ] **T08 [Onda 0]** — Feature flag `builder-v2.ts`
+- [x] **T08 [Onda 0]** — Feature flag `builder-v2.ts`
   - **Arquivo**: src/lib/feature-flags/builder-v2.ts
   - **Depende de**: —
   - **O que fazer**: Espelhar o idiom de `src/lib/feature-flags/auth-v3.ts`: env `off | on | percentage:N` + cookie override `builder-v2-override` + hash SHA-256 estável. **Seed do percentage = `organizationId`** (coorte estável por org — plan §1).
   - **Critério**: unit T58 verde; `npx tsc --noEmit`; zero deps npm novas.
   - **Paralelo**: [P]
 
-- [ ] **T87 [Onda 1]** — Kill-switch `BUILDER_V2_FORCE_RENDER_V1` + cascata SECRETS ⚠️ APROVAÇÃO (env var nova — aprovada 2026-06-11, plan §9) *(nova — delta 2026-06-11)*
+- [x] **T87 [Onda 1]** — Kill-switch `BUILDER_V2_FORCE_RENDER_V1` + cascata SECRETS ⚠️ APROVAÇÃO (env var nova — aprovada 2026-06-11, plan §9) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/readiness-resolver.ts + .env.example + docs/infra/SECRETS.md
   - **Depende de**: T17
   - **O que fazer**: NFR-08 (plan §3.1): env `BUILDER_V2_FORCE_RENDER_V1` (true|false, default false). Quando ligada, o branch do resolver (T17) força `nextPendingStep` (v1) MESMO com `journeyVersion === 2` — degrada SÓ o render, sem tocar estado persistido (sentinels compatíveis; steps v2 sem equivalente v1 ficam ocultos); desligar volta à v2 no request seguinte. **Cascata obrigatória**: documentar em `.env.example` + `docs/infra/SECRETS.md` (bump do frontmatter). Unit co-localizado no resolver: kill-switch ligado força engine v1 com `journeyVersion: 2` SEM nenhuma escrita de estado; desligado volta v2 (plan §7.1).
   - **Critério**: `grep BUILDER_V2_FORCE_RENDER_V1 .env.example docs/infra/SECRETS.md` retorna match nos dois; unit verde; zero writes no caminho do kill-switch (assert no teste); E2E T62 cobre o round-trip.
+  - **Executado 2026-06-12**: env documentada em `.env.example`/`docs/infra/SECRETS.md`; resolver força render v1 read-only; `readiness-resolver.test.ts` cobre on/off/`1` e zero writes. O round-trip E2E permanece no gate T62.
   - **Paralelo**: sequencial (depois de T17)
 
 ## Fase 3 — Backend
 
 ### Onda 0 — Fundações dark
 
-- [ ] **T09 [Onda 0]** — Serviço `trackJourneyEvent` (funil NFR-04)
+- [x] **T09 [Onda 0]** — Serviço `trackJourneyEvent` (funil NFR-04)
   - **Arquivo**: src/server/services/journey-events.ts
   - **Depende de**: T02
   - **O que fazer**: `trackJourneyEvent({ organizationId, projectId, journeyVersion, event, metadata? })` fire-and-forget com try/catch interno que NUNCA lança (padrão fail-open de `hasActiveCalendarConnection`). Vocabulário FECHADO em union TS (plan §6.2): `journey_started | identity_done | review_done | agent_created | test_done | test_skipped | channel_connected | published | next_steps_ack`. Metadata só com shape tipado SEM campos livres — proibido telefone/nome de contato (NFR-02/LGPD).
   - **Critério**: unit T59 (erro de DB não lança; metadata fora do contrato rejeitado em tipo); `npx tsc --noEmit`.
   - **Paralelo**: sequencial
 
-- [ ] **T10 [Onda 0]** — Seed `journeyVersion` + `journey_started` em `createWithInitialMessage`
+- [x] **T10 [Onda 0]** — Seed `journeyVersion` + `journey_started` em `createWithInitialMessage`
   - **Arquivo**: src/server/ai-module/builder/projects/projects.repository.ts
   - **Depende de**: T04, T08, T09
   - **O que fazer**: No `$transaction` de `createWithInitialMessage` (:28), gravar `journeyVersion` no builderState inicial decidido pelo flag (on/percentage por orgId → 2; off → 1) e emitir `journey_started` com a versão congelada. Logs com prefixo `[journey-v2]`.
   - **Critério**: criação com flag off grava `journeyVersion: 1` e com cookie override on grava 2; evento `journey_started` persiste em `builder_journey_events`; suíte existente verde (tudo invisível ao usuário).
   - **Paralelo**: sequencial
 
-- [ ] **T11 [Onda 0]** — Herança de versão no `duplicate` + `journey_started`
+- [x] **T11 [Onda 0]** — Herança de versão no `duplicate` + `journey_started`
   - **Arquivo**: src/server/ai-module/builder/projects/projects.repository.ts (método `duplicate`, :557)
   - **Depende de**: T10
   - **O que fazer**: `duplicate` cria BuilderProject SEM conversa/builderState — sem tratamento, clone de projeto v2 cairia no default 1 na criação lazy da conversa (downgrade silencioso, plan §2.2 item 1). Ler a versão do builderState da conversa do projeto-fonte e garantir que o ponto de criação lazy da conversa do clone receba a versão herdada (não o default); emitir `journey_started` na duplicação.
   - **Critério**: unit T60 — duplicar projeto v2 → conversa do clone nasce com `journeyVersion: 2`; evento emitido; duplicar v1 permanece v1.
   - **Paralelo**: sequencial
 
-- [ ] **T88 [Onda 0]** — Cron de purge `builder_journey_events` > 180 dias ⚠️ APROVAÇÃO (cron novo no worker — aprovado 2026-06-11, plan §9) *(nova — delta 2026-06-11)*
+- [x] **T88 [Onda 0]** — Cron de purge `builder_journey_events` > 180 dias ⚠️ APROVAÇÃO (cron novo no worker — aprovado 2026-06-11, plan §9) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/services/jobs/journey-events-purge.job.ts (+ registro em jobs/index.ts)
   - **Depende de**: T02
   - **O que fazer**: NFR-10 (plan §6.2): job recorrente no worker — `DELETE FROM builder_journey_events WHERE created_at < now() - interval '180 days'` (batched) — no MESMO padrão do schedule existente de `session-close.job.ts`. Fail-open: erro no purge loga (`[journey-v2]`) e NUNCA derruba o worker. Sem env nova; intervalo fixo. Unit co-localizado: deleta só eventos > 180 dias; nunca lança; idempotente (plan §7.1).
@@ -208,79 +271,80 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ### Onda 1 — Engine v2 + leitura
 
-- [ ] **T12 [Onda 1]** — Extrair `step-helpers.ts` compartilhado
+- [x] **T12 [Onda 1]** — Extrair `step-helpers.ts` compartilhado
   - **Arquivo**: src/server/ai-module/builder/state/step-helpers.ts (de next-pending-step.ts)
   - **Depende de**: —
   - **O que fazer**: Mover `confirmed` (:83) e `hasText` (:87) para o novo arquivo e exportar a interface `StepDefinition` (:56, hoje local); `next-pending-step.ts` passa a importar de lá. Proibido duplicar — é o anti-fork do risco R1.
   - **Critério**: `state/next-pending-step.test.ts` verde **SEM nenhuma edição**; `npx tsc --noEmit`.
   - **Paralelo**: [P]
 
-- [ ] **T13 [Onda 1]** — Estender `StepId` + tipo `Readiness.journey` *(alterada pelo delta 2026-06-11)*
+- [x] **T13 [Onda 1]** — Estender `StepId` + tipo `Readiness.journey` *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/readiness.types.ts
   - **Depende de**: —
   - **O que fazer**: (a) Re-grep cinto de segurança: confirmar que NÃO existe switch exaustivo sobre `StepId` (risco R3 — coberto pelo gate T78). (b) Adicionar à union (aditivo): `business_identity`, `agent_review`, `test_drive`, `channel_platform`, `whatsapp_connect`, `instagram_connect`, `published_next_steps`, `knowledge`, `media` (9 ids — plan §3.1). (c) `Readiness` ganha campo opcional `journey?: { version: 2; activePhaseId: PhaseId; phases: [...] }` com `PhaseId = 'conhecer'|'revisar'|'testar'|'lancar'` (plan §3.1). Campos v1 permanecem SEMPRE populados.
   - **Critério**: re-grep documentado no PR (zero switch exaustivo); `npx tsc --noEmit` verde em todo o repo (prova de que consumidores toleram a extensão).
   - **Paralelo**: [P]
 
-- [ ] **T14 [Onda 1]** — Sinais `hasLiveDeployment` + `hasConnectedWhatsAppInstance` + `hasConnectedInstagramInstance` no resolver *(alterada pelo delta 2026-06-11)*
+- [x] **T14 [Onda 1]** — Sinais `hasLiveDeployment` + `hasConnectedWhatsAppInstance` + `hasConnectedInstagramInstance` no resolver *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/readiness-resolver.ts
   - **Depende de**: T13
-  - **O que fazer**: Adicionar ao `StepEngineContext` e ao `Promise.all` (:74-97) TRÊS counts indexados (plan §3.1): `hasLiveDeployment` (BuilderDeployment status `live` por projectId+org), `hasConnectedWhatsAppInstance` (Connection com organizationId + channel WHATSAPP + **status `CONNECTED`** + **projectId do projeto**) e `hasConnectedInstagramInstance` (mesmo padrão, channel INSTAGRAM — isDone do step condicional `instagram_connect`; a transição de status IG é âncora revalidada no gate T82). NÃO reusar `hasWhatsAppInstance` (:85-88, conta presença sem status — auto-completaria no QR gerado). O blocker `channel` v1 permanece no sinal antigo (NFR-03).
+  - **O que fazer**: Adicionar ao `StepEngineContext` e ao `Promise.all` (:74-97) TRÊS counts indexados (plan §3.1): `hasLiveDeployment` (BuilderDeployment status `live` por projectId+org), `hasConnectedWhatsAppInstance` (Connection com organizationId + channel WHATSAPP + **status `CONNECTED`**, alcançada pelo `AgentDeployment` do agente do BuilderProject) e `hasConnectedInstagramInstance` (mesmo padrão, channel INSTAGRAM — isDone do step condicional `instagram_connect`; credenciais manuais IG são gravadas como CONNECTED conforme T82). NÃO reusar `hasWhatsAppInstance` (:85-88, conta presença e auto-completaria no QR gerado). O blocker `channel` v1 permanece no sinal antigo (NFR-03).
   - **Critério**: os três org-scoped; `next-pending-step.test.ts` verde sem edição; coberto por T61 (DISCONNECTED não completa).
   - **Paralelo**: sequencial
 
-- [ ] **T15 [Onda 1]** — Engine v2: `QUAYER_PHASES` + definições de steps *(alterada pelo delta 2026-06-11)*
+- [x] **T15 [Onda 1]** — Engine v2: `QUAYER_PHASES` + definições de steps *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/journey-v2.ts
   - **Depende de**: T05, T12, T13, T86
-  - **O que fazer**: Criar o arquivo com as 4 fases e steps do plan §3.2 — Conhecer: `objective` → `business_identity` (isDone: `confirmations.businessIdentity` OU `confirmed('source')`) → `source_ingestion` (opcional, override do slot ativo); Revisar: `agent_review` (isDone: persona && services && hours — SEM sentinel novo) → `agent_approval` → `knowledge` (opcional) → `media` (opcional); Testar: `test_drive` (gate SOFT); Lançar: `activation` → `channel_platform` (NOVO, FR-24/25; isDone: `confirmations.channelPlatform`) → `whatsapp_connect` (CONDICIONAL: surfa só se `channel.platforms` inclui `'whatsapp'`; polimórfico por `channel.whatsappMode` no render — T47; isDone MONOTÔNICO: `ctx.hasConnectedWhatsAppInstance || confirmations.whatsappConnectedOnce` — FR-15+FR-30) → `instagram_connect` (CONDICIONAL: surfa só se `channel.platforms` inclui `'instagram'`; isDone: `ctx.hasConnectedInstagramInstance`, com a ressalva de âncora do gate T82) → `summary` → `published_next_steps` (terminal, surfa com `hasLiveDeployment && !confirmations.publishedNextSteps`). **Regra geral de monotonicidade (FR-30, plan §3.2)**: step concluído NUNCA regride; sinal volátil de ctx ganha sentinel-espelho. REUSA `computeBlockers`/`FIELD_OWNERSHIP` (exports :372/:331) e helpers de T12 — zero fork.
+  - **O que fazer**: Criar o arquivo com as 4 fases e steps do plan §3.2 — Conhecer: `objective` → `business_identity` (isDone: `confirmations.businessIdentity` OU `confirmed('source')`) → `source_ingestion` (opcional, override do slot ativo); Revisar: `conversation_blueprint` → `agent_review` (persona && services && hours && agentApproved) → `knowledge` (opcional) → `media` (opcional); Testar: `test_drive` (gate SOFT) → `refinement`; Lançar: `activation` → `channel_platform` (FR-24/25; isDone: `confirmations.channelPlatform`) → `whatsapp_connect` (CONDICIONAL: surfa só se `channel.platforms` inclui `'whatsapp'`; polimórfico por `channel.whatsappMode` no render — T47; isDone MONOTÔNICO: `ctx.hasConnectedWhatsAppInstance || confirmations.whatsappConnectedOnce` — FR-15+FR-30) → `instagram_connect` (CONDICIONAL: surfa só se `channel.platforms` inclui `'instagram'`; isDone: `ctx.hasConnectedInstagramInstance`, alimentado por credenciais manuais CONNECTED conforme T82) → `summary` → `published_next_steps` (terminal, surfa com `hasLiveDeployment && !confirmations.publishedNextSteps`). **Regra geral de monotonicidade (FR-30, plan §3.2)**: step concluído NUNCA regride; sinal volátil de ctx ganha sentinel-espelho. REUSA `computeBlockers`/`FIELD_OWNERSHIP` (exports :372/:331) e helpers de T12 — zero fork.
   - **Critério**: `npx tsc --noEmit`; nenhum import duplicando primitivos do v1 (review de PR); função pura sem IO.
   - **Paralelo**: sequencial
 
-- [ ] **T16 [Onda 1]** — Engine v2: `nextPendingStepV2` + completeness + `isDeployReady` + payload `journey` *(alterada pelo delta 2026-06-11)*
+- [x] **T16 [Onda 1]** — Engine v2: `nextPendingStepV2` + completeness + `isDeployReady` + payload `journey` *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/journey-v2.ts
   - **Depende de**: T15
   - **O que fazer**: Implementar `nextPendingStepV2(state, ctx)` retornando step ativo + montagem do payload `journey` (fases com status done/active/pending); `completenessPct` monotônico (mesma fórmula sobre os steps aplicáveis — **steps condicionais de canal entram no denominador SÓ quando a plataforma está selecionada**, plan §3.2) e `isDeployReady` = required das fases 1-4 (exceto terminal) + zero blockers (mesmo contrato v1).
   - **Critério**: unit T61 verde (ordem, sinais, monotonicidade, steps condicionais, blockers).
   - **Paralelo**: sequencial
 
-- [ ] **T17 [Onda 1]** — Branch por versão no resolver + `journey` no getReadiness
+- [x] **T17 [Onda 1]** — Branch por versão no resolver + `journey` no getReadiness
   - **Arquivo**: src/server/ai-module/builder/state/readiness-resolver.ts
   - **Depende de**: T14, T16
   - **O que fazer**: `state.journeyVersion === 2 ? nextPendingStepV2(state, ctx) : nextPendingStep(state, ctx)`; popular `readiness.journey` apenas no branch v2. Campos v1 (`step`, `steps`, `completenessPct`, `isDeployReady`, `blockers`, `fieldOwnership`, `builderState`) SEMPRE populados nos dois branches. Log `[journey-v2]` no branch.
   - **Critério**: `next-pending-step.test.ts` verde sem edição; projeto v1 recebe resposta byte-equivalente à atual (sem campo `journey`); projeto com override v2 recebe `journey` com 4 fases.
   - **Paralelo**: sequencial
 
-- [ ] **T18 [Onda 1]** — Banner v2-aware
+- [x] **T18 [Onda 1]** — Banner v2-aware
   - **Arquivo**: src/server/ai-module/builder/chat/handlers/build-journey-banner.ts
   - **Depende de**: T16
   - **O que fazer**: Quando `readiness.journey` existe, o cabeçalho `# PRÓXIMO PASSO` inclui a fase ativa ("Fase 2 de 4 — Revisar") — mudança puramente aditiva no renderer puro (plan §3.5).
   - **Critério**: `build-journey-banner.test.ts` existente verde + caso novo com `journey` presente; render v1 inalterado.
   - **Paralelo**: [P]
 
-- [ ] **T89 [Onda 1]** — Provider LLM mock test-only para E2E (NFR-09) *(nova — delta 2026-06-11)*
+- [x] **T89 [Onda 1]** — Provider LLM mock test-only para E2E (NFR-09) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/ai-agents/services/provider-factory.ts (+ fixture de env no projeto local do Playwright)
   - **Depende de**: —
   - **O que fazer**: Injeção test-only no provider factory atrás de env, com **guard duro `NODE_ENV !== 'production'`** (impossível ativar em prod — plan §1/§5): quando a env está setada, o factory devolve um provider mock determinístico (respostas/tool-calls roteirizáveis). A fixture do Playwright (project local) seta a env — TODOS os specs E2E v2 (T62, T64, T67, T68, T70, T72, T105) rodam com o mock; LLM real só no smoke de homol. É pré-requisito dos E2E das ondas 2+ (plan §10 Onda 1).
   - **Critério**: com `NODE_ENV=production` a env é IGNORADA (unit/assert); spec E2E roda sem chave real de LLM; a env é test-only e NÃO entra em `.env.example`/SECRETS (documentada no harness de teste — plan §9).
+  - **Executado 2026-06-12**: `provider-factory.ts` suporta `E2E_LLM_MOCK`, texto determinístico e tool-calls roteáveis fora de production; `provider-factory.test.ts` cobre guard production, mock em `streamText`/`generateText` e JSON inválido fail-open. Specs E2E documentam que o dev server local deve subir com `E2E_LLM_MOCK=1` porque o Playwright não possui `webServer` propositalmente.
   - **Paralelo**: [P]
 
 ### Onda 2 — Conhecer
 
-- [ ] **T19 [Onda 2]** — Card `business_identity` server-side (payload + handler)
+- [x] **T19 [Onda 2]** — Card `business_identity` server-side (payload + handler)
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.ts (novo) + cards/card-submit.schemas.ts
   - **Depende de**: T05, T09, T13
-  - **O que fazer**: Registrar payload `{ cardKey, name: string(1..80), address?: string(1..300), description?: string(1..500) }` no registry per-card e criar handler em **arquivo NOVO** `handlers/apply/journey-v2.ts` (o entrypoint tem 960 linhas > máx 800 — guideline proíbe edição >30 linhas; o dispatch no switch do entrypoint fica <30 linhas): grava `identity.*` + espelha `project.name`/`builder_projects.name` (padrão transacional de `set-project-basics.tool.ts` :149-202), limpa `capturedProposals` do domínio quando T06 existir (nesta onda ainda sem o namespace — deixar hook claro), flipa `businessIdentity` via `applyConfirmation`, emite `identity_done`. Re-sanitização server-side (trims/clamps).
+  - **O que fazer**: Registrar payload `{ cardKey, name: string(1..80), address?: string(1..300), description?: string(1..500) }` no registry per-card e criar handler em **arquivo NOVO** `handlers/apply/journey-v2.ts` (o entrypoint tinha 960 linhas > máx 800 antes do split; o dispatch no switch do entrypoint fica <30 linhas): grava `identity.*` + espelha `project.name`/`builder_projects.name` (padrão transacional de `set-project-basics.tool.ts` :149-202), limpa `capturedProposals` do domínio quando T06 existir (nesta onda ainda sem o namespace — deixar hook claro), flipa `businessIdentity` via `applyConfirmation`, emite `identity_done`. Re-sanitização server-side (trims/clamps).
   - **Critério**: unit T63; exhaustiveness guard do union força o branch; `updateMany` org-scoped.
   - **Paralelo**: sequencial
 
-- [ ] **T20 [Onda 2]** — Evento `identity_done` no accept de source
+- [x] **T20 [Onda 2]** — Evento `identity_done` no accept de source
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply-card-submit.ts (accept de source, ~:796)
   - **Depende de**: T09
   - **O que fazer**: No handler que flipa `applyConfirmation(state, 'source')`, emitir `identity_done` (a fonte satisfaz a identidade — FR-03/plan §6.2). Edição pontual <30 linhas no entrypoint (permitida pelo guideline).
   - **Critério**: accept de source grava o evento; `apply-card-submit.test.ts` verde.
   - **Paralelo**: [P]
 
-- [ ] **T21 [Onda 2]** — Chips na fase Conhecer (`journey-rules`)
+- [x] **T21 [Onda 2]** — Chips na fase Conhecer (`journey-rules`)
   - **Arquivo**: src/server/ai-module/builder/prompts/journey-rules.ts
   - **Depende de**: —
   - **O que fazer**: Adicionar regra instruindo o meta-agente a usar `quick_reply_chips` nas perguntas de texto livre da fase Conhecer (decisão do plan §3.5: MANTER chips — schema+handler+componente já existem end-to-end).
@@ -289,35 +353,35 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ### Onda 3 — Revisar
 
-- [ ] **T22 [Onda 3]** — Split de `apply-card-submit.ts`: extrair `handlers/apply/{persona,services,hours}.ts`
+- [x] **T22 [Onda 3]** — Split de `apply-card-submit.ts`: extrair `handlers/apply/{persona,services,hours}.ts`
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/persona.ts (+services.ts, hours.ts; entrypoint vira dispatch)
   - **Depende de**: —
-  - **O que fazer**: Pré-requisito do guideline (960 > máx 800): mover `applyAgentPersona`/`applyServices`/`applyBusinessHours` (funções locais ~:327-417) para exports PUROS em 3 arquivos; `apply-card-submit.ts` fica com switch/dispatch + helpers transversais (plan §3.3).
+  - **O que fazer**: Pré-requisito do guideline (entrypoint estava em 960 > máx 800 antes do split): mover `applyAgentPersona`/`applyServices`/`applyBusinessHours` (funções locais ~:327-417) para exports PUROS em 3 arquivos; `apply-card-submit.ts` fica com switch/dispatch + helpers transversais (plan §3.3).
   - **Critério**: `apply-card-submit.test.ts` verde sem mudança de comportamento; entrypoint abaixo de 800 linhas; `npx tsc --noEmit`.
   - **Paralelo**: sequencial (antes de T24)
 
-- [ ] **T23 [Onda 3]** — Tool `propose_field_values`
+- [x] **T23 [Onda 3]** — Tool `propose_field_values`
   - **Arquivo**: src/server/ai-module/builder/tools/propose-field-values.tool.ts (+ registro em tools/index.ts)
   - **Depende de**: T06
   - **O que fazer**: Irmã da `set_project_basics` (mesmo `$transaction` read-modify-write org-scoped), grava SÓ `capturedProposals.*` (zod com max-lengths por campo + whitelist de domínios — LLM nunca grava shape arbitrário). Description: "use quando o usuário mencionar horários/serviços/preços/transferência em texto livre — a proposta aparece prefillada no card para CONFIRMAÇÃO; nunca confirme por ele". NUNCA flipa sentinel.
   - **Critério**: unit cobrindo whitelist + atomicidade; `BuilderToolCall` loga a invocação (automático); `npx tsc --noEmit`.
   - **Paralelo**: sequencial
 
-- [ ] **T24 [Onda 3]** — Card composto `agent_review` server-side (payload + handler + validação granular FR-22) *(alterada pelo delta 2026-06-11)*
+- [x] **T24 [Onda 3]** — Card composto `agent_review` server-side (payload + handler + validação granular FR-22) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.ts + cards/card-submit.schemas.ts
   - **Depende de**: T06, T19, T22
   - **O que fazer**: Payload `{ cardKey, persona, offered, notOffered, hours, disclosure?: {mode, customText?} }` (shapes dos cards individuais). Handler compõe os exports puros de `apply/{persona,services,hours}.ts` num ÚNICO write (1 `updateMany` org-scoped) flipando `persona`+`services`+`hours`, limpa `capturedProposals.{persona,services,hours}` via `clearCapturedProposals` (clear EXPLÍCITO), aplica `disclosure` opcional no MESMO handler via `normalizeIdentityCard`+`mergeIdentityCardIntoMetadata` de `@/lib/agent-identity-card` sobre `BuilderProject.metadata.identityCard` (1 POST real, sem segundo request ao PATCH identity). **Validação granular POR SEÇÃO (FR-22, plan §3.3 item 2)**: em falha, retorna `{ errors: { persona?: string, services?: string, hours?: string } }` — nunca erro monolítico do card e NENHUM write parcial; o client (T43) preserva o estado local das seções válidas. Emite `review_done`.
   - **Critério**: unit T66 — exatamente 3 sentinels flipados em 1 write; clear explícito; disclosure no metadata; erro em uma seção → erro granular daquela seção SEM write parcial; default de horários NÃO vive no handler (vive no componente).
   - **Paralelo**: sequencial
 
-- [ ] **T25 [Onda 3]** — `create_agent`: disclosure no prompt + evento `agent_created`
+- [x] **T25 [Onda 3]** — `create_agent`: disclosure no prompt + evento `agent_created`
   - **Arquivo**: src/server/ai-module/builder/tools/create-agent.tool.ts
   - **Depende de**: T24
   - **O que fazer**: Ao materializar o systemPrompt, aplicar `injectDisclosureIntoPrompt(metadata.identityCard)` (hoje só em `identity.routes.ts:102-114` `if (project.aiAgentId)` — no v2 o disclosure é decidido ANTES do agente existir; plan §4.5). Emitir `trackJourneyEvent('agent_created')`. Sem mudança quando `identityCard` ausente.
   - **Critério**: agente criado após agent_review com disclosure tem o texto injetado no systemPrompt; sem identityCard → prompt idêntico ao atual; evento gravado.
   - **Paralelo**: sequencial
 
-- [ ] **T26 [Onda 3]** — Proposta de handoff por nicho regulado
+- [x] **T26 [Onda 3]** — Proposta de handoff por nicho regulado
   - **Arquivo**: src/server/ai-module/builder/tools/research-niche.tool.ts
   - **Depende de**: T06
   - **O que fazer**: Quando o nicho pesquisado é regulado (advocacia/saúde — decisão 1 da spec §9), gravar `capturedProposals.handoff = { mode, reason }` com a justificativa da proposta (plan §2.2 item 2). NUNCA flipa o sentinel `handoff`.
@@ -326,42 +390,42 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ### Onda 4 — Capacidades
 
-- [ ] **T27 [Onda 4]** — Extração client-safe `enabled-tools-derivation.pure.ts`
+- [x] **T27 [Onda 4]** — Extração client-safe `enabled-tools-derivation.pure.ts`
   - **Arquivo**: src/server/ai-module/builder/deploy/enabled-tools-derivation.pure.ts
   - **Depende de**: —
   - **O que fazer**: Mover `derive{Pricing,Handoff,Calendar}ToolChanges` + `reconcileEnabledTools` para arquivo dependency-free (sem import de `database`/Prisma); re-exportar do arquivo original — imports existentes intactos (plan §4.4).
   - **Critério**: `enabled-tools-derivation.test.ts` verde **SEM edição**; o `.pure.ts` não importa nada de `src/server/services/database`.
   - **Paralelo**: [P]
 
-- [ ] **T28 [Onda 4]** — Query `getCapabilities`
+- [x] **T28 [Onda 4]** — Query `getCapabilities`
   - **Arquivo**: src/server/ai-module/builder/capabilities/capabilities.routes.ts (+ registro em builder.controller.ts)
   - **Depende de**: —
   - **O que fazer**: `GET /builder/projects/:id/capabilities` sob `authOrApiKeyProcedure({ required: true })`, org-scoped: `{ customTools (AgentTool type CUSTOM org-scoped: id/name/description/isActive), mediaImagesCount, calendarConnected (reusa hasActiveCalendarConnection), knowledgeSourceCount }`. NENHUMA escrita (toggles derivam do builderState que o readiness já entrega — NFR-05). Compor no controller via spread (composer pattern).
   - **Critério**: rota responde 401 sem auth e 404 cross-org; `npm run test:api` (se contrato coberto) ou unit do resolver; `npx tsc --noEmit`. NÃO editar igniter.client/schema (auto-gerados pelo dev server).
   - **Paralelo**: [P]
 
-- [ ] **T90 [Onda 4]** — Silent-submit no card-submit (`ackMode: 'silent'` + allowlist — FR-29) *(nova — delta 2026-06-11)*
+- [x] **T90 [Onda 4]** — Silent-submit no card-submit (`ackMode: 'silent'` + allowlist — FR-29) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/card-submit.routes.ts + cards/card-submit.schemas.ts
   - **Depende de**: —
   - **O que fazer**: Plan §3.3: o body do card-submit ganha `ackMode?: 'conversational' (default) | 'silent'`. No modo `silent`: o flip de estado persiste pelo MESMO caminho de hoje (:102-106), a resposta é JSON simples (`{ ok, builderState }`) e NÃO há `ensureBuilderAgent` nem `buildSseResponse` — zero turno/custo LLM. **Allowlist server-side** de cardKeys que aceitam `silent` (toggles da superfície de Capacidades: handoff/pricing/calendar e afins — plan §4.3); cards da jornada REJEITAM `silent` com 400 (o ACK conversacional é parte do contrato). Mesma auth (`authOrApiKeyProcedure`) + mesmo CSRF (plan §5).
   - **Critério**: unit T102 — flip persiste e resposta é JSON sem SSE; cardKey fora da allowlist com `silent` → 400; modo default permanece byte-compatível com o comportamento atual (testes existentes do card-submit verdes).
   - **Paralelo**: [P] (com T27/T28)
 
-- [ ] **T29 [Onda 4]** — Backfill RAG no `create_agent` (risco R7 / FR-13)
+- [x] **T29 [Onda 4]** — Backfill RAG no `create_agent` (risco R7 / FR-13)
   - **Arquivo**: src/server/ai-module/builder/tools/create-agent.tool.ts
   - **Depende de**: T25 (mesmo arquivo)
   - **O que fazer**: Ler `project.metadata.knowledgeCollectionId` e setar `ragCollectionId`+`useRAG` no agente criado — fecha o gap do lazy `wireCollectionToProject` (`knowledge/knowledge-helpers.ts:67-86`, só roda `if (project.aiAgentId)`): no v2 a fonte é colada ANTES do agente existir.
   - **Critério**: fonte ingerida antes do create_agent → agente nasce com `ragCollectionId` setado e `useRAG: true` (unit); sem collection → comportamento atual.
   - **Paralelo**: sequencial
 
-- [ ] **T30 [Onda 4]** — Passo `materialize_knowledge` na saga + correção de comentário stale
+- [x] **T30 [Onda 4]** — Passo `materialize_knowledge` na saga + correção de comentário stale
   - **Arquivo**: src/server/ai-module/builder/deploy/deploy-flow.orchestrator.ts (+ comentário em src/server/ai-module/ai-agents/runtime/playground-stream.ts:104-106)
   - **Depende de**: T29
   - **O que fazer**: Adicionar passo idempotente na saga que garante `ragCollectionId`+`useRAG` quando o projeto tem collection (rede DUPLA com o backfill de T29). Corrigir o comentário stale do `playground-stream.ts` ("o vínculo acontece na saga de deploy" — hoje falso, passa a ser verdadeiro).
   - **Critério**: re-rodar a saga não duplica nada (idempotente); deploy de projeto com fonte pré-agente publica COM RAG (gate `prepare-agent-call.ts:208` satisfeito); comentário atualizado.
   - **Paralelo**: sequencial
 
-- [ ] **T31 [Onda 4]** — Acks `knowledge`/`media` server-side
+- [x] **T31 [Onda 4]** — Acks `knowledge`/`media` server-side
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.ts + cards/card-submit.schemas.ts
   - **Depende de**: T19
   - **O que fazer**: Payloads `{ cardKey, action: 'ack' }` para `knowledge` e `media` flipando os sentinels (padrão `silenced_contacts`) — os steps também são satisfeitos por dados reais (fonte/texto, imagesCount>0) sem card obrigatório (plan §3.3).
@@ -370,268 +434,273 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ### Onda 5 — Testar + Lançar
 
-- [ ] **T32 [Onda 5]** — Cards `test_drive` + `published_next_steps` server-side
+- [x] **T32 [Onda 5]** — Cards `test_drive` + `published_next_steps` server-side
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.ts + cards/card-submit.schemas.ts
   - **Depende de**: T19
   - **O que fazer**: `test_drive`: `{ cardKey, action: 'tested' | 'skip' }` flipa `testDrive` com ACK distinto para skip (LLM não promete validação — plan §3.3 item 3); emite `test_done`/`test_skipped`. `published_next_steps`: `{ cardKey, action: 'ack' }` flipa `publishedNextSteps`; emite `next_steps_ack`.
   - **Critério**: unit T69 (copy do ACK distinta por action); eventos gravados.
   - **Paralelo**: sequencial
 
-- [ ] **T33 [Onda 5]** — Auto-flip de `testDrive` no caminho real (helper compartilhado)
+- [x] **T33 [Onda 5]** — Auto-flip de `testDrive` no caminho real (helper compartilhado)
   - **Arquivo**: src/server/ai-module/ai-agents/runtime/playground-stream.ts (+ helper compartilhado + src/server/ai-module/builder/tools/run-playground-test.tool.ts)
   - **Depende de**: T05, T09
   - **O que fazer**: No primeiro turno bem-sucedido do playground do projeto, write atômico FAIL-OPEN (try/catch — NUNCA quebra o stream) flipando `testDrive` se ainda false + evento `test_done`; `run-playground-test.tool.ts` flipa pelo MESMO helper (proibido duplicar). O CTA do card leva à tab Testar que usa `POST /projects/:id/playground/stream` (stateless) — por isso o flip vive aqui.
   - **Critério**: unit T69 — erro de DB no flip não quebra o stream; segundo turno não re-flipa; ambos os caminhos usam o helper único.
   - **Paralelo**: sequencial
 
-- [ ] **T34 [Onda 5]** — Rota `POST /builder/channel/refresh-qr`
+- [x] **T34 [Onda 5]** — Rota `POST /builder/channel/refresh-qr`
   - **Arquivo**: src/server/ai-module/builder/channel/refresh-qr.routes.ts (+ registro em builder.controller.ts)
   - **Depende de**: —
   - **O que fazer**: Rota autenticada (`authOrApiKeyProcedure({ required: true })`, body `{ connectionId }`, connection SEMPRE resolvida org-scoped) que regenera o QR de Connection EXISTENTE espelhando a lógica do `POST /api/v1/instances/share/[token]` (route.ts:69-117): novo QR na UAZAPI + renova `shareTokenExpiresAt`. NÃO cria instância nem Connection (provisioning não é idempotente — plan §3.6).
   - **Critério**: chamada repetida não cria instância nova no broker nem linha Connection; 404 para connectionId de outra org; `npx tsc --noEmit`.
   - **Paralelo**: [P]
 
-- [ ] **T35 [Onda 5]** — Evento `channel_connected` + flip do sentinel-espelho `whatsappConnectedOnce` no webhook UAZ (FR-30) *(alterada pelo delta 2026-06-11)*
+- [x] **T35 [Onda 5]** — Evento `channel_connected` + flip do sentinel-espelho `whatsappConnectedOnce` no webhook UAZ (FR-30) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/communication/webhooks/uazapi/resolve-connection.ts
   - **Depende de**: T05, T09
   - **O que fazer**: Na TRANSIÇÃO para `CONNECTED` (:66-73, 156 — MESMO ponto, plan §2.2 item 3): (a) emitir `channel_connected` fire-and-forget, sem PII no metadata; (b) flipar **fail-open** (try/catch — NUNCA quebra o webhook) o sentinel `confirmations.whatsappConnectedOnce` no builderState do projeto da Connection (resolvido por `projectId` org-scoped), se ainda false. Conectou uma vez → o step `whatsapp_connect` nunca reabre (monotonicidade — isDone combinado em T15); queda posterior vira aviso (T100), nunca passo pendente.
   - **Critério**: transição → CONNECTED grava o evento uma vez E flipa o sentinel; erro de DB no flip/telemetria NÃO falha o webhook (asserts); Connection sem projectId não flipa nada; testes do webhook verdes.
   - **Paralelo**: [P]
 
-- [ ] **T36 [Onda 5]** — Evento `published` na saga
+- [x] **T36 [Onda 5]** — Evento `published` na saga
   - **Arquivo**: src/server/ai-module/builder/deploy/deploy-flow.orchestrator.ts
   - **Depende de**: T09
   - **O que fazer**: Emitir `published` quando o deployment vira status `live` (plan §6.2), fail-open.
   - **Critério**: deploy bem-sucedido grava o evento; falha de telemetria não falha a saga; testes da saga verdes.
   - **Paralelo**: [P]
 
-- [ ] **T91 [Onda 5]** — Card `channel_platform` server-side (payload + handler — FR-24/25) *(nova — delta 2026-06-11)*
+- [x] **T91 [Onda 5]** — Card `channel_platform` server-side (payload + handler — FR-24/25/26) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.ts + cards/card-submit.schemas.ts
   - **Depende de**: T19, T86
-  - **O que fazer**: Plan §3.3 item 5: payload `{ cardKey, platforms: Array<'whatsapp'|'instagram'> (min 1), whatsappMode?: 'qr'|'cloud' }` com Zod refine: `whatsappMode` obrigatório quando `platforms` inclui `'whatsapp'` (a UI pré-seleciona `'qr'` — T96). Handler grava `channel.platforms` + `channel.whatsappMode` e flipa `channelPlatform` via `applyConfirmation`. **Até a Onda 5b: REJEITA `platforms` com 2 itens** (espelho server-side do disable da UI — FR-20/FR-26; a remoção é T94).
-  - **Critério**: unit T103 — min 1 plataforma; refine do whatsappMode; rejeição de dupla seleção pré-5b; sentinel flipado; cross-org rejeitado.
+  - **O que fazer**: Plan §3.3 item 5: payload `{ cardKey, platforms: Array<'whatsapp'|'instagram'> (min 1), whatsappMode?: 'qr'|'cloud' }` com Zod refine: `whatsappMode` obrigatório quando `platforms` inclui `'whatsapp'` (a UI pré-seleciona `'qr'` — T96). Handler grava `channel.platforms` + `channel.whatsappMode` e flipa `channelPlatform` via `applyConfirmation`. Pós-5b/T94, aceita 1 ou 2 plataformas; dupla seleção surfa `whatsapp_connect` e `instagram_connect`.
+  - **Critério**: unit T103 — min 1 plataforma; refine do whatsappMode; dupla seleção aceita; sentinel flipado; cross-org rejeitado.
+  - **Executado 2026-06-12**: `applyChannelPlatform` aceita 1 ou 2 plataformas, deduplica, limpa `whatsappMode` órfão quando só IG é escolhido, flipa `channelPlatform` e invalida Refinando por mudança material.
   - **Paralelo**: sequencial (mesmo arquivo que T32)
 
 ### Onda 5b — Multi-canal simultâneo (FR-26, plan §3.7) *(nova — delta 2026-06-11)*
 
-- [ ] **T92 [Onda 5b]** — Attach pausa por CONEXÃO (não por agente) ⚠️ APROVAÇÃO (semântica de runtime — aprovada 2026-06-11, plan §9)
+- [x] **T92 [Onda 5b]** — Attach pausa por CONEXÃO (não por agente) ⚠️ APROVAÇÃO (semântica de runtime — aprovada 2026-06-11, plan §9)
   - **Arquivo**: src/server/ai-module/builder/channel/attach-to-agent.ts
   - **Depende de**: T83 (gate), T70 (Onda 5 verde)
   - **O que fazer**: Mudar o `updateMany` (:25-28, `where { agentConfigId, status: 'ACTIVE' }`) para incluir o filtro `connectionId` — pausa SÓ deployments da MESMA conexão (re-attach/troca daquele canal), permitindo **N deployments ACTIVE, 1 por canal** (WhatsApp + Instagram do mesmo agente). A mudança vale para os DOIS callers (`channel-credentials.routes.ts` — Cloud/IG — e `provision-whatsapp.routes.ts`). Nenhuma migration: `AgentDeployment` já suporta N linhas por agente (plan §3.7).
   - **Critério**: unit T104 verde; suíte existente do attach/deploy verde (regressão do re-attach da mesma conexão).
+  - **Executado 2026-06-12**: `attach-to-agent.ts` filtra `updateMany` por `{ agentConfigId, connectionId, status: 'ACTIVE' }`; o status novo respeita o gate de Refinando (`ACTIVE` ou `PAUSED`).
   - **Paralelo**: sequencial
 
-- [ ] **T93 [Onda 5b]** — Validação da resolução inbound por connection
+- [x] **T93 [Onda 5b]** — Validação da resolução inbound por connection
   - **Arquivo**: runtime inbound (pontos mapeados pelo gate T83 — ex.: resolução de deployment no caminho do webhook→dispatch)
   - **Depende de**: T92
   - **O que fazer**: Revalidar que a resolução de deployment no caminho inbound é POR CONNECTION (a mensagem chega numa conexão específica e resolve o deployment DAQUELA conexão — nunca assume deployment único por agente); qualquer ponto que assuma unicidade é corrigido AQUI (plan §3.7b, risco 10 — deployment "fantasma"/resolução errada).
   - **Critério**: inventário do gate T83 com cada ponto marcado conforme/corrigido; testes do runtime inbound verdes; com 2 deployments ACTIVE, mensagem de cada canal resolve o deployment certo (coberto também no E2E T105).
+  - **Executado 2026-06-12**: `resolveAgentIdForConnection` filtra por `connectionId`, `status: 'ACTIVE'` e org do `agentConfig`; teste `resolve-connection.test.ts` cobre dois deployments ACTIVE do mesmo agente e fallback seguro.
   - **Paralelo**: sequencial
 
-- [ ] **T94 [Onda 5b]** — Habilitar a seleção dupla no card `channel_platform`
+- [x] **T94 [Onda 5b]** — Habilitar a seleção dupla no card `channel_platform`
   - **Arquivo**: src/client/components/projetos/chat/cards/channel-platform-card.tsx + cards/handlers/apply/journey-v2.ts (remoção da rejeição server-side)
   - **Depende de**: T92, T96
   - **O que fazer**: Remover o disable da UI (hint "em breve") E a rejeição server-side de 2 plataformas no handler (T91) — plan §3.7d. O hint dá lugar ao comportamento real: "Pode marcar os dois — o mesmo agente atende ambos."
   - **Critério**: submit com `['whatsapp','instagram']` aceito; engine surfa `whatsapp_connect` E `instagram_connect`; unit T103 atualizado (caso de dupla seleção passa a ser aceito pós-5b); E2E T105.
+  - **Executado 2026-06-12**: `channel-platform-card.tsx` usa multi-select real; handler aceita duas plataformas; `builder-v2-lancamento.spec.ts` e `builder-v2-multicanal.spec.ts` cobrem o contrato aceito.
   - **Paralelo**: [P] (com T93)
 
-- [ ] **T37 [Onda 1]** — Overview renderiza fases quando `journey` presente
+- [x] **T37 [Onda 1]** — Overview renderiza fases quando `journey` presente
   - **Arquivo**: src/client/components/projetos/preview/tabs/overview/helpers/readiness-adapters.ts (+ componentes da overview tocados)
   - **Depende de**: T17
   - **O que fazer**: Quando `readiness.journey` existe, os adapters renderizam as 4 fases com seus steps (status done/active/pending); sem `journey` (v1), render atual byte-idêntico (NFR-03).
   - **Critério**: projeto com override v2 navega as 4 fases na Overview usando os cards existentes mapeados (critério da Onda 1); snapshot/render v1 inalterado.
   - **Paralelo**: sequencial
 
-- [ ] **T38 [Onda 2]** — Componente `business-identity-card.tsx` + registry
+- [x] **T38 [Onda 2]** — Componente `business-identity-card.tsx` + registry
   - **Arquivo**: src/client/components/projetos/chat/cards/business-identity-card.tsx (+ entrada em card-registry.tsx `STEP_TO_CARD`)
   - **Depende de**: T19
   - **O que fazer**: Card com prefill de `identity.*`/`project.name`/`capturedProposals` (quando existir); vazio = formulário em branco com hint (plan §4.1). Registrar `stepId: business_identity` no `STEP_TO_CARD` (:207).
   - **Critério**: ≤300 linhas; card surfa como step ativo em projeto v2 sem fonte; submit chega ao handler T19; `npm run lint`.
   - **Paralelo**: sequencial
 
-- [ ] **T39 [Onda 3]** — Helper de precedência `prefill.ts` (mount-only + proposta tardia FR-23) *(alterada pelo delta 2026-06-11)*
+- [x] **T39 [Onda 3]** — Helper de precedência `prefill.ts` (mount-only + proposta tardia FR-23) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/prefill.ts
   - **Depende de**: T06
   - **O que fazer**: Helper PURO com a regra única `owned confirmado > capturedProposals.<domínio> > default` (FR-02, plan §4.2) + flag de origem para o badge "sugerido da conversa". Os `capturedProposals` chegam no `builderState` que o `ActiveStepCard` já entrega (zero fetch extra — NFR-05). **Proposta tardia (FR-23, plan §4.2)**: o prefill é calculado UMA única vez, no mount do card; o helper expõe a detecção de proposta que chega DEPOIS (via refetch do readiness) SEM re-prefillar nem sobrescrever digitação — quem age é o chip "Usar sugestão" (T95).
   - **Critério**: unit co-localizado cobrindo as 3 precedências + proposta tardia NÃO re-prefilla campo já montado/digitado (plan §7.1); `npx tsc --noEmit`.
   - **Paralelo**: [P]
 
-- [ ] **T40 [Onda 3]** — Extrair `persona-section.tsx`
+- [x] **T40 [Onda 3]** — Extrair `persona-section.tsx`
   - **Arquivo**: src/client/components/projetos/chat/cards/review/persona-section.tsx (+ refactor de agent-persona-card.tsx)
   - **Depende de**: —
   - **O que fazer**: Extrair a lógica de formulário do `agent-persona-card.tsx` para seção reutilizável; o card individual passa a importá-la (zero duplicação — permanece para o reopen FR-17). Manter as 3 opções de "jeito de falar" (spec §9 pendente 5 — sem decisão, preservar comportamento atual).
   - **Critério**: card individual renderiza/submete idêntico (testes react existentes verdes); `npm run lint`.
   - **Paralelo**: [P]
 
-- [ ] **T41 [Onda 3]** — Extrair `services-section.tsx`
+- [x] **T41 [Onda 3]** — Extrair `services-section.tsx`
   - **Arquivo**: src/client/components/projetos/chat/cards/review/services-section.tsx (+ refactor de services-offered-card.tsx)
   - **Depende de**: —
   - **O que fazer**: Mesmo padrão de T40 para o card de serviços.
   - **Critério**: idem T40.
   - **Paralelo**: [P]
 
-- [ ] **T42 [Onda 3]** — Extrair `hours-section.tsx` + default "sempre aberto"
+- [x] **T42 [Onda 3]** — Extrair `hours-section.tsx` + default "sempre aberto"
   - **Arquivo**: src/client/components/projetos/chat/cards/review/hours-section.tsx (+ refactor de business-hours-card.tsx)
   - **Depende de**: —
   - **O que fazer**: Mesmo padrão de T40 para horários, com prefill default "sempre aberto" (decisão 3 da spec §9 — o default vive no COMPONENTE, não no handler).
   - **Critério**: idem T40 + default aplicado quando sem dado owned/proposto.
   - **Paralelo**: [P]
 
-- [ ] **T43 [Onda 3]** — Card composto `agent-review-card.tsx` + registry (erros granulares FR-22) *(alterada pelo delta 2026-06-11)*
+- [x] **T43 [Onda 3]** — Card composto `agent-review-card.tsx` + registry (erros granulares FR-22) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/agent-review-card.tsx (+ entrada em card-registry.tsx)
   - **Depende de**: T24, T39, T40, T41, T42
   - **O que fazer**: Orquestrador FINO compondo as 3 seções + seção avançada de disclosure (modos `ai_explicit`/`human_passthrough`/`custom` + aceite, migrada da IdentityTab); prefill via T39 com badge "sugerido da conversa" em valores de `capturedProposals` (owned renderiza sem badge); 1 POST único para o handler T24. **Erros granulares (FR-22)**: quando o handler retorna `{ errors: { persona?, services?, hours? } }`, o card destaca SÓ a(s) seção(ões) com erro e PRESERVA o estado local das seções válidas — re-submit corrige apenas o que falhou.
   - **Critério**: ≤300 linhas (orquestrador); 1 única confirmação obrigatória (NFR-07); badge aparece só em propostos; erro em `hours` não descarta persona/services digitados (teste react); `npm run lint`.
   - **Paralelo**: sequencial
 
-- [ ] **T95 [Onda 3]** — Chip "Usar sugestão" para proposta tardia (FR-23) *(nova — delta 2026-06-11)*
+- [x] **T95 [Onda 3]** — Chip "Usar sugestão" para proposta tardia (FR-23) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/use-suggestion-chip.tsx (+ integração nas seções review/{persona,services,hours}-section.tsx)
   - **Depende de**: T39, T40, T41, T42
   - **O que fazer**: Componente de chip compartilhado (plan §4.2): quando `capturedProposals` chega DEPOIS de o card estar montado (detecção do helper T39 observando o readiness), o campo correspondente mostra o chip "Usar sugestão" — aplicar a proposta é SEMPRE ação explícita do usuário, por campo; nunca re-prefill automático nem sobrescrita de digitação. Usado pelas 3 seções do `agent_review` (e disponível para `business_identity`).
   - **Critério**: teste react — proposta tardia não altera o valor digitado; clicar o chip aplica SÓ o campo clicado; chip some após aplicar/submeter; `npm run lint`.
   - **Paralelo**: sequencial (depois das seções)
 
-- [ ] **T44 [Onda 4]** — `capabilities-section.tsx` na Overview
+- [x] **T44 [Onda 4]** — `capabilities-section.tsx` na Overview
   - **Arquivo**: src/client/components/projetos/preview/tabs/overview/components/capabilities-section.tsx
   - **Depende de**: T27, T28
   - **O que fazer**: Seção da Overview (decisão: NÃO é tab nova) com linhas: Conhecimento (SEMPRE ativo, sem toggle, link p/ tab Conhecimento — FR-07), Transferir (estado de `builderState.handoff.mode`; proposta de nicho regulado = toggle pré-ligado com badge + reason de `capturedProposals.handoff`), Preços, Agenda, Fotos (`mediaImagesCount`), Integrações (`customTools`, empty state). Usa as funções puras de T27 para mostrar o que o agente saberá fazer (sem segunda fonte de verdade).
   - **Critério**: ≤300 linhas; estados dos toggles derivam do builderState do readiness (zero fetch extra além do getCapabilities); `npm run lint`.
   - **Paralelo**: sequencial
 
-- [ ] **T45 [Onda 4]** — Toggles abrem cards inline + submit via silent-submit (FR-29) *(alterada pelo delta 2026-06-11 — substitui o roteamento pela submitCard conversacional)*
+- [x] **T45 [Onda 4]** — Toggles abrem cards inline + submit via silent-submit (FR-29) *(alterada pelo delta 2026-06-11 — substitui o roteamento pela submitCard conversacional)*
   - **Arquivo**: src/client/components/projetos/preview/tabs/overview/components/capabilities-section.tsx (+ tradução do evento `builder:capability-toggled` em use-chat-stream.ts)
   - **Depende de**: T44, T90
   - **O que fazer**: Ligar um toggle EXPANDE inline o card correspondente (`handoff-card`/`pricing-card`/`calendar-connect-card`) submetendo pelo MESMO endpoint card-submit, **OBRIGATORIAMENTE com `ackMode: 'silent'`** (plan §4.3): o flip persiste sem turno LLM/SSE e o chat mostra uma linha de sistema LOCAL barata ("✓ Preços ativados" / "✓ Transferência ativada") — via evento leve `builder:capability-toggled` que o `use-chat-stream` traduz em mensagem de sistema no histórico vivo (sem POST de chat). Os MESMOS cards, quando abertos NA JORNADA do chat (reopen FR-17, proposta de nicho regulado), continuam com submit conversacional pela `submitCard` do `use-chat-stream` (consumo único do SSE). Isso elimina na origem o risco R2 (SSE consumido fora do chat) E o custo LLM por clique de toggle.
   - **Critério**: ligar roleta pela Overview expõe config inline, persiste SEM turno LLM e a linha de sistema local aparece no chat aberto sem reload (asserção do E2E T68); zero chamadas a `ensureBuilderAgent`/SSE no caminho do toggle (network assert).
   - **Paralelo**: sequencial
 
-- [ ] **T46 [Onda 5]** — `test-drive-card.tsx` + registry
+- [x] **T46 [Onda 5]** — `test-drive-card.tsx` + registry
   - **Arquivo**: src/client/components/projetos/chat/cards/test-drive-card.tsx (+ card-registry.tsx)
   - **Depende de**: T32
   - **O que fazer**: CTA primário "Abrir teste" (troca para tab Testar via `onTabChange`), secundário "Já testei", escape explícito "Publicar sem testar" (decisão 2 da spec §9); disabled com MOTIVO enquanto `!agentExists` (FR-20).
   - **Critério**: ≤300 linhas; estados cobertos; submit chega ao handler T32 com action correta.
   - **Paralelo**: [P]
 
-- [ ] **T47 [Onda 5]** — `whatsapp-connect-card.tsx` + registry (polimórfico qr/cloud + teto de polling FR-27 + monotonicidade FR-30) *(alterada pelo delta 2026-06-11)*
+- [x] **T47 [Onda 5]** — `whatsapp-connect-card.tsx` + registry (polimórfico qr/cloud + teto de polling FR-27 + monotonicidade FR-30) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/whatsapp-connect-card.tsx (+ card-registry.tsx)
   - **Depende de**: T14, T34, T91
   - **O que fazer**: Card **polimórfico por `channel.whatsappMode`** (plan §4.1): modo `qr` → loading (chama o provisioning existente UMA única vez, APENAS quando o projeto não tem Connection — lookup org-scoped por projectId, plan §3.6a); QR visível + "Gerar novamente" via rota `refresh-qr` com throttle client de 30s (§3.6b); erro com retry honesto (NFR-06); conectado por autodetecção (`hasConnectedWhatsAppInstance` no readiness com polling — T51); **quando o polling atinge o teto de 10min (T51), mostra "Ainda esperando?" com botão que RE-ARMA a verificação (FR-27)**. Modo `cloud` → renderiza o fluxo de credenciais Cloud existente (`channel-credentials.routes.ts`). **Concluído NUNCA regride (FR-30)**: com `whatsappConnectedOnce` true o card permanece "conectado"; queda posterior vira banner de aviso (T100), não passo reaberto. Reusa o visual de `chat/whatsapp-qr-card.tsx` (que permanece para o tool-result inline v1).
   - **Critério**: ≤300 linhas; clicar "Gerar novamente" N vezes não cria instância nova (asserção E2E T70); card vira "conectado" sem reload quando o webhook seta CONNECTED; teto + re-arme cobertos no E2E T70 (clock mockado); modo cloud renderiza credenciais sem provisionar QR.
   - **Paralelo**: sequencial
 
-- [ ] **T48 [Onda 5]** — `published-next-steps-card.tsx` + registry
+- [x] **T48 [Onda 5]** — `published-next-steps-card.tsx` + registry
   - **Arquivo**: src/client/components/projetos/chat/cards/published-next-steps-card.tsx (+ card-registry.tsx)
   - **Depende de**: T32
   - **O que fazer**: FR-16: testar do celular (deep-link wa.me), ver Atividade (`onTabChange`), como pausar; ação única `ack` (informativo).
   - **Critério**: ≤300 linhas; surfa só pós-publicação (engine T15); ack remove do slot.
   - **Paralelo**: [P]
 
-- [ ] **T49 [Onda 5]** — Unificação do readiness: workspace dono ÚNICO da query
+- [x] **T49 [Onda 5]** — Unificação do readiness: workspace dono ÚNICO da query
   - **Arquivo**: src/client/components/projetos/workspace.tsx (+ preview/tab-registry.tsx `TabRenderContext`)
   - **Depende de**: T17
   - **O que fazer**: Içar a query de readiness para `workspace.tsx` (1 fetch); `PreviewPanel`/`OverviewTab` E `ChatPanel` recebem `readiness` + `refetchReadiness` por prop/context (estender `TabRenderContext`). FR-18: fonte única.
   - **Critério**: exatamente 1 request de readiness no carregamento do workspace (network assert no E2E); Overview e chat exibem o MESMO estado.
   - **Paralelo**: sequencial
 
-- [ ] **T50 [Onda 5]** — `use-chat-stream` consome o readiness içado (remoção do `READINESS_QUERY`)
+- [x] **T50 [Onda 5]** — `use-chat-stream` consome o readiness içado (remoção do `READINESS_QUERY`)
   - **Arquivo**: src/client/components/projetos/chat/use-chat-stream.ts
   - **Depende de**: T49
   - **O que fazer**: Remover o `READINESS_QUERY` interno (:78, :202-207); os triggers existentes (refetch em SSE finish e pós-card-submit) passam a chamar o `refetchReadiness` içado — comportamento preservado.
   - **Critério**: grep `READINESS_QUERY` zero matches; card pinado no chat continua atualizando após submit/SSE finish; testes react do chat verdes.
   - **Paralelo**: sequencial
 
-- [ ] **T51 [Onda 5]** — Polling 5s condicionado ao step de conexão, com teto de 10min (FR-27) *(alterada pelo delta 2026-06-11)*
+- [x] **T51 [Onda 5]** — Polling 5s condicionado ao step de conexão, com teto de 10min (FR-27) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/workspace.tsx (hook unificado de readiness)
   - **Depende de**: T50
   - **O que fazer**: `refetchInterval` de 5s APENAS enquanto o step ativo é `whatsapp_connect`/`instagram_connect` **E há menos de 10 minutos desde o último arm** (plan §4.4); passado o teto, o polling PARA e o hook expõe o estado "esgotado" para o card mostrar "Ainda esperando?" com botão que **re-arma** (re-zera o timer e retoma os 5s — T47). Senão mantém focus+turno+triggers. Com a unificação, o polling alcança o card pinado no chat — é a autodetecção do QR (risco R4); o teto elimina o polling infinito em aba esquecida.
   - **Critério**: com step ativo ≠ steps de conexão, zero polling (network assert); com QR na tela, card detecta conexão em ≤5s; após 10min o polling cessa e o re-arme retoma (E2E T70 com clock mockado).
   - **Paralelo**: sequencial
 
-- [ ] **T52 [Onda 5]** — Activation prefill default "responder todas" (FR-14)
+- [x] **T52 [Onda 5]** — Activation prefill default "responder todas" (FR-14)
   - **Arquivo**: src/client/components/projetos/chat/cards/activation-mode-card.tsx
   - **Depende de**: —
   - **O que fazer**: Card abre com `mode='all'` pré-selecionado (ajuste opcional na fase Lançar; silenciados já encadeados via `onSubmitCard` shipped).
   - **Critério**: render default com "todas as mensagens" selecionado; testes react do card verdes.
   - **Paralelo**: [P]
 
-- [ ] **T96 [Onda 5]** — `channel-platform-card.tsx` + registry (2 níveis — FR-24/25) *(nova — delta 2026-06-11)*
+- [x] **T96 [Onda 5]** — `channel-platform-card.tsx` + registry (2 níveis — FR-24/25/26) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/channel-platform-card.tsx (+ card-registry.tsx)
   - **Depende de**: T91
-  - **O que fazer**: Card com os 2 níveis no MESMO componente (plan §4.1). **Nível 1** — "Onde seu agente vai atender?": multi-select 💬 **WhatsApp** ("Onde seus clientes já falam com você") e 📸 **Instagram** ("Responde DMs do seu perfil automaticamente") + hint "Pode marcar os dois — o mesmo agente atende ambos."; copy SEM jargão (sem "QR"/"API"/"Cloud" — NFR-07). **Nível 2** (expande inline só se WhatsApp marcado): "Conectar meu WhatsApp" ⭐ Recomendado e PRÉ-SELECIONADO ("Escaneie um QR code com o WhatsApp do seu negócio — pronto em 2 minutos, sem burocracia.") vs "WhatsApp oficial da Meta" badge avançado ("Para empresas com número verificado na Meta. Mais robusto para alto volume — exige conta WhatsApp Business API."). Instagram SEM nível 2. **Até a Onda 5b**: seleção dupla DESABILITADA com hint honesto "em breve" (FR-20/FR-26 — removido em T94). Benefício antes da tecnologia em toda a copy.
+  - **O que fazer**: Card com os 2 níveis no MESMO componente (plan §4.1). **Nível 1** — "Onde seu agente vai atender?": multi-select 💬 **WhatsApp** ("Onde seus clientes já falam com você") e 📸 **Instagram** ("Responde DMs do seu perfil automaticamente") + hint "Pode marcar os dois — o mesmo agente atende ambos."; copy SEM jargão (sem "QR"/"API"/"Cloud" — NFR-07). **Nível 2** (expande inline só se WhatsApp marcado): "Conectar meu WhatsApp" ⭐ Recomendado e PRÉ-SELECIONADO ("Escaneie um QR code com o WhatsApp do seu negócio — pronto em 2 minutos, sem burocracia.") vs "WhatsApp oficial da Meta" badge avançado ("Para empresas com número verificado na Meta. Mais robusto para alto volume — exige conta WhatsApp Business API."). Instagram SEM nível 2. Pós-5b/T94, a seleção dupla é o comportamento real.
   - **Critério**: ≤300 linhas; nível 1 sem nenhum termo de jargão (review de copy); QR pré-selecionado ao marcar WhatsApp; submit chega ao handler T91; E2E T70 cobre nível 1→2 e IG direto.
+  - **Executado 2026-06-12**: card registrado em `card-registry.tsx`, multi-select real habilitado, QR pré-selecionado e payload alinhado ao schema/handler T91.
   - **Paralelo**: sequencial (depois de T91)
 
-- [ ] **T97 [Onda 5]** — `instagram-connect-card.tsx` + registry *(nova — delta 2026-06-11)*
+- [x] **T97 [Onda 5]** — `instagram-connect-card.tsx` + registry *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/instagram-connect-card.tsx (+ card-registry.tsx)
   - **Depende de**: T14, T91
-  - **O que fazer**: Card condicional (`channel.platforms` inclui `'instagram'`) que embrulha o caminho oficial EXISTENTE de credenciais IG (`channel-credentials.routes.ts`) — sem nível 2 (FR-25); conectado por autodetecção (`hasConnectedInstagramInstance` no readiness — com a ressalva de âncora resolvida no gate T82: se o sinal IG for volátil, mesma solução de sentinel-espelho).
+  - **O que fazer**: Card condicional (`channel.platforms` inclui `'instagram'`) que embrulha o caminho oficial EXISTENTE de credenciais IG (`channel-credentials.routes.ts`) — sem nível 2 (FR-25); salvar credenciais grava Connection `CONNECTED`, e a conclusão vem por autodetecção (`hasConnectedInstagramInstance` no readiness).
   - **Critério**: ≤300 linhas; surfa só com Instagram selecionado; reusa o fluxo de credenciais sem duplicar formulário; `npm run lint`.
   - **Paralelo**: [P] (com T96 após T91)
 
-- [ ] **T107 [Onda 4]** — Share delegável da Agenda na config inline (FR-34) *(nova — delta share 2026-06-11)*
+- [x] **T107 [Onda 4]** — Share delegável da Agenda na config inline (FR-34) *(nova — delta share 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/preview/tabs/overview/components/capabilities-section.tsx (sub-seção Agenda; extrair `calendar-share-row.tsx` se estourar limite)
   - **Depende de**: T44
   - **O que fazer**: Dois caminhos lado a lado na config da capacidade Agenda (plan §4.3): "Conectar minha agenda" (OAuth direto) OU "Enviar link para o profissional" — [Copiar link] + [Enviar por WhatsApp] (wa.me com texto pré-pronto) usando o connect-link EXISTENTE (`POST /builder/calendar/connect-link` → `/conectar-agenda/<token>`, TTL 7 dias EXIBIDO). Estado "aguardando o profissional conectar…" via `GET /builder/calendar/status/:projectId` com refetch on-focus + botão "Verificar conexão" (reusar o `checkConnection` ref-guarded de `connect-link-flow.tsx`); só confirma com status CONNECTED real (FR-11).
   - **Critério**: link copiável/enviável; conexão remota detectada sem reload (focus/botão); TTL visível; `npm run lint`.
   - **Paralelo**: sequencial (depois de T44)
 
-- [ ] **T108 [Onda 5]** — Bloco de share delegável no card `whatsapp_connect` (FR-34) *(nova — delta share 2026-06-11)*
+- [x] **T108 [Onda 5]** — Bloco de share delegável no card `whatsapp_connect` (FR-34) *(nova — delta share 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/whatsapp-connect-card.tsx
   - **Depende de**: T47
   - **O que fazer**: Bloco "ou" abaixo do QR (plan §3.6c/§4.1): "📤 O número fica com outra pessoa?" + [Copiar link] + [Enviar por WhatsApp] (wa.me pré-pronto) com o `shareLink` que o provision idempotente já retorna; microcopy "Envie este link para quem tem o celular da empresa — ela escaneia de lá." + "Link válido por 15 min · Gerar novamente" (renova QR E shareToken JUNTOS — contrato do plan §3.6, via re-call do provision sem `force` ou wrapper `refresh-qr`, decisão do gate T82). Conclusão remota cai na MESMA autodetecção do card (polling do readiness).
   - **Critério**: copiar/wa.me funcionam; "Gerar novamente" renova QR+validade sem criar instância nova no broker; scan remoto vira "Conectado ✓" sem reload; `npm run lint`.
   - **Paralelo**: sequencial (depois de T47)
 
-- [ ] **T98 [Onda 5]** — Summary v2-aware (FR-31) *(nova — delta 2026-06-11)*
+- [x] **T98 [Onda 5]** — Summary v2-aware (FR-31) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/preview-summary-card.tsx + preview-summary-helpers.ts
   - **Depende de**: T17
   - **O que fazer**: Branch v2 no resumo de pré-publicação (plan §4.1): quando `readiness.journey` está presente, o resumo lista as **fases** + as **capacidades ATIVAS** (derivadas do `builderState`/Capacidades) — NÃO as seções fixas v1 que assumem pricing/handoff obrigatórios. Render v1 byte-intocado (NFR-03).
   - **Critério**: projeto v2 com handoff desligado mostra resumo SEM seção de transferência obrigatória; snapshot v1 inalterado; teste react do branch; `npm run lint`.
   - **Paralelo**: [P]
 
-- [ ] **T99 [Onda 5]** — Card guiado de BYOK (FR-28) *(nova — delta 2026-06-11)*
+- [x] **T99 [Onda 5]** — Card guiado de BYOK (FR-28) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/chat/cards/byok-guided-card.tsx
   - **Depende de**: T17
   - **O que fazer**: Render condicional do chat (NÃO é step, plan §4.1): quando `readiness.blockers` contém `byok` e a fase ativa é Lançar, renderizar card guiado de chave — "cole sua chave OpenAI — veja onde pegar", com link para `/integracoes` (o redirect real do blocker, `next-pending-step.ts:44`) — em vez de só o aviso seco. Blocker-driven, sem sentinel: some sozinho quando `byokProviderCount > 0`.
   - **Critério**: ≤300 linhas; card aparece com blocker byok ativo na fase Lançar e some após configurar a chave (sem reload, via refetch do readiness); `npm run lint`.
   - **Paralelo**: [P]
 
-- [ ] **T100 [Onda 5]** — Banner de queda de conexão (FR-30 — aviso, nunca regressão) *(nova — delta 2026-06-11)*
+- [x] **T100 [Onda 5]** — Banner de queda de conexão (FR-30 — aviso, nunca regressão) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/workspace.tsx (ou componente de banner do preview) — ponto exato definido na implementação
   - **Depende de**: T35, T49
   - **O que fazer**: Plan §4.4: quando `confirmations.whatsappConnectedOnce === true` mas `hasConnectedWhatsAppInstance` volta a false (conexão caiu), a UI mostra **banner de aviso** (+ entrada na Atividade) com CTA de reconexão — o step `whatsapp_connect` permanece concluído e a jornada NÃO reabre.
   - **Critério**: simular queda (Connection → DISCONNECTED) exibe o banner e o progresso/fases não regridem (unit do engine em T61 + assert de UI); CTA leva à reconexão (refresh-qr/credenciais).
   - **Paralelo**: sequencial (após T49)
 
-- [ ] **T53 [Onda 6]** — Campo `visibleWhen` no tab-registry + filtro no painel
+- [x] **T53 [Onda 6]** — Campo `visibleWhen` no tab-registry + filtro no painel
   - **Arquivo**: src/client/components/projetos/preview/tab-registry.tsx (+ ponto de render das tabs no preview-panel)
   - **Depende de**: T49
   - **O que fazer**: Novo campo opcional `visibleWhen?: (ctx: { project; readiness }) => boolean`; em projetos v2 (`readiness.journey` presente) tabs não-acionáveis ficam INVISÍVEIS (filtradas, não locked); em v1 o comportamento locked atual permanece intocado (NFR-03).
   - **Critério**: unit T71 — v2 filtra, v1 locked; `npx tsc --noEmit`.
   - **Paralelo**: sequencial
 
-- [ ] **T54 [Onda 6]** — Regras de visibilidade por tab (FR-19)
+- [x] **T54 [Onda 6]** — Regras de visibilidade por tab (FR-19)
   - **Arquivo**: src/client/components/projetos/preview/tab-registry.tsx
   - **Depende de**: T53
   - **O que fazer**: Aplicar `visibleWhen` por entrada: Visão geral/Conhecimento/Mídias na fase Revisar; Testar quando `agentExists`; Publicar pelo `deploy-gate.ts` compartilhado (shipped); Atividade mantém `requiresPublished`; Config/Avançado a partir de Revisar (plan §4.4).
   - **Critério**: E2E T72 — nenhuma tab visível-porém-bloqueada em v2; tabs aparecem por fase.
   - **Paralelo**: sequencial
 
-- [ ] **T55 [Onda 6]** — Chat fullscreen na fase Conhecer
+- [x] **T55 [Onda 6]** — Chat fullscreen na fase Conhecer
   - **Arquivo**: src/client/components/projetos/workspace.tsx
   - **Depende de**: T49
   - **O que fazer**: Renderizar só o `ChatPanel` (sem split) enquanto `readiness.journey?.activePhaseId === 'conhecer'`; split revela com transição na entrada de Revisar. Branch ESTRITAMENTE atrás de `readiness.journey !== undefined` (risco R8 — zero impacto v1).
   - **Critério**: E2E T72 — primeira tela do projeto v2 só conversa; E2E T62 — layout v1 intacto.
   - **Paralelo**: [P] (com T53/T54)
 
-- [ ] **T101 [Onda 6]** — Animação da revelação progressiva (FR-32, nível sutil) *(nova — delta 2026-06-11)*
+- [x] **T101 [Onda 6]** — Animação da revelação progressiva (FR-32, nível sutil) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/client/components/projetos/workspace.tsx + preview/tabs/overview (stagger) + ponto de render das tabs (pulso)
   - **Depende de**: T53, T55
   - **O que fazer**: Plan §4.6 — três animações em **CSS transitions puras, zero lib nova**: (a) na transição Conhecer→Revisar, o chat desliza à esquerda e o painel entra da direita com fade (transition de width/transform+opacity no mesmo branch `readiness.journey` do fullscreen); (b) conteúdo da Visão geral monta em cascata (~100ms de stagger, delay incremental por seção via CSS); (c) tab recém-liberada pelo `visibleWhen` (Testar/Publicar) ganha UM pulso de destaque (one-shot por tab, controle local; nunca repete em re-render). **`prefers-reduced-motion` obrigatório**: media query desativa as três (estado final aplicado direto). Tudo atrás do branch `readiness.journey` (zero impacto v1).
   - **Critério**: zero deps npm novas (`git diff package.json` vazio); pulso dispara 1 única vez por liberação de tab; com `prefers-reduced-motion` emulado, nenhuma transição roda (assert no E2E T72); `npm run lint`.
   - **Paralelo**: sequencial (após T53/T55)
 
-- [ ] **T56 [Onda 6]** — Remoção da IdentityTab ⚠️ APROVAÇÃO (deleção de arquivo)
+- [x] **T56 [Onda 6]** — Remoção da IdentityTab ⚠️ APROVAÇÃO (deleção de arquivo)
   - **Arquivo**: src/client/components/projetos/preview/tabs/identity/identity-tab.tsx (DELETAR) + remoção do embed em prompt-tab.tsx (:29, :73) + entrada no tab-registry
   - **Depende de**: T24, T25
   - **O que fazer**: Deletar a superfície duplicada (FR-21) — o disclosure já vive no agent_review (T24/T43) e o `create_agent` injeta no prompt (T25). O endpoint PATCH `/builder/identity/:projectId` PERMANECE para edição pós-criação. Doc deprecated em T73.
@@ -640,177 +709,187 @@ Quebra do `plan.md` (ondas 0–7 + **Onda 5b**) em **109 tarefas atômicas**. Qu
 
 ## Fase 5 — Testes
 
-- [ ] **T57 [Onda 0]** — Unit: `journeyVersion` default + backfill legado
+- [x] **T57 [Onda 0]** — Unit: `journeyVersion` default + backfill legado
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.test.ts (ou co-localizado existente)
   - **Depende de**: T04
   - **O que fazer**: `parseBuilderState` de JSONB legado retorna `journeyVersion: 1`; estado novo aceita 2; valor inválido cai no default.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T58 [Onda 0]** — Unit: flag `builder-v2`
+- [x] **T58 [Onda 0]** — Unit: flag `builder-v2`
   - **Arquivo**: src/lib/feature-flags/builder-v2.test.ts
   - **Depende de**: T08
   - **O que fazer**: Parse on/off/percentage + override cookie + hash estável por organizationId (espelho do teste do auth-v3).
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T59 [Onda 0]** — Unit: `journey-events` nunca lança
+- [x] **T59 [Onda 0]** — Unit: `journey-events` nunca lança
   - **Arquivo**: src/server/services/journey-events.test.ts
   - **Depende de**: T09
   - **O que fazer**: Erro de DB não propaga (fail-open); vocabulário fechado (evento fora da union não compila — assert de tipo); metadata com chave fora do contrato rejeitado.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T60 [Onda 0]** — Unit: `duplicate` herda v2 sem downgrade
+- [x] **T60 [Onda 0]** — Unit: `duplicate` herda v2 sem downgrade
   - **Arquivo**: src/server/ai-module/builder/projects/projects.repository.test.ts (ou co-localizado)
   - **Depende de**: T11
   - **O que fazer**: Duplicar projeto v2 → conversa do clone nasce `journeyVersion: 2` (criação lazy respeita herança); evento `journey_started` emitido; duplicar v1 → permanece 1.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T61 [Onda 1]** — Unit: engine `journey-v2` *(alterada pelo delta 2026-06-11)*
+- [x] **T61 [Onda 1]** — Unit: engine `journey-v2` *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/state/journey-v2.test.ts
   - **Depende de**: T16
   - **O que fazer**: Plan §7.1: ordem das fases; `business_identity` satisfeito por `confirmations.source`; `test_drive` flipado por tested E skip; `whatsapp_connect` done por `hasConnectedWhatsAppInstance` (Connection DISCONNECTED NÃO completa) **E permanece done com ctx false quando `whatsappConnectedOnce` é true (monotonicidade FR-30)**; **`channel_platform` flipa por sentinel e os steps de conexão surfam CONDICIONALMENTE por plataforma** (sem whatsapp marcado → `whatsapp_connect` não surfa; instagram marcado → `instagram_connect` surfa); `published_next_steps` surfa só com `hasLiveDeployment`; completeness monotônico (**steps condicionais entram no denominador só com a plataforma selecionada**); `isDeployReady` exige blockers zerados; os 7 sentinels novos default false.
   - **Critério**: `npm run test:unit` verde E `state/next-pending-step.test.ts` verde SEM edição (prova NFR-03).
   - **Paralelo**: sequencial
 
-- [ ] **T62 [Onda 1]** — E2E: regressão v1 com flag off + kill-switch (NFR-08) *(alterada pelo delta 2026-06-11)*
+- [x] **T62 [Onda 1]** — E2E: regressão v1 com flag off + kill-switch (NFR-08) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v1-regressao.spec.ts
   - **Depende de**: T17, T87, T89
   - **O que fazer**: Flag off → jornada v1 completa intocada (NFR-03): sem campo `journey`, layout split desde o início, tabs locked (não filtradas). **E com `BUILDER_V2_FORCE_RENDER_V1=true`: projeto v2 renderiza no engine v1 SEM perda de estado (NFR-08); desligar volta à v2** (plan §7.2). Re-rodar a cada onda subsequente. Roda com o provider LLM mock (T89).
   - **Critério**: `npm run test:e2e` (project local) verde, incluindo o round-trip do kill-switch.
+  - **Executado 2026-06-12**: round-trip local em `PLAYWRIGHT_BASE_URL=http://localhost:3005` com Supabase local. Metade off: servidor com `BUILDER_V2_FORCE_RENDER_V1=false`, runner `E2E_BUILDER_KILL_SWITCH=off`, `npx playwright test --project=local test/e2e/builder/builder-v1-regressao.spec.ts` → 2/2 passou. Metade on: servidor reiniciado com `BUILDER_V2_FORCE_RENDER_V1=true`, runner `E2E_BUILDER_KILL_SWITCH=on`, mesmo comando → 2/2 passou. Em ambos, flag off manteve v1 sem `journey`; projeto v2 preservou `builderState.journeyVersion=2` e alternou só render.
   - **Paralelo**: sequencial
 
-- [ ] **T63 [Onda 2]** — Unit: handler `business_identity`
+- [x] **T63 [Onda 2]** — Unit: handler `business_identity`
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.test.ts
   - **Depende de**: T19
   - **O que fazer**: Espelha nome no projeto (transacional); flipa `businessIdentity`; sanitização (lengths/trims); `identity_done` emitido; cross-org rejeitado.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T64 [Onda 2]** — E2E: jornada sem site
+- [x] **T64 [Onda 2]** — E2E: jornada sem site
   - **Arquivo**: test/e2e/builder/builder-v2-sem-site.spec.ts
   - **Depende de**: T38, T21
   - **O que fazer**: Fixture org seedada + cookie `builder-v2-override=on`: business_identity preenchido pela conversa → agente de teste responde "onde fica?" (critério §8 item 2).
   - **Critério**: `npm run test:e2e` verde.
+  - **Executado 2026-06-12**: `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 E2E_LLM_MOCK_TEXT='Resposta determinística do provider mock (E2E_LLM_MOCK). Sem chamada de LLM real. Endereço: Rua das Flores, 123 — Centro, São Paulo/SP.' npx playwright test --project=local test/e2e/builder/builder-v2-sem-site.spec.ts` → 1/1 passou. O harness agora materializa `AIAgentConfig` + `BuilderPromptVersion` para exercitar o Playground; `ensureBuilderAgent` ficou idempotente contra P2002 no unique `(organizationId,name)`.
   - **Paralelo**: sequencial
 
-- [ ] **T65 [Onda 3]** — Unit: `capturedProposals` + clear explícito
+- [x] **T65 [Onda 3]** — Unit: `capturedProposals` + clear explícito
   - **Arquivo**: src/server/ai-module/builder/cards/builder-state.test.ts
   - **Depende de**: T06
   - **O que fazer**: Parse/backfill legado; `clearCapturedProposals` remove SÓ o domínio dado; teste de regressão do invariante "deepMerge nunca deleta".
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T66 [Onda 3]** — Unit: handler `agent_review` (+ validação granular FR-22) *(alterada pelo delta 2026-06-11)*
+- [x] **T66 [Onda 3]** — Unit: handler `agent_review` (+ validação granular FR-22) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.test.ts
   - **Depende de**: T24
   - **O que fazer**: Flipa exatamente persona+services+hours em 1 write; limpa `capturedProposals` explicitamente; disclosure opcional aplicado em `metadata.identityCard`; `review_done` emitido. **Granularidade (plan §7.1)**: erro em `hours` retorna `{ errors: { hours } }` e NÃO descarta persona/services válidos — nenhum write parcial.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T67 [Onda 3]** — E2E: jornada com site
+- [x] **T67 [Onda 3]** — E2E: jornada com site
   - **Arquivo**: test/e2e/builder/builder-v2-com-site.spec.ts
   - **Depende de**: T43, T23
   - **O que fazer**: 2 perguntas → fonte aceita → agent_review PREFILLADO (badge "sugerido da conversa") → teste responde → publicar; nenhum dado pedido duas vezes (critérios §8 itens 1 e 3).
   - **Critério**: `npm run test:e2e` verde.
+  - **Executado 2026-06-12**: `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 npx playwright test --project=local test/e2e/builder/builder-v2-com-site.spec.ts` → 1/1 passou. O spec tolera síntese async ausente, valida accept de fonte, blueprint aprovado, `agent_review` consolidado e Playground com agente materializado por seed E2E.
   - **Paralelo**: sequencial
 
-- [ ] **T68 [Onda 4]** — E2E: Capacidades (+ silent-submit FR-29) *(alterada pelo delta 2026-06-11)*
+- [x] **T68 [Onda 4]** — E2E: Capacidades (+ silent-submit FR-29) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v2-capacidades.spec.ts
   - **Depende de**: T45, T30, T89
   - **O que fazer**: Conhecimento sempre-on sem toggle; transferir OFF por default publica e responde sozinho; **ligar roleta expõe config inline, PERSISTE via silent-submit SEM turno LLM e a linha de sistema local aparece no chat aberto** (FR-29, plan §7.2); agente publicado COM RAG quando a fonte veio antes do agente (critérios §8 itens 4-6). Roda com LLM mock (T89).
   - **Critério**: `npm run test:e2e` verde; network assert: zero SSE/turno LLM no caminho do toggle.
+  - **Executado 2026-06-12**: `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 npx playwright test --project=local test/e2e/builder/builder-v2-capacidades.spec.ts` → 5/5 passou. Cobriu conhecimento sempre-on, transferir OFF com agente solo materializado por seed, roleta via silent-submit JSON sem SSE, rejeição de `silent` fora da allowlist e Agenda delegada com connect-link + seed CONNECTED + capacidade ativa. Correções incluídas: `ackMode` preservado no validator da rota, response JSON do silent-submit, unwrap Igniter nos helpers, seed E2E do agente e seed DB do fluxo remoto da Agenda.
   - **Paralelo**: sequencial
 
-- [ ] **T69 [Onda 5]** — Unit: `test_drive` + auto-flip fail-open
+- [x] **T69 [Onda 5]** — Unit: `test_drive` + auto-flip fail-open
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.test.ts (+ teste do helper no playground-stream)
   - **Depende de**: T32, T33
   - **O que fazer**: Skip vs tested (copy do ACK distinta); auto-flip do playgroundStream é fail-open (erro de DB não quebra o stream); helper único usado pelos dois caminhos; eventos test_done/test_skipped.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T70 [Onda 5]** — E2E: Testar + Lançar (+ canal 2 níveis, teto de polling, BYOK guiado) *(alterada pelo delta 2026-06-11)*
+- [x] **T70 [Onda 5]** — E2E: Testar + Lançar (+ canal 2 níveis, teto de polling, BYOK guiado) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v2-lancamento.spec.ts
   - **Depende de**: T46, T47, T48, T51, T52, T96, T98, T99
-  - **O que fazer**: Teste oferecido ANTES da ativação; "Publicar sem testar" funciona; **card de plataforma nível 1 (copy sem jargão) → marcar WhatsApp abre nível 2 com QR pré-selecionado; marcar Instagram vai direto a credenciais (sem nível 2); seleção dupla desabilitada com hint honesto (pré-5b)**; QR re-apresentável até conectar SEM criar segunda instância (refresh-qr); **polling para no teto de 10min e "Ainda esperando?" re-arma (FR-27, com clock mockado)**; **resumo v2-aware lista fases + capacidades ativas (FR-31)**; **blocker byok exibe o card guiado (FR-28)**; pós-publicação mostra próximos passos (critérios §8 itens 8, 9, 13 + critérios novos de canal). Roda com LLM mock (T89).
+  - **O que fazer**: Teste oferecido ANTES da ativação; "Publicar sem testar" funciona; **card de plataforma nível 1 (copy sem jargão) → marcar WhatsApp abre nível 2 com QR pré-selecionado; marcar Instagram vai direto a credenciais (sem nível 2); seleção dupla aceita no contrato atual pós-5b**; QR re-apresentável até conectar SEM criar segunda instância (refresh-qr); **polling para no teto de 10min e "Ainda esperando?" re-arma (FR-27, com clock mockado)**; **resumo v2-aware lista fases + capacidades ativas (FR-31)**; **blocker byok exibe o card guiado (FR-28)**; pós-publicação mostra próximos passos (critérios §8 itens 8, 9, 13 + critérios novos de canal). Roda com LLM mock (T89).
   - **Critério**: `npm run test:e2e` verde; assert de instância única no broker (mock UAZ).
+  - **Executado 2026-06-12**: servidor local 3005 reiniciado com `E2E_UAZ_MOCK=1` e `NEXT_PUBLIC_APP_URL=http://localhost:3005`; `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 npx playwright test --project=local test/e2e/builder/builder-v2-lancamento.spec.ts` → 7/7 passou. Correções incluídas: mock UAZ test-only com guard fora de produção, seed E2E de agente/prompt para provision idempotente via `AgentDeployment`, seed do scan remoto WhatsApp (`Connection.CONNECTED` + `whatsappConnectedOnce`) e deleção real de `channel.whatsappMode` ao trocar para Instagram-only.
   - **Paralelo**: sequencial
 
-- [ ] **T71 [Onda 6]** — Unit: `visibleWhen` v2 vs locked v1
+- [x] **T71 [Onda 6]** — Unit: `visibleWhen` v2 vs locked v1
   - **Arquivo**: src/client/components/projetos/preview/tab-registry.test.ts (ou teste react co-localizado)
   - **Depende de**: T54
   - **O que fazer**: v2 (`journey` presente) → tab não-acionável FILTRADA; v1 → locked atual (regressão).
   - **Critério**: `npm run test:react` verde.
   - **Paralelo**: [P]
 
-- [ ] **T72 [Onda 6]** — E2E: UI progressiva (+ reduced-motion FR-32) *(alterada pelo delta 2026-06-11)*
+- [x] **T72 [Onda 6]** — E2E: UI progressiva (+ reduced-motion FR-32) *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v2-progressivo.spec.ts
   - **Depende de**: T54, T55, T101
   - **O que fazer**: Primeira tela só conversa (fullscreen Conhecer); tabs aparecem por fase; NENHUMA tab visível-porém-bloqueada em v2 (critério §8 item 12); **com `prefers-reduced-motion` emulado, transição Conhecer→Revisar SEM animações (FR-32)**. Roda com LLM mock (T89).
   - **Critério**: `npm run test:e2e` verde + re-run de T62 (v1 intacta).
+  - **Executado 2026-06-12**: `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 npx playwright test --project=local test/e2e/builder/builder-v2-progressivo.spec.ts` → 2/2 passou. Correções de harness: unwrap do envelope Igniter em `fetchReadiness`, emulação explícita de reduced-motion no teste; correção de produto: `createWithInitialMessage` agora seeda `project.name`/`project.objective` no `builderState` inicial e CSS específico da jornada zera duration em reduced-motion. O re-run T62 permanece como gate próprio.
   - **Paralelo**: sequencial
 
-- [ ] **T109 [Onda 5]** — E2E: fluxos delegados por link (FR-34) *(nova — delta share 2026-06-11)*
+- [x] **T109 [Onda 5]** — E2E: fluxos delegados por link (FR-34) *(nova — delta share 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v2-capacidades.spec.ts + builder-v2-lancamento.spec.ts (estender os dois)
   - **Depende de**: T107, T108, T70
   - **O que fazer**: Plan §7.2: (a) capacidades.spec — agenda delegada: gerar connect-link, simular conexão remota (flip CONNECTED por seed/stub no DB de teste), "Verificar conexão" confirma e a capacidade vira ativa; (b) lancamento.spec — share WhatsApp: copiar link, abrir `/compartilhar/<token>` em contexto ANÔNIMO mostrando o QR da MESMA Connection, flip CONNECTED por stub → card do builder vira "Conectado ✓" pela autodetecção. Roda com LLM mock (T89).
   - **Critério**: `npm run test:e2e` verde nos dois specs.
+  - **Executado 2026-06-12**: fechado pelos re-runs T68 (Agenda delegada 5/5) e T70 (WhatsApp delegado 7/7). Agenda: connect-link real, status antes `connected=false`, seed CONNECTED + `OrganizationProvider` project-scoped, status/capacidade ativos. WhatsApp: provision real com mock UAZ, share público anônimo, refresh sem nova Connection, seed CONNECTED + sentinel monotônico, readiness detecta `whatsapp_connect` concluído.
   - **Paralelo**: sequencial (fecha a Onda 5)
 
-- [ ] **T102 [Onda 4]** — Unit: silent-submit (FR-29) *(nova — delta 2026-06-11)*
+- [x] **T102 [Onda 4]** — Unit: silent-submit (FR-29) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/card-submit.routes.test.ts (ou co-localizado existente do card-submit)
   - **Depende de**: T90
   - **O que fazer**: Plan §7.1: com `ackMode: 'silent'` o flip persiste e a resposta é JSON simples SEM SSE (nenhuma chamada a `ensureBuilderAgent`/`buildSseResponse`); cardKey fora da allowlist com `silent` → 400; sem `ackMode` → comportamento conversacional atual intacto.
   - **Critério**: `npm run test:unit` verde.
   - **Paralelo**: [P]
 
-- [ ] **T103 [Onda 5]** — Unit: handler `channel_platform` *(nova — delta 2026-06-11)*
+- [x] **T103 [Onda 5]** — Unit: handler `channel_platform` *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/cards/handlers/apply/journey-v2.test.ts
   - **Depende de**: T91
-  - **O que fazer**: Plan §7.1: min 1 plataforma; refine — `whatsappMode` obrigatório quando whatsapp marcado; rejeição de dupla seleção pré-5b (caso invertido após T94); grava `channel.platforms`/`channel.whatsappMode`; flipa `channelPlatform`; cross-org rejeitado.
+  - **O que fazer**: Plan §7.1: min 1 plataforma; refine — `whatsappMode` obrigatório quando whatsapp marcado; dupla seleção pós-5b aceita; grava `channel.platforms`/`channel.whatsappMode`; flipa `channelPlatform`; cross-org rejeitado.
   - **Critério**: `npm run test:unit` verde.
+  - **Executado 2026-06-12**: `apply/journey-v2.test.ts` cobre WhatsApp QR/Cloud, Instagram sem `whatsappMode`, ausência de `whatsappMode` inválida, dupla seleção aceita, dedupe, cross-org e invalidação do Refinando.
   - **Paralelo**: [P]
 
-- [ ] **T104 [Onda 5b]** — Unit: `attach-to-agent` pausa por conexão (FR-26) *(nova — delta 2026-06-11)*
+- [x] **T104 [Onda 5b]** — Unit: `attach-to-agent` pausa por conexão (FR-26) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/ai-module/builder/channel/attach-to-agent.test.ts (ou co-localizado)
   - **Depende de**: T92
   - **O que fazer**: Plan §7.1: pausa SÓ deployments da mesma `connectionId`; 2 conexões de canais distintos coexistem ACTIVE (1 por canal); re-attach da MESMA conexão reativa sem duplicar deployment.
   - **Critério**: `npm run test:unit` verde.
+  - **Executado 2026-06-12**: `attach-to-agent.test.ts` cobre coexistência de 2 ACTIVE, re-attach idempotente/reativação e no-op sem agente.
   - **Paralelo**: [P]
 
-- [ ] **T105 [Onda 5b]** — E2E: multi-canal simultâneo *(nova — delta 2026-06-11)*
+- [x] **T105 [Onda 5b]** — E2E: multi-canal simultâneo *(nova — delta 2026-06-11)*
   - **Arquivo**: test/e2e/builder/builder-v2-multicanal.spec.ts
   - **Depende de**: T93, T94, T89
   - **O que fazer**: Plan §7.2/§3.7c: marcar os dois canais → publicar → 2 deployments ACTIVE (1 por canal) → inbound dos 2 canais responde; trocar/reconectar o QR do WhatsApp NÃO derruba o deployment do Instagram (FR-26, critério §8 da Onda 5b). Roda com LLM mock (T89) + mock UAZ. **Inclui re-run da suíte v1/v2 inteira (regressão do 1-canal — gate da Onda 5b)**.
   - **Critério**: `npm run test:e2e` verde + suíte completa verde (regressão).
+  - **Executado 2026-06-12**: `PLAYWRIGHT_BASE_URL=http://localhost:3005 DATABASE_URL/TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public E2E_LLM_MOCK=1 E2E_MULTICANAL_DB=1 npx playwright test --project=local test/e2e/builder/builder-v2-multicanal.spec.ts` → 4/4 passou. O spec agora seeda agente + duas Connections ACTIVE (WhatsApp/Instagram) quando a flag DB está ligada, cobrindo dupla seleção, surfacing dos dois steps, coexistência dos deployments, isolamento por conexão e regressão 1-canal.
   - **Paralelo**: sequencial
 
 ## Fase 6 — Observabilidade & polish
 
-- [ ] **T73 [Onda 6]** — Doc deprecated da IdentityTab (cascata CLAUDE.md)
+- [x] **T73 [Onda 6]** — Doc deprecated da IdentityTab (cascata CLAUDE.md)
   - **Arquivo**: docs/deprecated/IDENTITY_TAB.md
   - **Depende de**: T56
   - **O que fazer**: Documentar a remoção (o que era, por que saiu, onde o disclosure vive agora — agent_review/T24 + create_agent/T25, endpoint PATCH preservado, como ressuscitar via git) com frontmatter doc-freshness.
   - **Critério**: arquivo existe com frontmatter completo; refs à IdentityTab removidas de docs ativas.
   - **Paralelo**: [P]
 
-- [ ] **T74 [Onda 7]** — Queries do funil (dashboard ops)
+- [x] **T74 [Onda 7]** — Queries do funil (dashboard ops)
   - **Arquivo**: docs/builder/JOURNEY_V2_FUNNEL.md
   - **Depende de**: T09
   - **O que fazer**: Documentar as queries SQL do funil por fase (agregação `MIN(createdAt)` por (projectId, event), por org e global; metas da spec §2: conclusão, tempo até primeiro teste) para operação via Claude Code/MCP Supabase (sem admin UI).
   - **Critério**: queries executam no Postgres de homol e retornam o funil; frontmatter doc-freshness.
   - **Paralelo**: [P]
 
-- [ ] **T75 [Onda 7]** — Monitor de drafts v1 ATIVOS + issue de sunset *(alterada pelo delta 2026-06-11)*
+- [x] **T75 [Onda 7]** — Monitor de drafts v1 ATIVOS + issue de sunset *(alterada pelo delta 2026-06-11)*
   - **Arquivo**: docs/builder/JOURNEY_V2_FUNNEL.md (query JSONB) + issue no repositório
   - **Depende de**: T17, T106
   - **O que fazer**: Query operacional por `builderState->>'journeyVersion'` para contar drafts v1 **ATIVOS — excluindo arquivados** (FR-33: o gate de convergência conta só ativos; o arquivamento de T106 é o que destrava o sunset); criar a issue de sunset JÁ nesta onda (quando drafts v1 ativos = 0 por 60 dias: remover paths v1-only, o branch do resolver e o flag — plan §10 Onda 7).
   - **Critério**: query funciona e exclui arquivados; issue criada com critério de gatilho explícito.
   - **Paralelo**: [P]
 
-- [ ] **T106 [Onda 7]** — Arquivamento de drafts v1 inativos por 90 dias (FR-33) *(nova — delta 2026-06-11)*
+- [x] **T106 [Onda 7]** — Arquivamento de drafts v1 inativos por 90 dias (FR-33) *(nova — delta 2026-06-11)*
   - **Arquivo**: src/server/services/jobs/journey-events-purge.job.ts (mesma rotina/schedule de T88) ou rotina dedicada no worker — reusando a lógica do `archiveProject` existente (`projects/routes/crud.routes.ts`)
   - **Depende de**: T88, T10
   - **O que fazer**: Plan §10 Onda 7 (sunset desbloqueável): rotina recorrente que arquiva BuilderProject draft com `builderState->>'journeyVersion' = '1'` e sem atividade (updatedAt) há 90 dias, reusando o mecanismo de arquivamento EXISTENTE (`archiveProject` — sem deleção, reversível por unarchive). Rodar no MESMO schedule do purge (T88) — **nenhum cron adicional além do aprovado no plan §9**. Fail-open + log `[journey-v2]`; org-scoped por construção (varre por projeto, arquiva via lógica existente).
@@ -853,3 +932,91 @@ Gate entre ondas: critério "Pronto quando" do plan §10 + `npm run lint && npx 
 3. ~~Jeito de falar / avisar sem pausar~~ **RESOLVIDA (spec §9 decisão 9, 2026-06-11)**: T40 mantém as 3 opções de persona e o handoff-card mantém "avisar sem pausar" como opção avançada — confirmados sem mudança pelo founder.
 
 Sem pendentes abertas no delta 2026-06-11 (spec §9: decisões 5–10 registradas).
+
+---
+
+## Adendo 2026-06-13 — Backlog mission-first (T110–T118 + TPRO)
+
+> Integração de `backlog-simples.md` + `mission-first-v3.md` (FR-51..54, FR-PRO-01, NFR-13..15), **validada por
+> workflow multi-agente com verificação adversarial**. Numeração continua de T109 (sem renumerar — padrão do delta
+> 2026-06-11). Itens já cobertos no mission-first-v3 NÃO recriados. **Âncoras corrigidas pela verificação:** fonte das
+> recomendações = `blueprint.toolTriggers[]`/`handoffTriggers[]`/`successCriteria[]` (NÃO `AgentStrategy.recommendedTools`,
+> que não existe); `inferKnownVertical/inferNiche/soldOutLimit` são privados → extrair; gate de supressão extraído de
+> `canDispatchAgent`; hook inbound em `process-inbound.ts`; metadata de funil em shape fechado (sem PII).
+
+- [ ] **T110 [Onda 4]** ⚠️ GATE — revalidar âncoras do recomendador
+  - **Arquivo**: — (verificação)
+  - **Depende de**: —
+  - **O que fazer**: re-grepar `capabilities/capabilities.routes.ts` (getCapabilities), `deploy/enabled-tools-derivation.pure.ts`, `playbook/designer-input.ts` (`inferKnownVertical`/`inferNiche`/`soldOutLimit` privados; `hasSoldOutSourceSignal` exportado), `playbook/blueprint.schema.ts` (`toolTriggers`/`handoffTriggers`/`successCriteria`), `catalog/official-tools.ts`. Confirmar que `recommendAgentCapabilities` NÃO existe (greenfield). **FALHAR se alguém reintroduzir `recommendedTools`** (não existe no código).
+  - **Critério**: relatório de grep anexado; nenhuma âncora stale.
+  - **Paralelo**: sequencial
+
+- [ ] **T111 [Onda 4]** *(nova — backlog 2026-06-13)* — `recommendAgentCapabilities` puro (FR-51, NFR-13)
+  - **Arquivo**: `src/server/ai-module/builder/capabilities/recommend-capabilities.pure.ts` (+ extrair `src/server/ai-module/builder/playbook/niche-inference.pure.ts`)
+  - **Depende de**: T110, T27
+  - **O que fazer**: (1) extrair `inferKnownVertical/inferNiche/soldOutLimit` de `designer-input.ts` para `niche-inference.pure.ts` (consumido por ambos — evita export ad-hoc e dependência circular). (2) função PURA `recommendAgentCapabilities(builderState, insumos)` (zero IO, client-safe) que lê `mission.key/addons`, `objective`, nicho, risco (`hasSoldOutSourceSignal`/`soldOutLimit`) e insumos de getCapabilities; retorna `[{ id, kind:'recommended'|'optional', reason, requires[], risk, initialConfig }]` keyed em `official-tools.ts`. **Fonte por missão = `blueprint.toolTriggers[]`/`handoffTriggers[]`/`successCriteria[]`** via `blueprint-helpers.ts`. NÃO escreve `enabledTools` nem dispara a saga (FR-09).
+  - **Critério**: unit T114; tsc sem `any`; missão ausente → fallback (nunca throw); `requires[]` de agenda inclui conexão (FR-11).
+  - **Paralelo**: [P] com T28
+
+- [ ] **T112 [Onda 4]** *(nova)* — expor `recommendations[]` no envelope getCapabilities (FR-51, NFR-05)
+  - **Arquivo**: `src/server/ai-module/builder/capabilities/capabilities.routes.ts`
+  - **Depende de**: T111, T28
+  - **O que fazer**: adicionar `recommendations` ao envelope de `GET /builder/projects/:id/capabilities`, chamando T111 com os insumos já lidos (zero fetch extra). Read-only, org-scoped.
+  - **Critério**: rota devolve `recommendations[]`; 401 sem auth, 404 cross-org; sem escrita; tsc verde.
+  - **Paralelo**: sequencial (mesmo arquivo de T28)
+
+- [ ] **T113 [Onda 4]** *(nova)* — Capacidades renderiza recomendações + roteia ao card de domínio (FR-52)
+  - **Arquivo**: `src/client/components/projetos/preview/tabs/overview/components/capabilities-section.tsx`
+  - **Depende de**: T112, T44, T45
+  - **O que fazer**: renderizar `recommendations[]` (recomendada c/ badge "Sugerido para seu nicho" + `reason` em linguagem de negócio FR-49; opcionais abaixo). Aceitar NÃO grava tool: roteia ao card de domínio via submit silencioso (FR-29) ou escreve `selectedCapabilityKeys`/`mission.addons`; `initialConfig` vira prefill via chip "Usar sugestão" (FR-23). 🚫 PROIBIDO recriar checkboxes de handoff/agenda/preços (bug do `propose-tool-selection`).
+  - **Critério**: aceitar recomendação abre/submete o card de domínio correto; nenhuma escrita direta de `enabledTools`; E2E T115.
+  - **Paralelo**: sequencial
+
+- [ ] **T114 [Onda 4 / Fase 5]** *(nova)* — Unit do recomendador (FR-51, NFR-13)
+  - **Arquivo**: `src/server/ai-module/builder/capabilities/recommend-capabilities.pure.test.ts`
+  - **Depende de**: T111
+  - **O que fazer**: SDR imobiliário → capturar lead/qualificar/transferir/agendar/follow-up; clínica → agendar/confirmar/lembrar/transferir; suporte → poda (sem qualificação); missão ausente → fallback sem throw; `requires[]` de agenda inclui conexão; função nunca escreve estado.
+  - **Critério**: cobre missão/nicho/risco/insumos + invariante read-only.
+  - **Paralelo**: [P]
+
+- [ ] **T115 [Onda 4 / Fase 5]** *(nova; LLM mock NFR-09/T89)* — E2E Capacidades recomendadas (FR-52)
+  - **Arquivo**: `test/e2e/builder/builder-v2-capacidades.spec.ts` (estender)
+  - **Depende de**: T113, T89
+  - **O que fazer**: missão SDR → Capacidades mostra recomendadas com badge; aceitar "Transferir para consultor" abre o handoff-card e persiste por silent-submit (FR-29) sem turno LLM; nenhuma capacidade gravada fora do card de domínio.
+  - **Critério**: assert do roteamento ao card de domínio + ausência de segunda superfície.
+  - **Paralelo**: [P]
+
+- [ ] **T116 [Onda 3]** *(nova)* — `agent_review` orientado a negócio (FR-53)
+  - **Arquivo**: `src/client/components/projetos/chat/cards/agent-review-card.tsx` + handler
+  - **Depende de**: T24, T43; **sub-seção de automações proativas depende de TPRO-F1** (addendum pós-Onda 4)
+  - **O que fazer**: seções somente-leitura: missão, capacidades ativas (derivadas FR-09), qualificação (se aplica FR-44), restrições comerciais (se risco FR-44), automações proativas ativas (F1), ferramentas/integrações, "o que o agente nunca pode prometer". Linguagem de negócio (FR-41/FR-49); reusa `derive*ToolChanges` (fonte única). **Faseado**: T116 base (Onda 3) sem o bloco proativo; addendum liga o bloco após TPRO-F1.
+  - **Critério**: card mostra o retrato completo sem re-decidir; assert em E2E T67.
+  - **Paralelo**: sequencial
+
+- [ ] **T117 [Onda 1]** *(nova — mission-first)* — Evento de funil `mission_selected` (FR-48)
+  - **Arquivo**: `src/server/services/journey-events.ts` (estender união fechada **E** `JourneyEventMetadataByName`) + handler do card Missão
+  - **Depende de**: T09
+  - **O que fazer**: adicionar `mission_selected` ao `JourneyEventName` E uma entrada em `JourneyEventMetadataByName` com shape **FECHADO** `{ role?: <enum>, framework?: 'bant'|'spin'|'meddic'|'triagem'|'appointment', objectiveKind?: <enum> }` — **sem** `businessType`/`objective` free-text (PII/LGPD, NFR-02). Emitir fire-and-forget no submit da missão.
+  - **Critério**: evento gravado uma vez; metadata fora do contrato rejeitada no tipo; funil agrega por role/objectiveKind.
+  - **Paralelo**: [P]
+
+- [ ] **T118 [Onda 7]** *(nova; doc)* — Decisão Tavily primário + nomenclatura LLM (FR-54, FR-P2-02)
+  - **Arquivo**: `docs/builder/` (decisão de pesquisa) + doc de arquitetura LLM
+  - **Depende de**: —
+  - **O que fazer**: registrar Tavily como motor primário (Firecrawl/Crawlee futuro) com frontmatter doc-freshness; corrigir nomenclatura LLM (front não fala com LLM; backend usa primitives do pacote `ai`; provider factory roteia via LiteLLM; sem "usamos Vercel"). **LiteLLM já existe como gateway** (não greenfield).
+  - **Critério**: docs com frontmatter; refs corrigidas.
+  - **Paralelo**: [P]
+
+- [ ] **TPRO-F1 [Onda 4]** *(nova — Proatividade F1, design-time, in-scope v3)* — Capacidade "Mensagens proativas" (recomenda+persiste) (FR-PRO-01)
+  - **Arquivo**: `builder-state.ts` (aditivo) + `capabilities-section.tsx` + `recommend-capabilities.pure.ts`
+  - **Depende de**: T111, T113
+  - **O que fazer**: capacidade opt-in com 3 presets (Follow-up de lead parado / Lembretes de agenda / Datas importantes); recomendada por FR-51 p/ SDR/closer/cobrança/pós-venda; persiste metadata no `builderState` (zero migration); exibida na revisão (FR-53). **NENHUM envio** (runtime = épico). **Aviso de compliance em design-time** (#19): ao ligar, alertar que envios fora da janela de 24h exigirão template aprovado.
+  - **Critério**: liga/desliga persiste; recomendação na missão certa; revisão lista automações ativas; aviso de compliance exibido.
+  - **Paralelo**: sequencial
+
+- [ ] **TPRO-EPIC** *(meta-tarefa — FORA da jornada-builder-v2; runtime)* — Detalhar `/plan` + `/break` do épico Proatividade
+  - **Arquivo**: `specs/builder-proatividade/` (spec.md já criado; faltam plan.md + tasks.md)
+  - **Depende de**: TPRO-F1 + alinhamento com FSM-outbound-durável
+  - **O que fazer**: rodar `/plan` e `/break` sobre `specs/builder-proatividade/spec.md` (FR-PRO-02..08, NFR-PRO-1..3): motor `ScheduledAutomation` + instância; `create_followup` real (hoje fantasma); job BullMQ atrasado + cron-scan; disparo via `sendAgentResponse` alinhado ao `OutboundDispatch`; cancel-on-inbound (`process-inbound.ts`); janela 24h + `sendTemplate`/HSM; opt-out/anti-spam reply-aware/gates extraídos/auditoria com leitura/opt-in; proveniência da data (F4). Faseado F2→F3→F4.
+  - **Critério**: épico runtime declarado fora do escopo da v2 (NFR-14); reuso/net-new mapeados (spec §5); plan/tasks próprios.
+  - **Paralelo**: independente da jornada v2

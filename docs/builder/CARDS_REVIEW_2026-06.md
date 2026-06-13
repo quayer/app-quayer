@@ -244,7 +244,7 @@ inclicável) até `project.aiAgent !== null`; `requiresPublished` = HIDDEN até
 | Tab (value) | Label | Componente | Dados (fonte) | Locked/Hidden por | Editável | Observações |
 |---|---|---|---|---|---|---|
 | `overview` | Visão geral | `overview-tab.tsx` | derivações de `messages` + `project` + readiness (`use-overview-derivations`) | — | não (leitura + quick actions) | EmptyState quando sem atividade; celebração ao criar agente |
-| `prompt` | Prompt | `prompt-tab.tsx` | `project.aiAgent.systemPrompt` (SSR) + `IdentityTab` (fetch próprio) + `VersionHistory` | `requiresAgent` (locked) | sim — autosave debounce 2s (`use-prompt-autosave`) | embute a antiga tab Identidade no topo |
+| `prompt` | Prompt | `prompt-tab.tsx` | `project.aiAgent.systemPrompt` (SSR) + `VersionHistory` | `requiresAgent` (locked) | sim — autosave debounce 2s (`use-prompt-autosave`) | a antiga seção de identidade foi removida e documentada em `docs/deprecated/IDENTITY_TAB.md` |
 | `knowledge` | Conhecimento | `knowledge-tab.tsx` | `fetch` manual `/api/v1/builder/knowledge/:id` + reload | — | sim — add fonte (PDF/URL/texto), delete, toggle useRAG | poll 3s enquanto processing |
 | `media` | Mídias | `media-tab.tsx` | `api.builder.listProjectMedia.useQuery` | — | sim — upload multipart, legenda, soft-delete | funciona pré-agente (collection on-demand) |
 | `playground` | Testar | `playground-tab.tsx` | SSE `/projects/:id/playground/stream`, histórico só local | `requiresAgent` (locked) | n/a (chat de teste) | nunca persiste no banco |

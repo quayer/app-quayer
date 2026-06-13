@@ -1,6 +1,6 @@
 ---
 Criado: 2026-06-10
-Atualizado: 2026-06-11
+Atualizado: 2026-06-12
 Revisar em: ao iniciar o /plan desta spec, ou mudança nos cards/step-engine do Builder
 Relacionados:
   - src/server/ai-module/builder/state/next-pending-step.ts
@@ -53,6 +53,7 @@ Redesenhar a jornada de criação de agentes do Builder de um trilho de 15 etapa
 9. Como **dono de negócio**, quero que a interface comece simples (só a conversa) e revele as áreas (visão geral, teste, publicação) conforme elas fazem sentido, para não me perder em abas bloqueadas.
 10. Como **dono de negócio**, quero saber o que fazer depois de publicar (testar do meu celular, ver as conversas chegando), para ter confiança de que está funcionando.
 11. Como **founder/agência montando o agente para um cliente** (ou dono que está no computador com o celular do negócio em outra mão), quero enviar um link para OUTRA PESSOA concluir a conexão — quem está com o celular da empresa escaneia o QR do WhatsApp de lá; o profissional (dentista/advogado/barbeiro) autoriza a própria agenda de onde estiver — para concluir o lançamento sem depender de estar com o aparelho ou a conta na minha frente.
+12. Como **founder/agência**, quero ver e aprovar o roteiro conversacional antes de publicar, e quero que o sistema simule conversas com avaliadores antes da publicação, para reduzir agentes publicados com perguntas ruins, ferramenta errada ou falhas de segurança/UX.
 
 ## 5. Requisitos Funcionais
 
@@ -83,7 +84,7 @@ Redesenhar a jornada de criação de agentes do Builder de um trilho de 15 etapa
 - **FR-16** Após a publicação, o sistema deve apresentar "próximos passos" (testar do próprio celular, onde acompanhar conversas, como pausar/ajustar).
 - **FR-24** A escolha de canal deve começar por um **card de plataforma** ("Onde seu agente vai atender?") na fase Lançar, antes da conexão: multi-select com 💬 **WhatsApp** ("Onde seus clientes já falam com você") e 📸 **Instagram** ("Responde DMs do seu perfil automaticamente"), com o hint "Pode marcar os dois — o mesmo agente atende ambos." A copy do nível 1 não pode conter jargão técnico (sem "QR", "API", "Cloud").
 - **FR-25** Se WhatsApp for marcado, um **segundo nível** apresenta o modo de conexão: **"Conectar meu WhatsApp"** ⭐ Recomendado e pré-selecionado ("Escaneie um QR code com o WhatsApp do seu negócio — pronto em 2 minutos, sem burocracia.") versus **"WhatsApp oficial da Meta"** com badge avançado ("Para empresas com número verificado na Meta. Mais robusto para alto volume — exige conta WhatsApp Business API."). Benefício antes da tecnologia em toda a copy. Instagram **não tem** segundo nível (segue o caminho oficial existente de credenciais).
-- **FR-26** O agente deve poder atender WhatsApp e Instagram **simultaneamente**: a publicação mantém um deployment ativo **por canal** — conectar/trocar um canal pausa apenas o deployment da mesma conexão, nunca os dos outros canais. *(Entrega na Onda 5b; até lá a seleção dupla fica desabilitada com aviso honesto, coerente com FR-20.)*
+- **FR-26** O agente deve poder atender WhatsApp e Instagram **simultaneamente**: a publicação mantém um deployment ativo **por canal** — conectar/trocar um canal pausa apenas o deployment da mesma conexão, nunca os dos outros canais. *(Onda 5b incorporada ao contrato atual em 2026-06-12: seleção dupla habilitada e attach pausando por conexão.)*
 - **FR-27** A verificação automática de conexão (polling do QR) deve ter **teto**: para após 10 minutos; a UI mostra "Ainda esperando?" com botão que re-arma a verificação.
 - **FR-28** Quando o bloqueio de chave de IA (BYOK) estiver ativo na fase Lançar, o chat deve mostrar um **card guiado** de configuração de chave ("cole sua chave OpenAI — veja onde pegar", com link para a configuração) em vez de apenas um aviso.
 
@@ -99,6 +100,8 @@ Redesenhar a jornada de criação de agentes do Builder de um trilho de 15 etapa
 - **FR-32** A revelação progressiva (FR-19) deve ser **animada em nível sutil**: o chat desliza para a esquerda e o painel entra da direita com fade; o conteúdo da Visão geral monta em cascata (~100ms de stagger); a aba recém-liberada (Testar/Publicar) recebe um pulso de destaque único. Deve respeitar `prefers-reduced-motion` (sem animações quando ativo).
 - **FR-33** Drafts v1 sem atividade por **90 dias** devem ser arquivados (mecanismo de arquivamento existente); o gate de convergência/sunset da v1 conta apenas drafts v1 **ativos**.
 - **FR-34** As conexões externas da jornada (WhatsApp/QR e Agenda/Google) devem ser **delegáveis por link**: além do caminho direto na própria tela, o usuário pode **copiar** ou **enviar por WhatsApp** (wa.me com texto pré-pronto) um link público-por-token para OUTRA PESSOA concluir a conexão de onde estiver — quem tem o celular da empresa escaneia o QR; o profissional autoriza a própria agenda. O caminho direto permanece visível (o share é um bloco "ou" em destaque, não substitui o QR/a autorização); a validade do link é exibida com ação de gerar novamente ("válido por 15 min" no WhatsApp; "válido por 7 dias" na agenda — TTLs dos mecanismos existentes); e a conclusão remota é detectada pelo builder sem reload, pela mesma verificação do caminho direto — o dono nunca precisa sair da jornada.
+- **FR-35** Antes da geração final do prompt, a jornada deve produzir e aprovar um **Blueprint conversacional**: roteiro de conversa, perguntas, critérios de qualificação, uso de ferramentas, handoff, conhecimento necessário e critérios de sucesso. O prompt final deve preservar esse blueprint; se não preservar, a geração deve falhar com erro auditável.
+- **FR-36** Antes de publicar um projeto v2, a jornada deve passar pela fase/gate **Refinando**: múltiplos avaliadores simulam conversas com o agente criado e checam roteiro, perguntas, ferramentas, conhecimento, segurança e UX. Publicação só libera quando o resultado agregado estiver aprovado; falhas, execução pendente ou decisão humana necessária bloqueiam com mensagem clara.
 
 ## 6. Requisitos Não-Funcionais
 
@@ -155,6 +158,8 @@ Redesenhar a jornada de criação de agentes do Builder de um trilho de 15 etapa
 - [ ] Suíte E2E v2 verde com LLM mock; nenhum teste E2E v2 depende de LLM real.
 - [ ] Eventos de funil com mais de 180 dias são purgados automaticamente.
 - [ ] Draft v1 inativo há 90 dias é arquivado; o gate de convergência conta só drafts v1 ativos.
+- [ ] Blueprint conversacional aprovado antes da anatomia/prompt final; edição posterior do blueprint invalida a geração anterior e o prompt preserva roteiro/perguntas/ferramentas aprovados.
+- [ ] Refinando bloqueia publicação v2 quando ausente, rodando, falhou ou precisa de decisão humana; só `passed` libera. Resultado antigo fica inválido após mudança relevante de prompt/blueprint/contexto.
 
 ## 9. Perguntas em aberto
 
@@ -168,15 +173,17 @@ Redesenhar a jornada de criação de agentes do Builder de um trilho de 15 etapa
 > **Decisões registradas em 2026-06-11** (revisão com o founder):
 >
 > 5. **Canal em 2 níveis (FR-24/FR-25):** a escolha de canal começa pelo card de plataforma multi-select (WhatsApp/Instagram) na fase Lançar; nível 2 só para WhatsApp (QR ⭐ recomendado/pré-selecionado vs Cloud API com badge avançado); Instagram sem nível 2. Copy: zero jargão no nível 1; benefício antes da tecnologia.
-> 6. **Multi-canal simultâneo (FR-26):** aprovado como **Onda 5b** própria — exige mudar a semântica do attach (pausa por conexão, não por agente) + validação do runtime inbound + E2E de 2 canais. A Onda 5 entrega WhatsApp (QR/Cloud) e Instagram individuais; a 5b libera "os dois".
+> 6. **Multi-canal simultâneo (FR-26):** aprovado como **Onda 5b** própria e incorporado ao contrato atual em 2026-06-12 — semântica do attach pausando por conexão, validação do runtime inbound por `connectionId` e E2E de 2 canais. O card de plataforma aceita "os dois".
 > 7. **11 mitigações da revisão sênior — todas aceitas:** silent-submit para toggles (FR-29), monotonicidade com sentinel-espelho (FR-30), resumo v2-aware (FR-31), sunset desbloqueável por arquivamento (FR-33), kill-switch de render (NFR-08), validação granular do agent_review (FR-22), proposta tardia com chip "Usar sugestão" (FR-23), E2E determinístico com LLM mock (NFR-09), polling com teto (FR-27), retenção de 180 dias do funil (NFR-10) e gate de revalidação de âncoras no início de toda onda (registrado no plano, §10).
 > 8. **BYOK guiado (FR-28)** e **animação da revelação em nível sutil (FR-32)** aprovados.
 > 9. **Confirmados sem mudança (defaults do plano):** nomes das fases na UI = "Conhecer / Revisar / Testar / Lançar" (resolve a pendente de naming); "jeito de falar" mantém as 3 opções na revisão; "avisar sem pausar" permanece como opção avançada dentro de transferência; Capacidades como seção da Visão geral (não tab); "Publicar sem testar" visível.
 > 10. **Gate de plano para capacidades:** permanece como hoje — o gate fica na publicação (blocker `byok` existente), agora com o card guiado de chave (FR-28) em vez de aviso seco.
 > 11. **Conexão delegável por link (FR-34) — delta do founder 2026-06-11:** aprovado para os DOIS fluxos. Nenhum mecanismo novo de token: o WhatsApp reusa o shareLink público-por-token existente (`/compartilhar/<token>`, TTL 15 min renovável, já devolvido pelo provision); a Agenda reusa o connect-link existente (`/conectar-agenda/<token>`, TTL 7 dias). Entrega = UI dos dois shares + E2E do fluxo delegado (plano §3.6/§4.1/§4.3/§5, Ondas 4 e 5).
+> 12. **Blueprint conversacional (FR-35) — execução 2026-06-12:** aprovado como requisito da fase Revisar antes do prompt final. O prompt-writer deve recusar geração sem blueprint aprovado e validar preservação do roteiro no prompt.
+> 13. **Refinando (FR-36) — execução 2026-06-12:** aprovado como gate de publicação v2. V1 não ganha bloqueio novo; v2 sem Refinando `passed` não publica. Freshness por versão/hash/contexto, bypasses de rollback/edição direta/attach, UX persistente como step da fase Testar, E2E v2 de blueprint+Refinando e gates de âncoras R10 foram fechados no lote de 2026-06-12.
 
-Sem pendentes abertas: as antigas pendentes 5-8 foram resolvidas pelas decisões 9 e 10 acima.
+Sem pendentes abertas de produto para FR-35/FR-36; R08/R10 estão registrados como executados no plano/tasks. A execução completa em homol/prod e rollout gradual continuam sob T76.
 
 ---
 
-**Próximo passo sugerido:** rodar `/break specs/jornada-builder-v2` sobre o plano atualizado (delta 2026-06-11 integrado: canal em 2 níveis + Onda 5b, 11 mitigações, BYOK guiado, animação da revelação, conexão delegável por link nos dois fluxos — FR-34).
+**Próximo passo sugerido:** seguir para a validação de rollout T76 ou para a próxima onda ainda aberta em `tasks.md`, mantendo os E2Es v2 com LLM mock como gate.

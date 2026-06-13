@@ -1,9 +1,13 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
+  getUserOrgId,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T70 — E2E: Testar + Lançar (spec §8 itens 8, 9, 13 + critérios novos de canal) +
@@ -17,7 +21,7 @@ import {
  *     • Card de plataforma em 2 NÍVEIS (FR-24/25): nível 1 SEM jargão ("WhatsApp"/
  *       "Instagram"); marcar WhatsApp abre o nível 2 com QR PRÉ-SELECIONADO;
  *       marcar Instagram vai direto a credenciais (sem nível 2); seleção dupla
- *       DESABILITADA com hint honesto (pré-5b — o handler rejeita 2 plataformas).
+ *       já é aceita no contrato atual (T94/Onda 5b), surfando os dois steps.
  *     • QR RE-APRESENTÁVEL até conectar SEM criar 2ª instância (refresh-qr) — a
  *       prova de "instância única no broker" é o connectionId ESTÁVEL entre o
  *       provision idempotente e o refresh.
@@ -154,6 +158,68 @@ interface SharePublicPayload {
   organizationName?: string
 }
 
+interface SeededSession {
+  email: string
+  userId: string
+  organizationId: string
+}
+
+interface SeedPrismaClient {
+  $connect: () => Promise<void>
+  $disconnect: () => Promise<void>
+  aIAgentConfig: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        isActive: boolean
+        provider: string
+        model: string
+        systemPrompt: string
+        enabledTools: string[]
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderPromptVersion: {
+    create: (args: {
+      data: {
+        aiAgentId: string
+        versionNumber: number
+        content: string
+        description: string
+        createdBy: 'chat'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderProject: {
+    update: (args: {
+      where: { id: string }
+      data: { aiAgentId: string }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  connection: {
+    update: (args: {
+      where: { id: string }
+      data: { status: 'CONNECTED'; lastConnected: Date }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderProjectConversation: {
+    findUnique: (args: {
+      where: { projectId: string }
+      select: { builderState: true }
+    }) => Promise<{ builderState: unknown } | null>
+    update: (args: {
+      where: { projectId: string }
+      data: { builderState: unknown }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+}
+
 /**
  * Set the builder-v2 override cookie for the baseURL host BEFORE any navigation
  * that creates a project (the version is frozen at creation time, server-side).
@@ -182,7 +248,7 @@ async function setOverrideCookie(
  * whole test when the test DB / OTP is not reachable from the runner — never a
  * hard failure outside the gate environment.
  */
-async function loginViaOtp(page: Page): Promise<void> {
+async function loginViaOtp(page: Page): Promise<SeededSession> {
   test.skip(
     process.env.E2E_SIGNUP_ENABLED === 'false',
     'login indisponível neste ambiente (E2E_SIGNUP_ENABLED=false)',
@@ -215,6 +281,15 @@ async function loginViaOtp(page: Page): Promise<void> {
 
   // Login lands on `/` (home Builder) or a deep-linked /projetos route.
   await waitForRedirect(page, /\/(?:$|\?|projetos)/)
+
+  try {
+    const ids = await getUserOrgId(email)
+    return { email, ...ids }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    test.skip(true, 'org lookup not reachable: ' + message)
+    throw new Error('unreachable')
+  }
 }
 
 /**
@@ -251,9 +326,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -289,8 +365,8 @@ async function provisionWhatsApp(
     { data: { projectId } },
   )
   if (!res.ok()) return null
-  const body = (await res.json()) as { data?: ProvisionResult }
-  return body.data ?? null
+  const body = await res.json()
+  return unwrapIgniterData<ProvisionResult>(body) ?? null
 }
 
 /**
@@ -306,8 +382,8 @@ async function refreshQr(
     data: { connectionId },
   })
   if (!res.ok()) return null
-  const body = (await res.json()) as { data?: RefreshResult }
-  return body.data ?? null
+  const body = await res.json()
+  return unwrapIgniterData<RefreshResult>(body) ?? null
 }
 
 /**
@@ -325,6 +401,105 @@ async function fetchSharePublic(
   return { payload: body.data ?? null, status: res.status() }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function getSeedPrisma(): Promise<SeedPrismaClient> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'seeding requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
+  await prisma.$connect()
+  return prisma
+}
+
+async function seedAgentAndPrompt(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const prisma = await getSeedPrisma()
+  const systemPrompt =
+    'Voce e o agente de atendimento de uma barbearia. ' +
+    'Atenda clientes vindos do WhatsApp e Instagram de forma objetiva.'
+
+  try {
+    const suffix = projectId.slice(0, 8)
+    const agent = await prisma.aIAgentConfig.create({
+      data: {
+        organizationId: session.organizationId,
+        name: `E2E lancamento ${suffix}`,
+        isActive: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt,
+        enabledTools: [],
+      },
+      select: { id: true },
+    })
+    await prisma.builderPromptVersion.create({
+      data: {
+        aiAgentId: agent.id,
+        versionNumber: 1,
+        content: systemPrompt,
+        description: 'E2E lancamento prompt version',
+        createdBy: 'chat',
+      },
+      select: { id: true },
+    })
+    await prisma.builderProject.update({
+      where: { id: projectId },
+      data: { aiAgentId: agent.id },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
+async function markWhatsAppConnected(
+  projectId: string,
+  connectionId: string,
+): Promise<void> {
+  const prisma = await getSeedPrisma()
+
+  try {
+    await prisma.connection.update({
+      where: { id: connectionId },
+      data: { status: 'CONNECTED', lastConnected: new Date() },
+      select: { id: true },
+    })
+
+    const row = await prisma.builderProjectConversation.findUnique({
+      where: { projectId },
+      select: { builderState: true },
+    })
+    const state = isRecord(row?.builderState) ? row!.builderState : {}
+    const confirmations = isRecord(state.confirmations)
+      ? state.confirmations
+      : {}
+    await prisma.builderProjectConversation.update({
+      where: { projectId },
+      data: {
+        builderState: {
+          ...state,
+          confirmations: {
+            ...confirmations,
+            whatsappConnectedOnce: true,
+          },
+        },
+      },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
 test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 níveis) + share WhatsApp (FR-34)', () => {
   // ───────────────────────────────────────────────────────────────────────────
   // §8 item 8/9: teste oferecido ANTES da ativação (gate SOFT) e "Publicar sem
@@ -334,9 +509,10 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
+    await seedAgentAndPrompt(session, projectId)
 
     // Sanidade v2: o readiness expõe a jornada de 4 fases (Conhecer/Revisar/Testar/Lançar).
     const before = await fetchReadiness(page, projectId)
@@ -385,15 +561,16 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
 
   // ───────────────────────────────────────────────────────────────────────────
   // §8 canal (FR-24/25): nível 1 (sem jargão) → WhatsApp abre nível 2 com QR
-  //   pré-selecionado; Instagram vai direto a credenciais; dupla seleção rejeitada.
+  //   pré-selecionado; Instagram vai direto a credenciais; dupla seleção aceita.
   // ───────────────────────────────────────────────────────────────────────────
-  test('channel_platform: WhatsApp surfa whatsapp_connect (QR), Instagram surfa instagram_connect, dupla seleção rejeitada (pré-5b)', async ({
+  test('channel_platform: WhatsApp surfa whatsapp_connect (QR), Instagram surfa instagram_connect, dupla seleção aceita', async ({
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
+    await seedAgentAndPrompt(session, projectId)
 
     const before = await fetchReadiness(page, projectId)
     expect(before.journey?.version, 'readiness v2 expõe journey').toBe(2)
@@ -402,21 +579,33 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
       'channel_platform começa pendente',
     ).toBe(false)
 
-    // ── Pré-5b: seleção DUPLA é rejeitada server-side (espelho do disable da UI). ─
+    // ── Pós-5b: seleção DUPLA é aceita server-side (o mesmo agente atende ambos). ─
     const dupla = await submitCard(page, projectId, 'channel_platform', {
       platforms: ['whatsapp', 'instagram'],
       whatsappMode: 'qr',
     })
     expect(
       dupla.ok,
-      'até a Onda 5b, marcar os dois canais é rejeitado (canal único)',
-    ).toBe(false)
-    // O sentinel NÃO flipou na rejeição (nenhum write parcial).
+      `channel_platform(whatsapp+instagram/qr) aceito (${dupla.status})`,
+    ).toBeTruthy()
+
     const afterDupla = await fetchReadiness(page, projectId)
     expect(
-      afterDupla.builderState?.confirmations?.channelPlatform ?? false,
-      'seleção dupla rejeitada não flipa o sentinel',
-    ).toBe(false)
+      afterDupla.builderState?.confirmations?.channelPlatform,
+      'seleção dupla flipa o sentinel channelPlatform',
+    ).toBe(true)
+    const dualStepIds = (afterDupla.journey?.phases ?? [])
+      .flatMap((p) => p.steps ?? [])
+      .map((s) => (s as { id?: string }).id)
+      .filter((id): id is string => typeof id === 'string')
+    expect(
+      dualStepIds.includes('whatsapp_connect'),
+      'seleção dupla → whatsapp_connect surfa',
+    ).toBe(true)
+    expect(
+      dualStepIds.includes('instagram_connect'),
+      'seleção dupla → instagram_connect surfa',
+    ).toBe(true)
 
     // ── WhatsApp (nível 2 QR pré-selecionado): grava platforms + whatsappMode. ──
     const wpp = await submitCard(page, projectId, 'channel_platform', {
@@ -467,7 +656,7 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
     const afterIg = await fetchReadiness(page, projectId)
     expect(
       afterIg.builderState?.channel?.platforms ?? [],
-      'Instagram gravado (troca de canal pré-5b)',
+      'Instagram gravado (troca para canal único)',
     ).toContain('instagram')
     expect(
       afterIg.builderState?.channel?.whatsappMode,
@@ -484,9 +673,10 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
     browser,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
+    await seedAgentAndPrompt(session, projectId)
 
     // O card QR só surfa quando WhatsApp(QR) foi escolhido — flipa o canal antes.
     const wpp = await submitCard(page, projectId, 'channel_platform', {
@@ -583,9 +773,10 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
+    await seedAgentAndPrompt(session, projectId)
 
     await submitCard(page, projectId, 'channel_platform', {
       platforms: ['whatsapp'],
@@ -605,14 +796,9 @@ test.describe('Builder v2 — Testar + Lançar (§8 itens 8, 9, 13 + canal 2 ní
       'antes do scan, o sentinel-espelho whatsappConnectedOnce está desligado',
     ).toBe(false)
 
-    // ── Simula o scan remoto do número (sem WhatsApp real): o gate flipa a
-    //    Connection para CONNECTED (webhook UAZ → resolve-connection.ts:66-73,156).
-    test.skip(
-      !process.env.E2E_WHATSAPP_CONNECT_STUB,
-      'flip CONNECTED do WhatsApp requer o stub do gate (E2E_WHATSAPP_CONNECT_STUB) — ' +
-        'sem WhatsApp real no E2E. A asserção "antes nunca confirma" já passou. ' +
-        'Corpo completo preservado.',
-    )
+    // ── Simula o scan remoto do número (sem WhatsApp real): o seed flipa a
+    //    Connection para CONNECTED e o sentinel que o webhook manteria monotônico.
+    await markWhatsAppConnected(projectId, first!.connectionId!)
 
     // ── Autodetecção: o readiness reflete a conexão real (FR-15) e o sentinel-espelho
     //    fica true (monotonicidade FR-30 — o passo NUNCA reabre depois disso).

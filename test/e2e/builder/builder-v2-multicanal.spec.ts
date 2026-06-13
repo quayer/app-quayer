@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
+  getUserOrgId,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T105 — E2E: multi-canal simultâneo (Onda 5b, FR-26, plan §3.7 / §7.2).
@@ -12,9 +16,8 @@ import {
  *
  *   Fixture org seedada + cookie `builder-v2-override=on`. Cobre:
  *     • Card `channel_platform` com AMBOS os canais marcados (whatsapp+instagram).
- *       PÓS-5b a seleção dupla está HABILITADA (T94 removeu a rejeição server-side
- *       que ainda vive em builder-v2-lancamento.spec.ts como contrato da Onda 5):
- *       o handler aceita 1 OU 2 plataformas — o mesmo agente atende ambas.
+ *       PÓS-5b a seleção dupla está HABILITADA: o handler aceita 1 OU 2
+ *       plataformas — o mesmo agente atende ambas.
  *     • O engine v2 surfa os DOIS steps de conexão condicionalmente: marcar os dois
  *       → `whatsapp_connect` E `instagram_connect` surfam na jornada (`selectedWhatsApp`
  *       / `selectedInstagram` em journey-v2.ts), enquanto 1 só plataforma surfa só o
@@ -112,17 +115,82 @@ interface DeploymentRow {
   status: string
 }
 
+interface SeededSession {
+  email: string
+  userId: string
+  organizationId: string
+}
+
 /** Minimal Prisma surface needed to read the seeded multi-canal state. */
 interface MinimalMultiCanalPrisma {
   $connect: () => Promise<void>
   $disconnect: () => Promise<void>
+  aIAgentConfig: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        isActive: boolean
+        provider: string
+        model: string
+        systemPrompt: string
+        enabledTools: string[]
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderPromptVersion: {
+    create: (args: {
+      data: {
+        aiAgentId: string
+        versionNumber: number
+        content: string
+        description: string
+        createdBy: 'chat'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
   builderProject: {
     findFirst: (args: {
       where: { id: string }
       select: { aiAgentId: true; organizationId: true }
     }) => Promise<{ aiAgentId: string | null; organizationId: string } | null>
+    update: (args: {
+      where: { id: string }
+      data: { aiAgentId: string }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  connection: {
+    create: (args: {
+      data: {
+        name: string
+        channel: 'WHATSAPP' | 'INSTAGRAM'
+        provider: 'WHATSAPP_WEB' | 'INSTAGRAM_META'
+        status: 'CONNECTED'
+        organizationId: string
+        uazapiToken?: string
+        qrCode?: string
+        igAccountId?: string
+        igPageAccessToken?: string
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
   }
   agentDeployment: {
+    create: (args: {
+      data: {
+        agentConfigId: string
+        connectionId: string
+        mode: 'CHAT'
+        status: 'ACTIVE'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+    deleteMany: (args: {
+      where: { agentConfigId: string }
+    }) => Promise<{ count: number }>
     findMany: (args: {
       where: { agentConfigId: string; status: string }
       select: {
@@ -163,7 +231,7 @@ async function setOverrideCookie(
  * whole test when the test DB / OTP is not reachable from the runner — never a
  * hard failure outside the gate environment.
  */
-async function loginViaOtp(page: Page): Promise<void> {
+async function loginViaOtp(page: Page): Promise<SeededSession> {
   test.skip(
     process.env.E2E_SIGNUP_ENABLED === 'false',
     'login indisponível neste ambiente (E2E_SIGNUP_ENABLED=false)',
@@ -196,6 +264,15 @@ async function loginViaOtp(page: Page): Promise<void> {
 
   // Login lands on `/` (home Builder) or a deep-linked /projetos route.
   await waitForRedirect(page, /\/(?:$|\?|projetos)/)
+
+  try {
+    const ids = await getUserOrgId(email)
+    return { email, ...ids }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    test.skip(true, 'org lookup not reachable: ' + message)
+    throw new Error('unreachable')
+  }
 }
 
 /**
@@ -232,9 +309,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -280,14 +358,9 @@ async function readActiveDeployments(
   const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
   if (!databaseUrl) return null
 
-  const mod = (await import('@prisma/client')) as unknown as {
-    PrismaClient: new (opts?: {
-      datasources?: { db: { url: string } }
-    }) => MinimalMultiCanalPrisma
-  }
-  const prisma: MinimalMultiCanalPrisma = new mod.PrismaClient({
-    datasources: { db: { url: databaseUrl } },
-  })
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as MinimalMultiCanalPrisma
 
   try {
     await prisma.$connect()
@@ -316,6 +389,105 @@ async function readActiveDeployments(
   }
 }
 
+async function seedMultiCanalDeployments(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'seed multi-canal requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as MinimalMultiCanalPrisma
+
+  const systemPrompt =
+    'Voce e o agente multi-canal de uma loja. Atenda WhatsApp e Instagram.'
+
+  try {
+    await prisma.$connect()
+    const suffix = projectId.slice(0, 8)
+    const agent = await prisma.aIAgentConfig.create({
+      data: {
+        organizationId: session.organizationId,
+        name: `E2E multicanal ${suffix}`,
+        isActive: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt,
+        enabledTools: [],
+      },
+      select: { id: true },
+    })
+    await prisma.builderPromptVersion.create({
+      data: {
+        aiAgentId: agent.id,
+        versionNumber: 1,
+        content: systemPrompt,
+        description: 'E2E multicanal prompt version',
+        createdBy: 'chat',
+      },
+      select: { id: true },
+    })
+    await prisma.builderProject.update({
+      where: { id: projectId },
+      data: { aiAgentId: agent.id },
+      select: { id: true },
+    })
+
+    const whatsapp = await prisma.connection.create({
+      data: {
+        name: `E2E WhatsApp ${suffix}`,
+        channel: 'WHATSAPP',
+        provider: 'WHATSAPP_WEB',
+        status: 'CONNECTED',
+        organizationId: session.organizationId,
+        uazapiToken: `e2e-wa-${suffix}`,
+        qrCode: `e2e-wa-qr-${suffix}`,
+      },
+      select: { id: true },
+    })
+    const instagram = await prisma.connection.create({
+      data: {
+        name: `E2E Instagram ${suffix}`,
+        channel: 'INSTAGRAM',
+        provider: 'INSTAGRAM_META',
+        status: 'CONNECTED',
+        organizationId: session.organizationId,
+        igAccountId: `ig-${suffix}`,
+        igPageAccessToken: `ig-token-${suffix}`,
+      },
+      select: { id: true },
+    })
+
+    await prisma.agentDeployment.deleteMany({
+      where: { agentConfigId: agent.id },
+    })
+    await prisma.agentDeployment.create({
+      data: {
+        agentConfigId: agent.id,
+        connectionId: whatsapp.id,
+        mode: 'CHAT',
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    })
+    await prisma.agentDeployment.create({
+      data: {
+        agentConfigId: agent.id,
+        connectionId: instagram.id,
+        mode: 'CHAT',
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
 test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => {
   // ───────────────────────────────────────────────────────────────────────────
   // FR-26: AMBOS marcados (whatsapp+instagram) — pós-5b a seleção dupla é ACEITA
@@ -325,7 +497,7 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -343,8 +515,6 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
     ).toBe(false)
 
     // ── PÓS-5b: marcar os DOIS canais é ACEITO (o mesmo agente atende ambos). ───
-    // (builder-v2-lancamento.spec.ts ainda testa a rejeição como contrato da
-    //  Onda 5; aqui — Onda 5b — a dupla seleção está habilitada via T94.)
     const dupla = await submitCard(page, projectId, 'channel_platform', {
       platforms: ['whatsapp', 'instagram'],
       whatsappMode: 'qr',
@@ -395,7 +565,7 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -405,6 +575,9 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
       whatsappMode: 'qr',
     })
     expect(dupla.ok, `channel_platform(ambos) aceito (${dupla.status})`).toBeTruthy()
+    if (process.env.E2E_MULTICANAL_DB) {
+      await seedMultiCanalDeployments(session, projectId)
+    }
 
     // O attach pausa por CONEXÃO (attach-to-agent.ts), permitindo N deployments
     // ACTIVE — 1 por canal. A coexistência é estado interno: lê-se o test DB
@@ -459,7 +632,7 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -468,6 +641,9 @@ test.describe('Builder v2 — multi-canal simultâneo (Onda 5b / FR-26)', () => 
       whatsappMode: 'qr',
     })
     expect(dupla.ok, `channel_platform(ambos) aceito (${dupla.status})`).toBeTruthy()
+    if (process.env.E2E_MULTICANAL_DB) {
+      await seedMultiCanalDeployments(session, projectId)
+    }
 
     test.skip(
       !process.env.E2E_MULTICANAL_DB,

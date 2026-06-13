@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 import {
   generateTestEmail,
   getLatestOtp,
+  getUserOrgId,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T68 — E2E: Capacidades (spec §8 itens 4-6) + card-submit silent (FR-29) +
@@ -160,6 +164,72 @@ interface CalendarStatusResult {
   warning?: string
 }
 
+interface SeededSession {
+  email: string
+  userId: string
+  organizationId: string
+}
+
+interface SeedPrismaClient {
+  $connect: () => Promise<void>
+  $disconnect: () => Promise<void>
+  aIAgentConfig: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        isActive: boolean
+        provider: string
+        model: string
+        systemPrompt: string
+        enabledTools: string[]
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderPromptVersion: {
+    create: (args: {
+      data: {
+        aiAgentId: string
+        versionNumber: number
+        content: string
+        description: string
+        createdBy: 'chat'
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  builderProject: {
+    update: (args: {
+      where: { id: string }
+      data: { aiAgentId: string }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+  calendarConnection: {
+    updateMany: (args: {
+      where: { organizationId: string; builderProjectId: string }
+      data: { status: 'CONNECTED'; calendarEmail: string }
+    }) => Promise<{ count: number }>
+  }
+  organizationProvider: {
+    create: (args: {
+      data: {
+        organizationId: string
+        name: string
+        category: 'AUXILIARY'
+        provider: string
+        builderProjectId: string
+        isActive: boolean
+        isPrimary: boolean
+        priority: number
+        credentials: Record<string, string>
+      }
+      select: { id: true }
+    }) => Promise<{ id: string }>
+  }
+}
+
 /**
  * Set the builder-v2 override cookie for the baseURL host BEFORE any navigation
  * that creates a project (the version is frozen at creation time, server-side).
@@ -185,7 +255,7 @@ async function setOverrideCookie(page: Page, value: 'on' | 'off'): Promise<void>
  * whole test when the test DB / OTP is not reachable from the runner — never a
  * hard failure outside the gate environment.
  */
-async function loginViaOtp(page: Page): Promise<void> {
+async function loginViaOtp(page: Page): Promise<SeededSession> {
   test.skip(
     process.env.E2E_SIGNUP_ENABLED === 'false',
     'login indisponível neste ambiente (E2E_SIGNUP_ENABLED=false)',
@@ -218,6 +288,15 @@ async function loginViaOtp(page: Page): Promise<void> {
 
   // Login lands on `/` (home Builder) or a deep-linked /projetos route.
   await waitForRedirect(page, /\/(?:$|\?|projetos)/)
+
+  try {
+    const ids = await getUserOrgId(email)
+    return { email, ...ids }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    test.skip(true, 'org lookup not reachable: ' + message)
+    throw new Error('unreachable')
+  }
 }
 
 /**
@@ -254,9 +333,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -272,9 +352,10 @@ async function fetchCapabilities(
     `/api/v1/builder/projects/${projectId}/capabilities`,
   )
   expect(res.ok(), `capabilities ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: CapabilitiesSnapshot }
-  expect(body.data, 'capabilities.data ausente').toBeTruthy()
-  return body.data as CapabilitiesSnapshot
+  const body = await res.json()
+  const capabilities = unwrapIgniterData<CapabilitiesSnapshot>(body)
+  expect(capabilities, 'capabilities.data ausente').toBeTruthy()
+  return capabilities as CapabilitiesSnapshot
 }
 
 /**
@@ -306,8 +387,10 @@ async function enableRoletaSilently(
     `silent handoff submit falhou (${res.status()})`,
   ).toBeTruthy()
   const contentType = res.headers()['content-type'] ?? ''
-  const result = (await res.json()) as { data?: SilentSubmitResult }
-  return { result: result.data ?? (result as SilentSubmitResult), contentType }
+  const body = await res.json()
+  const result = unwrapIgniterData<SilentSubmitResult>(body)
+  expect(result, 'silent-submit.data ausente').toBeTruthy()
+  return { result: result as SilentSubmitResult, contentType }
 }
 
 /**
@@ -327,8 +410,8 @@ async function createCalendarConnectLink(
   // 404 = CalendarConnection delegate ausente (tabela não provisionada) → skip.
   if (res.status() === 404) return null
   if (!res.ok()) return null
-  const body = (await res.json()) as { data?: ConnectLinkResult }
-  return body.data ?? null
+  const body = await res.json()
+  return unwrapIgniterData<ConnectLinkResult>(body) ?? null
 }
 
 /**
@@ -345,8 +428,8 @@ async function fetchCalendarStatus(
     `/api/v1/builder/calendar/status/${projectId}`,
   )
   expect(res.ok(), `calendar status ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: CalendarStatusResult }
-  return body.data ?? {}
+  const body = await res.json()
+  return unwrapIgniterData<CalendarStatusResult>(body) ?? {}
 }
 
 /**
@@ -393,6 +476,109 @@ async function askPlayground(
   return assistantText
 }
 
+async function seedAgentAndPrompt(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'seeding requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
+
+  const systemPrompt =
+    'Voce e o agente de atendimento de uma barbearia. ' +
+    'Responda diretamente como agente solo quando perguntarem sobre horarios ou agenda.'
+
+  try {
+    await prisma.$connect()
+    const suffix = projectId.slice(0, 8)
+    const agent = await prisma.aIAgentConfig.create({
+      data: {
+        organizationId: session.organizationId,
+        name: `E2E capacidades ${suffix}`,
+        isActive: true,
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt,
+        enabledTools: [],
+      },
+      select: { id: true },
+    })
+    await prisma.builderPromptVersion.create({
+      data: {
+        aiAgentId: agent.id,
+        versionNumber: 1,
+        content: systemPrompt,
+        description: 'E2E capacidades prompt version',
+        createdBy: 'chat',
+      },
+      select: { id: true },
+    })
+    await prisma.builderProject.update({
+      where: { id: projectId },
+      data: { aiAgentId: agent.id },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
+async function markCalendarConnected(
+  session: SeededSession,
+  projectId: string,
+): Promise<void> {
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL
+  if (!databaseUrl) {
+    test.skip(true, 'calendar connected seed requires TEST_DATABASE_URL / DATABASE_URL')
+    throw new Error('unreachable')
+  }
+
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
+  }) as unknown as SeedPrismaClient
+
+  try {
+    await prisma.$connect()
+    const updated = await prisma.calendarConnection.updateMany({
+      where: {
+        organizationId: session.organizationId,
+        builderProjectId: projectId,
+      },
+      data: {
+        status: 'CONNECTED',
+        calendarEmail: 'agenda.e2e@quayer.test',
+      },
+    })
+    expect(
+      updated.count,
+      'seed deve conectar ao menos um CalendarConnection do projeto',
+    ).toBeGreaterThan(0)
+
+    await prisma.organizationProvider.create({
+      data: {
+        organizationId: session.organizationId,
+        name: 'E2E Google Calendar',
+        category: 'AUXILIARY',
+        provider: 'google-calendar',
+        builderProjectId: projectId,
+        isActive: true,
+        isPrimary: false,
+        priority: 0,
+        credentials: { refreshToken: 'e2e-calendar-refresh-token' },
+      },
+      select: { id: true },
+    })
+  } finally {
+    await prisma.$disconnect()
+  }
+}
+
 test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29) + agenda delegada (FR-34)', () => {
   // ───────────────────────────────────────────────────────────────────────────
   // §8 item: conhecimento SEMPRE ativo (FR-07) — sem toggle de desligar.
@@ -402,7 +588,7 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -454,8 +640,9 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
     ).toBe(false)
 
     // ── O agente responde SOZINHO (solo) — sem nenhuma config de transferência. ─
-    // Exige agente materializado + LLM mock; quando indisponível, o backbone
-    // determinístico acima (handoff OFF, sem blocker) já satisfaz o critério.
+    // O harness materializa um agente ativo mínimo para isolar este critério do
+    // fluxo completo de deploy; o handoff continua ausente, então a resposta é solo.
+    await seedAgentAndPrompt(session, projectId)
     const answer = await askPlayground(
       page,
       projectId,
@@ -583,7 +770,7 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -613,14 +800,9 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
       'antes do profissional conectar, "Verificar conexão" NÃO confirma (FR-11)',
     ).toBe(false)
 
-    // ── Simula o scan remoto do profissional (sem OAuth real no E2E): o gate flipa
-    //    a CalendarConnection mais recente para CONNECTED via seed/stub server-side.
-    test.skip(
-      !process.env.E2E_CALENDAR_CONNECT_STUB,
-      'flip CONNECTED da agenda requer o stub do gate (E2E_CALENDAR_CONNECT_STUB) — ' +
-        'sem OAuth real no E2E. A asserção "antes nunca confirma" (FR-11) já passou. ' +
-        'Corpo completo preservado.',
-    )
+    // ── Simula o scan remoto do profissional (sem OAuth real no E2E): o seed flipa
+    //    a CalendarConnection e cria a credencial AUXILIARY que o runtime consultaria.
+    await markCalendarConnected(session, projectId)
 
     // ── "Verificar conexão": após o flip, o MESMO status query confirma o card. ──
     // Refetch on-demand (o `checkConnection` ref-guarded do connect-link-flow só
@@ -653,7 +835,7 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
     page,
   }) => {
     await setOverrideCookie(page, 'on')
-    await loginViaOtp(page)
+    const session = await loginViaOtp(page)
 
     const projectId = await createProjectViaHome(page)
 
@@ -672,14 +854,9 @@ test.describe('Builder v2 — Capacidades (§8 itens 4-6) + silent-submit (FR-29
       'antes da conexão remota, a capacidade Agenda está desligada (calendarConnected false)',
     ).toBe(false)
 
-    // ── Simula o scan remoto do profissional (sem OAuth real no E2E): o gate flipa
-    //    a CalendarConnection mais recente para CONNECTED via seed/stub server-side.
-    test.skip(
-      !process.env.E2E_CALENDAR_CONNECT_STUB,
-      'flip CONNECTED da agenda requer o stub do gate (E2E_CALENDAR_CONNECT_STUB) — ' +
-        'sem OAuth real no E2E. A asserção "antes desligada" já passou. ' +
-        'Corpo completo preservado.',
-    )
+    // ── Simula o scan remoto do profissional (sem OAuth real no E2E): o seed flipa
+    //    a CalendarConnection e cria a credencial AUXILIARY que o runtime consultaria.
+    await markCalendarConnected(session, projectId)
 
     // ── A capacidade Agenda vira ATIVA: `getCapabilities` reporta calendarConnected
     //    true (reusa `hasActiveCalendarConnection` — a mesma fonte do runtime).

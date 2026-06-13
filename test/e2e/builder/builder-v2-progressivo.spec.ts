@@ -4,6 +4,7 @@ import {
   getLatestOtp,
   waitForRedirect,
 } from '../auth/helpers'
+import { unwrapIgniterData } from './igniter-response'
 
 /**
  * T72 — E2E: UI progressiva (+ reduced-motion FR-32).
@@ -200,9 +201,10 @@ async function fetchReadiness(
     `/api/v1/builder/projects/${projectId}/readiness`,
   )
   expect(res.ok(), `readiness ${res.status()}`).toBeTruthy()
-  const body = (await res.json()) as { data?: ReadinessSnapshot }
-  expect(body.data, 'readiness.data ausente').toBeTruthy()
-  return body.data as ReadinessSnapshot
+  const body = await res.json()
+  const readiness = unwrapIgniterData<ReadinessSnapshot>(body)
+  expect(readiness, 'readiness.data ausente').toBeTruthy()
+  return readiness as ReadinessSnapshot
 }
 
 /**
@@ -363,6 +365,15 @@ test.describe('Builder v2 — UI progressiva (FR-19 / §8 item 12) + reduced-mot
     test('com prefers-reduced-motion as animações de revelação ficam com duração ~0', async ({
       page,
     }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+          ),
+        )
+        .toBe(true)
+
       await setOverrideCookie(page, 'on')
       await loginViaOtp(page)
 
