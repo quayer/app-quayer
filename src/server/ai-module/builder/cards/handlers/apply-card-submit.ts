@@ -24,26 +24,26 @@ import {
   parseBuilderState,
   patchBuilderState,
   applyConfirmation,
+  invalidateRefinement,
   type BuilderState,
   type DeepPartial,
-  type SourceProposal,
 } from '../builder-state'
 import {
   CHANNEL_KEYS,
   type CardSubmitBody,
   type ChannelKey,
-  type PricingPayload,
-  type PricingItemPayload,
-  type CalendarConnectPayload,
-  type ActivationModePayload,
   type AgentApprovalPayload,
-  type QuickReplyChipsPayload,
-  type SourceProgressPayload,
-  type SilencedContactsPayload,
 } from '../card-submit.schemas'
 import { trackJourneyEvent } from '@/server/services/journey-events'
 import {
   applyBusinessIdentity,
+  applyMission,
+  applyBuildMode,
+  applyQualification,
+  applyRestrictions,
+  applyDiagnosis,
+  applyConversationBlueprint,
+  generateConversationBlueprintFromCard,
   applyAgentReview,
   applyTestDrive,
   applyChannelPlatform,
@@ -56,6 +56,13 @@ import { applyServices } from './apply/services'
 import { applyBusinessHours } from './apply/hours'
 import { applyChannel } from './apply/channel'
 import { applyHandoff } from './apply/handoff'
+import { applyPricing } from './apply/pricing'
+import { applyCalendarConnect } from './apply/calendar'
+import { applyActivationMode } from './apply/activation'
+import { applyPreviewSummary } from './apply/preview-summary'
+import { applyQuickReplyChips } from './apply/quick-reply'
+import { applySourceProgress } from './apply/source-progress'
+import { applySilencedContacts } from './apply/silenced-contacts'
 // Integration Builder (W2, T24) — the two integration cards own their write
 // (encrypt + CustomIntegration.credentials + test) OUTSIDE this switch, same as
 // the T31 knowledge/media acks. They are NOT in `CardSubmitBody`, so the branch
@@ -66,6 +73,8 @@ import type {
   IntegrationProposalPayload,
   IntegrationCredentialsPayload,
 } from '../card-submit.schemas'
+
+export { applyPricing } from './apply/pricing'
 
 // ---------------------------------------------------------------------------
 // Args / result
@@ -147,10 +156,36 @@ function isValidChannelKey(key: string): key is ChannelKey {
   return CHANNEL_KEY_SET.has(key)
 }
 
+const REFINEMENT_INVALIDATING_CARDS = new Set<string>([
+  'agent_approval',
+  'tool_selection',
+  'channel',
+  'agent_persona',
+  'services',
+  'business_hours',
+  'pricing',
+  'handoff',
+  'calendar_connect',
+  'activation_mode',
+  'source_progress',
+  'silenced_contacts',
+])
+
+function maybeInvalidateRefinementForCard(
+  state: BuilderState,
+  cardKey: string,
+): BuilderState {
+  if (!REFINEMENT_INVALIDATING_CARDS.has(cardKey)) return state
+  return invalidateRefinement(
+    state,
+    `O card ${cardKey} alterou o contexto testado pelo refinamento.`,
+  )
+}
+
 /**
  * Trim, drop empties, and dedupe a free-text string list (order-preserving).
- * Transversal helper — used here (handoff/activation/source) and re-imported by
- * the extracted `apply/services.ts` (T22 split). Single source of truth.
+ * Transversal helper re-imported by extracted apply handlers
+ * (services/handoff/activation/source). Single source of truth.
  */
 export function sanitizeStringList(values: readonly string[]): string[] {
   const seen = new Set<string>()
@@ -164,87 +199,6 @@ export function sanitizeStringList(values: readonly string[]): string[] {
   return out
 }
 
-/** Estilos de divulgação válidos — espelho do enum no schema/builder-state. */
-const PRICING_DISCLOSURE_STYLES = [
-  'exact',
-  'from',
-  'average',
-  'none',
-] as const
-type PricingDisclosureStyle = (typeof PRICING_DISCLOSURE_STYLES)[number]
-const PRICING_DISCLOSURE_SET: ReadonlySet<string> = new Set(
-  PRICING_DISCLOSURE_STYLES,
-)
-
-/**
- * Re-valida o estilo de divulgação (G4) server-side: cai para 'exact' (o default)
- * se vier algo fora do conjunto conhecido. Nunca confia no body.
- */
-function sanitizeDisclosureStyle(
-  style: string | undefined,
-): PricingDisclosureStyle {
-  return style && PRICING_DISCLOSURE_SET.has(style)
-    ? (style as PricingDisclosureStyle)
-    : 'exact'
-}
-
-/** `true` quando uma URL https(s) é confiável o suficiente para persistir (G5b). */
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value)
-}
-
-/**
- * Re-validate pricing items server-side: trim names, floor/clamp cents to int>=0,
- * e (Onda B) condiciona os novos campos ao estilo de divulgação global:
- *  - `priceMaxCents` (G4) só é mantido quando o estilo é 'average' E o teto é
- *    estritamente maior que o piso (`priceCents`); caso contrário é descartado,
- *    para o JSONB nunca guardar uma faixa sem sentido.
- *  - `imageUrl` (G5b) é mantido só quando é uma URL http(s) válida (trim + cap),
- *    senão é descartado.
- */
-function sanitizePricingItems(
-  items: readonly PricingItemPayload[],
-  disclosureStyle: PricingDisclosureStyle,
-): PricingItemPayload[] {
-  const out: PricingItemPayload[] = []
-  for (const item of items) {
-    const name = item.name.trim()
-    if (name.length === 0) continue
-    // priceCents is already int>=0 via Zod; clamp defensively (never trust body).
-    const priceCents = Math.max(0, Math.trunc(item.priceCents))
-    const category = item.category?.trim()
-
-    // G4 — teto da faixa: só quando 'average' E max > piso. Senão dropamos.
-    let priceMaxCents: number | undefined
-    if (disclosureStyle === 'average' && typeof item.priceMaxCents === 'number') {
-      const ceiling = Math.max(0, Math.trunc(item.priceMaxCents))
-      if (ceiling > priceCents) priceMaxCents = ceiling
-    }
-
-    // G5b — foto do serviço: só uma URL http(s) válida (cap a 2000 chars).
-    let imageUrl: string | undefined
-    if (typeof item.imageUrl === 'string') {
-      const trimmed = item.imageUrl.trim().slice(0, 2000)
-      if (trimmed.length > 0 && isHttpUrl(trimmed)) imageUrl = trimmed
-    }
-
-    out.push({
-      name,
-      priceCents,
-      ...(category && category.length > 0 ? { category } : {}),
-      ...(priceMaxCents !== undefined ? { priceMaxCents } : {}),
-      ...(imageUrl ? { imageUrl } : {}),
-    })
-  }
-  return out
-}
-
-/** Normalize a currency code to an uppercase 3-letter ISO-ish code. */
-function sanitizeCurrency(currency: string): string {
-  const trimmed = currency.trim().toUpperCase()
-  return trimmed.length === 3 ? trimmed : 'BRL'
-}
-
 /**
  * Porta SERVER-SIDE de `phone-br.ts normalizeBrPhone` (G6/G1): normaliza um
  * telefone brasileiro digitado livre para E.164 (`+55DDDNNNNNNNN`) SEM depender
@@ -253,8 +207,8 @@ function sanitizeCurrency(currency: string): string {
  * válido. Só retorna um número quando há confiança na forma; caso contrário
  * `undefined` — telefone é OPCIONAL, então simplesmente o omitimos.
  *
- * Exported as a transversal helper — used here (silenced_contacts) and re-imported
- * by the extracted `apply/handoff.ts` (sanitizeTeamMembers). Single source of truth.
+ * Exported as a transversal helper re-imported by extracted apply handlers
+ * (handoff/silenced_contacts). Single source of truth.
  */
 export function normalizeWhatsappBr(raw: string | undefined): string | undefined {
   if (!raw) return undefined
@@ -278,27 +232,6 @@ export function normalizeWhatsappBr(raw: string | undefined): string | undefined
   return undefined
 }
 
-/**
- * G1 — re-valida contatos silenciados server-side: normaliza o WhatsApp para
- * E.164-BR (descarta os que não normalizam), faz trim do nome (inclui só se não
- * vazio), dedupe por whatsapp e capa em 50. Nunca confia no body.
- */
-function sanitizeSilencedContacts(
-  items: SilencedContactsPayload['contacts'],
-): SilencedContactsPayload['contacts'] {
-  const seen = new Set<string>()
-  const out: SilencedContactsPayload['contacts'] = []
-  for (const item of items) {
-    const whatsapp = normalizeWhatsappBr(item.whatsapp)
-    if (!whatsapp || seen.has(whatsapp)) continue
-    seen.add(whatsapp)
-    const name = item.name?.trim()
-    out.push(name && name.length > 0 ? { name, whatsapp } : { whatsapp })
-    if (out.length >= 50) break
-  }
-  return out
-}
-
 // ---------------------------------------------------------------------------
 // Per-card application — returns the next state + the ACK instruction
 // ---------------------------------------------------------------------------
@@ -306,7 +239,7 @@ function sanitizeSilencedContacts(
 /**
  * The result of applying a card to the builder state: the next state + the pt-BR
  * ACK note that seeds the LLM turn. Exported so the extracted per-card handlers
- * (`apply/{persona,services,hours}.ts`, T22 split) share one canonical shape.
+ * (`apply/*.ts`, T22 split) share one canonical shape.
  */
 export interface CardApplication {
   next: BuilderState
@@ -377,374 +310,6 @@ function applyToolSelection(
       'Anexe cada uma ao agente com attach_tool_to_agent (uma chamada por ferramenta) e então siga para o próximo passo. ' +
       'Não reabra o seletor de ferramentas.',
   }
-}
-
-// --- W3 cards (persona/services/hours extracted to apply/{...}.ts — T22) ----
-
-/** Frase PT-BR de COMO o agente fala o preço (G4), para a copy do ACK. */
-const DISCLOSURE_LABELS: Record<PricingDisclosureStyle, string> = {
-  exact: 'valor exato (ex.: "R$ 250")',
-  from: 'a partir de (ex.: "a partir de R$ 250")',
-  average: 'faixa média (ex.: "entre R$ 200 e R$ 350")',
-  none: 'não informar o preço (qualifica e encaminha)',
-}
-
-/** Render server-side de centavos → "R$ 1.234,56" para a copy do ACK (min ticket). */
-function centsToBrl(cents: number): string {
-  const safe = Math.max(0, Math.trunc(cents))
-  const reais = Math.floor(safe / 100)
-  const remainder = safe % 100
-  const reaisStr = reais.toLocaleString('pt-BR')
-  return `R$ ${reaisStr},${remainder.toString().padStart(2, '0')}`
-}
-
-export function applyPricing(
-  state: BuilderState,
-  payload: Pick<
-    PricingPayload,
-    'items' | 'currency' | 'disclosureStyle' | 'minTicketCents'
-  >,
-): CardApplication {
-  // builderState only — the deploy saga materializes PriceList/PriceItem later.
-  const disclosureStyle = sanitizeDisclosureStyle(payload.disclosureStyle)
-  const items = sanitizePricingItems(payload.items, disclosureStyle)
-  const currency = sanitizeCurrency(payload.currency)
-
-  // G5a — min ticket: mantém só um inteiro > 0; 0/null/ausente significa SEM valor
-  // mínimo. A tabela é submetida wholesale, então "ausente" = o usuário REMOVEU.
-  let minTicketCents: number | undefined
-  if (typeof payload.minTicketCents === 'number') {
-    const cents = Math.max(0, Math.trunc(payload.minTicketCents))
-    if (cents > 0) minTicketCents = cents
-  }
-
-  const patch: DeepPartial<BuilderState> = {
-    pricing: {
-      items,
-      currency,
-      disclosureStyle,
-      ...(minTicketCents !== undefined ? { minTicketCents } : {}),
-    },
-  }
-  // deepMerge pula `undefined`, então um min ticket ausente preservaria o valor
-  // antigo. Limpamos o escalar explicitamente para o checkbox poder ser desmarcado.
-  let merged = patchBuilderState(state, patch)
-  if (minTicketCents === undefined && merged.pricing.minTicketCents !== undefined) {
-    merged = { ...merged, pricing: { ...merged.pricing, minTicketCents: undefined } }
-  }
-  const next = applyConfirmation(merged, 'pricing')
-
-  const countLabel = items.length === 1 ? '1 item' : `${items.length} itens`
-  const withPhotoCount = items.filter((i) => Boolean(i.imageUrl)).length
-  const photoNote =
-    withPhotoCount > 0
-      ? ` ${withPhotoCount === 1 ? '1 item tem' : `${withPhotoCount} itens têm`} foto (catálogo visual).`
-      : ''
-  const minTicketNote =
-    minTicketCents !== undefined
-      ? ` Valor mínimo de atendimento: ${centsToBrl(minTicketCents)}.`
-      : ''
-
-  return {
-    next,
-    cardInstruction:
-      `O usuário CADASTROU a tabela de preços via card (${countLabel} em ${currency}).${photoNote}${minTicketNote} ` +
-      `Ao falar de preço, use o formato: ${DISCLOSURE_LABELS[disclosureStyle]}. ` +
-      'Use a tool get_pricing para responder sobre preços e siga para o próximo passo. ' +
-      'Não reabra o card de preços.',
-  }
-}
-
-/**
- * G10 — valores de `status` que significam "o usuário optou por seguir SEM agenda"
- * (escape hatch "Continuar sem agenda" após N tentativas de conexão falharem). O
- * schema mantém `status` como string opcional (≤120), então 'skipped' já cabe sem
- * mudança de contrato. Junto com CALENDAR_CONNECTED_STATUSES, gateia o flip do
- * sentinel `confirmations.calendar` (FR-11) além de ramificar a copy do ACK.
- */
-const CALENDAR_SKIPPED_STATUSES: ReadonlySet<string> = new Set([
-  'skipped',
-  'skip',
-  'none',
-])
-
-/**
- * FR-11 (jornada-builder-v2) — valores de `status` que significam conexão REAL.
- * Espelha 1:1 o conjunto `connected` do `resolvePhase` do card
- * (calendar-connect-card.tsx): FE e BE concordam sobre o que é "conectado".
- */
-const CALENDAR_CONNECTED_STATUSES: ReadonlySet<string> = new Set([
-  'connected',
-  'active',
-  'ok',
-  'ready',
-  'linked',
-])
-
-function applyCalendarConnect(
-  state: BuilderState,
-  payload: Pick<CalendarConnectPayload, 'connectionId' | 'status'>,
-): CardApplication {
-  // builderState only — the deploy saga owns the real CalendarConnection.
-  // `status` é persistido verbatim (inclui 'skipped' do escape hatch).
-  const patch: DeepPartial<BuilderState> = {
-    calendar: {
-      connectionId: payload.connectionId,
-      status: payload.status,
-    },
-  }
-  const patched = patchBuilderState(state, patch)
-
-  const normalizedStatus = (payload.status ?? '').trim().toLowerCase()
-  const isSkipped = CALENDAR_SKIPPED_STATUSES.has(normalizedStatus)
-  const isConnected = CALENDAR_CONNECTED_STATUSES.has(normalizedStatus)
-
-  // FR-11 — o flip de `confirmations.calendar` SÓ acontece com conexão REAL ou
-  // pulo EXPLÍCITO. Qualquer outro status (vazio, connecting, error, …) persiste
-  // o progresso mas NÃO confirma: o passo `calendar` continua pendente em
-  // nextPendingStep e o ACK é honesto — nunca "conectado" sem conectar.
-  if (!isConnected && !isSkipped) {
-    return {
-      next: patched,
-      cardInstruction:
-        'O usuário INICIOU a conexão da agenda via card, mas a conexão AINDA NÃO foi concluída ' +
-        `(status atual: ${payload.status ? `"${payload.status}"` : 'nenhum'} — aguardando conexão da agenda). ` +
-        'NÃO confirme a agenda como conectada e NÃO prometa agendamentos: oriente o usuário a concluir a autorização do calendário. ' +
-        'O card de conexão continua disponível até conectar de fato ou o usuário optar por seguir sem agenda.',
-    }
-  }
-
-  const next = applyConfirmation(patched, 'calendar')
-
-  // G10 — escape hatch: o usuário seguiu sem conectar a agenda. O agente deve
-  // qualificar + avisar a equipe, NUNCA prometer agendamento.
-  if (isSkipped) {
-    return {
-      next,
-      cardInstruction:
-        'O usuário optou por CONTINUAR SEM AGENDA (não conectou um calendário). ' +
-        'NÃO prometa marcar horários nem confirme agendamentos: qualifique o lead e avise a equipe responsável para o contato humano dar sequência. ' +
-        'Siga para o próximo passo da jornada. Não reabra o card de conexão de agenda (o usuário pode reconectar depois se quiser).',
-    }
-  }
-
-  return {
-    next,
-    cardInstruction:
-      `O usuário CONECTOU a agenda via card (status "${payload.status ?? 'connected'}"). ` +
-      'Use a agenda conectada para agendamentos e siga para o próximo passo. ' +
-      'Não reabra o card de conexão de agenda.',
-  }
-}
-
-function applyActivationMode(
-  state: BuilderState,
-  payload: Pick<ActivationModePayload, 'mode' | 'keywords'>,
-): CardApplication {
-  const keywords = sanitizeStringList(payload.keywords)
-  const patch: DeepPartial<BuilderState> = {
-    activation: { mode: payload.mode, keywords },
-  }
-  const next = applyConfirmation(patchBuilderState(state, patch), 'activation')
-
-  const keywordsLabel = keywords.length > 0 ? keywords.join(', ') : '(nenhuma)'
-  return {
-    next,
-    cardInstruction:
-      `O usuário ESCOLHEU o modo de ativação via card: "${payload.mode}" (palavras-chave: ${keywordsLabel}). ` +
-      'Considere esse modo no comportamento do agente e siga para o próximo passo. ' +
-      'Não reabra o card de modo de ativação.',
-  }
-}
-
-function applyPreviewSummary(state: BuilderState): CardApplication {
-  // Confirm-only deploy gate — flip `summary`, no owned fields.
-  const next = applyConfirmation(state, 'summary')
-  return {
-    next,
-    cardInstruction:
-      'O usuário CONFIRMOU o resumo de pré-visualização ("Tudo certo?") via card. ' +
-      'Todos os passos da jornada estão revisados — prossiga para a publicação (deploy) do agente. ' +
-      'Não reabra o card de resumo.',
-  }
-}
-
-function applyQuickReplyChips(
-  state: BuilderState,
-  payload: Pick<QuickReplyChipsPayload, 'value'>,
-): CardApplication {
-  // No sentinel, no owned field — the chosen chip routes as a NORMAL user turn.
-  // State is returned unchanged; the entrypoint skips the persist for this card.
-  return {
-    next: state,
-    cardInstruction: payload.value.trim(),
-  }
-}
-
-/**
- * Resolve the values to commit when the user ACCEPTS the source proposal:
- * start from the stored `proposed` synthesis, let `edited` override per field,
- * then re-sanitize EVERY value server-side (never trust the body). Returns a
- * clean `SourceProposal` carrying only grounded, non-empty fields.
- */
-function resolveAcceptedProposal(
-  proposed: SourceProposal | undefined,
-  edited: SourceProgressPayload['edited'],
-): SourceProposal {
-  const base = proposed ?? {}
-  const out: SourceProposal = {}
-
-  // Scalars: edited wins; fall back to the stored proposal. Trim + drop empties.
-  const businessName = (edited?.businessName ?? base.businessName)?.trim()
-  if (businessName) out.businessName = businessName
-
-  const audience = (edited?.audience ?? base.audience)?.trim()
-  if (audience) out.audience = audience
-
-  const tone = (edited?.tone ?? base.tone)?.trim()
-  if (tone) out.tone = tone
-
-  // Onda E — identidade do negócio (endereço completo + descrição 1-2 frases).
-  const address = (edited?.address ?? base.address)?.trim()
-  if (address) out.address = address
-
-  const description = (edited?.description ?? base.description)?.trim()
-  if (description) out.description = description
-
-  // Lists: edited replaces the proposal wholesale when supplied. Trim + dedupe.
-  const services = sanitizeStringList(edited?.services ?? base.services ?? [])
-  if (services.length > 0) out.services = services
-
-  const differentiators = sanitizeStringList(
-    edited?.differentiators ?? base.differentiators ?? [],
-  )
-  if (differentiators.length > 0) out.differentiators = differentiators
-
-  return out
-}
-
-/**
- * source_progress — the "cole seu site/IG" acceptance gate. The async
- * `quayer:source-enrich` job has already written PROPOSED values into
- * `state.sourceIngestion.proposed`; here the user ACCEPTS them, so we copy the
- * (optionally edited) proposal into the OWNED builderState fields and flip the
- * `source` sentinel.
- *
- * Owned-field mapping (only fields with a canonical home are committed):
- *   - businessName    → project.name
- *   - audience        → project.objective  (ONLY when objective is still empty —
- *                       FR-02: never overwrite what the user already typed)
- *   - tone            → persona.tone
- *   - services        → services.offered    (UNIONed with already-confirmed list)
- *   - address         → identity.address     (Onda E)
- *   - description     → identity.description (Onda E)
- *   - differentiators → kept in `proposed` + RAG (no owned field today; never
- *                       force-fit into a mismatched slot — see the report note).
- *
- * Anti-hallucination: this is the ONLY place `confirmations.source` flips. The
- * synthesis job never touches owned fields nor the sentinel.
- */
-function applySourceProgress(
-  state: BuilderState,
-  edited: SourceProgressPayload['edited'],
-): CardApplication {
-  const accepted = resolveAcceptedProposal(state.sourceIngestion.proposed, edited)
-
-  // Build the patch ONLY from fields that resolved to a value, so accepting a
-  // sparse proposal never clobbers unrelated owned values with empties.
-  const patch: DeepPartial<BuilderState> = {}
-
-  // FR-02 (jornada-builder-v2) — `audience` é só um PROXY de objetivo: preenche
-  // `project.objective` apenas quando ele ainda está vazio. Um objetivo que o
-  // usuário já informou em texto livre NUNCA é sobrescrito pelo aceite da fonte.
-  const objectiveAlreadySet =
-    typeof state.project.objective === 'string' &&
-    state.project.objective.trim().length > 0
-  const applyAudience = Boolean(accepted.audience) && !objectiveAlreadySet
-
-  if (accepted.businessName || applyAudience) {
-    patch.project = {
-      ...(accepted.businessName ? { name: accepted.businessName } : {}),
-      ...(applyAudience && accepted.audience
-        ? { objective: accepted.audience }
-        : {}),
-    }
-  }
-  if (accepted.tone) {
-    patch.persona = { tone: accepted.tone }
-  }
-  if (accepted.address || accepted.description) {
-    // Onda E — endereço + descrição do negócio têm um lar canônico próprio.
-    patch.identity = {
-      ...(accepted.address ? { address: accepted.address } : {}),
-      ...(accepted.description ? { description: accepted.description } : {}),
-    }
-  }
-  if (accepted.services && accepted.services.length > 0) {
-    // Union with the already-present offered list (the user may have confirmed
-    // services earlier) so accepting the source never DROPS prior choices.
-    patch.services = {
-      offered: sanitizeStringList([
-        ...state.services.offered,
-        ...accepted.services,
-      ]),
-    }
-  }
-  // `differentiators` has no owned field today; it stays in `proposed` (and in
-  // the RAG collection) rather than being written to a mismatched slot.
-
-  const next = applyConfirmation(patchBuilderState(state, patch), 'source')
-
-  const bits: string[] = []
-  if (accepted.businessName) bits.push(`nome "${accepted.businessName}"`)
-  if (accepted.services && accepted.services.length > 0) {
-    const noun = accepted.services.length === 1 ? 'serviço' : 'serviços'
-    bits.push(`${accepted.services.length} ${noun}`)
-  }
-  if (applyAudience) bits.push('público-alvo')
-  if (accepted.tone) bits.push(`tom "${accepted.tone}"`)
-  if (accepted.address) bits.push(`endereço "${accepted.address}"`)
-  if (accepted.description) bits.push('descrição do negócio')
-  const summary = bits.length > 0 ? bits.join(', ') : 'as informações da fonte'
-  return {
-    next,
-    cardInstruction:
-      `O usuário ACEITOU os dados extraídos do site/Instagram via card (${summary}). ` +
-      'Esses valores agora fazem parte do contexto do agente (e o conteúdo da fonte está na base de conhecimento). ' +
-      'Use-os ao montar o agente e siga para o próximo passo da jornada. Não reabra o card de fontes.',
-  }
-}
-
-/**
- * G1 — silenced_contacts: o usuário definiu (ou confirmou que não há) os contatos
- * que o agente NUNCA responde automaticamente. `contacts` é um array → o
- * deepMerge substitui a lista inteira (replace wholesale), que é o comportamento
- * desejado. `acknowledged` é sempre `true` no state (o sentinel real é
- * `confirmations.silencedContacts`, resolvido só aqui via applyConfirmation —
- * nunca lido do body). Passo OPCIONAL: lista vazia é válida.
- */
-function applySilencedContacts(
-  state: BuilderState,
-  contacts: SilencedContactsPayload['contacts'],
-): CardApplication {
-  const clean = sanitizeSilencedContacts(contacts)
-  const patch: DeepPartial<BuilderState> = {
-    silencedContacts: { contacts: clean, acknowledged: true },
-  }
-  const next = applyConfirmation(
-    patchBuilderState(state, patch),
-    'silencedContacts',
-  )
-
-  const cardInstruction =
-    clean.length === 0
-      ? 'O usuário confirmou que não há contatos a silenciar — o agente pode responder todos. ' +
-        'Siga para o próximo passo da jornada. Não reabra o card de contatos em silêncio.'
-      : `O usuário definiu ${clean.length === 1 ? '1 contato' : `${clean.length} contatos`} que o agente NUNCA responde automaticamente (o humano responde essas pessoas no WhatsApp). ` +
-        'Respeite esse silêncio no comportamento do agente e siga para o próximo passo. ' +
-        'Não reabra o card de contatos em silêncio.'
-
-  return { next, cardInstruction }
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +438,94 @@ export async function applyCardSubmit(
         current,
         payload: body,
       })
+    case 'mission':
+      // Jornada v3 (mission-first/T117/FR-37/FR-48): card de JORNADA com ACK
+      // conversacional. Own write transacional org-scoped (substitui o subtree
+      // builderState.mission + flipa `mission`) e emite `mission_selected`.
+      // Return early — o write genérico abaixo é para os handlers puros (state)=>app.
+      return applyMission({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'build_mode':
+      // Jornada v3 (mission-first/FR-39): card de JORNADA com ACK conversacional.
+      // Own write transacional org-scoped (grava o escalar builderState.buildMode +
+      // flipa `buildMode`); SEM evento de funil. Return early — o write genérico
+      // abaixo é para os handlers puros (state)=>application.
+      return applyBuildMode({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'qualification':
+      // FR-44 (critérios de qualificação): card de JORNADA com ACK conversacional.
+      // Own write transacional org-scoped (substitui o subtree builderState.qualification
+      // + flipa `qualification`); SEM evento de funil. Return early — o write genérico
+      // abaixo é para os handlers puros (state)=>application.
+      return applyQualification({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'restrictions':
+      // FR-44 (restrições comerciais — backlog #3): card de JORNADA com ACK
+      // conversacional. Own write transacional org-scoped (substitui o subtree
+      // builderState.restrictions + flipa `restrictions`); SEM evento de funil. A
+      // decisão gravada também destrava o gate do conversation_blueprint. Return
+      // early — o write genérico abaixo é para os handlers puros (state)=>application.
+      return applyRestrictions({
+        conversationId: conversation.id,
+        projectId,
+        organizationId,
+        current,
+        payload: body,
+      })
+    case 'diagnosis':
+      // FR-46 (diagnóstico do Modo Pesquisa — backlog #9): card READ-MOSTLY de ACK.
+      // Own write transacional org-scoped (flipa `diagnosis` via applySentinelAck,
+      // com guarda NFR-12 missionFirst); SEM evento de funil. Return early — o write
+      // genérico abaixo é para os handlers puros (state)=>application.
+      return applyDiagnosis({
+        projectId,
+        organizationId,
+        current,
+      })
+    case 'conversation_blueprint':
+      // Builder Playbook: generate proposed route or approve it before prompt
+      // generation. Own write — return early.
+      if (body.action === 'generate') {
+        return generateConversationBlueprintFromCard({
+          conversationId: conversation.id,
+          projectId,
+          organizationId,
+          userId: args.userId,
+          current,
+          contextDecision: body.contextDecision,
+        })
+      }
+      if (!body.blueprint) {
+        return {
+          ok: false,
+          reason: 'invalid',
+          message: 'Plano de atendimento é obrigatório para aprovação.',
+        }
+      }
+      return applyConversationBlueprint({
+        conversationId: conversation.id,
+        organizationId,
+        current,
+        payload: {
+          blueprint: body.blueprint,
+          contextDecision: body.contextDecision,
+        },
+      })
     case 'agent_review':
       // Journey v2 (T24/FR-05/FR-22): composite card. Owns its OWN transactional
       // write (persona+services+hours+agentApproved in 1 updateMany + optional
@@ -896,8 +549,8 @@ export async function applyCardSubmit(
         payload: body,
       })
     case 'channel_platform':
-      // Journey v2 (T91/FR-24/25): grava channel.platforms+whatsappMode e flipa
-      // channelPlatform; re-valida whatsappMode + canal único pré-5b. Own write.
+      // Journey v2 (T91/FR-24/25/26): grava channel.platforms+whatsappMode,
+      // aceita 1 ou 2 plataformas e flipa channelPlatform. Own write.
       return applyChannelPlatform({
         conversationId: conversation.id,
         organizationId,
@@ -927,9 +580,11 @@ export async function applyCardSubmit(
   // Single tenant-filtered write, scoped by organizationId in the same statement
   // (findUnique-by-projectId already proved ownership). `BuilderState` is a plain
   // JSON-serializable object → cast to the Prisma JSON input type for the column.
+  const nextState = maybeInvalidateRefinementForCard(application.next, body.cardKey)
+
   await database.builderProjectConversation.updateMany({
     where: { id: conversation.id, organizationId },
-    data: { builderState: application.next as unknown as Prisma.InputJsonValue },
+    data: { builderState: nextState as unknown as Prisma.InputJsonValue },
   })
 
   return {

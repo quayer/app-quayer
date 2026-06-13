@@ -21,6 +21,7 @@
 
 import { z } from 'zod'
 import { CHANNEL_KEYS } from '../tools/select-channel.tool'
+import { conversationBlueprintEditableSchema } from '../playbook/blueprint.schema'
 
 // ==========================================
 // Channel enum (derived from select-channel.tool.ts CHANNEL_CATALOG)
@@ -317,6 +318,25 @@ export const mediaAckPayloadSchema = z.object({
 })
 
 /**
+ * FR-PRO-01 (F1 — Mensagens proativas, design-time) — proactive: o toggle
+ * SILENCIOSO da CAPACIDADE "Mensagens proativas" da seção Capacidades (FR-43). NÃO
+ * é um card de jornada (sem `action`, sem ACK conversacional) — é um toggle como
+ * handoff/pricing/calendar: entra em `SILENT_ALLOWED_CARD_KEYS` e persiste sem
+ * turno LLM (FR-29). Os 3 presets em linguagem de negócio (FR-49) são booleans com
+ * default `false` (capacidade opt-in, desligada por padrão). Despachado por handler
+ * próprio (`apply/journey-v2.ts:applyProactive`) via `card-submit.routes.ts`, FORA
+ * da união do entrypoint (exhaustiveness guard intocado, igual aos acks T31). F1 só
+ * recomenda+persiste — NENHUM envio (runtime F2-F4 é épico próprio). →
+ * `builderState.proactive` (subtree, SEM sentinel — é capacidade, não passo).
+ */
+export const proactivePayloadSchema = z.object({
+  cardKey: z.literal('proactive'),
+  followUp: z.boolean().default(false),
+  reminders: z.boolean().default(false),
+  importantDates: z.boolean().default(false),
+})
+
+/**
  * Integration Builder (W2) — integration_proposal: the user CONFIRMS the
  * proposed integration. Confirm-only, exactly like `agent_approval`: there is no
  * client-supplied data to trust. The proposal itself (which integration, scopes,
@@ -358,6 +378,95 @@ export const businessIdentityPayloadSchema = z.object({
 })
 
 /**
+ * Jornada v3 (mission-first — mission-first-v3.md, FR-37/FR-48) — mission: o
+ * usuário escolhe a MISSÃO do agente numa ÚNICA decisão (card de JORNADA com ACK
+ * conversacional, igual a `business_identity` — entra na união do entrypoint, NÃO
+ * é silent). `key` é o bundle escolhido (obrigatório); `label` é o rótulo humano
+ * em linguagem de negócio (FR-49); `role`/`objective` são a resolução INTERNA
+ * (strings — o handler mapeia para os enums fechados do funil); `addons` são as
+ * capacidades extras ligadas na escolha; `custom` marca o caminho "montar do zero".
+ * Tudo RE-sanitizado server-side (trim/clamp/dedupe). → `builderState.mission` /
+ * confirmation `mission`.
+ */
+export const missionPayloadSchema = z.object({
+  cardKey: z.literal('mission'),
+  key: z.string().min(1).max(120),
+  label: z.string().max(160).optional(),
+  role: z.string().max(60).optional(),
+  objective: z.string().max(60).optional(),
+  // Cap de 12 add-ons (cada um curto) contra balão da coluna JSONB; re-trim/dedupe
+  // server-side no handler. Default [] espelha `missionStateSchema.addons`.
+  addons: z.array(z.string().min(1).max(60)).max(12).default([]),
+  custom: z.boolean().optional(),
+})
+
+/**
+ * Jornada v3 (mission-first — FR-39/FR-49) — build_mode: o usuário escolhe COMO
+ * quer construir o agente numa ÚNICA decisão (card de JORNADA com ACK conversacional,
+ * igual a `mission`/`business_identity` — entra na união do entrypoint, NÃO é silent).
+ * `mode` é uma escolha entre 3 valores em linguagem de negócio (FR-49):
+ *   - 'recomendado' (default, pré-selecionado no card) → "Montar agora com boas práticas".
+ *   - 'pesquisa' → "Pesquisar referências antes".
+ *   - 'livre' → "Eu digo como quero".
+ * Sem dado livre a confiar além do enum. → `builderState.buildMode` /
+ * confirmation `buildMode`.
+ */
+export const buildModePayloadSchema = z.object({
+  cardKey: z.literal('build_mode'),
+  mode: z.enum(['recomendado', 'pesquisa', 'livre']),
+})
+
+/**
+ * FR-44 (critérios de qualificação — backlog #10) — qualification: o usuário
+ * escolhe (multi-seleção) QUAIS dados o agente coleta de cada contato para
+ * considerar o atendimento bom (nome, prazo de compra, faixa de orçamento, etc.).
+ * Card de JORNADA com ACK conversacional (entra na união do entrypoint, igual a
+ * mission/business_identity). `fields` é a lista de campos escolhidos — bounded
+ * (cap 24 itens, cada um curto) e RE-trim/dedupe/clamp server-side. Pode vir vazia
+ * (o usuário confirma sem marcar nada). → `builderState.qualification` /
+ * confirmation `qualification`.
+ */
+export const qualificationPayloadSchema = z.object({
+  cardKey: z.literal('qualification'),
+  fields: z.array(z.string().min(1).max(120)).max(24).default([]),
+})
+
+/**
+ * FR-44 (restrições comerciais — backlog #3) — restrictions: o usuário escolhe COMO
+ * o agente trata uma fonte que aparece 100% vendida/esgotada. Card de JORNADA com
+ * ACK conversacional (entra na união do entrypoint, igual a qualification/mission).
+ * `soldOutStrategy` espelha o enum de `SoldOutConversationStrategy` (designer-input.ts)
+ * — a MESMA decisão que a v2 tomava inline no `conversation_blueprint.contextDecision`.
+ * `note` é uma observação livre opcional do usuário (clampada server-side). →
+ * `builderState.restrictions` / confirmation `restrictions`.
+ */
+export const restrictionsPayloadSchema = z.object({
+  cardKey: z.literal('restrictions'),
+  soldOutStrategy: z.enum([
+    'interest_list',
+    'human_confirm',
+    'available_confirmed',
+  ]),
+  note: z.string().min(1).max(300).optional(),
+})
+
+/**
+ * FR-46 (diagnóstico do Modo Pesquisa — backlog #9) — diagnosis: card READ-MOSTLY
+ * da fase Conhecer (surge DEPOIS de build_mode/source e ANTES de mission, quando
+ * `buildMode === 'pesquisa'`). É um ACK puro, igual a `published_next_steps`/
+ * `knowledge`/`media`: a única ação é `'ack'` e flipa `confirmations.diagnosis`
+ * server-side. NÃO há dado do client a confiar — o card só EXIBE o que já sabemos
+ * do negócio (derivado do builderState) e o usuário reconhece para seguir.
+ * DEGRADAÇÃO GRACIOSA (FR-47): mesmo sem pesquisa externa, o card mostra o que há.
+ * Card de JORNADA com ACK conversacional (entra na união do entrypoint, igual a
+ * test_drive/business_identity — NÃO é silent). → confirmation `diagnosis`.
+ */
+export const diagnosisPayloadSchema = z.object({
+  cardKey: z.literal('diagnosis'),
+  action: z.literal('ack'),
+})
+
+/**
  * Jornada v2 (T32, plan §3.3 item 3) — test_drive: gate SOFT da fase Testar. O
  * usuário ou TESTOU o agente (`'tested'`) ou optou por PUBLICAR SEM TESTAR
  * (`'skip'`). Ambas as ações flipam o MESMO sentinel `confirmations.testDrive`
@@ -382,12 +491,12 @@ export const testDrivePayloadSchema = z.object({
  * abaixo — NÃO no schema do registry: `z.discriminatedUnion` (zod 3) exige
  * `ZodObject`s crus com discriminador literal e REJEITA o `ZodEffects` que um
  * `.refine()` produz. Por isso o objeto cru entra na união (discriminação por
- * `cardKey`) e o handler RE-VALIDA o refine + a regra de canal único pré-5b
- * server-side (nunca confia no body — o padrão deste módulo). A UI pré-seleciona
+ * `cardKey`) e o handler RE-VALIDA o refine server-side (nunca confia no body
+ * — o padrão deste módulo). Pós-5b, o contrato aceita 1 ou 2 plataformas.
+ * A UI pré-seleciona
  * `'qr'` (T96). O handler grava `channel.platforms`+`channel.whatsappMode` e
  * flipa `channelPlatform`; o engine v2 (T15) lê `platforms` para surfar os
- * passos de conexão condicionalmente. **Até a Onda 5b a seleção DUPLA é
- * rejeitada server-side** (espelho do disable da UI; a remoção é T94/5b).
+ * passos de conexão condicionalmente.
  * → confirmation `channelPlatform`.
  */
 export const channelPlatformPayloadSchema = z.object({
@@ -400,9 +509,7 @@ export const channelPlatformPayloadSchema = z.object({
  * Cross-field invariant do `channel_platform` (FR-24/25): `whatsappMode` é
  * obrigatório sempre que `'whatsapp'` está entre as plataformas. Função PURA
  * exportada para o handler (`apply/journey-v2.ts`) re-validar server-side e para
- * o `channelPlatformSubmitSchema` (refine standalone, p/ tipagem/FE). A regra de
- * canal ÚNICO pré-5b (rejeição de 2 plataformas) é checada SÓ no handler — é
- * temporária (some em T94) e não é invariante do contrato do payload.
+ * o `channelPlatformSubmitSchema` (refine standalone, p/ tipagem/FE).
  */
 export function channelPlatformWhatsappModeOk(p: {
   platforms: readonly ('whatsapp' | 'instagram')[]
@@ -445,7 +552,7 @@ export const publishedNextStepsPayloadSchema = z.object({
  * espelham `business_hours`) — o handler compõe os exports puros de
  * `handlers/apply/{persona,services,hours}.ts` num único write org-scoped.
  *
- * O bloco OPCIONAL `disclosure` (vindo da seção avançada — antiga IdentityTab) é
+ * O bloco OPCIONAL `disclosure` (vindo da seção avançada de identidade) é
  * aplicado NO MESMO handler sobre `BuilderProject.metadata.identityCard` (1 POST
  * real, sem segundo request ao PATCH /builder/identity). `customText` só é
  * significativo quando `mode === 'custom'`; o lib normaliza/clamp server-side.
@@ -487,6 +594,41 @@ export const agentReviewPayloadSchema = z.object({
 })
 
 /**
+ * Builder Playbook — conversation_blueprint: card que aprova o roteiro
+ * conversacional antes do prompt final. `generate` cria uma proposta quando o
+ * active-step card aparece vazio; `approve` carrega o blueprint editado pelo
+ * usuário. O handler normaliza/valida server-side, grava `status: approved` e
+ * carimba `approvedAt`. Não há sentinel novo: o engine v2 lê
+ * `builderState.conversationBlueprint.status === 'approved'`.
+ *
+ * Mantemos um único `ZodObject` porque a união externa é discriminada por
+ * `cardKey`; unions internas aqui quebrariam a montagem do registry em Zod 3.
+ */
+export const conversationBlueprintContextDecisionSchema = z.object({
+  kind: z.literal('sold_out'),
+  strategy: z.enum(['interest_list', 'human_confirm', 'available_confirmed']),
+  note: z.string().min(1).max(300).optional(),
+})
+
+export const conversationBlueprintPayloadSchema = z.object({
+  cardKey: z.literal('conversation_blueprint'),
+  action: z.enum(['generate', 'approve']),
+  blueprint: conversationBlueprintEditableSchema.optional(),
+  contextDecision: conversationBlueprintContextDecisionSchema.optional(),
+})
+
+/**
+ * Builder Playbook — refinement: ação determinística para rodar o Refinando a
+ * partir do active-step card. Diferente de cards de confirmação, este payload
+ * não flipa sentinel; o handler executa o pipeline `runProjectRefinement` e
+ * grava `builderState.refinement`.
+ */
+export const refinementPayloadSchema = z.object({
+  cardKey: z.literal('refinement'),
+  action: z.literal('run'),
+})
+
+/**
  * Registry of per-card payload schemas. ADD a card here (W3) and the cardKey
  * enum + discriminated union below pick it up automatically. Keyed by the
  * literal `cardKey` each schema carries in its discriminator field.
@@ -507,12 +649,36 @@ export const CARD_PAYLOAD_SCHEMAS = {
   source_progress: sourceProgressPayloadSchema,
   silenced_contacts: silencedContactsPayloadSchema,
   business_identity: businessIdentityPayloadSchema,
+  // T117 (mission-first v3) — card de JORNADA com ACK conversacional, despachado
+  // pelo switch do `applyCardSubmit` (está na união do entrypoint), igual a
+  // business_identity.
+  mission: missionPayloadSchema,
+  // FR-39 (mission-first v3) — card de JORNADA com ACK conversacional, despachado
+  // pelo switch do `applyCardSubmit` (está na união do entrypoint), igual a mission.
+  build_mode: buildModePayloadSchema,
+  // FR-44 — critérios de qualificação. Card de JORNADA com ACK conversacional,
+  // despachado pelo switch do `applyCardSubmit` (está na união do entrypoint),
+  // igual a mission/build_mode.
+  qualification: qualificationPayloadSchema,
+  // FR-44 (backlog #3) — restrições comerciais. Card de JORNADA com ACK
+  // conversacional, despachado pelo switch do `applyCardSubmit` (está na união do
+  // entrypoint), igual a qualification.
+  restrictions: restrictionsPayloadSchema,
+  // FR-46 (backlog #9) — diagnóstico do Modo Pesquisa. Card READ-MOSTLY de ACK,
+  // despachado pelo switch do `applyCardSubmit` (está na união do entrypoint),
+  // igual a test_drive/business_identity.
+  diagnosis: diagnosisPayloadSchema,
+  conversation_blueprint: conversationBlueprintPayloadSchema,
   agent_review: agentReviewPayloadSchema,
   // T32/T91 — cards das fases Testar/Lançar. Despachados pelo switch do
   // `applyCardSubmit` (estão na união do entrypoint), com ACK conversacional.
   test_drive: testDrivePayloadSchema,
   channel_platform: channelPlatformPayloadSchema,
   published_next_steps: publishedNextStepsPayloadSchema,
+  // R09 — Refinando: registrado aqui para que `CARD_KEYS` reconheça o card; o
+  // despacho vive no `card-submit.routes.ts` em handler próprio, fora do union do
+  // entrypoint, porque executa o pipeline determinístico de validação.
+  refinement: refinementPayloadSchema,
   // T31 — acks dos passos opcionais Conhecimento/Mídia. Registrados aqui para que
   // `CARD_KEYS`/`cardSubmitParamsSchema` reconheçam os cardKeys da rota; o despacho
   // vive no `card-submit.routes.ts` (handlers próprios), fora do `applyCardSubmit`.
@@ -524,6 +690,11 @@ export const CARD_PAYLOAD_SCHEMAS = {
   // acks T31 — assim o exhaustiveness guard do entrypoint segue intocado.
   integration_proposal: integrationProposalPayloadSchema,
   integration_credentials: integrationCredentialsPayloadSchema,
+  // FR-PRO-01 (F1) — toggle SILENCIOSO da capacidade "Mensagens proativas".
+  // Registrado aqui para que `CARD_KEYS`/`cardSubmitParamsSchema` reconheçam o
+  // cardKey da rota; o despacho vive no `card-submit.routes.ts` (handler próprio
+  // `applyProactive`), fora da união do entrypoint, igual aos acks T31.
+  proactive: proactivePayloadSchema,
 } as const
 
 /** All currently-registered card keys (derived from the registry). */
@@ -553,11 +724,11 @@ export type CardSubmitParams = z.infer<typeof cardSubmitParamsSchema>
 /**
  * Discriminated union over `cardKey` of the cards dispatched by `applyCardSubmit`.
  *
- * INTENTIONALLY does NOT list `knowledge`/`media` (T31): those are sentinel-only
- * acks routed directly by `card-submit.routes.ts` to handlers in
- * `handlers/apply/journey-v2.ts`, so the entrypoint's exhaustiveness guard
- * (`const _never: never = body`) stays valid without editing it. The ROUTE accepts
- * them via `cardSubmitRouteBodySchema` below (the wider parse gate).
+ * INTENTIONALLY does NOT list `refinement`/`knowledge`/`media`: those are routed
+ * directly by `card-submit.routes.ts` to their own handlers, so the entrypoint's
+ * exhaustiveness guard (`const _never: never = body`) stays valid without editing
+ * it. The ROUTE accepts them via `cardSubmitRouteBodySchema` below (the wider
+ * parse gate).
  */
 export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   agentApprovalPayloadSchema,
@@ -575,6 +746,12 @@ export const cardSubmitBodySchema = z.discriminatedUnion('cardKey', [
   sourceProgressPayloadSchema,
   silencedContactsPayloadSchema,
   businessIdentityPayloadSchema,
+  missionPayloadSchema,
+  buildModePayloadSchema,
+  qualificationPayloadSchema,
+  restrictionsPayloadSchema,
+  diagnosisPayloadSchema,
+  conversationBlueprintPayloadSchema,
   agentReviewPayloadSchema,
   testDrivePayloadSchema,
   channelPlatformPayloadSchema,
@@ -621,15 +798,19 @@ export const SILENT_ALLOWED_CARD_KEYS: ReadonlySet<string> = new Set<string>([
   'tool_selection',
   'knowledge',
   'media',
+  // FR-PRO-01 (F1) — toggle silencioso da capacidade "Mensagens proativas" (FR-29:
+  // persiste sem turno LLM, como os demais toggles de Capacidades).
+  'proactive',
 ])
 
 /**
  * Payload de card aceito pela ROTA: a união do `applyCardSubmit` MAIS os acks
  * `knowledge`/`media` (T31). É o gate de parse do `card-submit.routes.ts` — mais
  * largo que `cardSubmitBodySchema` (que o entrypoint consome). Discriminado por
- * `cardKey`, então o `safeParse` resolve a variante e o `ackMode` é lido à parte.
+ * `cardKey`; o `ackMode` é o único campo extra preservado no parse da rota para
+ * não ser removido pelo validator do Igniter antes do handler.
  */
-export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
+const cardSubmitRoutePayloadSchema = z.discriminatedUnion('cardKey', [
   agentApprovalPayloadSchema,
   toolSelectionPayloadSchema,
   channelPayloadSchema,
@@ -645,6 +826,13 @@ export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
   sourceProgressPayloadSchema,
   silencedContactsPayloadSchema,
   businessIdentityPayloadSchema,
+  missionPayloadSchema,
+  buildModePayloadSchema,
+  qualificationPayloadSchema,
+  restrictionsPayloadSchema,
+  diagnosisPayloadSchema,
+  conversationBlueprintPayloadSchema,
+  refinementPayloadSchema,
   agentReviewPayloadSchema,
   testDrivePayloadSchema,
   channelPlatformPayloadSchema,
@@ -656,7 +844,20 @@ export const cardSubmitRouteBodySchema = z.discriminatedUnion('cardKey', [
   // fora da união do entrypoint (exhaustiveness guard intocado, igual T31).
   integrationProposalPayloadSchema,
   integrationCredentialsPayloadSchema,
+  // FR-PRO-01 (F1) — toggle silencioso da capacidade "Mensagens proativas",
+  // despachado por handler próprio (`apply/journey-v2.ts:applyProactive`) via
+  // `card-submit.routes.ts`, fora da união do entrypoint (igual aos acks T31).
+  proactivePayloadSchema,
 ])
+
+const cardSubmitRouteAckSchema = z.object({
+  ackMode: ackModeSchema.optional(),
+})
+
+export const cardSubmitRouteBodySchema = z.intersection(
+  cardSubmitRoutePayloadSchema,
+  cardSubmitRouteAckSchema,
+)
 export type CardSubmitRouteBody = z.infer<typeof cardSubmitRouteBodySchema>
 
 // ==========================================
@@ -687,6 +888,15 @@ export type SilencedContactsPayload = z.infer<
 export type BusinessIdentityPayload = z.infer<
   typeof businessIdentityPayloadSchema
 >
+export type MissionPayload = z.infer<typeof missionPayloadSchema>
+export type BuildModePayload = z.infer<typeof buildModePayloadSchema>
+export type QualificationPayload = z.infer<typeof qualificationPayloadSchema>
+export type RestrictionsPayload = z.infer<typeof restrictionsPayloadSchema>
+export type DiagnosisPayload = z.infer<typeof diagnosisPayloadSchema>
+export type ConversationBlueprintPayload = z.infer<
+  typeof conversationBlueprintPayloadSchema
+>
+export type RefinementPayload = z.infer<typeof refinementPayloadSchema>
 export type AgentReviewPayload = z.infer<typeof agentReviewPayloadSchema>
 export type TestDrivePayload = z.infer<typeof testDrivePayloadSchema>
 export type ChannelPlatformPayload = z.infer<
@@ -703,3 +913,4 @@ export type IntegrationProposalPayload = z.infer<
 export type IntegrationCredentialsPayload = z.infer<
   typeof integrationCredentialsPayloadSchema
 >
+export type ProactivePayload = z.infer<typeof proactivePayloadSchema>

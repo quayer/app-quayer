@@ -17,6 +17,7 @@ import {
   parseBuilderState,
   patchBuilderState,
   clearCapturedProposals,
+  invalidateRefinement,
   DEFAULT_BUILDER_STATE,
 } from './builder-state'
 
@@ -245,6 +246,164 @@ describe('capturedProposals namespace (T06/FR-02) — parse + legacy backfill', 
       capturedProposals: { persona: { name: 'x'.repeat(301) } },
     })
     expect(parsed.capturedProposals).toBeUndefined()
+  })
+})
+
+describe('refinement namespace — optional aggregate state', () => {
+  it('an empty {} resolves refinement to undefined (OPTIONAL, no default)', () => {
+    expect(parseBuilderState({}).refinement).toBeUndefined()
+  })
+
+  it('DEFAULT_BUILDER_STATE has no refinement namespace', () => {
+    expect(DEFAULT_BUILDER_STATE.refinement).toBeUndefined()
+  })
+
+  it('backfills a legacy JSONB state without refinement to undefined', () => {
+    const legacy = {
+      project: { name: 'Clínica X' },
+      confirmations: { persona: true },
+    }
+    expect(parseBuilderState(legacy).refinement).toBeUndefined()
+  })
+
+  it('preserves a populated refinement aggregate and defaults internal arrays', () => {
+    const parsed = parseBuilderState({
+      refinement: {
+        status: 'failed',
+        runId: 'refine-1',
+        score: 72,
+        startedAt: '2026-06-12T00:00:00.000Z',
+        finishedAt: '2026-06-12T00:01:00.000Z',
+        checks: [
+          {
+            checkId: 'route',
+            label: 'Plano de atendimento',
+            status: 'fail',
+            severity: 'critical',
+            evidence: 'Pulou a etapa de qualificação.',
+            recommendation: 'Corrigir o fluxo antes de publicar.',
+            autoFixable: true,
+          },
+        ],
+        blockers: [
+          {
+            checkId: 'route',
+            severity: 'critical',
+            message: 'O agente pulou uma etapa obrigatória.',
+          },
+        ],
+      },
+    })
+
+    expect(parsed.refinement).toMatchObject({
+      status: 'failed',
+      runId: 'refine-1',
+      score: 72,
+      checks: [
+        expect.objectContaining({
+          checkId: 'route',
+          status: 'fail',
+          severity: 'critical',
+          autoFixable: true,
+        }),
+      ],
+      blockers: [
+        expect.objectContaining({
+          checkId: 'route',
+          message: 'O agente pulou uma etapa obrigatória.',
+        }),
+      ],
+    })
+  })
+
+  it('defaults checks/blockers to [] when the namespace is present but empty', () => {
+    const parsed = parseBuilderState({ refinement: { status: 'idle' } })
+
+    expect(parsed.refinement).toEqual({
+      status: 'idle',
+      checks: [],
+      blockers: [],
+    })
+  })
+
+  it('drops an out-of-contract refinement without throwing', () => {
+    const parsed = parseBuilderState({
+      refinement: {
+        status: 'failed',
+        score: 101,
+      },
+    })
+
+    expect(parsed.refinement).toBeUndefined()
+  })
+
+  it('preserves refinement material metadata', () => {
+    const parsed = parseBuilderState({
+      refinement: {
+        status: 'passed',
+        checks: [],
+        blockers: [],
+        material: {
+          promptVersionId: 'version-1',
+          promptVersionNumber: 1,
+          promptHash: 'prompt-hash',
+          blueprintHash: 'blueprint-hash',
+          contextHash: 'context-hash',
+        },
+      },
+    })
+
+    expect(parsed.refinement?.material).toEqual({
+      promptVersionId: 'version-1',
+      promptVersionNumber: 1,
+      promptHash: 'prompt-hash',
+      blueprintHash: 'blueprint-hash',
+      contextHash: 'context-hash',
+    })
+  })
+
+  it('invalidateRefinement turns a v2 result into an idle blocker without old checks', () => {
+    const state = parseBuilderState({
+      journeyVersion: 2,
+      refinement: {
+        status: 'passed',
+        score: 100,
+        runId: 'refine-1',
+        checks: [
+          {
+            checkId: 'route',
+            status: 'pass',
+            severity: 'low',
+          },
+        ],
+        blockers: [],
+        material: { promptVersionId: 'version-1' },
+      },
+    })
+
+    const next = invalidateRefinement(
+      state,
+      'Prompt mudou.',
+      '2026-06-12T10:00:00.000Z',
+    )
+
+    expect(next.refinement).toEqual({
+      status: 'idle',
+      checks: [],
+      blockers: [],
+      material: { promptVersionId: 'version-1' },
+      invalidatedAt: '2026-06-12T10:00:00.000Z',
+      invalidationReason: 'Prompt mudou.',
+    })
+  })
+
+  it('invalidateRefinement is a no-op for v1 projects', () => {
+    const state = parseBuilderState({
+      journeyVersion: 1,
+      refinement: { status: 'passed', checks: [], blockers: [] },
+    })
+
+    expect(invalidateRefinement(state, 'Mudou.')).toBe(state)
   })
 })
 

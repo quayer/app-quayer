@@ -13,7 +13,12 @@
 // ---------------------------------------------------------------------------
 
 export interface ValidationIssue {
-  validator: 'anatomy' | 'blacklist' | 'ambiguity' | 'journey'
+  validator:
+    | 'anatomy'
+    | 'blacklist'
+    | 'ambiguity'
+    | 'journey'
+    | 'blueprint_preservation'
   severity: 'error' | 'warning'
   message: string
 }
@@ -31,6 +36,14 @@ export { validateAnatomy } from './whatsapp-prompt-anatomy'
 export { validateBlacklist } from './blacklist'
 export { validateAmbiguity } from './ambiguity'
 export { validateJourney } from './journey'
+export {
+  validateBlueprintPreservation,
+  type BlueprintPreservationIssue,
+  type BlueprintPreservationIssueCode,
+  type BlueprintPreservationResult,
+  type BlueprintPreservationSeverity,
+  type ValidateBlueprintPreservationInput,
+} from './blueprint-preservation'
 
 // ---------------------------------------------------------------------------
 // Orchestrator

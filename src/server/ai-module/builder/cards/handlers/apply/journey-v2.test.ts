@@ -32,6 +32,7 @@ const mockProjectFindFirst = vi.hoisted(() => vi.fn())
 const mockProjectUpdateMany = vi.hoisted(() => vi.fn())
 const mockTransaction = vi.hoisted(() => vi.fn())
 const mockTrackJourneyEvent = vi.hoisted(() => vi.fn())
+const mockPlaybookDesignerRun = vi.hoisted(() => vi.fn())
 
 vi.mock('@/server/services/database', () => {
   const tx = {
@@ -64,16 +65,28 @@ vi.mock('@/server/services/journey-events', () => ({
   trackJourneyEvent: mockTrackJourneyEvent,
 }))
 
+vi.mock('../../../sub-agents', () => ({
+  playbookDesignerSubAgent: {
+    run: mockPlaybookDesignerRun,
+  },
+}))
+
 // ---------------------------------------------------------------------------
 // Imports após o registro dos mocks
 // ---------------------------------------------------------------------------
 
 import {
   applyBusinessIdentity,
+  applyConversationBlueprint,
+  generateConversationBlueprintFromCard,
   applyAgentReview,
   applyChannelPlatform,
   applyTestDrive,
   applyPublishedNextSteps,
+  applyKnowledgeAck,
+  applyMediaAck,
+  applyProactive,
+  applyRestrictions,
 } from './journey-v2'
 import {
   parseBuilderState,
@@ -83,6 +96,7 @@ import {
 import type {
   AgentReviewPayload,
   ChannelPlatformPayload,
+  ConversationBlueprintPayload,
   TestDrivePayload,
 } from '../../card-submit.schemas'
 import { getIdentityCardFromMetadata } from '@/lib/agent-identity-card'
@@ -326,6 +340,400 @@ describe('applyBusinessIdentity — T63 (FR-03)', () => {
     // herda do `current` (state v2 fornecido), provando que não houve clobber.
     expect(next.journeyVersion).toBe(2)
     expect(next.persona.tone).toBe('cordial')
+  })
+})
+
+// ===========================================================================
+// Builder Playbook — unit do handler `applyConversationBlueprint`.
+//
+// O `conversation_blueprint` aprova o roteiro conversacional antes do prompt final
+// em projetos v2. Diferente dos passos baseados em confirmations, ele conclui
+// quando `builderState.conversationBlueprint.status === 'approved'`.
+// ===========================================================================
+
+type BlueprintApprovePayload = ConversationBlueprintPayload & {
+  action: 'approve'
+  blueprint: NonNullable<ConversationBlueprintPayload['blueprint']>
+}
+
+function blueprintPayload(
+  overrides: Partial<NonNullable<ConversationBlueprintPayload['blueprint']>> = {},
+): BlueprintApprovePayload {
+  return {
+    cardKey: 'conversation_blueprint',
+    action: 'approve',
+    blueprint: {
+      objective: 'Qualificar leads e conduzir para atendimento.',
+      niche: 'imobiliário',
+      stages: [
+        {
+          id: 'qualificacao',
+          title: 'Qualificar',
+          goal: 'Entender a necessidade do lead.',
+        },
+      ],
+      questions: [
+        {
+          id: 'interesse',
+          stageId: 'qualificacao',
+          text: 'Você procura para morar ou investir?',
+          purpose: 'Entender a intenção principal.',
+          variableKey: 'interesse',
+          skipWhenKnown: 'Pular se a intenção já estiver clara.',
+          required: true,
+        },
+      ],
+      variables: [
+        {
+          key: 'interesse',
+          label: 'Interesse',
+          type: 'text',
+          reviewRequired: false,
+        },
+      ],
+      skipRules: [],
+      successCriteria: ['Lead com intenção e próximo passo claros.'],
+      handoffTriggers: ['Lead pede visita ou consultor.'],
+      toolTriggers: [],
+      objectionRules: [],
+      doRules: ['Perguntar uma coisa por vez.'],
+      dontRules: ['Não inventar disponibilidade.'],
+      sourceRefs: [{ type: 'user', label: 'Objetivo informado no chat' }],
+      ...overrides,
+    },
+  }
+}
+
+function submitBlueprint(
+  payload: BlueprintApprovePayload = blueprintPayload(),
+  current: BuilderState = patchBuilderState(parseBuilderState(undefined), {
+    journeyVersion: 2,
+    project: { objective: 'Qualificar leads' },
+  }),
+) {
+  return applyConversationBlueprint({
+    conversationId: CONV_ID,
+    organizationId: ORG_ID,
+    current,
+    payload: { blueprint: payload.blueprint },
+  })
+}
+
+describe('generateConversationBlueprintFromCard — Builder Playbook', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+  })
+
+  it('gera e grava uma proposta de roteiro sem aprovar automaticamente', async () => {
+    const current = patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      project: {
+        name: 'Vibra Butantã',
+        objective: 'Criar um SDR imobiliário para qualificar leads do empreendimento.',
+      },
+      sourceIngestion: {
+        proposed: {
+          businessName: 'Vibra Butantã',
+          services: ['apartamentos de 2 quartos'],
+          address: 'Rua Coronel Ferreira Leal, 161, Vila Gomes, São Paulo',
+          description: 'Empreendimento residencial na Zona Oeste de São Paulo.',
+          differentiators: ['pronto e 100% vendido', 'opção de varanda'],
+        },
+      },
+    })
+    mockConvFindFirst.mockResolvedValueOnce({ builderState: current })
+    mockPlaybookDesignerRun.mockResolvedValueOnce({
+      success: true,
+      data: {
+        blueprint: { ...blueprintPayload().blueprint, status: 'proposed' },
+        source: 'fixture',
+        warnings: [],
+      },
+      durationMs: 12,
+    })
+
+    const res = await generateConversationBlueprintFromCard({
+      conversationId: CONV_ID,
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      userId: 'user-1',
+      current,
+      contextDecision: {
+        kind: 'sold_out',
+        strategy: 'interest_list',
+      },
+    })
+
+    expect(res.ok).toBe(true)
+    expect(mockPlaybookDesignerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        objective:
+          'Criar um SDR imobiliário para qualificar leads do empreendimento.',
+        niche: 'imobiliário',
+        knownServices: ['apartamentos de 2 quartos'],
+        knownLimits: expect.arrayContaining([
+          expect.stringContaining('100% vendido'),
+          expect.stringContaining('lista de interesse'),
+        ]),
+      }),
+      { organizationId: ORG_ID, userId: 'user-1', projectId: PROJECT_ID },
+    )
+
+    const next = writtenConvState()
+    expect(next.conversationBlueprint?.status).toBe('proposed')
+    expect(next.conversationBlueprint?.approvedAt).toBeUndefined()
+    expect(next.conversationBlueprint?.questions).toHaveLength(1)
+    if (res.ok) {
+      expect(res.cardInstruction).toContain('GERADO via card')
+      expect(res.cardInstruction).toContain('lista de interesse')
+      expect(res.cardInstruction).toContain('aguarde o usuário aprovar')
+    }
+  })
+
+  it('bloqueia geração quando a fonte diz 100% vendido e o usuário ainda não decidiu a estratégia', async () => {
+    const current = patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      project: {
+        name: 'Vibra Butantã',
+        objective: 'Criar um SDR imobiliário para qualificar leads do empreendimento.',
+      },
+      sourceIngestion: {
+        proposed: {
+          businessName: 'Vibra Butantã',
+          services: ['apartamentos de 2 quartos'],
+          differentiators: ['pronto e 100% vendido'],
+        },
+      },
+    })
+
+    const res = await generateConversationBlueprintFromCard({
+      conversationId: CONV_ID,
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      userId: 'user-1',
+      current,
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/100% vendido\/esgotado/i)
+    }
+    expect(mockPlaybookDesignerRun).not.toHaveBeenCalled()
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('recusa gerar quando ainda não há objetivo do agente', async () => {
+    const current = parseBuilderState(undefined)
+
+    const res = await generateConversationBlueprintFromCard({
+      conversationId: CONV_ID,
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      userId: 'user-1',
+      current,
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/objetivo do agente/i)
+    }
+    expect(mockPlaybookDesignerRun).not.toHaveBeenCalled()
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('applyConversationBlueprint — Builder Playbook', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        project: { objective: 'Qualificar leads' },
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+  })
+
+  it('grava conversationBlueprint.status=approved com approvedAt e preserva o restante do state', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        persona: { tone: 'consultivo' },
+      }),
+    })
+
+    const res = await submitBlueprint()
+
+    expect(res.ok).toBe(true)
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+
+    const next = writtenConvState()
+    expect(next.conversationBlueprint?.status).toBe('approved')
+    expect(next.conversationBlueprint?.approvedAt).toEqual(expect.any(String))
+    expect(next.conversationBlueprint?.questions).toHaveLength(1)
+    expect(next.persona.tone).toBe('consultivo')
+    expect(next.journeyVersion).toBe(2)
+  })
+
+  it('normaliza o blueprint editado criando variável faltante para pergunta válida', async () => {
+    const res = await submitBlueprint(
+      blueprintPayload({
+        variables: [],
+        questions: [
+          {
+            id: 'regiao',
+            stageId: 'qualificacao',
+            text: 'Qual região você prefere?',
+            purpose: 'Descobrir a região de interesse.',
+            variableKey: 'regiao',
+            skipWhenKnown: 'Pular se a região já foi informada.',
+            required: true,
+          },
+        ],
+      }),
+    )
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.conversationBlueprint?.variables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'regiao', label: 'Descobrir a região de interesse.' }),
+      ]),
+    )
+  })
+
+  it('bloqueia aprovação quando a fonte diz 100% vendido e o usuário ainda não decidiu a estratégia', async () => {
+    const current = patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      project: { objective: 'Qualificar leads' },
+      sourceIngestion: {
+        proposed: {
+          differentiators: ['pronto e 100% vendido'],
+        },
+      },
+    })
+
+    const res = await applyConversationBlueprint({
+      conversationId: CONV_ID,
+      organizationId: ORG_ID,
+      current,
+      payload: { blueprint: blueprintPayload().blueprint },
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/100% vendido\/esgotado/i)
+    }
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('anexa a decisão de fonte vendida nas dontRules antes de aprovar', async () => {
+    const current = patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      project: { objective: 'Qualificar leads' },
+      sourceIngestion: {
+        proposed: {
+          differentiators: ['pronto e 100% vendido'],
+        },
+      },
+    })
+    mockConvFindFirst.mockResolvedValueOnce({ builderState: current })
+
+    const res = await applyConversationBlueprint({
+      conversationId: CONV_ID,
+      organizationId: ORG_ID,
+      current,
+      payload: {
+        blueprint: blueprintPayload({ dontRules: ['Não inventar disponibilidade.'] })
+          .blueprint,
+        contextDecision: {
+          kind: 'sold_out',
+          strategy: 'human_confirm',
+        },
+      },
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.conversationBlueprint?.dontRules).toEqual(
+      expect.arrayContaining([
+        'Não inventar disponibilidade.',
+        expect.stringContaining('confirmar disponibilidade'),
+      ]),
+    )
+    if (res.ok) {
+      expect(res.cardInstruction).toContain('confirmar disponibilidade')
+    }
+  })
+
+  it('rejeita blueprint sem perguntas e não escreve estado', async () => {
+    const res = await submitBlueprint(
+      blueprintPayload({
+        questions: [],
+        variables: [],
+      }),
+    )
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/pergunta/i)
+    }
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('ACK instrui a preservar o roteiro e seguir para generate_prompt_anatomy', async () => {
+    const res = await submitBlueprint()
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/aprovou o plano de atendimento/i)
+      expect(res.cardInstruction).toMatch(/1 pergunta/i)
+      expect(res.cardInstruction).toMatch(/1 gatilho/i)
+      expect(res.cardInstruction).toMatch(/conversationblueprint/i)
+      expect(res.cardInstruction).toMatch(/generate_prompt_anatomy/i)
+      expect(res.cardInstruction).toMatch(/não reabra/i)
+    }
+  })
+
+  it('cross-org: read fresco e write são sempre filtrados por organizationId', async () => {
+    await submitBlueprint()
+
+    expect(mockConvFindFirst).toHaveBeenCalledWith({
+      where: { id: CONV_ID, organizationId: ORG_ID },
+      select: { builderState: true },
+    })
+    const convCall = mockConvUpdateMany.mock.calls[0]![0] as {
+      where: { id: string; organizationId: string }
+    }
+    expect(convCall.where).toEqual({ id: CONV_ID, organizationId: ORG_ID })
   })
 })
 
@@ -788,7 +1196,7 @@ describe('applyAgentReview — T66 (FR-05/FR-22)', () => {
 // Cobre (critério da tarefa T103):
 //   - min 1 plataforma (o schema garante; aqui o caminho feliz com 1 grava);
 //   - refine: `whatsappMode` obrigatório quando `'whatsapp'` selecionado → invalid;
-//   - rejeição de dupla seleção pré-5b (2 plataformas → invalid; invertido em T94);
+//   - dupla seleção pós-5b aceita (2 plataformas → `whatsapp_connect` + `instagram_connect`);
 //   - grava `channel.platforms`/`channel.whatsappMode`;
 //   - flipa `channelPlatform` (e NÃO emite evento de funil — channel_connected é
 //     da conexão real, não da seleção);
@@ -881,6 +1289,23 @@ describe('applyChannelPlatform — T103 (FR-24/25)', () => {
     expect(next.channel?.whatsappMode).toBeUndefined()
   })
 
+  it('trocar de WhatsApp para Instagram-only remove whatsappMode antigo', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        channel: { platforms: ['whatsapp'], whatsappMode: 'qr' },
+        confirmations: { channelPlatform: true },
+      }),
+    })
+
+    const res = await submitChannel({ platforms: ['instagram'] })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.channel?.platforms).toEqual(['instagram'])
+    expect(next.channel?.whatsappMode).toBeUndefined()
+  })
+
   it('NÃO emite evento de funil (channel_connected é da conexão real, não da seleção)', async () => {
     await submitChannel({ platforms: ['whatsapp'], whatsappMode: 'qr' })
 
@@ -925,7 +1350,7 @@ describe('applyChannelPlatform — T103 (FR-24/25)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Seleção dupla HABILITADA na Onda 5b (T94 removeu a rejeição pré-5b): o
+  // Seleção dupla HABILITADA na Onda 5b (T94): o
   // mesmo agente atende WhatsApp + Instagram (attach pausa por conexão, não por
   // agente). Persiste as 2 plataformas e flipa o sentinel.
   // -------------------------------------------------------------------------
@@ -942,9 +1367,9 @@ describe('applyChannelPlatform — T103 (FR-24/25)', () => {
     expect(next.confirmations.channelPlatform).toBe(true)
   })
 
-  it('platforms duplicado é deduplicado para um canal único (não dispara a regra pré-5b)', async () => {
-    // O body com a MESMA plataforma repetida vira 1 após o dedupe — não é "dupla
-    // seleção" e segue o caminho feliz.
+  it('platforms duplicado é deduplicado para um canal único', async () => {
+    // O body com a MESMA plataforma repetida vira 1 após o dedupe e segue o
+    // caminho feliz.
     const res = await submitChannel({
       platforms: ['whatsapp', 'whatsapp'],
       whatsappMode: 'qr',
@@ -1272,5 +1697,605 @@ describe('applyPublishedNextSteps — T69 (FR-16)', () => {
     if (!res.ok) expect(res.reason).toBe('not_found')
     expect(mockConvUpdateMany).not.toHaveBeenCalled()
     expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+})
+
+// ===========================================================================
+// T31 (jornada-builder-v2, Onda 4) — acks opcionais knowledge/media.
+//
+// Ambos usam o mesmo helper interno `applySentinelAck`: provam posse por
+// projectId, re-leem o state fresco dentro da transacao e flipam somente o
+// sentinel server-side correspondente. Nao emitem evento de funil porque esses
+// passos sao opcionais e nao fazem parte do vocabulario de `trackJourneyEvent`.
+// ===========================================================================
+
+describe('applyKnowledgeAck / applyMediaAck — T31 optional sentinels', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindUnique.mockResolvedValue({ id: CONV_ID, organizationId: ORG_ID })
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        confirmations: { knowledge: false, media: false },
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  it('knowledge ack flipa confirmations.knowledge num write org-scoped', async () => {
+    const res = await applyKnowledgeAck({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+    })
+
+    expect(res.ok).toBe(true)
+    expect(mockConvFindUnique).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID },
+      select: { id: true, organizationId: true },
+    })
+    const next = writtenConvState()
+    expect(next.confirmations.knowledge).toBe(true)
+    expect(next.confirmations.media).toBe(false)
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  it('media ack flipa confirmations.media num write org-scoped', async () => {
+    const res = await applyMediaAck({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.confirmations.media).toBe(true)
+    expect(next.confirmations.knowledge).toBe(false)
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+})
+
+// ===========================================================================
+// FR-44 (backlog #3) — unit do handler `applyRestrictions`.
+//
+// O `restrictions` é o card de JORNADA da fase Revisar (DEPOIS de qualification e
+// ANTES de conversation_blueprint) que move a decisão de "esgotado" da v2 (inline no
+// plano via contextDecision) para um passo dedicado. Grava o subtree
+// `restrictions.{soldOutStrategy,note}` CRU e flipa `confirmations.restrictions`. NÃO
+// emite evento de funil. Mocks de database são os mesmos dos blocos acima.
+// ===========================================================================
+
+describe('applyRestrictions — FR-44 (backlog #3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        missionFirst: true,
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  /** v2 mission-first state (o passo só aplica em mission-first). */
+  function missionFirstState(): BuilderState {
+    return patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      missionFirst: true,
+    })
+  }
+
+  function submitRestrictions(
+    payload: {
+      soldOutStrategy: 'interest_list' | 'human_confirm' | 'available_confirmed'
+      note?: string
+    },
+    current: BuilderState = missionFirstState(),
+  ) {
+    return applyRestrictions({
+      conversationId: CONV_ID,
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      current,
+      payload,
+    })
+  }
+
+  it('grava restrictions.soldOutStrategy + flipa o sentinel num único write org-scoped', async () => {
+    const res = await submitRestrictions({ soldOutStrategy: 'interest_list' })
+
+    expect(res.ok).toBe(true)
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+
+    const next = writtenConvState()
+    expect(next.restrictions?.soldOutStrategy).toBe('interest_list')
+    expect(next.confirmations.restrictions).toBe(true)
+  })
+
+  it('grava a nota opcional (trim + clamp 300) quando presente', async () => {
+    await submitRestrictions({
+      soldOutStrategy: 'human_confirm',
+      note: '  temos uma fase nova em pré-lançamento  ',
+    })
+
+    const next = writtenConvState()
+    expect(next.restrictions?.note).toBe('temos uma fase nova em pré-lançamento')
+  })
+
+  it('nota só-espaço vira undefined (não grava note)', async () => {
+    await submitRestrictions({ soldOutStrategy: 'available_confirmed', note: '   ' })
+
+    const next = writtenConvState()
+    expect(next.restrictions?.note).toBeUndefined()
+    expect(next.restrictions?.soldOutStrategy).toBe('available_confirmed')
+  })
+
+  it('substitui o subtree inteiro ao trocar de estratégia (não preserva note antiga)', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(missionFirstState(), {
+        restrictions: { soldOutStrategy: 'interest_list', note: 'nota antiga' },
+      }),
+    })
+
+    await submitRestrictions({ soldOutStrategy: 'human_confirm' })
+
+    const next = writtenConvState()
+    expect(next.restrictions?.soldOutStrategy).toBe('human_confirm')
+    // O deep-merge preservaria a nota antiga; o write cru a remove.
+    expect(next.restrictions?.note).toBeUndefined()
+  })
+
+  it('NÃO emite evento de funil (restrictions fora do vocabulário)', async () => {
+    await submitRestrictions({ soldOutStrategy: 'interest_list' })
+
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  it('projeto v2 puro (missionFirst !== true) → invalid, sem nenhum write — NFR-12', async () => {
+    const res = await submitRestrictions(
+      { soldOutStrategy: 'interest_list' },
+      patchBuilderState(parseBuilderState(undefined), { journeyVersion: 2 }),
+    )
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/restrições comerciais não se aplica/i)
+    }
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('cross-org: read fresco + write SEMPRE filtram por organizationId', async () => {
+    await submitRestrictions({ soldOutStrategy: 'interest_list' })
+
+    expect(mockConvFindFirst).toHaveBeenCalledWith({
+      where: { id: CONV_ID, organizationId: ORG_ID },
+      select: { builderState: true },
+    })
+    const convCall = mockConvUpdateMany.mock.calls[0]![0] as {
+      where: { id: string; organizationId: string }
+    }
+    expect(convCall.where).toEqual({ id: CONV_ID, organizationId: ORG_ID })
+  })
+})
+
+// ===========================================================================
+// FR-44 (backlog #3) — gate do blueprint aceita state.restrictions.soldOutStrategy.
+//
+// MOVER esgotado backward-compatible: quando a v3 já decidiu a restrição no state
+// (`restrictions.soldOutStrategy`), o gate do plano NÃO exige o `contextDecision`
+// inline (a v2 segue funcionando pelo contextDecision).
+// ===========================================================================
+
+describe('conversation_blueprint gate — aceita state.restrictions (FR-44)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+  })
+
+  /** Estado sold-out com a decisão já tomada no passo restrictions (v3). */
+  function soldOutWithStateDecision(
+    strategy: 'interest_list' | 'human_confirm' | 'available_confirmed',
+  ): BuilderState {
+    return patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      missionFirst: true,
+      project: { objective: 'Qualificar leads do empreendimento' },
+      sourceIngestion: {
+        proposed: { differentiators: ['pronto e 100% vendido'] },
+      },
+      restrictions: { soldOutStrategy: strategy },
+    })
+  }
+
+  it('GENERATE: usa state.restrictions e NÃO exige contextDecision', async () => {
+    const current = soldOutWithStateDecision('interest_list')
+    mockConvFindFirst.mockResolvedValueOnce({ builderState: current })
+    mockPlaybookDesignerRun.mockResolvedValueOnce({
+      success: true,
+      data: {
+        blueprint: { ...blueprintPayload().blueprint, status: 'proposed' },
+        source: 'fixture',
+        warnings: [],
+      },
+      durationMs: 5,
+    })
+
+    const res = await generateConversationBlueprintFromCard({
+      conversationId: CONV_ID,
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      userId: 'user-1',
+      current,
+      // SEM contextDecision — a decisão veio do state.
+    })
+
+    expect(res.ok).toBe(true)
+    // O known limit da estratégia do state foi propagado ao designer.
+    expect(mockPlaybookDesignerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        knownLimits: expect.arrayContaining([
+          expect.stringContaining('lista de interesse'),
+        ]),
+      }),
+      expect.anything(),
+    )
+  })
+
+  it('APPROVE: usa state.restrictions e NÃO exige contextDecision (anexa nas dontRules)', async () => {
+    const current = soldOutWithStateDecision('human_confirm')
+    mockConvFindFirst.mockResolvedValueOnce({ builderState: current })
+
+    const res = await applyConversationBlueprint({
+      conversationId: CONV_ID,
+      organizationId: ORG_ID,
+      current,
+      payload: {
+        blueprint: blueprintPayload({
+          dontRules: ['Não inventar disponibilidade.'],
+        }).blueprint,
+        // SEM contextDecision — a decisão veio do state.
+      },
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.conversationBlueprint?.dontRules).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('confirmar disponibilidade'),
+      ]),
+    )
+  })
+
+  it('v2 (sem state.restrictions) ainda EXIGE o contextDecision para sold-out', async () => {
+    // backward-compat: a v2 não grava restrictions no state, então o gate continua
+    // exigindo o contextDecision inline.
+    const current = patchBuilderState(parseBuilderState(undefined), {
+      journeyVersion: 2,
+      project: { objective: 'Qualificar leads' },
+      sourceIngestion: {
+        proposed: { differentiators: ['pronto e 100% vendido'] },
+      },
+    })
+
+    const res = await applyConversationBlueprint({
+      conversationId: CONV_ID,
+      organizationId: ORG_ID,
+      current,
+      payload: { blueprint: blueprintPayload().blueprint },
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('invalid')
+      expect(res.message).toMatch(/100% vendido\/esgotado/i)
+    }
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+})
+
+// ===========================================================================
+// FR-PRO-01 (F1 — Mensagens proativas, design-time) — unit do handler
+// `applyProactive`.
+//
+// É uma CAPACIDADE (toggle silencioso de Capacidades), NÃO um passo de jornada:
+// grava o subtree `builderState.proactive.{followUp,reminders,importantDates}` CRU
+// e NÃO flipa sentinel nem emite evento de funil. Resolve a posse pelo
+// `projectId @unique` (findUnique, FORA da tx), igual a `applySentinelAck`. F1 só
+// recomenda+persiste — nenhum envio. Mocks de database/journey-events idem acima.
+//
+// Cobre:
+//   - grava os 3 flags num único write org-scoped; nenhum sentinel tocado;
+//   - default off: subtree ausente parseia para `proactive: undefined`;
+//   - substitui o subtree INTEIRO (não preserva flags antigas via deep-merge);
+//   - NÃO emite evento de funil; subtrees não-relacionados sobrevivem;
+//   - falha de posse (not_found/forbidden) → sem write;
+//   - cross-org: posse por findUnique + write org-scoped.
+// ===========================================================================
+
+describe('applyProactive — FR-PRO-01 (F1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConvFindUnique.mockResolvedValue({ id: CONV_ID, organizationId: ORG_ID })
+    mockConvFindFirst.mockResolvedValue({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+      }),
+    })
+    mockConvUpdateMany.mockResolvedValue({ count: 1 })
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProjectConversation: {
+            findFirst: mockConvFindFirst,
+            updateMany: mockConvUpdateMany,
+          },
+        }),
+    )
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  function submitProactive(payload: {
+    followUp: boolean
+    reminders: boolean
+    importantDates: boolean
+  }) {
+    return applyProactive({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+      payload,
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Default off + grava os 3 flags
+  // -------------------------------------------------------------------------
+  it('default off: subtree ausente parseia para proactive undefined', () => {
+    const empty = parseBuilderState(undefined)
+    expect(empty.proactive).toBeUndefined()
+  })
+
+  it('grava os 3 flags (todos on) num único write org-scoped', async () => {
+    const res = await submitProactive({
+      followUp: true,
+      reminders: true,
+      importantDates: true,
+    })
+
+    expect(res.ok).toBe(true)
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockConvUpdateMany).toHaveBeenCalledOnce()
+
+    const next = writtenConvState()
+    expect(next.proactive).toEqual({
+      followUp: true,
+      reminders: true,
+      importantDates: true,
+    })
+  })
+
+  it('grava seleção parcial (só follow-up) e mantém os demais false', async () => {
+    const res = await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.proactive).toEqual({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+  })
+
+  it('desligar (todos false) grava o subtree com os 3 flags em false', async () => {
+    const res = await submitProactive({
+      followUp: false,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.proactive).toEqual({
+      followUp: false,
+      reminders: false,
+      importantDates: false,
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // NÃO toca sentinels nem emite funil; substitui subtree inteiro
+  // -------------------------------------------------------------------------
+  it('NÃO flipa nenhum sentinel (é capacidade, não passo)', async () => {
+    await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    const next = writtenConvState()
+    // O subtree de confirmações segue idêntico ao default (nada flipado).
+    expect(next.confirmations).toEqual(parseBuilderState(undefined).confirmations)
+  })
+
+  it('NÃO emite evento de funil (proactive fora do vocabulário)', async () => {
+    await submitProactive({
+      followUp: true,
+      reminders: true,
+      importantDates: false,
+    })
+
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+
+  it('substitui o subtree INTEIRO ao reconfigurar (não preserva flags antigas)', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        proactive: { followUp: true, reminders: true, importantDates: true },
+      }),
+    })
+
+    await submitProactive({
+      followUp: false,
+      reminders: false,
+      importantDates: true,
+    })
+
+    const next = writtenConvState()
+    // O deep-merge preservaria followUp/reminders true; o write cru os zera.
+    expect(next.proactive).toEqual({
+      followUp: false,
+      reminders: false,
+      importantDates: true,
+    })
+  })
+
+  it('subtrees não-relacionados sobrevivem ao patch da capacidade', async () => {
+    mockConvFindFirst.mockResolvedValueOnce({
+      builderState: patchBuilderState(parseBuilderState(undefined), {
+        journeyVersion: 2,
+        persona: { tone: 'cordial' },
+        confirmations: { persona: true },
+      }),
+    })
+
+    const res = await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(true)
+    const next = writtenConvState()
+    expect(next.persona.tone).toBe('cordial')
+    expect(next.confirmations.persona).toBe(true)
+    expect(next.proactive?.followUp).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // ACK ramifica por estado (ligou x desligou) + aviso de compliance
+  // -------------------------------------------------------------------------
+  it('ACK ao ligar menciona o aviso de compliance (janela 24h / template)', async () => {
+    const res = await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/proativ/i)
+      expect(res.cardInstruction).toMatch(/24h/i)
+      expect(res.cardInstruction).toMatch(/template aprovado/i)
+    }
+  })
+
+  it('ACK ao desligar diz que o agente permanece reativo (copy distinta)', async () => {
+    const res = await submitProactive({
+      followUp: false,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.cardInstruction).toMatch(/desligou/i)
+      expect(res.cardInstruction).toMatch(/reativo/i)
+      // O caminho desligado NÃO repete o aviso de compliance.
+      expect(res.cardInstruction).not.toMatch(/template aprovado/i)
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Falha de posse — NENHUM write
+  // -------------------------------------------------------------------------
+  it('conversa inexistente → not_found, sem write', async () => {
+    mockConvFindUnique.mockResolvedValueOnce(null)
+
+    const res = await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('not_found')
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  it('conversa de outra org → forbidden, sem write', async () => {
+    mockConvFindUnique.mockResolvedValueOnce({
+      id: CONV_ID,
+      organizationId: 'org-OUTRA',
+    })
+
+    const res = await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe('forbidden')
+    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockConvUpdateMany).not.toHaveBeenCalled()
+  })
+
+  // -------------------------------------------------------------------------
+  // Boundary de tenant — posse por findUnique + write org-scoped
+  // -------------------------------------------------------------------------
+  it('cross-org: resolve a posse pelo projectId e escreve SEMPRE org-scoped', async () => {
+    await submitProactive({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+
+    expect(mockConvFindUnique).toHaveBeenCalledWith({
+      where: { projectId: PROJECT_ID },
+      select: { id: true, organizationId: true },
+    })
+    expect(mockConvFindFirst).toHaveBeenCalledWith({
+      where: { id: CONV_ID, organizationId: ORG_ID },
+      select: { builderState: true },
+    })
+    const convCall = mockConvUpdateMany.mock.calls[0]![0] as {
+      where: { id: string; organizationId: string }
+    }
+    expect(convCall.where).toEqual({ id: CONV_ID, organizationId: ORG_ID })
   })
 })

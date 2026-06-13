@@ -61,6 +61,58 @@ describe('card-submit schemas — Integration Builder (W2, T50)', () => {
       })
       expect(result.success).toBe(true)
     })
+
+    it('preserves route-level ackMode without keeping arbitrary unknown fields', () => {
+      const result = cardSubmitRouteBodySchema.safeParse({
+        cardKey: 'handoff',
+        mode: 'roleta',
+        alsoSchedule: false,
+        steps: [],
+        members: [],
+        ackMode: 'silent',
+        ignored: 'strip-me',
+      })
+
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.ackMode).toBe('silent')
+        expect('ignored' in result.data).toBe(false)
+      }
+    })
+
+    it('accepts conversation_blueprint generate without requiring a blueprint body', () => {
+      const result = cardSubmitRouteBodySchema.safeParse({
+        cardKey: 'conversation_blueprint',
+        action: 'generate',
+      })
+
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.cardKey).toBe('conversation_blueprint')
+        if (result.data.cardKey === 'conversation_blueprint') {
+          expect(result.data.action).toBe('generate')
+        }
+      }
+    })
+
+    it('accepts conversation_blueprint generate with a critical context decision', () => {
+      const result = cardSubmitRouteBodySchema.safeParse({
+        cardKey: 'conversation_blueprint',
+        action: 'generate',
+        contextDecision: {
+          kind: 'sold_out',
+          strategy: 'interest_list',
+        },
+      })
+
+      expect(result.success).toBe(true)
+      if (result.success && result.data.cardKey === 'conversation_blueprint') {
+        expect(result.data.contextDecision).toEqual({
+          kind: 'sold_out',
+          strategy: 'interest_list',
+        })
+      }
+    })
   })
 
   describe('cardSubmitRouteBodySchema — rejects malformed payloads', () => {
@@ -84,6 +136,19 @@ describe('card-submit schemas — Integration Builder (W2, T50)', () => {
       const result = cardSubmitRouteBodySchema.safeParse({
         cardKey: 'integration_credentials',
       })
+      expect(result.success).toBe(false)
+    })
+
+    it('rejects conversation_blueprint context decisions with unknown strategies', () => {
+      const result = cardSubmitRouteBodySchema.safeParse({
+        cardKey: 'conversation_blueprint',
+        action: 'generate',
+        contextDecision: {
+          kind: 'sold_out',
+          strategy: 'sell_anyway',
+        },
+      })
+
       expect(result.success).toBe(false)
     })
   })

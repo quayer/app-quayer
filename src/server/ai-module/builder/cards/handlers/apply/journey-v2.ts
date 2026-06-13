@@ -18,14 +18,21 @@ import {
   patchBuilderState,
   applyConfirmation,
   clearCapturedProposals,
+  invalidateRefinement,
   type BuilderState,
   type DeepPartial,
   type ConfirmationKey,
 } from '../../builder-state'
 import type {
   AgentReviewPayload,
+  BuildModePayload,
   BusinessIdentityPayload,
   ChannelPlatformPayload,
+  ConversationBlueprintPayload,
+  MissionPayload,
+  ProactivePayload,
+  QualificationPayload,
+  RestrictionsPayload,
   TestDrivePayload,
 } from '../../card-submit.schemas'
 import { channelPlatformWhatsappModeOk } from '../../card-submit.schemas'
@@ -42,6 +49,17 @@ import {
   normalizeIdentityCard,
   type AgentIdentityCard,
 } from '@/lib/agent-identity-card'
+import {
+  blueprintHasBlockingIssues,
+  normalizeConversationBlueprint,
+  validateConversationBlueprint,
+} from '../../../playbook/blueprint-helpers'
+import {
+  buildDesignerInput,
+  hasSoldOutSourceSignal,
+  soldOutStrategyKnownLimit,
+} from '../../../playbook/designer-input'
+import { playbookDesignerSubAgent } from '../../../sub-agents'
 
 /** Clamp a free-text field server-side (trim + max length). `undefined`/empty → undefined. */
 function sanitizeText(raw: string | undefined, max: number): string | undefined {
@@ -59,6 +77,59 @@ function summarizeList(items: readonly string[], fallback: string): string {
   const head = clean.slice(0, 3).join(', ')
   const extra = clean.length > 3 ? ` e mais ${clean.length - 3}` : ''
   return `${head}${extra}`
+}
+
+type ConversationBlueprintContextDecision = NonNullable<
+  ConversationBlueprintPayload['contextDecision']
+>
+
+/** A estratégia de esgotado normalizada, vinda do state OU do contextDecision inline. */
+type ResolvedSoldOut = {
+  strategy: ConversationBlueprintContextDecision['strategy']
+  note?: string
+}
+
+/**
+ * FR-44 (backlog #3) — resolve a decisão de esgotado a aplicar no plano de
+ * atendimento, com PRECEDÊNCIA para o passo `restrictions` da fase Revisar (v3,
+ * gravado no state ANTES do plano). Quando ausente, cai para o `contextDecision`
+ * inline (v2 — backward-compatible). Retorna `undefined` quando NENHUMA das duas
+ * fontes carrega a decisão.
+ */
+function resolveSoldOutDecision(
+  state: BuilderState,
+  contextDecision: ConversationBlueprintContextDecision | undefined,
+): ResolvedSoldOut | undefined {
+  const stateStrategy = state.restrictions?.soldOutStrategy
+  if (stateStrategy) {
+    const note = sanitizeText(state.restrictions?.note, 300)
+    return { strategy: stateStrategy, ...(note ? { note } : {}) }
+  }
+  if (contextDecision?.kind === 'sold_out') {
+    return { strategy: contextDecision.strategy, note: contextDecision.note }
+  }
+  return undefined
+}
+
+function soldOutDecisionLabel(
+  decision: ResolvedSoldOut | undefined,
+): string | undefined {
+  if (!decision) return undefined
+  if (decision.strategy === 'interest_list') return 'lista de interesse/alternativas'
+  if (decision.strategy === 'human_confirm') return 'confirmar disponibilidade com humano'
+  return 'disponibilidade confirmada pelo usuário'
+}
+
+function appendRequiredDontRule(
+  rules: readonly string[],
+  requiredRule: string | undefined,
+): string[] {
+  if (!requiredRule) return [...rules]
+  const normalized = requiredRule.trim().toLowerCase()
+  const withoutDuplicate = rules.filter(
+    (rule) => rule.trim().toLowerCase() !== normalized,
+  )
+  return [...withoutDuplicate.slice(0, 19), requiredRule]
 }
 
 /**
@@ -148,7 +219,10 @@ export async function applyBusinessIdentity(args: {
           }
         : {}),
     }
-    const next = applyConfirmation(patchBuilderState(fresh, patch), 'businessIdentity')
+    const next = invalidateRefinement(
+      applyConfirmation(patchBuilderState(fresh, patch), 'businessIdentity'),
+      'O card business_identity alterou a identidade testada pelo refinamento.',
+    )
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversationId, organizationId },
@@ -187,6 +261,602 @@ export async function applyBusinessIdentity(args: {
 }
 
 /**
+ * Mapeia a `role` (string livre do card) para o enum FECHADO do funil
+ * (`mission_selected.role`). Retorna `undefined` quando não casa — o evento então
+ * OMITE a chave (NFR-02: sem free-text/PII no metadata do funil).
+ */
+const MISSION_ROLE_ENUM = [
+  'sdr',
+  'closer',
+  'secretaria',
+  'suporte',
+  'vendas',
+  'cobranca',
+  'onboarding',
+] as const
+type MissionRoleEnum = (typeof MISSION_ROLE_ENUM)[number]
+function toMissionRoleEnum(raw: string | undefined): MissionRoleEnum | undefined {
+  if (!raw) return undefined
+  const v = raw.trim().toLowerCase()
+  return (MISSION_ROLE_ENUM as readonly string[]).includes(v)
+    ? (v as MissionRoleEnum)
+    : undefined
+}
+
+/**
+ * Mapeia o `objective` (string livre do card) para o enum FECHADO do funil
+ * (`mission_selected.objectiveKind`). `undefined` quando não casa — chave omitida.
+ */
+const MISSION_OBJECTIVE_ENUM = [
+  'qualificar',
+  'agendar',
+  'vender',
+  'suportar',
+  'transferir',
+] as const
+type MissionObjectiveEnum = (typeof MISSION_OBJECTIVE_ENUM)[number]
+function toMissionObjectiveEnum(
+  raw: string | undefined,
+): MissionObjectiveEnum | undefined {
+  if (!raw) return undefined
+  const v = raw.trim().toLowerCase()
+  return (MISSION_OBJECTIVE_ENUM as readonly string[]).includes(v)
+    ? (v as MissionObjectiveEnum)
+    : undefined
+}
+
+/**
+ * T117 (mission-first v3 — FR-37/FR-48) — mission: o usuário escolheu a MISSÃO do
+ * agente numa única decisão. Espelho FIEL de `applyBusinessIdentity` (tx atômica
+ * org-scoped, re-read FRESCO, applyConfirmation, invalidateRefinement, evento
+ * DEPOIS do write), mas grava o subtree `mission` CRU (não `patchBuilderState`).
+ * `role`/`objective` (strings do card) são mapeados para os enums quando válidos,
+ * senão omitidos (NFR-02: sem free-text/PII no funil). Self-contained.
+ */
+export async function applyMission(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  current: BuilderState
+  payload: Pick<
+    MissionPayload,
+    'key' | 'label' | 'role' | 'objective' | 'addons' | 'custom'
+  >
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, projectId, organizationId, current, payload } = args
+
+  // NFR-12 hardening: o passo Missão só existe em projetos mission-first. Rejeita
+  // um POST forjado a um projeto v2 puro (onde o engine nem surfa o passo).
+  if (current.missionFirst !== true) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'O passo de missão não se aplica a este projeto.',
+    }
+  }
+
+  const key = sanitizeText(payload.key, 120)
+  if (!key) {
+    return { ok: false, reason: 'invalid', message: 'Missão é obrigatória' }
+  }
+  const label = sanitizeText(payload.label, 160)
+  const role = sanitizeText(payload.role, 60)
+  const objective = sanitizeText(payload.objective, 60)
+  // Re-trim/dedupe/clamp dos add-ons server-side (nunca confia no body).
+  const addons = Array.from(
+    new Set(
+      payload.addons
+        .map((item) => sanitizeText(item, 60))
+        .filter((item): item is string => item !== undefined),
+    ),
+  ).slice(0, 12)
+  const custom = payload.custom === true
+
+  // Atomic read-modify-write: re-lê o state MAIS recente dentro da transação
+  // (fallback ao `current` quando o read in-tx erra — test doubles) e substitui
+  // o subtree `mission` INTEIRO. Diferente de `applyBusinessIdentity` (que usa
+  // patchBuilderState/deep-merge): o deep-merge preservaria `addons`/`role` antigos
+  // ao TROCAR de missão, então gravamos o subtree cru. (Mesmo racional de applyChannelPlatform.)
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    const withMission: BuilderState = {
+      ...fresh,
+      mission: {
+        key,
+        ...(label ? { label } : {}),
+        ...(role ? { role } : {}),
+        ...(objective ? { objective } : {}),
+        addons,
+        custom,
+      },
+    }
+    const next = invalidateRefinement(
+      applyConfirmation(withMission, 'mission'),
+      'O card mission alterou a missão testada pelo refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  // FR-48 — a missão foi escolhida. Fire-and-forget, nunca lança. Metadata FECHADO:
+  // só os enums casados entram (strings free-text/PII NUNCA vão para o funil).
+  const roleEnum = toMissionRoleEnum(role)
+  const objectiveKind = toMissionObjectiveEnum(objective)
+  await trackJourneyEvent({
+    organizationId,
+    projectId,
+    journeyVersion: current.journeyVersion,
+    event: 'mission_selected',
+    ...(roleEnum || objectiveKind
+      ? {
+          metadata: {
+            ...(roleEnum ? { role: roleEnum } : {}),
+            ...(objectiveKind ? { objectiveKind } : {}),
+          },
+        }
+      : {}),
+  })
+
+  const missionLabel = label ?? key
+  const addonNote =
+    addons.length > 0 ? ` Capacidades extras ligadas: ${addons.join(', ')}.` : ''
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário ESCOLHEU a missão do agente via card: "${missionLabel}".` +
+      addonNote +
+      ' Essa missão define o foco do agente e já faz parte do contexto. ' +
+      'Use-a ao montar o agente e siga para o próximo passo da jornada. ' +
+      'Não reabra o card de Missão.',
+  }
+}
+
+/** Rótulo humano (linguagem de negócio, FR-49) de cada modo de construção. */
+const BUILD_MODE_LABELS: Record<BuildModePayload['mode'], string> = {
+  recomendado: 'Montar agora com boas práticas',
+  pesquisa: 'Pesquisar referências antes',
+  livre: 'Eu digo como quero',
+}
+
+/**
+ * FR-39 (mission-first v3) — build_mode: o usuário escolheu COMO quer construir o
+ * agente numa única decisão. Espelho MAIS LEVE de `applyMission` (tx atômica
+ * org-scoped, re-read FRESCO, applyConfirmation, invalidateRefinement), mas grava
+ * apenas o escalar top-level `buildMode` (via `patchBuilderState` — last-write-wins
+ * em escalar é seguro) e NÃO emite evento de funil (`build_mode` não pertence ao
+ * vocabulário fechado de `trackJourneyEvent`). Self-contained.
+ */
+export async function applyBuildMode(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  current: BuilderState
+  payload: Pick<BuildModePayload, 'mode'>
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, organizationId, current, payload } = args
+  const mode = payload.mode
+
+  // NFR-12 hardening: o passo Modo de construção só existe em projetos mission-first.
+  if (current.missionFirst !== true) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'O passo de modo de construção não se aplica a este projeto.',
+    }
+  }
+
+  // Atomic read-modify-write: re-lê o state MAIS recente dentro da transação
+  // (fallback ao `current` quando o read in-tx erra — test doubles), grava o
+  // escalar `buildMode` e flipa o sentinel num único `updateMany` org-scoped.
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    const next = invalidateRefinement(
+      applyConfirmation(patchBuilderState(fresh, { buildMode: mode }), 'buildMode'),
+      'O card build_mode alterou o modo de construção testado pelo refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário ESCOLHEU o modo de construção via card: "${BUILD_MODE_LABELS[mode]}". ` +
+      'Adapte sua abordagem nos próximos passos a essa preferência ' +
+      '(recomendado = montar direto com boas práticas; pesquisa = trazer referências antes; ' +
+      'livre = deixar o usuário ditar como o agente trabalha) e siga para o próximo passo da jornada. ' +
+      'Não reabra o card de modo de construção.',
+  }
+}
+
+/**
+ * FR-44 (critérios de qualificação — backlog #10) — qualification: o usuário
+ * escolheu (multi-seleção) QUAIS dados o agente coleta de cada contato para
+ * considerar o atendimento bom. Espelho FIEL de `applyBuildMode`/`applyMission`
+ * (tx atômica org-scoped, re-read FRESCO, applyConfirmation, invalidateRefinement),
+ * mas grava o subtree `qualification` CRU (não `patchBuilderState`): o subtree é uma
+ * LISTA, e o deep-merge preservaria campos antigos ao trocar a seleção, então
+ * substituímos o subtree inteiro (mesmo racional de applyMission/applyChannelPlatform).
+ * NÃO emite evento de funil (`qualification` não pertence ao vocabulário fechado de
+ * `trackJourneyEvent`). Self-contained.
+ */
+export async function applyQualification(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  current: BuilderState
+  payload: Pick<QualificationPayload, 'fields'>
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, organizationId, current, payload } = args
+
+  // NFR-12 hardening: o passo de qualificação só existe em projetos mission-first
+  // (o engine v2 só o surfa quando `missionFirst === true`). Rejeita um POST forjado
+  // a um projeto v2 puro (onde o engine nem surfa o passo).
+  if (current.missionFirst !== true) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'O passo de critérios de qualificação não se aplica a este projeto.',
+    }
+  }
+
+  // Re-trim/dedupe/clamp dos campos server-side (nunca confia no body), cap 24.
+  const fields = Array.from(
+    new Set(
+      payload.fields
+        .map((item) => sanitizeText(item, 120))
+        .filter((item): item is string => item !== undefined),
+    ),
+  ).slice(0, 24)
+
+  // Atomic read-modify-write: re-lê o state MAIS recente dentro da transação
+  // (fallback ao `current` quando o read in-tx erra — test doubles) e substitui o
+  // subtree `qualification` INTEIRO (lista → last-write-wins, não deep-merge).
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    const withQualification: BuilderState = {
+      ...fresh,
+      qualification: { fields },
+    }
+    const next = invalidateRefinement(
+      applyConfirmation(withQualification, 'qualification'),
+      'O card qualification alterou os critérios testados pelo refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const fieldNote =
+    fields.length > 0
+      ? `Dados a coletar: ${fields.join(', ')}.`
+      : 'O usuário optou por não definir critérios obrigatórios de qualificação.'
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário DEFINIU os critérios de qualificação via card. ${fieldNote} ` +
+      'Use esses critérios ao montar o plano de atendimento (o agente coleta esses dados antes de qualificar o contato) e siga para o próximo passo da jornada. ' +
+      'Não reabra o card de critérios de qualificação.',
+  }
+}
+
+/** Rótulo humano (linguagem de negócio, FR-49) de cada estratégia de esgotado. */
+const SOLD_OUT_STRATEGY_LABELS: Record<
+  RestrictionsPayload['soldOutStrategy'],
+  string
+> = {
+  interest_list: 'captar lista de interesse/alternativas',
+  human_confirm: 'confirmar disponibilidade com consultor',
+  available_confirmed: 'usar disponibilidade confirmada pelo usuário',
+}
+
+/**
+ * FR-44 (restrições comerciais — backlog #3) — restrictions: o usuário escolheu COMO
+ * o agente trata uma fonte 100% vendida/esgotada. Espelho FIEL de
+ * `applyQualification`/`applyMission` (tx atômica org-scoped, re-read FRESCO,
+ * applyConfirmation, invalidateRefinement), gravando o subtree `restrictions` CRU
+ * (não `patchBuilderState`): ao trocar a estratégia, o deep-merge preservaria a `note`
+ * antiga, então substituímos o subtree inteiro. NÃO emite evento de funil
+ * (`restrictions` não pertence ao vocabulário fechado de `trackJourneyEvent`).
+ * Self-contained. A decisão gravada aqui também destrava o gate do
+ * `conversation_blueprint` (substitui o `contextDecision` inline da v2 — backward-compatible).
+ */
+export async function applyRestrictions(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  current: BuilderState
+  payload: Pick<RestrictionsPayload, 'soldOutStrategy' | 'note'>
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, organizationId, current, payload } = args
+
+  // NFR-12 hardening: o passo de restrições só existe em projetos mission-first
+  // (o engine v2 só o surfa quando `missionFirst === true` e a fonte sinaliza
+  // esgotado). Rejeita um POST forjado a um projeto v2 puro.
+  if (current.missionFirst !== true) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'O passo de restrições comerciais não se aplica a este projeto.',
+    }
+  }
+
+  const soldOutStrategy = payload.soldOutStrategy
+  const note = sanitizeText(payload.note, 300)
+
+  // Atomic read-modify-write: re-lê o state MAIS recente dentro da transação
+  // (fallback ao `current` quando o read in-tx erra — test doubles) e substitui o
+  // subtree `restrictions` INTEIRO (escalar+nota → last-write-wins, não deep-merge).
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+
+    const withRestrictions: BuilderState = {
+      ...fresh,
+      restrictions: {
+        soldOutStrategy,
+        ...(note ? { note } : {}),
+      },
+    }
+    const next = invalidateRefinement(
+      applyConfirmation(withRestrictions, 'restrictions'),
+      'O card restrictions alterou as restrições testadas pelo refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const noteNote = note ? ` Observação do usuário: ${note}.` : ''
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário DEFINIU a restrição comercial via card: ${SOLD_OUT_STRATEGY_LABELS[soldOutStrategy]}.` +
+      noteNote +
+      ' Essa direção já faz parte do contexto do agente — use-a ao montar o plano de atendimento ' +
+      '(não prometa disponibilidade/preço/visita fora do que a estratégia permite) e siga para o próximo passo da jornada. ' +
+      'Não reabra o card de restrições comerciais.',
+  }
+}
+
+/**
+ * Builder Playbook — conversation_blueprint: gera uma proposta de roteiro a
+ * partir do estado já coletado. Este caminho é acionado pelo próprio card quando
+ * o active-step aparece vazio, para não depender do LLM lembrar de chamar a tool
+ * `generate_conversation_blueprint`.
+ *
+ * Grava somente `status: proposed`; a aprovação continua sendo uma ação humana
+ * explícita no mesmo card.
+ */
+export async function generateConversationBlueprintFromCard(args: {
+  conversationId: string
+  projectId: string
+  organizationId: string
+  userId?: string
+  current: BuilderState
+  contextDecision?: ConversationBlueprintContextDecision
+}): Promise<ApplyCardSubmitResult> {
+  const {
+    conversationId,
+    projectId,
+    organizationId,
+    userId,
+    current,
+    contextDecision,
+  } = args
+
+  // FR-44 (backlog #3) — a decisão de esgotado pode vir do passo `restrictions`
+  // (v3, gravado no state ANTES do plano) OU do `contextDecision` inline (v2). Se a
+  // v3 já decidiu no state, NÃO exigimos o contextDecision (backward-compatible: a
+  // v2 segue funcionando pelo contextDecision).
+  const resolvedSoldOut = resolveSoldOutDecision(current, contextDecision)
+  if (hasSoldOutSourceSignal(current) && resolvedSoldOut === undefined) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message:
+        'A fonte indica que o empreendimento está 100% vendido/esgotado. Escolha no card como o agente deve tratar essa restrição antes de gerar o plano de atendimento.',
+    }
+  }
+
+  const decisionLimit = resolvedSoldOut
+    ? soldOutStrategyKnownLimit(resolvedSoldOut.strategy, resolvedSoldOut.note)
+    : undefined
+  const designerInput = buildDesignerInput(current, {
+    extraKnownLimits: decisionLimit ? [decisionLimit] : [],
+  })
+  if (!designerInput) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message:
+        'Defina primeiro o objetivo do agente antes de gerar o plano de atendimento.',
+    }
+  }
+
+  const designed = await playbookDesignerSubAgent.run(designerInput, {
+    organizationId,
+    userId: userId ?? 'system',
+    projectId,
+  })
+  if (!designed.success) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: designed.error,
+    }
+  }
+
+  const blueprint = normalizeConversationBlueprint({
+    ...designed.data.blueprint,
+    status: 'proposed',
+    objective: designerInput.objective,
+    niche: designerInput.niche,
+  })
+  const issues = validateConversationBlueprint(blueprint)
+
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+    const next = invalidateRefinement(
+      patchBuilderState(fresh, {
+        conversationBlueprint: blueprint,
+      }),
+      'Uma nova proposta de plano de atendimento foi gerada depois do refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const warnings = [...designed.data.warnings, ...issues.map((i) => i.message)]
+  const decisionLabel = soldOutDecisionLabel(resolvedSoldOut)
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O plano de atendimento foi GERADO via card (${blueprint.stages.length} etapa(s), ${blueprint.questions.length} pergunta(s)). ` +
+      (decisionLabel
+        ? `Restrição crítica resolvida pelo usuário: ${decisionLabel}. `
+        : '') +
+      (warnings.length > 0 ? `Avisos: ${warnings.join(' ')} ` : '') +
+      'Mostre o card conversation_blueprint para revisão e aguarde o usuário aprovar; não gere o prompt final antes da aprovação.',
+  }
+}
+
+/**
+ * Builder Playbook — conversation_blueprint: aprova o roteiro conversacional
+ * proposto/editado pelo usuário. Sem sentinel novo: o engine v2 considera o
+ * passo concluído quando `conversationBlueprint.status === 'approved'`.
+ */
+export async function applyConversationBlueprint(args: {
+  conversationId: string
+  organizationId: string
+  current: BuilderState
+  payload: {
+    blueprint: NonNullable<ConversationBlueprintPayload['blueprint']>
+    contextDecision?: ConversationBlueprintContextDecision
+  }
+}): Promise<ApplyCardSubmitResult> {
+  const { conversationId, organizationId, current, payload } = args
+
+  // FR-44 (backlog #3) — a decisão de esgotado pode vir do passo `restrictions`
+  // (v3, gravado no state) OU do `contextDecision` inline (v2). Se a v3 já decidiu,
+  // NÃO exigimos o contextDecision (backward-compatible).
+  const resolvedSoldOut = resolveSoldOutDecision(current, payload.contextDecision)
+  if (hasSoldOutSourceSignal(current) && resolvedSoldOut === undefined) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message:
+        'A fonte indica que o empreendimento está 100% vendido/esgotado. Escolha no card como o agente deve tratar essa restrição antes de aprovar o plano de atendimento.',
+    }
+  }
+
+  const decisionLimit = resolvedSoldOut
+    ? soldOutStrategyKnownLimit(resolvedSoldOut.strategy, resolvedSoldOut.note)
+    : undefined
+
+  const approved = normalizeConversationBlueprint({
+    ...payload.blueprint,
+    dontRules: appendRequiredDontRule(payload.blueprint.dontRules, decisionLimit),
+    status: 'approved',
+    approvedAt: new Date().toISOString(),
+  })
+  const issues = validateConversationBlueprint(approved)
+  if (blueprintHasBlockingIssues(issues)) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: issues.map((issue) => issue.message).join(' '),
+    }
+  }
+
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { builderState: true },
+    })
+    const fresh =
+      row?.builderState != null ? parseBuilderState(row.builderState) : current
+    const next = invalidateRefinement(
+      patchBuilderState(fresh, {
+        conversationBlueprint: approved,
+      }),
+      'O plano de atendimento mudou depois do refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const toolCount = approved.toolTriggers.filter((trigger) => trigger.active).length
+  const handoffCount = approved.handoffTriggers.length
+  const decisionLabel = soldOutDecisionLabel(resolvedSoldOut)
+  const receiptParts = [
+    `${approved.questions.length} pergunta(s)`,
+    `${approved.stages.length} etapa(s)`,
+    ...(handoffCount > 0 ? [`${handoffCount} gatilho(s) de humano`] : []),
+    ...(toolCount > 0 ? [`${toolCount} ferramenta(s) prevista(s)`] : []),
+  ]
+  return {
+    ok: true,
+    conversationId,
+    cardInstruction:
+      `O usuário APROVOU o plano de atendimento via card (${receiptParts.join(', ')}). ` +
+      (decisionLabel
+        ? `Restrição crítica resolvida pelo usuário: ${decisionLabel}. `
+        : '') +
+      'Use este ConversationBlueprint como contrato para gerar o prompt final: preserve as perguntas, regras de pulo, critérios, limites e gatilhos. ' +
+      'Agora prossiga para gerar o prompt com generate_prompt_anatomy; não reabra o card de plano de atendimento.',
+  }
+}
+
+/**
  * T31 (plan §3.3) — flip ATÔMICO e org-scoped de um único sentinel server-side
  * para os acks `knowledge`/`media`. Self-contained (igual a `applyBusinessIdentity`):
  * resolve a conversa por `projectId` org-scoped (prova de posse → `not_found` quando
@@ -203,6 +873,7 @@ async function applySentinelAck(args: {
   organizationId: string
   sentinel: ConfirmationKey
   cardInstruction: string
+  invalidationReason?: string
 }): Promise<ApplyCardSubmitResult> {
   const { projectId, organizationId, sentinel, cardInstruction } = args
 
@@ -224,7 +895,10 @@ async function applySentinelAck(args: {
     })
     // null/garbage/legado → DEFAULT_BUILDER_STATE (parseBuilderState nunca lança).
     const fresh = parseBuilderState(row?.builderState)
-    const next = applyConfirmation(fresh, sentinel)
+    const confirmed = applyConfirmation(fresh, sentinel)
+    const next = args.invalidationReason
+      ? invalidateRefinement(confirmed, args.invalidationReason)
+      : confirmed
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversation.id, organizationId },
@@ -247,6 +921,8 @@ export async function applyKnowledgeAck(args: {
   return applySentinelAck({
     ...args,
     sentinel: 'knowledge',
+    invalidationReason:
+      'O passo knowledge alterou o contexto de conhecimento testado pelo refinamento.',
     cardInstruction:
       'O usuário reconheceu o passo de base de conhecimento. ' +
       'Considere o conteúdo já anexado (se houver) ao responder e siga para o próximo passo. ' +
@@ -266,10 +942,127 @@ export async function applyMediaAck(args: {
   return applySentinelAck({
     ...args,
     sentinel: 'media',
+    invalidationReason:
+      'O passo media alterou o contexto de mídia testado pelo refinamento.',
     cardInstruction:
       'O usuário reconheceu o passo de catálogo de mídia. ' +
       'Use as fotos/vídeos já cadastrados (se houver) quando fizer sentido e siga para o próximo passo. ' +
       'Não reabra o card de Mídia.',
+  })
+}
+
+/**
+ * FR-PRO-01 (F1 — Mensagens proativas / Automações, design-time) — applyProactive:
+ * persiste o toggle SILENCIOSO da CAPACIDADE "Mensagens proativas" da seção
+ * Capacidades (FR-43). É uma CAPACIDADE, NÃO um passo de jornada: grava o subtree
+ * `builderState.proactive.{followUp,reminders,importantDates}` e NÃO flipa nenhum
+ * sentinel nem emite evento de funil (não pertence ao vocabulário fechado de
+ * `trackJourneyEvent`, e os 3 presets não gateiam a jornada nem o deploy).
+ *
+ * Self-contained (mesmo idiom de `applySentinelAck`): resolve a posse da conversa
+ * pelo `projectId @unique` (prova de tenant → not_found/forbidden) ANTES da
+ * transação; dentro da tx re-lê o estado MAIS recente (para não atropelar um submit
+ * concorrente) e SUBSTITUI o subtree `proactive` INTEIRO (last-write-wins: o
+ * deep-merge preservaria flags antigas, então gravamos cru — mesmo racional de
+ * applyChannelPlatform/applyRestrictions). Invalida o refinamento (uma capacidade
+ * mudou o que foi testado). F1 só persiste — NENHUM envio (runtime F2-F4 é épico
+ * próprio). Org-scoped em TODO write. No `any`.
+ */
+export async function applyProactive(args: {
+  projectId: string
+  organizationId: string
+  payload: Pick<ProactivePayload, 'followUp' | 'reminders' | 'importantDates'>
+}): Promise<ApplyCardSubmitResult> {
+  const { projectId, organizationId, payload } = args
+
+  const conversation = await database.builderProjectConversation.findUnique({
+    where: { projectId },
+    select: { id: true, organizationId: true },
+  })
+  if (!conversation) {
+    return { ok: false, reason: 'not_found', message: 'Conversa do Builder não encontrada' }
+  }
+  if (conversation.organizationId !== organizationId) {
+    return { ok: false, reason: 'forbidden', message: 'Acesso negado a esta conversa' }
+  }
+
+  const proactive = {
+    followUp: payload.followUp,
+    reminders: payload.reminders,
+    importantDates: payload.importantDates,
+  }
+
+  await database.$transaction(async (tx) => {
+    const row = await tx.builderProjectConversation.findFirst({
+      where: { id: conversation.id, organizationId },
+      select: { builderState: true },
+    })
+    // null/garbage/legado → DEFAULT_BUILDER_STATE (parseBuilderState nunca lança).
+    const fresh = parseBuilderState(row?.builderState)
+    // Substitui o subtree `proactive` INTEIRO (last-write-wins, não deep-merge).
+    const withProactive: BuilderState = { ...fresh, proactive }
+    const next = invalidateRefinement(
+      withProactive,
+      'A capacidade de mensagens proativas mudou o que foi testado pelo refinamento.',
+    )
+
+    await tx.builderProjectConversation.updateMany({
+      where: { id: conversation.id, organizationId },
+      data: { builderState: next as unknown as Prisma.InputJsonValue },
+    })
+  })
+
+  const anyOn = proactive.followUp || proactive.reminders || proactive.importantDates
+  return {
+    ok: true,
+    conversationId: conversation.id,
+    cardInstruction: anyOn
+      ? 'O usuário LIGOU a capacidade de mensagens proativas (automações). ' +
+        'Considere-a parte do contexto do agente. Lembre que envios fora da janela de 24h do WhatsApp exigem template aprovado.'
+      : 'O usuário DESLIGOU a capacidade de mensagens proativas. ' +
+        'O agente permanece reativo (só responde a mensagens recebidas).',
+  }
+}
+
+/**
+ * FR-46 (diagnóstico do Modo Pesquisa — backlog #9) — diagnosis: card READ-MOSTLY
+ * de ACK da fase Conhecer (surge DEPOIS de build_mode/source e ANTES de mission,
+ * quando `buildMode === 'pesquisa'`). É um ACK puro, espelho de
+ * `applyKnowledgeAck`/`applyMediaAck`: flipa o sentinel `confirmations.diagnosis`
+ * server-side via `applySentinelAck` (write atômico org-scoped, re-read FRESCO) —
+ * NADA vem do body. Diferente dos acks knowledge/media, ele tem a GUARDA NFR-12: o
+ * passo só existe em projetos mission-first (o engine v2 só o surfa quando
+ * `missionFirst === true && buildMode === 'pesquisa'`), então rejeitamos um POST
+ * forjado a um projeto v2 puro. NÃO emite evento de funil (`diagnosis` não pertence
+ * ao vocabulário fechado de `trackJourneyEvent`). Self-contained.
+ */
+export async function applyDiagnosis(args: {
+  projectId: string
+  organizationId: string
+  current: BuilderState
+}): Promise<ApplyCardSubmitResult> {
+  const { projectId, organizationId, current } = args
+
+  // NFR-12 hardening: o passo de diagnóstico só existe em projetos mission-first
+  // no Modo Pesquisa. Rejeita um POST forjado a um projeto v2 puro / outro modo.
+  if (current.missionFirst !== true) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: 'O passo de diagnóstico não se aplica a este projeto.',
+    }
+  }
+
+  return applySentinelAck({
+    projectId,
+    organizationId,
+    sentinel: 'diagnosis',
+    invalidationReason:
+      'O passo diagnosis alterou o contexto de pesquisa testado pelo refinamento.',
+    cardInstruction:
+      'O usuário REVISOU o diagnóstico do negócio (Modo Pesquisa) e confirmou para seguir. ' +
+      'Considere o que já foi entendido do negócio como contexto e prossiga para o próximo passo da jornada (a missão). ' +
+      'Não reabra o card de diagnóstico.',
   })
 }
 
@@ -404,13 +1197,19 @@ export async function applyChannelPlatform(args: {
     const fresh =
       row?.builderState != null ? parseBuilderState(row.builderState) : current
 
-    const patch: DeepPartial<BuilderState> = {
+    // Replace the whole channel subtree. `patchBuilderState` deep-merges and
+    // would preserve an old `whatsappMode` when switching to Instagram-only.
+    const withChannel: BuilderState = {
+      ...fresh,
       channel: {
         platforms,
         ...(whatsappMode ? { whatsappMode } : {}),
       },
     }
-    const next = applyConfirmation(patchBuilderState(fresh, patch), 'channelPlatform')
+    const next = invalidateRefinement(
+      applyConfirmation(withChannel, 'channelPlatform'),
+      'O card channel_platform alterou os canais testados pelo refinamento.',
+    )
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversationId, organizationId },
@@ -494,7 +1293,7 @@ function validateAgentReviewSections(
  * T24 (FR-05/FR-22) — agent_review: card COMPOSTO da fase Revisar. Funde persona +
  * serviços + horários + APROVAÇÃO DE CRIAÇÃO numa ÚNICA confirmação consolidada
  * (NFR-07: 1 decisão, 1 ACK em vez de 4) e, opcionalmente, aplica o disclosure
- * (seção avançada — antiga IdentityTab) no MESMO handler.
+ * (seção avançada de identidade) no MESMO handler.
  *
  * Fluxo:
  *  1. VALIDAÇÃO GRANULAR (FR-22) — antes de qualquer escrita. Em falha de uma
@@ -576,6 +1375,10 @@ export async function applyAgentReview(args: {
     approvedProposal = deriveApprovedAgentProposal(next)
     next = patchBuilderState(next, { proposal: approvedProposal })
     next = applyConfirmation(next, 'agentApproved')
+    next = invalidateRefinement(
+      next,
+      'O card agent_review alterou voz, escopo ou horários testados pelo refinamento.',
+    )
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversationId, organizationId },

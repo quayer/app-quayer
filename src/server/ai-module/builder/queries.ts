@@ -76,6 +76,11 @@ export async function getProjectDetail(
             connectionId: true,
           },
         },
+        conversation: {
+          select: {
+            builderState: true,
+          },
+        },
       },
     }).then((project) => {
       if (!project) return null

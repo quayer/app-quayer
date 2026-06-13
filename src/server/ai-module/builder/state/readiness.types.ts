@@ -52,14 +52,25 @@ export type StepId =
   | 'summary'
   // v2 step ids (journey-v2.ts / QUAYER_PHASES) — additive
   | 'business_identity'
+  | 'conversation_blueprint'
   | 'agent_review'
   | 'test_drive'
+  | 'refinement'
   | 'channel_platform'
   | 'whatsapp_connect'
   | 'instagram_connect'
   | 'published_next_steps'
   | 'knowledge'
   | 'media'
+  // v3 step ids (mission-first — journey-v2.ts CONHECER) — additive
+  | 'mission'
+  | 'build_mode'
+  // FR-44 (critérios de qualificação — journey-v2.ts REVISAR, condicional) — additive
+  | 'qualification'
+  // FR-44 (restrições comerciais — journey-v2.ts REVISAR, condicional) — additive
+  | 'restrictions'
+  // FR-46 (diagnóstico do Modo Pesquisa — journey-v2.ts CONHECER, condicional) — additive
+  | 'diagnosis'
 
 /** A step as surfaced in the progress checklist (UI + banner). */
 export interface ReadinessStep {
@@ -110,7 +121,11 @@ export interface StepEngineContext {
  * checks the publish flow owns (`plan | byok`). The 6 pre-deploy checks from
  * `whatsapp-agent-system-prompt.ts` map onto these.
  */
-export type ReadinessBlockerCheck = DeployRunnerBlockerCheck | 'plan' | 'byok'
+export type ReadinessBlockerCheck =
+  | DeployRunnerBlockerCheck
+  | 'plan'
+  | 'byok'
+  | 'refinement'
 
 /** A single deploy blocker, with an actionable CTA + redirect for the UI. */
 export interface ReadinessBlocker {
@@ -162,6 +177,16 @@ export interface Readiness {
    * boundary (`getReadiness`); the pure `nextPendingStep` omits it.
    */
   builderState?: BuilderState
+  /**
+   * Live DB signals attached by the resolver boundary for UI-only diagnostics.
+   * They must not replace the pure step decision above: v2 can keep a step done
+   * via monotonic sentinels while still surfacing a live connection warning.
+   */
+  liveSignals?: {
+    hasConnectedWhatsAppInstance: boolean
+    hasConnectedInstagramInstance: boolean
+    hasLiveDeployment: boolean
+  }
   /**
    * Phased journey view — populated ONLY for `journeyVersion: 2` projects (the
    * resolver's v2 branch). When present, the UI/banner render the 4-phase

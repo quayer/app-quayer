@@ -27,7 +27,12 @@ import { getReadiness } from '../state/readiness-resolver'
 import type { Readiness } from '../state/readiness.types'
 
 import { applyCardSubmit } from './handlers/apply-card-submit'
-import { applyKnowledgeAck, applyMediaAck } from './handlers/apply/journey-v2'
+import {
+  applyKnowledgeAck,
+  applyMediaAck,
+  applyProactive,
+} from './handlers/apply/journey-v2'
+import { applyRefinementRun } from './handlers/apply/refinement'
 import { parseBuilderState } from './builder-state'
 import {
   cardSubmitParamsSchema,
@@ -132,6 +137,18 @@ const submitCard = igniter.mutation({
         ? await applyKnowledgeAck({ projectId, organizationId })
         : body.cardKey === 'media'
           ? await applyMediaAck({ projectId, organizationId })
+          : body.cardKey === 'refinement'
+            ? await applyRefinementRun({ projectId, organizationId })
+          : body.cardKey === 'proactive'
+            ? await applyProactive({
+                projectId,
+                organizationId,
+                payload: {
+                  followUp: body.followUp,
+                  reminders: body.reminders,
+                  importantDates: body.importantDates,
+                },
+              })
           : await applyCardSubmit({
               projectId,
               organizationId,
@@ -168,9 +185,12 @@ const submitCard = igniter.mutation({
         where: { id: applied.conversationId },
         select: { builderState: true },
       })
-      return response.success({
-        ok: true,
-        builderState: parseBuilderState(conversation?.builderState),
+      return response.json({
+        success: true,
+        data: {
+          ok: true,
+          builderState: parseBuilderState(conversation?.builderState),
+        },
       })
     }
 

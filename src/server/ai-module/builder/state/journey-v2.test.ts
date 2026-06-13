@@ -9,6 +9,8 @@
  *   - the 4 QUAYER_PHASES surface in order (Conhecer → Revisar → Testar → Lançar);
  *   - `business_identity` satisfied by `confirmations.source` (the FR-03 equiv path);
  *   - `test_drive` flipped by BOTH `tested` and `skip` (the soft gate sentinel);
+ *   - `refinement` surfaces as a persistent Testar step and gates Lançar until
+ *     the aggregate status is `passed`;
  *   - `whatsapp_connect` done ONLY via `ctx.hasConnectedWhatsAppInstance` OR the
  *     `whatsappConnectedOnce` sentinel-mirror — a DISCONNECTED connection (ctx false,
  *     sentinel false) does NOT complete it; once flipped it stays done with ctx false
@@ -71,9 +73,69 @@ function freshV2State(): BuilderState {
   return patchBuilderState(parseBuilderState(null), { journeyVersion: 2 })
 }
 
+/** A v3 mission-first state (journeyVersion 2 + the `missionFirst` rollout marker). */
+function freshMissionFirstState(): BuilderState {
+  return patchBuilderState(freshV2State(), { missionFirst: true })
+}
+
 /** Mark a confirmation sentinel true (pure). */
 function confirm(state: BuilderState, key: ConfirmationKey): BuilderState {
   return applyConfirmation(state, key)
+}
+
+function approveBlueprint(state: BuilderState): BuilderState {
+  return patchBuilderState(state, {
+    conversationBlueprint: {
+      status: 'approved',
+      objective: 'Qualificar leads e conduzir para o próximo passo.',
+      niche: 'serviço local',
+      stages: [
+        {
+          id: 'qualificacao',
+          title: 'Qualificar',
+          goal: 'Entender a necessidade do lead.',
+        },
+      ],
+      questions: [
+        {
+          id: 'servico',
+          stageId: 'qualificacao',
+          text: 'Qual serviço você precisa?',
+          purpose: 'Identificar a demanda.',
+          variableKey: 'servico',
+          skipWhenKnown: 'Pular se o serviço já foi informado.',
+          required: true,
+        },
+      ],
+      variables: [
+        {
+          key: 'servico',
+          label: 'Serviço',
+          type: 'text',
+          reviewRequired: false,
+        },
+      ],
+      successCriteria: ['Demanda entendida.'],
+      handoffTriggers: [],
+      toolTriggers: [],
+      objectionRules: [],
+      doRules: [],
+      dontRules: [],
+      skipRules: [],
+      sourceRefs: [{ type: 'default', label: 'teste' }],
+    },
+  })
+}
+
+function markRefinementPassed(state: BuilderState): BuilderState {
+  return patchBuilderState(state, {
+    refinement: {
+      status: 'passed',
+      score: 100,
+      checks: [],
+      blockers: [],
+    },
+  })
 }
 
 /** Select one or more channel platforms in the builderState (mirrors the card). */
@@ -94,11 +156,18 @@ function selectPlatforms(
 function stateUpTo(step: StepId): BuilderState {
   // The ordered list of GATING sentinels (skipping optional/terminal + the
   // conditional connect steps which gate on platform/ctx, not a plain sentinel).
-  const order: Array<{ id: StepId; confirm?: ConfirmationKey; free?: boolean }> = [
+  const order: Array<{
+    id: StepId
+    confirm?: ConfirmationKey
+    free?: boolean
+    blueprint?: boolean
+  }> = [
     { id: 'objective', free: true },
     { id: 'business_identity', confirm: 'businessIdentity' },
+    { id: 'conversation_blueprint', blueprint: true },
     { id: 'agent_review', confirm: 'persona' }, // composite — see below
     { id: 'test_drive', confirm: 'testDrive' },
+    { id: 'refinement' },
     { id: 'activation', confirm: 'activation' },
     { id: 'channel_platform', confirm: 'channelPlatform' },
     { id: 'whatsapp_connect' }, // gated by ctx/sentinel + platform
@@ -112,12 +181,16 @@ function stateUpTo(step: StepId): BuilderState {
     if (entry.id === step) break
     if (entry.free) {
       s = patchBuilderState(s, { project: { name: 'X', objective: 'Y' } })
+    } else if (entry.blueprint) {
+      s = approveBlueprint(s)
     } else if (entry.id === 'agent_review') {
       // Composite: persona + services + hours + agentApproved.
       s = confirm(s, 'persona')
       s = confirm(s, 'services')
       s = confirm(s, 'hours')
       s = confirm(s, 'agentApproved')
+    } else if (entry.id === 'refinement') {
+      s = markRefinementPassed(s)
     } else if (entry.id === 'whatsapp_connect') {
       // Satisfied via the sentinel-mirror so we can step past it deterministically.
       s = confirm(s, 'whatsappConnectedOnce')
@@ -151,7 +224,8 @@ function fullyCompletedV2State(): BuilderState {
     'summary',
   ]
   for (const key of sentinels) s = confirm(s, key)
-  return s
+  s = approveBlueprint(s)
+  return markRefinementPassed(s)
 }
 
 /**
@@ -185,7 +259,7 @@ describe('nextPendingStepV2 — phase ordering', () => {
   })
 
   it('walks the phases in order as gating steps complete', () => {
-    // objective (conhecer) → business_identity (conhecer) → agent_review (revisar)
+    // objective (conhecer) → business_identity (conhecer) → conversation_blueprint (revisar)
     let s = freshV2State()
     expect(nextPendingStepV2(s, READY_CTX).journey?.activePhaseId).toBe<PhaseId>('conhecer')
 
@@ -194,8 +268,11 @@ describe('nextPendingStepV2 — phase ordering', () => {
     expect(nextPendingStepV2(s, READY_CTX).journey?.activePhaseId).toBe<PhaseId>('conhecer')
 
     s = confirm(s, 'businessIdentity')
-    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('agent_review')
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('conversation_blueprint')
     expect(nextPendingStepV2(s, READY_CTX).journey?.activePhaseId).toBe<PhaseId>('revisar')
+
+    s = approveBlueprint(s)
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('agent_review')
   })
 
   it('the Testar phase (test_drive) comes after Revisar and before Lançar', () => {
@@ -256,7 +333,29 @@ describe('nextPendingStepV2 — test_drive (soft gate)', () => {
     const s = confirm(stateUpTo('test_drive'), 'testDrive')
     const r = nextPendingStepV2(s, READY_CTX)
     expect(r.steps.find((st) => st.id === 'test_drive')?.done).toBe(true)
-    expect(r.step.id).not.toBe<StepId>('test_drive')
+    expect(r.step.id).toBe<StepId>('refinement')
+    expect(r.requiredMissing).toContain('refinement.status')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// refinement — persistent pre-launch gate (FR-36 / R09)
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — refinement step', () => {
+  it('surfaces after test_drive and before Lançar', () => {
+    const r = nextPendingStepV2(stateUpTo('refinement'), READY_CTX)
+    expect(r.step.id).toBe<StepId>('refinement')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('testar')
+    expect(r.requiredMissing).toContain('refinement.status')
+  })
+
+  it('advances to Lançar only after refinement passes', () => {
+    const s = markRefinementPassed(stateUpTo('refinement'))
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'refinement')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('activation')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('lancar')
   })
 })
 
@@ -282,7 +381,8 @@ describe('nextPendingStepV2 — whatsapp_connect', () => {
     ] as ConfirmationKey[]) {
       s = confirm(s, key)
     }
-    return s
+    s = approveBlueprint(s)
+    return markRefinementPassed(s)
   }
 
   it('completes via the live CONNECTED signal (ctx.hasConnectedWhatsAppInstance)', () => {
@@ -335,7 +435,8 @@ describe('nextPendingStepV2 — conditional channel steps', () => {
     ] as ConfirmationKey[]) {
       s = confirm(s, key)
     }
-    return s
+    s = approveBlueprint(s)
+    return markRefinementPassed(s)
   }
 
   it('WhatsApp NOT selected → whatsapp_connect never surfaces and drops from the checklist', () => {
@@ -452,10 +553,19 @@ describe('nextPendingStepV2 — completenessPct', () => {
     expect(pct).toBeGreaterThanOrEqual(prev)
     prev = pct
 
-    // Every step's sentinel in journey order — gating + the optionals + the terminal.
+    // Every step in journey order — blueprint approval is stateful (not a sentinel).
+    for (const key of ['businessIdentity', 'source'] as ConfirmationKey[]) {
+      s = confirm(s, key)
+      pct = nextPendingStepV2(s, ctx).completenessPct
+      expect(pct).toBeGreaterThanOrEqual(prev)
+      prev = pct
+    }
+    s = approveBlueprint(s)
+    pct = nextPendingStepV2(s, ctx).completenessPct
+    expect(pct).toBeGreaterThanOrEqual(prev)
+    prev = pct
+
     const order: ConfirmationKey[] = [
-      'businessIdentity',
-      'source',
       'persona',
       'services',
       'hours',
@@ -463,13 +573,26 @@ describe('nextPendingStepV2 — completenessPct', () => {
       'knowledge',
       'media',
       'testDrive',
+    ]
+    for (const key of order) {
+      s = confirm(s, key)
+      pct = nextPendingStepV2(s, ctx).completenessPct
+      expect(pct).toBeGreaterThanOrEqual(prev)
+      prev = pct
+    }
+    s = markRefinementPassed(s)
+    pct = nextPendingStepV2(s, ctx).completenessPct
+    expect(pct).toBeGreaterThanOrEqual(prev)
+    prev = pct
+
+    const launchOrder: ConfirmationKey[] = [
       'activation',
       'channelPlatform',
       'whatsappConnectedOnce',
       'summary',
       'publishedNextSteps',
     ]
-    for (const key of order) {
+    for (const key of launchOrder) {
       s = confirm(s, key)
       pct = nextPendingStepV2(s, ctx).completenessPct
       expect(pct).toBeGreaterThanOrEqual(prev)
@@ -503,7 +626,8 @@ describe('nextPendingStepV2 — completenessPct', () => {
       ] as ConfirmationKey[]) {
         s = confirm(s, key)
       }
-      return s
+      s = approveBlueprint(s)
+      return markRefinementPassed(s)
     }
 
     // WhatsApp only, connected → 100% (instagram_connect not in the denominator).
@@ -539,15 +663,15 @@ describe('nextPendingStepV2 — isDeployReady', () => {
     expect(r.blockers.map((b) => b.check)).toContain('plan')
   })
 
-  it('surfaces all six v1 blockers for an empty context (vocabulary reused, not forked)', () => {
+  it('surfaces v1 blockers plus the v2 refinement gate for an empty context', () => {
     const r = nextPendingStepV2(freshV2State(), EMPTY_CTX)
     expect(r.blockers.map((b) => b.check).sort()).toEqual(
-      ['agent', 'byok', 'channel', 'plan', 'prompt', 'version'].sort(),
+      ['agent', 'byok', 'channel', 'plan', 'prompt', 'version', 'refinement'].sort(),
     )
   })
 
   it('is false when blockers clear but gating steps remain', () => {
-    const r = nextPendingStepV2(freshV2State(), READY_CTX)
+    const r = nextPendingStepV2(markRefinementPassed(freshV2State()), READY_CTX)
     expect(r.blockers).toHaveLength(0)
     expect(r.isDeployReady).toBe(false)
   })
@@ -578,8 +702,10 @@ describe('nextPendingStepV2 — new v2 sentinels default false', () => {
     const r = nextPendingStepV2(freshV2State(), EMPTY_CTX)
     const v2StepIds: StepId[] = [
       'business_identity',
+      'conversation_blueprint',
       'agent_review',
       'test_drive',
+      'refinement',
       'channel_platform',
     ]
     for (const id of v2StepIds) {
@@ -621,5 +747,492 @@ describe('nextPendingStepV2 — optional knowledge/media', () => {
     })
     const r = nextPendingStepV2(s, READY_CTX)
     expect(r.steps.find((st) => st.id === 'media')?.done).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mission step (v3, mission-first) — gated by the `missionFirst` marker
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — mission step (v3, mission-first)', () => {
+  it('is INERT for a plain v2 project (no missionFirst marker) — NFR-12', () => {
+    const s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    const r = nextPendingStepV2(s, READY_CTX)
+    // mission never enters the checklist for a non-mission-first project…
+    expect(r.steps.find((st) => st.id === 'mission')).toBeUndefined()
+    // …and the journey behaves exactly as the current v2: business_identity is next.
+    expect(r.step.id).toBe<StepId>('business_identity')
+  })
+
+  it('surfaces after business_identity for a mission-first project, in Conhecer', () => {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    // build_mode (FR-39) precedes business_identity in the Conhecer phase; confirm
+    // it + business_identity so this test exercises the mission step specifically.
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('mission')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('conhecer')
+    expect(r.requiredMissing).toContain('confirmations.mission')
+  })
+
+  it('gates the journey: confirming mission advances to conversation_blueprint', () => {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    s = confirm(s, 'mission')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'mission')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('the mission sentinel defaults false on a fresh/default state', () => {
+    expect(DEFAULT_BUILDER_STATE.confirmations.mission).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// build_mode step (v3, mission-first, FR-39) — gated by the `missionFirst` marker
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — build_mode step (v3, mission-first)', () => {
+  it('is INERT for a plain v2 project (no missionFirst marker) — NFR-12', () => {
+    const s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    const r = nextPendingStepV2(s, READY_CTX)
+    // build_mode never enters the checklist for a non-mission-first project…
+    expect(r.steps.find((st) => st.id === 'build_mode')).toBeUndefined()
+    // …and the journey behaves exactly as the current v2: business_identity is next.
+    expect(r.step.id).toBe<StepId>('business_identity')
+  })
+
+  it('surfaces RIGHT AFTER objective and BEFORE business_identity for a mission-first project', () => {
+    // objective just answered, nothing else confirmed → build_mode is the next gating
+    // step (it precedes business_identity in the Conhecer phase, FR-39).
+    const s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('build_mode')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('conhecer')
+    expect(r.requiredMissing).toContain('confirmations.buildMode')
+  })
+
+  it('is the FIRST Conhecer gate: it surfaces before objective is answered too', () => {
+    // A fresh mission-first state surfaces objective first (build_mode applies but
+    // objective is the earlier gate); answering objective then surfaces build_mode.
+    const fresh = freshMissionFirstState()
+    expect(nextPendingStepV2(fresh, READY_CTX).step.id).toBe<StepId>('objective')
+
+    const withObjective = patchBuilderState(fresh, {
+      project: { name: 'X', objective: 'Y' },
+    })
+    expect(nextPendingStepV2(withObjective, READY_CTX).step.id).toBe<StepId>(
+      'build_mode',
+    )
+  })
+
+  it('gates the journey: confirming build_mode advances to business_identity', () => {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    s = confirm(s, 'buildMode')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'build_mode')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('business_identity')
+  })
+
+  it('the build_mode sentinel defaults false on a fresh/default state', () => {
+    expect(DEFAULT_BUILDER_STATE.confirmations.buildMode).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// diagnosis step (FR-46, backlog #9) — conditional on buildMode === 'pesquisa'
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — diagnosis step (FR-46, Modo Pesquisa)', () => {
+  /**
+   * A mission-first state driven through objective + build_mode + business_identity,
+   * with the buildMode value set by the caller. After this boundary the NEXT
+   * Conhecer gate is `diagnosis` (when buildMode === 'pesquisa') and then `mission`
+   * — i.e. diagnosis surfaces AFTER build_mode/source/business_identity and BEFORE
+   * mission. buildMode is set on the state AND its sentinel confirmed.
+   */
+  function atDiagnosisBoundary(
+    buildMode?: 'recomendado' | 'pesquisa' | 'livre',
+  ): BuilderState {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+      ...(buildMode ? { buildMode } : {}),
+    })
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    return s
+  }
+
+  it('SURFACES before mission for buildMode === pesquisa, in the Conhecer phase', () => {
+    const s = atDiagnosisBoundary('pesquisa')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('diagnosis')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('conhecer')
+    expect(r.requiredMissing).toContain('confirmations.diagnosis')
+    expect(r.steps.find((st) => st.id === 'diagnosis')).toBeDefined()
+  })
+
+  it('gates Conhecer: confirming diagnosis advances to mission', () => {
+    let s = atDiagnosisBoundary('pesquisa')
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('diagnosis')
+    s = confirm(s, 'diagnosis')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'diagnosis')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('mission')
+  })
+
+  it('is INERT for buildMode === recomendado (some do checklist)', () => {
+    const s = atDiagnosisBoundary('recomendado')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'diagnosis')).toBeUndefined()
+    // Conhecer skips straight to mission (no diagnosis gate for recomendado).
+    expect(r.step.id).toBe<StepId>('mission')
+  })
+
+  it('is INERT for buildMode === livre (some do checklist)', () => {
+    const s = atDiagnosisBoundary('livre')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'diagnosis')).toBeUndefined()
+    expect(r.step.id).toBe<StepId>('mission')
+  })
+
+  it('is INERT for a plain v2 project even when buildMode is set — NFR-12', () => {
+    // A plain v2 project (no missionFirst marker): even with buildMode 'pesquisa'
+    // forced into the state, the step never applies (missionFirst is the hard gate).
+    let s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+      buildMode: 'pesquisa',
+    })
+    s = confirm(s, 'businessIdentity')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'diagnosis')).toBeUndefined()
+    // Plain v2: mission/build_mode are also inert, so the journey moves past
+    // Conhecer straight to the Revisar phase (conversation_blueprint).
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT for a mission-first project with NO buildMode set', () => {
+    // missionFirst true but buildMode undefined (build_mode step still pending) →
+    // diagnosis must not be applicable; the active step is build_mode itself.
+    const s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'diagnosis')).toBeUndefined()
+    expect(r.step.id).toBe<StepId>('build_mode')
+  })
+
+  it('the diagnosis sentinel defaults false on a fresh/default state', () => {
+    expect(DEFAULT_BUILDER_STATE.confirmations.diagnosis).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// qualification step (FR-44, backlog #10) — conditional on a qualifying mission
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — qualification step (FR-44)', () => {
+  /**
+   * A mission-first state driven through the whole Conhecer phase (objective +
+   * build_mode + business_identity + mission) so the NEXT gating step is the first
+   * Revisar gate. The mission is set by the caller so each test picks qualifying
+   * vs. non-qualifying.
+   */
+  function atRevisarBoundary(mission: {
+    objective?: string
+    role?: string
+  }): BuilderState {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+      mission: { key: 'k', ...mission },
+    })
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    s = confirm(s, 'mission')
+    return s
+  }
+
+  it('SURFACES before conversation_blueprint for a qualifying mission (objective)', () => {
+    const s = atRevisarBoundary({ objective: 'qualificar' })
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('qualification')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('revisar')
+    expect(r.requiredMissing).toContain('confirmations.qualification')
+    // Enters the checklist for a qualifying mission.
+    expect(r.steps.find((st) => st.id === 'qualification')).toBeDefined()
+  })
+
+  it('SURFACES for a qualifying mission by role (sdr/closer/vendas/cobranca)', () => {
+    for (const role of ['sdr', 'closer', 'vendas', 'cobranca']) {
+      const s = atRevisarBoundary({ role })
+      const r = nextPendingStepV2(s, READY_CTX)
+      expect(r.step.id).toBe<StepId>('qualification')
+    }
+  })
+
+  it('gates Revisar: confirming qualification advances to conversation_blueprint', () => {
+    let s = atRevisarBoundary({ objective: 'qualificar' })
+    s = confirm(s, 'qualification')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'qualification')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT for a mission-first project whose mission does NOT qualify', () => {
+    // A "tirar duvidas" mission (role suporte / objetivo suportar) never qualifies.
+    const s = atRevisarBoundary({ role: 'suporte', objective: 'suportar' })
+    const r = nextPendingStepV2(s, READY_CTX)
+    // qualification never enters the checklist…
+    expect(r.steps.find((st) => st.id === 'qualification')).toBeUndefined()
+    // …and the journey skips straight to conversation_blueprint.
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT for a plain v2 project (no missionFirst marker) — NFR-12', () => {
+    // A plain v2 project at the Revisar boundary: even with a qualifying-looking
+    // mission set, the step never applies (missionFirst is the hard gate).
+    let s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+      mission: { key: 'k', objective: 'qualificar', role: 'sdr' },
+    })
+    s = confirm(s, 'businessIdentity')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'qualification')).toBeUndefined()
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT for a mission-first project with NO mission set', () => {
+    // missionFirst true but mission undefined → missionQualifies(s) false → inert.
+    // (Drive through build_mode but NOT mission so we exercise the no-mission path.)
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    // mission step is still pending here, but qualification must not be applicable.
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'qualification')).toBeUndefined()
+  })
+
+  it('the qualification sentinel defaults false on a fresh/default state', () => {
+    expect(DEFAULT_BUILDER_STATE.confirmations.qualification).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// restrictions step (FR-44, backlog #3) — conditional on a sold-out source signal
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — restrictions step (FR-44, backlog #3)', () => {
+  /** A source proposal that signals 100% sold-out (drives hasSoldOutSourceSignal). */
+  function withSoldOutSource(state: BuilderState): BuilderState {
+    return patchBuilderState(state, {
+      sourceIngestion: {
+        proposed: {
+          differentiators: ['empreendimento pronto e 100% vendido'],
+        },
+      },
+    })
+  }
+
+  /**
+   * A mission-first state driven through Conhecer (objective + build_mode +
+   * business_identity + mission) so the NEXT gating step is the first Revisar gate.
+   * The mission is NON-qualifying (suporte/suportar) so the `qualification` step is
+   * inert and `restrictions` is the first applicable Revisar step when the source
+   * signals sold-out. Sold-out signal is toggled by the caller.
+   */
+  function atRevisarBoundaryNonQualifying(soldOut: boolean): BuilderState {
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+      mission: { key: 'k', role: 'suporte', objective: 'suportar' },
+    })
+    if (soldOut) s = withSoldOutSource(s)
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    s = confirm(s, 'mission')
+    return s
+  }
+
+  it('SURFACES before conversation_blueprint when the source signals sold-out', () => {
+    const s = atRevisarBoundaryNonQualifying(true)
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.step.id).toBe<StepId>('restrictions')
+    expect(r.journey?.activePhaseId).toBe<PhaseId>('revisar')
+    expect(r.requiredMissing).toContain('confirmations.restrictions')
+    expect(r.steps.find((st) => st.id === 'restrictions')).toBeDefined()
+  })
+
+  it('gates Revisar: confirming restrictions advances to conversation_blueprint', () => {
+    let s = atRevisarBoundaryNonQualifying(true)
+    s = confirm(s, 'restrictions')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'restrictions')?.done).toBe(true)
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT when the source carries NO sold-out signal', () => {
+    const s = atRevisarBoundaryNonQualifying(false)
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'restrictions')).toBeUndefined()
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('is INERT for a plain v2 project (no missionFirst marker) even with sold-out — NFR-12', () => {
+    let s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    s = withSoldOutSource(s)
+    s = confirm(s, 'businessIdentity')
+    const r = nextPendingStepV2(s, READY_CTX)
+    expect(r.steps.find((st) => st.id === 'restrictions')).toBeUndefined()
+    expect(r.step.id).toBe<StepId>('conversation_blueprint')
+  })
+
+  it('comes AFTER qualification when BOTH apply (qualifying mission + sold-out source)', () => {
+    // A qualifying mission (sdr/qualificar) AND a sold-out source: qualification is
+    // the first Revisar gate, restrictions the second (order qualification → restrictions).
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+      mission: { key: 'k', role: 'sdr', objective: 'qualificar' },
+    })
+    s = withSoldOutSource(s)
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    s = confirm(s, 'mission')
+    // qualification surfaces first.
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('qualification')
+    // confirming qualification surfaces restrictions next (before the plano).
+    s = confirm(s, 'qualification')
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>('restrictions')
+    // confirming restrictions advances to the plano (conversation_blueprint).
+    s = confirm(s, 'restrictions')
+    expect(nextPendingStepV2(s, READY_CTX).step.id).toBe<StepId>(
+      'conversation_blueprint',
+    )
+  })
+
+  it('the restrictions sentinel defaults false on a fresh/default state', () => {
+    expect(DEFAULT_BUILDER_STATE.confirmations.restrictions).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// REVISAR phase ordering (FR-42 + FR-44) — the final Revisar order
+// ---------------------------------------------------------------------------
+
+describe('nextPendingStepV2 — REVISAR phase ordering', () => {
+  it('the Revisar phase steps are in the expected order (FR-42 plano + conditionals)', () => {
+    // The applicable Revisar steps for a mission-first project with BOTH conditionals
+    // active (qualifying mission + sold-out source) — order is the contract:
+    // [qualification, restrictions, conversation_blueprint(Plano), agent_review, knowledge, media].
+    let s = patchBuilderState(freshMissionFirstState(), {
+      project: { name: 'X', objective: 'Y' },
+      mission: { key: 'k', role: 'sdr', objective: 'qualificar' },
+      sourceIngestion: {
+        proposed: { differentiators: ['pronto e 100% vendido'] },
+      },
+    })
+    s = confirm(s, 'buildMode')
+    s = confirm(s, 'businessIdentity')
+    s = confirm(s, 'mission')
+    const r = nextPendingStepV2(s, READY_CTX)
+    const revisar = r.journey?.phases.find((p) => p.id === 'revisar')
+    expect(revisar?.steps.map((st) => st.id)).toEqual<StepId[]>([
+      'qualification',
+      'restrictions',
+      'conversation_blueprint',
+      'agent_review',
+      'knowledge',
+      'media',
+    ])
+    // FR-42 — the plano step title renamed.
+    expect(
+      revisar?.steps.find((st) => st.id === 'conversation_blueprint')?.title,
+    ).toBe('Plano de atendimento')
+  })
+
+  it('plain v2 Revisar order omits the two conditionals (FR-42 rename still applies)', () => {
+    let s = patchBuilderState(freshV2State(), {
+      project: { name: 'X', objective: 'Y' },
+    })
+    s = confirm(s, 'businessIdentity')
+    const r = nextPendingStepV2(s, READY_CTX)
+    const revisar = r.journey?.phases.find((p) => p.id === 'revisar')
+    // qualification + restrictions are mission-first conditionals → absent for v2.
+    expect(revisar?.steps.map((st) => st.id)).toEqual<StepId[]>([
+      'conversation_blueprint',
+      'agent_review',
+      'knowledge',
+      'media',
+    ])
+    expect(
+      revisar?.steps.find((st) => st.id === 'conversation_blueprint')?.title,
+    ).toBe('Plano de atendimento')
+  })
+})
+
+describe('nextPendingStepV2 — refinement blocker', () => {
+  it('missing refinement blocks deploy readiness for v2 projects', () => {
+    const s = patchBuilderState(fullyCompletedV2State(), {
+      refinement: undefined,
+    })
+
+    const r = nextPendingStepV2(
+      { ...s, refinement: undefined },
+      READY_CTX,
+    )
+
+    expect(r.isDeployReady).toBe(false)
+    expect(r.step.id).toBe<StepId>('refinement')
+    expect(r.requiredMissing).toContain('refinement.status')
+    expect(r.blockers).toEqual([
+      expect.objectContaining({
+        check: 'refinement',
+        message: 'Rode o refinamento antes de publicar.',
+      }),
+    ])
+  })
+
+  it('critical refinement failure blocks deploy readiness and surfaces the refinement step', () => {
+    const s = patchBuilderState(fullyCompletedV2State(), {
+      refinement: {
+        status: 'failed',
+        checks: [],
+        blockers: [
+          {
+            checkId: 'safety',
+            severity: 'critical',
+            message: 'O agente violou uma regra crítica de segurança.',
+          },
+        ],
+      },
+    })
+
+    const r = nextPendingStepV2(s, READY_CTX)
+
+    expect(r.isDeployReady).toBe(false)
+    expect(r.blockers).toEqual([
+      expect.objectContaining({
+        check: 'refinement',
+        message: 'O agente violou uma regra crítica de segurança.',
+      }),
+    ])
+    expect(r.step.id).toBe<StepId>('refinement')
   })
 })

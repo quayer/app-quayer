@@ -647,6 +647,109 @@ describe('computeBlockers', () => {
     const blockers = computeBlockers(freshState(), ctx)
     expect(blockers.map((b) => b.check)).toContain('channel')
   })
+
+  it('refinement blocker fires only for critical refinement failures', () => {
+    const state = patchBuilderState(freshState(), {
+      journeyVersion: 2,
+      refinement: {
+        status: 'failed',
+        checks: [
+          {
+            checkId: 'route',
+            status: 'fail',
+            severity: 'critical',
+            evidence: 'Pulou a etapa de qualificação.',
+            recommendation: 'Corrigir o roteiro antes de publicar.',
+            autoFixable: true,
+          },
+        ],
+        blockers: [],
+      },
+    })
+
+    const blockers = computeBlockers(state, READY_CTX)
+
+    expect(blockers).toEqual([
+      expect.objectContaining({
+        check: 'refinement',
+        message: 'Corrigir o roteiro antes de publicar.',
+        cta: 'Corrigir refinamento',
+      }),
+    ])
+  })
+
+  it('v2 refinement must pass before deploy, even without a critical failure', () => {
+    const state = patchBuilderState(freshState(), {
+      journeyVersion: 2,
+      refinement: {
+        status: 'needs_user_decision',
+        checks: [
+          {
+            checkId: 'ux',
+            status: 'fail',
+            severity: 'medium',
+            evidence: 'Mensagem longa demais.',
+            autoFixable: false,
+          },
+        ],
+        blockers: [],
+      },
+    })
+
+    expect(computeBlockers(state, READY_CTX)).toEqual([
+      expect.objectContaining({
+        check: 'refinement',
+        message: 'Revise as decisões pendentes do refinamento antes de publicar.',
+      }),
+    ])
+  })
+
+  it('passed refinement warnings do not block deploy', () => {
+    const state = patchBuilderState(freshState(), {
+      journeyVersion: 2,
+      refinement: {
+        status: 'passed',
+        checks: [
+          {
+            checkId: 'ux',
+            status: 'warning',
+            severity: 'medium',
+            evidence: 'Mensagem longa demais.',
+            autoFixable: false,
+          },
+        ],
+        blockers: [],
+      },
+    })
+
+    expect(computeBlockers(state, READY_CTX)).toHaveLength(0)
+  })
+
+  it('legacy v1 refinement warnings and non-critical failures do not block deploy', () => {
+    const state = patchBuilderState(freshState(), {
+      refinement: {
+        status: 'failed',
+        checks: [
+          {
+            checkId: 'ux',
+            status: 'fail',
+            severity: 'medium',
+            evidence: 'Mensagem longa demais.',
+            autoFixable: false,
+          },
+        ],
+        blockers: [
+          {
+            checkId: 'ux',
+            severity: 'high',
+            message: 'Ajuste recomendado antes de publicar.',
+          },
+        ],
+      },
+    })
+
+    expect(computeBlockers(state, READY_CTX)).toHaveLength(0)
+  })
 })
 
 // ---------------------------------------------------------------------------

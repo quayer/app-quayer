@@ -101,15 +101,17 @@ export async function getReadiness(
   // `AgentDeployment` (the canonical project↔connection link — `Connection.projectId`
   // FKs the LEGACY `Project` table, so it is never the BuilderProject id; see
   // attach-to-agent.ts / channel.routes.ts:getProjectChannel). The v2 channel-connect
-  // steps need status-aware counts, so we count Connections reachable via an ACTIVE
-  // deployment of THIS project's agent. No agent yet → no connected channel.
+  // steps need status-aware counts, so we count Connections reachable via a
+  // deployment of THIS project's agent. PAUSED still means "linked but not
+  // serving runtime" and is enough for the connection step; ACTIVE is only
+  // required after publication. No agent yet → no connected channel.
   const projectAgentConnection = (channel: 'WHATSAPP' | 'INSTAGRAM') => ({
     organizationId,
     channel,
     status: 'CONNECTED' as const,
     agentDeployments: {
       some: {
-        status: 'ACTIVE' as const,
+        status: { in: ['ACTIVE' as const, 'PAUSED' as const] },
         agentConfig: { id: agentId ?? undefined, organizationId },
       },
     },
@@ -220,7 +222,15 @@ export async function getReadiness(
 
   // Attach the resolved state so the FE active-step card pre-fills with
   // already-confirmed values (the pure engines omit it).
-  return { ...readiness, builderState: state }
+  return {
+    ...readiness,
+    builderState: state,
+    liveSignals: {
+      hasConnectedWhatsAppInstance: ctx.hasConnectedWhatsAppInstance,
+      hasConnectedInstagramInstance: ctx.hasConnectedInstagramInstance,
+      hasLiveDeployment: ctx.hasLiveDeployment,
+    },
+  }
 }
 
 // Re-export so the prompt-length floor used here stays discoverable from the

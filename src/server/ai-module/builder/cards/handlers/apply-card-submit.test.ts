@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockFindUnique = vi.hoisted(() => vi.fn())
 const mockUpdateMany = vi.hoisted(() => vi.fn())
+const mockTrackJourneyEvent = vi.hoisted(() => vi.fn())
 
 vi.mock('@/server/services/database', () => ({
   database: {
@@ -23,6 +24,10 @@ vi.mock('@/server/services/database', () => ({
   },
 }))
 
+vi.mock('@/server/services/journey-events', () => ({
+  trackJourneyEvent: mockTrackJourneyEvent,
+}))
+
 import {
   parseBuilderState,
   patchBuilderState,
@@ -30,6 +35,11 @@ import {
 } from '../builder-state'
 import { applyPricing, applyCardSubmit } from './apply-card-submit'
 import type { CardSubmitBody } from '../card-submit.schemas'
+
+beforeEach(() => {
+  mockTrackJourneyEvent.mockReset()
+  mockTrackJourneyEvent.mockResolvedValue(undefined)
+})
 
 /**
  * Onda B — G5a regression guard.
@@ -450,6 +460,25 @@ describe('applyCardSubmit — source_progress (Onda E: address + description)', 
     const next = writtenState()
     expect(next.project.objective).toBe('compradores de imóveis na Vila Gomes')
     if (res.ok) expect(res.cardInstruction).toMatch(/público-alvo/)
+  })
+
+  it('T20: accept da fonte emite identity_done com a journeyVersion congelada', async () => {
+    seedConversation(
+      patchBuilderState(stateWithProposal(), {
+        journeyVersion: 2,
+      }),
+    )
+
+    const res = await submitAccept()
+
+    expect(res.ok).toBe(true)
+    expect(mockTrackJourneyEvent).toHaveBeenCalledOnce()
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG_ID,
+      projectId: PROJECT_ID,
+      journeyVersion: 2,
+      event: 'identity_done',
+    })
   })
 })
 

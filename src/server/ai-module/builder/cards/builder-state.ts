@@ -14,6 +14,10 @@
  */
 
 import { z } from 'zod'
+import {
+  conversationBlueprintSchema,
+  type ConversationBlueprint,
+} from '../playbook/blueprint.schema'
 
 // ==========================================
 // Leaf schemas (grouped by domain area)
@@ -274,6 +278,76 @@ export const channelStateSchema = z.object({
 })
 
 /**
+ * Jornada v3 (mission-first — specs/jornada-builder-v2/mission-first-v3.md, FR-37/38)
+ * — a MISSÃO escolhida pelo usuário. É UMA decisão (sem card de Playbook separado):
+ *  - `key`       : o bundle escolhido (ex.: 'sdr_qualificar') — vocabulário aberto.
+ *  - `label`     : rótulo humano mostrado na tela (linguagem de negócio).
+ *  - `role`/`objective` : a resolução INTERNA (sdr/closer/…; qualificar/agendar/…) que
+ *                  alimenta o Playbook Engine (Onda 3). O playbook/framework resolvido
+ *                  NÃO mora aqui — vem do engine.
+ *  - `addons`    : capacidades extras ligadas na escolha ("e também agenda").
+ *  - `custom`    : caminho "montar do zero".
+ * 100% aditivo: states legados/v2 parseiam para `mission: undefined`.
+ */
+export const missionStateSchema = z.object({
+  key: z.string().optional(),
+  label: z.string().optional(),
+  role: z.string().optional(),
+  objective: z.string().optional(),
+  addons: z.array(z.string()).default([]),
+  custom: z.boolean().default(false),
+})
+
+/**
+ * Critérios de qualificação (FR-44, backlog #10) — os DADOS que o agente coleta de
+ * cada lead/contato para considerar o atendimento "bom o suficiente" (nome, prazo
+ * de compra, faixa de orçamento, etc.). É UMA lista de campos escolhidos no card
+ * `qualification` (multi-seleção de um set DEFAULT). 100% aditivo: states legados/v2
+ * parseiam para `qualification: undefined`. O passo só surge na fase Revisar para
+ * missões que qualificam (SDR/closer/vendas/cobrança ou objetivo 'qualificar').
+ */
+export const qualificationStateSchema = z.object({
+  fields: z.array(z.string()).default([]),
+})
+
+/**
+ * Restrições comerciais (FR-44, backlog #3) — como o agente deve tratar uma fonte
+ * que aparece 100% vendida/esgotada. É UMA decisão tomada no card `restrictions`
+ * (fase Revisar), ANTES do `conversation_blueprint`, quando a fonte sinaliza esgotado
+ * (`hasSoldOutSourceSignal`). `soldOutStrategy` espelha o enum de
+ * `SoldOutConversationStrategy` (designer-input.ts) — a MESMA decisão que a v2
+ * tomava inline no `conversation_blueprint` via `contextDecision`. `note` é uma
+ * observação livre opcional do usuário (clampada server-side). 100% aditivo: states
+ * legados/v2 parseiam para `restrictions: undefined` e o passo é inerte. Quando
+ * presente, o gate do blueprint usa esta decisão e NÃO re-pergunta no plano.
+ */
+export const restrictionsStateSchema = z.object({
+  soldOutStrategy: z
+    .enum(['interest_list', 'human_confirm', 'available_confirmed'])
+    .optional(),
+  note: z.string().optional(),
+})
+
+/**
+ * FR-PRO-01 (F1 — Mensagens proativas / Automações, design-time) — a CAPACIDADE
+ * opt-in "Mensagens proativas". É uma CAPACIDADE (toggle na seção Capacidades),
+ * NÃO um passo de jornada: SEM sentinel em `confirmations`, SEM StepId. Os 3
+ * presets em linguagem de negócio (FR-49) ficam OFF por padrão; F1 apenas
+ * RECOMENDA (FR-51) + PERSISTE a metadata aqui — NENHUM envio (o runtime F2-F4
+ * vive em `specs/builder-proatividade/spec.md`, fora de escopo). 100% aditivo:
+ * states legados/v2 parseiam para `proactive: undefined` (top-level OPCIONAL, sem
+ * default) e a capacidade fica desligada.
+ */
+export const proactiveStateSchema = z.object({
+  /** Retomar contato com lead que parou de responder (lead_idle). */
+  followUp: z.boolean().default(false),
+  /** Lembrar de visita/consulta/reunião agendada (appointment_before/after). */
+  reminders: z.boolean().default(false),
+  /** Agir em datas (aniversário, renovação, data custom). */
+  importantDates: z.boolean().default(false),
+})
+
+/**
  * Jornada v2 (T06, FR-02, plan §2.2 item 2) — `capturedProposals` é a generalização
  * do invariante de `sourceIngestion.proposed`: valores PROPOSTOS por captura de conversa
  * (tool `propose_field_values`) ou por nicho regulado (`research-niche`), que NUNCA
@@ -331,6 +405,64 @@ export const capturedProposalsSchema = z.object({
 })
 
 // ==========================================
+// Refining Loop (MVP aggregate state)
+// ==========================================
+
+/**
+ * Builder Playbook — fase "Refinando".
+ *
+ * MVP em JSONB, sem histórico detalhado nem transcript completo: guardamos só o
+ * agregado que a UI/readiness precisa para explicar se pode publicar. Runs
+ * completos podem virar tabela própria depois, como previsto na spec.
+ */
+export const refinementSeveritySchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'critical',
+])
+
+export const refinementCheckSummarySchema = z.object({
+  checkId: z.string().min(1).max(120),
+  label: z.string().min(1).max(160).optional(),
+  status: z.enum(['pass', 'warning', 'fail']),
+  severity: refinementSeveritySchema,
+  evidence: z.string().max(1000).optional(),
+  recommendation: z.string().max(1000).optional(),
+  autoFixable: z.boolean().default(false),
+})
+
+export const refinementBlockerSchema = z.object({
+  checkId: z.string().min(1).max(120),
+  severity: refinementSeveritySchema.default('critical'),
+  message: z.string().min(1).max(1000),
+  recommendation: z.string().max(1000).optional(),
+})
+
+export const refinementMaterialSchema = z.object({
+  promptVersionId: z.string().min(1).max(120).optional(),
+  promptVersionNumber: z.number().int().nonnegative().optional(),
+  promptHash: z.string().min(1).max(128).optional(),
+  blueprintHash: z.string().min(1).max(128).optional(),
+  contextHash: z.string().min(1).max(128).optional(),
+})
+
+export const refinementStateSchema = z.object({
+  status: z
+    .enum(['idle', 'running', 'passed', 'failed', 'needs_user_decision'])
+    .default('idle'),
+  runId: z.string().min(1).max(120).optional(),
+  score: z.number().min(0).max(100).optional(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  checks: z.array(refinementCheckSummarySchema).default([]),
+  blockers: z.array(refinementBlockerSchema).default([]),
+  material: refinementMaterialSchema.optional(),
+  invalidatedAt: z.string().datetime().optional(),
+  invalidationReason: z.string().max(500).optional(),
+})
+
+// ==========================================
 // Confirmation sentinels (server-resolved booleans)
 // ==========================================
 
@@ -375,6 +507,32 @@ export const confirmationsSchema = z.object({
   // a jornada nunca regride o passo de conexão. Flipado fail-open pelo webhook
   // UAZ (T35, onda 5); como os demais, jamais vem do body.
   whatsappConnectedOnce: z.boolean().default(false),
+  // Jornada v3 (mission-first, FR-37) — passo Missão concluído. Como os demais
+  // sentinels, só o passo correspondente o flipa server-side; nunca vem do body.
+  mission: z.boolean().default(false),
+  // Jornada v3 (mission-first, FR-39) — passo "Modo de construção" concluído. Como
+  // os demais sentinels, só o passo correspondente o flipa server-side; nunca vem
+  // do body. Inerte para projetos v2 puros (o passo só aplica quando missionFirst).
+  buildMode: z.boolean().default(false),
+  // FR-44 (critérios de qualificação) — passo `qualification` da fase Revisar
+  // concluído. Como os demais sentinels, só o passo correspondente o flipa
+  // server-side; nunca vem do body. CONDICIONAL: o passo só aplica para projetos
+  // mission-first cuja missão qualifica (SDR/closer/vendas/cobrança ou objetivo
+  // 'qualificar') — inerte para todos os demais (v2 puro / missão que não qualifica).
+  qualification: z.boolean().default(false),
+  // FR-44 (restrições comerciais, backlog #3) — passo `restrictions` da fase Revisar
+  // concluído. Como os demais sentinels, só o passo correspondente o flipa
+  // server-side; nunca vem do body. CONDICIONAL: o passo só aplica para projetos
+  // mission-first cuja fonte sinaliza esgotado (`hasSoldOutSourceSignal`) — inerte
+  // para todos os demais (v2 puro / fonte sem sinal de esgotado).
+  restrictions: z.boolean().default(false),
+  // FR-46 (diagnóstico do Modo Pesquisa, backlog #9) — passo `diagnosis` da fase
+  // Conhecer concluído (card READ-MOSTLY de ACK). Como os demais sentinels, só o
+  // passo correspondente o flipa server-side; nunca vem do body. CONDICIONAL: o
+  // passo só aplica para projetos mission-first cujo `buildMode === 'pesquisa'`
+  // (surge DEPOIS de build_mode/source e ANTES de mission) — inerte para todos os
+  // demais (v2 puro / buildMode recomendado ou livre).
+  diagnosis: z.boolean().default(false),
 })
 
 // ==========================================
@@ -427,10 +585,48 @@ export const builderStateSchema = z.object({
   // T86 — canal em 2 níveis (FR-24/25). OPCIONAL e SEM default: um state vazio/
   // legado parseia para `channel: undefined`; o engine v2 lê `state.channel?.platforms`.
   channel: channelStateSchema.optional(),
+  // Jornada v3 (mission-first) — marcador de rollout POR PROJETO: gateia o passo
+  // `mission` e a poda por missão. OPCIONAL e SEM default → projetos v2 existentes
+  // parseiam para `missionFirst: undefined` (= false) e o engine se comporta
+  // EXATAMENTE como a v2 atual (NFR-12). Seedado na criação do projeto quando a flag
+  // BUILDER_MISSION_FIRST resolve on.
+  missionFirst: z.boolean().optional(),
+  // Jornada v3 (mission-first, FR-37/38) — a missão escolhida. OPCIONAL, SEM default.
+  mission: missionStateSchema.optional(),
+  // Jornada v3 (mission-first, FR-39/49) — o MODO de construção escolhido: como o
+  // usuário quer montar o agente. OPCIONAL e SEM default: projetos v2 existentes
+  // parseiam para `buildMode: undefined` e o engine se comporta como a v2 atual
+  // (NFR-12; o passo `build_mode` só aplica quando missionFirst). 100% aditivo.
+  buildMode: z.enum(['recomendado', 'pesquisa', 'livre']).optional(),
+  // FR-44 (critérios de qualificação) — os dados que o agente coleta de cada lead
+  // para considerar o atendimento bom. OPCIONAL e SEM default: states legados/v2
+  // parseiam para `qualification: undefined` e o passo é inerte. O passo só aplica
+  // (engine v2) para missões que qualificam — 100% aditivo.
+  qualification: qualificationStateSchema.optional(),
+  // FR-44 (restrições comerciais, backlog #3) — como o agente trata uma fonte
+  // 100% vendida/esgotada. OPCIONAL e SEM default: states legados/v2 parseiam para
+  // `restrictions: undefined` e o passo é inerte. O passo só aplica (engine v2)
+  // quando a fonte sinaliza esgotado; a decisão também destrava o gate do blueprint
+  // (substitui o `contextDecision` inline da v2). 100% aditivo.
+  restrictions: restrictionsStateSchema.optional(),
+  // FR-PRO-01 (F1) — CAPACIDADE "Mensagens proativas" (toggle de Capacidades, NÃO
+  // passo de jornada): 3 presets opt-in, todos OFF por padrão. OPCIONAL e SEM
+  // default: states legados/v2 parseiam para `proactive: undefined` (capacidade
+  // desligada). NÃO tem sentinel em `confirmations` — é capacidade, não passo. F1
+  // só recomenda+persiste; nenhum envio (runtime F2-F4 é épico próprio). 100% aditivo.
+  proactive: proactiveStateSchema.optional(),
   // T06 — propostas capturadas da conversa (FR-02). OPCIONAL e SEM default: um state
   // vazio/legado parseia para `capturedProposals: undefined`. NUNCA flipa sentinels;
   // o prefill dos cards lê isto como fallback e o submit limpa via `clearCapturedProposals`.
   capturedProposals: capturedProposalsSchema.optional(),
+  // Builder Playbook — roteiro conversacional proposto/aprovado antes do prompt.
+  // OPCIONAL e SEM default: legados continuam válidos; só a jornada v2 exige
+  // `status: approved` antes de avançar para `agent_review`/prompt final.
+  conversationBlueprint: conversationBlueprintSchema.optional(),
+  // Refining Loop — agregado opcional da fase "Refinando". Sem default no
+  // top-level: states legados continuam sem a chave; quando presente, os arrays
+  // internos recebem defaults via schema.
+  refinement: refinementStateSchema.optional(),
   confirmations: confirmationsSchema.default({}),
 })
 
@@ -457,11 +653,23 @@ export type IdentityState = z.infer<typeof identityStateSchema>
 export type SilencedContactItem = z.infer<typeof silencedContactItemSchema>
 export type SilencedContactsState = z.infer<typeof silencedContactsStateSchema>
 export type ChannelState = z.infer<typeof channelStateSchema>
+export type MissionState = z.infer<typeof missionStateSchema>
+export type QualificationState = z.infer<typeof qualificationStateSchema>
+export type RestrictionsState = z.infer<typeof restrictionsStateSchema>
+/** FR-PRO-01 (F1) — a CAPACIDADE "Mensagens proativas" (3 presets opt-in). */
+export type ProactiveState = z.infer<typeof proactiveStateSchema>
 export type CapturedProposals = z.infer<typeof capturedProposalsSchema>
+export type RefinementMaterial = z.infer<typeof refinementMaterialSchema>
+export type RefinementCheckSummary = z.infer<typeof refinementCheckSummarySchema>
+export type RefinementBlocker = z.infer<typeof refinementBlockerSchema>
+export type RefinementState = z.infer<typeof refinementStateSchema>
+export type { ConversationBlueprint }
 /** Whitelist de domínios de `capturedProposals` — o que `clearCapturedProposals` aceita. */
 export type CapturedProposalDomain = keyof CapturedProposals
 export type BuilderConfirmations = z.infer<typeof confirmationsSchema>
 export type BuilderState = z.infer<typeof builderStateSchema>
+/** FR-39 — o modo de construção (top-level enum). */
+export type BuildMode = NonNullable<BuilderState['buildMode']>
 
 /** Confirmation sentinel keys — the canonical names cards/engine reference. */
 export type ConfirmationKey = keyof BuilderConfirmations
@@ -520,6 +728,35 @@ export function clearCapturedProposals(
     return stateRest
   }
   return { ...state, capturedProposals: rest }
+}
+
+/**
+ * Mark the current Refining result as stale after material Builder context changed.
+ * We keep the namespace present so readiness can explain why publication is blocked,
+ * but drop old checks/blockers so stale failures do not masquerade as current ones.
+ */
+export function invalidateRefinement(
+  state: BuilderState,
+  reason: string,
+  nowIso = new Date().toISOString()
+): BuilderState {
+  if (state.journeyVersion !== 2 || !state.refinement) return state
+
+  const trimmedReason = reason.trim().slice(0, 500)
+  return {
+    ...state,
+    refinement: {
+      status: 'idle',
+      checks: [],
+      blockers: [],
+      material: state.refinement.material,
+      invalidatedAt: nowIso,
+      invalidationReason:
+        trimmedReason.length > 0
+          ? trimmedReason
+          : 'O contexto do agente mudou depois do refinamento.',
+    },
+  }
 }
 
 /** Recursive partial used by patchBuilderState. */

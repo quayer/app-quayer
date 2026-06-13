@@ -22,6 +22,8 @@
  */
 
 import type { BuilderState } from '../cards/builder-state'
+import { hasSoldOutSourceSignal } from '../playbook/designer-input'
+import { getRefinementPublishGateMessage } from '../refinement/refinement-gate'
 import { computeBlockers, FIELD_OWNERSHIP } from './next-pending-step'
 import type {
   PhaseId,
@@ -41,7 +43,8 @@ import { type StepDefinition, confirmed, hasText } from './step-helpers'
  * engine compiles isolated NOW and stays byte-compatible once T14 widens the
  * canonical type — `StepEngineContextV2` is structurally `StepEngineContext` plus
  * these three booleans. The RESOLVER owns populating them (org-scoped DB counts,
- * status `CONNECTED` + projectId); the engine only reads them. Do NOT add IO here.
+ * status `CONNECTED` through the project's AgentDeployment); the engine only
+ * reads them. Do NOT add IO here.
  */
 export interface JourneyV2ContextSignals {
   /** A `BuilderDeployment` for this project is live (terminal step surfaces). */
@@ -52,7 +55,7 @@ export interface JourneyV2ContextSignals {
    * this with the `whatsappConnectedOnce` sentinel-mirror for monotonicity (FR-30).
    */
   hasConnectedWhatsAppInstance: boolean
-  /** An INSTAGRAM `Connection` is `CONNECTED` for this project (gate T82 caveat). */
+  /** An INSTAGRAM `Connection` is `CONNECTED` for this project. */
   hasConnectedInstagramInstance: boolean
 }
 
@@ -84,6 +87,38 @@ function selectedWhatsApp(state: BuilderState): boolean {
 /** Did the creator select Instagram in the channel_platform card? Pure. */
 function selectedInstagram(state: BuilderState): boolean {
   return state.channel?.platforms?.includes('instagram') === true
+}
+
+// ==========================================
+// qualification applicability — pure reader of state.mission (FR-44)
+// ==========================================
+
+/**
+ * Os papéis cuja missão IMPLICA qualificar o lead antes de seguir (FR-44). Usado
+ * por `missionQualifies` para decidir se o passo `qualification` da fase Revisar
+ * deve surgir. Vocabulário FECHADO espelhando os enums internos da missão.
+ */
+const QUALIFYING_MISSION_ROLES: ReadonlySet<string> = new Set<string>([
+  'sdr',
+  'closer',
+  'vendas',
+  'cobranca',
+])
+
+/**
+ * A missão escolhida COLETA dados para qualificar o atendimento? (FR-44). Pura:
+ * lê só `state.mission.{objective,role}`. Verdadeiro quando o objetivo é
+ * 'qualificar' OU o papel está no set de papéis que qualificam (SDR/closer/
+ * vendas/cobrança). Tolerante a caixa/espaços (o card grava enums normalizados,
+ * mas o handler aceita strings livres). Falso quando não há missão.
+ */
+function missionQualifies(state: BuilderState): boolean {
+  const mission = state.mission
+  if (!mission) return false
+  const objective = mission.objective?.trim().toLowerCase()
+  if (objective === 'qualificar') return true
+  const role = mission.role?.trim().toLowerCase()
+  return role !== undefined && QUALIFYING_MISSION_ROLES.has(role)
 }
 
 // ==========================================
@@ -143,9 +178,17 @@ function sourceIngestionActive(state: BuilderState): boolean {
 /**
  * Steps of the "Conhecer" phase. The creator tells us about the business.
  *  - `objective`        : free-form (same gate as v1) — what the agent solves.
+ *  - `build_mode`       : v3 (mission-first, FR-39) — REQUIRED, but applies ONLY when
+ *                         `state.missionFirst` is set. Comes RIGHT AFTER `objective`
+ *                         and BEFORE `business_identity`/`mission`: o usuário escolhe
+ *                         COMO quer construir (recomendado/pesquisa/livre). Inert for
+ *                         plain v2 projects (NFR-12).
  *  - `business_identity`: isDone via `confirmations.businessIdentity` OR an accepted
  *                         source (`confirmed('source')`) — pasting a site/IG is the
  *                         equivalent path (FR-03). No new sentinel for the source path.
+ *  - `mission`          : v3 (mission-first, FR-37) — REQUIRED, but applies ONLY when
+ *                         `state.missionFirst` is set (seeded at creation behind
+ *                         BUILDER_MISSION_FIRST). Inert for plain v2 projects (NFR-12).
  *  - `source_ingestion` : OPTIONAL — overrides the active slot while a scan is in
  *                         flight (mirrors v1), otherwise skipped from surfacing.
  */
@@ -157,6 +200,19 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
     requiredPaths: ['project.objective'],
     isDone: (s) => hasText(s.project.objective),
     missing: (s) => (hasText(s.project.objective) ? [] : ['project.objective']),
+  },
+  {
+    id: 'build_mode',
+    title: 'Modo de construção',
+    ask: 'Como você quer construir o agente? Escolha o modo no card.',
+    requiredPaths: ['confirmations.buildMode'],
+    // v3 (mission-first, FR-39): aplica SÓ em projetos mission-first. Projetos v2 sem
+    // o marcador `missionFirst` → o passo NÃO aplica, some do checklist/denominador e
+    // a jornada se comporta exatamente como a v2 atual (NFR-12).
+    applies: (s) => s.missionFirst === true,
+    isDone: (s) => confirmed(s, 'buildMode'),
+    missing: (s) =>
+      confirmed(s, 'buildMode') ? [] : ['confirmations.buildMode'],
   },
   {
     id: 'business_identity',
@@ -171,6 +227,33 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
         : ['confirmations.businessIdentity'],
   },
   {
+    id: 'diagnosis',
+    title: 'Diagnóstico do negócio',
+    ask: 'Veja o que eu já entendi do seu negócio e confirme para seguir. Escolha no card.',
+    requiredPaths: ['confirmations.diagnosis'],
+    // FR-46 (backlog #9) — CONDICIONAL: aplica SÓ em projetos mission-first cujo
+    // modo de construção é 'pesquisa' (o usuário pediu pesquisa de referências antes
+    // de montar). Surge DEPOIS de build_mode/source e ANTES de mission para o usuário
+    // revisar o que já entendemos. Card READ-MOSTLY de ACK. Inerte para v2 puro e para
+    // os modos 'recomendado'/'livre' (some do checklist/denominador). DEGRADAÇÃO
+    // GRACIOSA (FR-47): mesmo sem pesquisa externa, mostra o que há e segue.
+    applies: (s) => s.missionFirst === true && s.buildMode === 'pesquisa',
+    isDone: (s) => confirmed(s, 'diagnosis'),
+    missing: (s) => (confirmed(s, 'diagnosis') ? [] : ['confirmations.diagnosis']),
+  },
+  {
+    id: 'mission',
+    title: 'Missão do agente',
+    ask: 'Qual resultado esse agente deve gerar para o seu negócio? Escolha a missão no card.',
+    requiredPaths: ['confirmations.mission'],
+    // v3 (mission-first, FR-37): aplica SÓ em projetos mission-first. Projetos v2 sem
+    // o marcador `missionFirst` → o passo NÃO aplica, some do checklist/denominador e
+    // a jornada se comporta exatamente como a v2 atual (NFR-12).
+    applies: (s) => s.missionFirst === true,
+    isDone: (s) => confirmed(s, 'mission'),
+    missing: (s) => (confirmed(s, 'mission') ? [] : ['confirmations.mission']),
+  },
+  {
     id: 'source_ingestion',
     title: 'Fonte de conhecimento',
     ask: 'Se quiser, cole o seu site ou Instagram que eu já entendo o negócio — é opcional e você pode pular.',
@@ -183,6 +266,8 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
 
 /**
  * Steps of the "Revisar" phase. The creator reviews the consolidated proposal.
+ *  - `conversation_blueprint`: REQUIRED — roteiro conversacional aprovado antes
+ *                              do prompt final/playbook.
  *  - `agent_review`  : COMPOSITE (FR-05) — final review + create intent. isDone
  *                      derives from the section sentinels AND the existing
  *                      `agentApproved` sentinel (`persona && services && hours &&
@@ -194,6 +279,48 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
  * Capacidades surface (plan §4.3); their sentinels/handlers still work when opened.
  */
 const REVISAR_STEPS: readonly JourneyV2Step[] = [
+  {
+    id: 'qualification',
+    title: 'Critérios de qualificação',
+    ask: 'Quais dados o agente precisa coletar de cada contato para você considerar o atendimento bom? Escolha no card.',
+    requiredPaths: ['confirmations.qualification'],
+    // FR-44 — CONDICIONAL: aplica SÓ em projetos mission-first cuja missão
+    // qualifica (SDR/closer/vendas/cobrança ou objetivo 'qualificar'). Inerte para
+    // v2 puro e para missões que NÃO qualificam (some do checklist/denominador).
+    // Posicionado ANTES de conversation_blueprint para que os critérios entrem no
+    // roteiro da conversa.
+    applies: (s) => s.missionFirst === true && missionQualifies(s),
+    isDone: (s) => confirmed(s, 'qualification'),
+    missing: (s) =>
+      confirmed(s, 'qualification') ? [] : ['confirmations.qualification'],
+  },
+  {
+    id: 'restrictions',
+    title: 'Restrições comerciais',
+    ask: 'A fonte indica que pode estar 100% vendido/esgotado. Escolha no card como o agente deve tratar essa restrição.',
+    requiredPaths: ['confirmations.restrictions'],
+    // FR-44 (backlog #3) — CONDICIONAL: aplica SÓ em projetos mission-first cuja
+    // FONTE sinaliza esgotado (`hasSoldOutSourceSignal`). Inerte para v2 puro e para
+    // fontes sem sinal de esgotado (some do checklist/denominador). Posicionado
+    // DEPOIS de qualification e ANTES de conversation_blueprint para que a decisão
+    // já esteja no state quando o plano de atendimento for gerado/aprovado (assim o
+    // plano não re-pergunta a restrição).
+    applies: (s) => s.missionFirst === true && hasSoldOutSourceSignal(s),
+    isDone: (s) => confirmed(s, 'restrictions'),
+    missing: (s) =>
+      confirmed(s, 'restrictions') ? [] : ['confirmations.restrictions'],
+  },
+  {
+    id: 'conversation_blueprint',
+    title: 'Plano de atendimento',
+    ask: 'Vou montar o plano de atendimento do agente (consequência da missão, capacidades, qualificação e restrições). Revise e aprove o card antes de gerar o prompt final.',
+    requiredPaths: ['conversationBlueprint.status'],
+    isDone: (s) => s.conversationBlueprint?.status === 'approved',
+    missing: (s) =>
+      s.conversationBlueprint?.status === 'approved'
+        ? []
+        : ['conversationBlueprint.status'],
+  },
   {
     id: 'agent_review',
     title: 'Revisar e criar agente',
@@ -256,6 +383,8 @@ function hasMediaImages(state: BuilderState): boolean {
  *  - `test_drive`: SOFT gate (decision 2, spec §9) — the "Publicar sem testar"
  *                  escape also flips `confirmations.testDrive`. Required so the
  *                  step surfaces, but it never holds deploy hostage (the escape clears it).
+ *  - `refinement`: HARD pre-launch gate (FR-36) — visible and re-runnable from the
+ *                  active-step card; only `passed` clears the step.
  */
 const TESTAR_STEPS: readonly JourneyV2Step[] = [
   {
@@ -265,6 +394,17 @@ const TESTAR_STEPS: readonly JourneyV2Step[] = [
     requiredPaths: ['confirmations.testDrive'],
     isDone: (s) => confirmed(s, 'testDrive'),
     missing: (s) => (confirmed(s, 'testDrive') ? [] : ['confirmations.testDrive']),
+  },
+  {
+    id: 'refinement',
+    title: 'Refinar antes de lançar',
+    ask: 'Rode o refinamento para validar plano de atendimento, perguntas, ferramentas, conhecimento, segurança e UX antes de publicar.',
+    requiredPaths: ['refinement.status'],
+    isDone: (s) => getRefinementPublishGateMessage(s) === null,
+    missing: (s) =>
+      getRefinementPublishGateMessage(s) === null
+        ? []
+        : ['refinement.status'],
   },
 ] as const
 

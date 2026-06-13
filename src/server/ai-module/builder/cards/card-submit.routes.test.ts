@@ -55,6 +55,11 @@ vi.mock('./handlers/apply/journey-v2', () => ({
   applyMediaAck: mockApplyMediaAck,
 }))
 
+const mockApplyRefinementRun = vi.hoisted(() => vi.fn())
+vi.mock('./handlers/apply/refinement', () => ({
+  applyRefinementRun: mockApplyRefinementRun,
+}))
+
 // The two SSE-only collaborators we assert are NOT called on the silent path.
 const mockEnsureBuilderAgent = vi.hoisted(() => vi.fn())
 vi.mock('../services/ensure-builder-agent', () => ({
@@ -97,6 +102,11 @@ function makeResponse() {
       _body = body
       _status = 200
       return { _status, _body, _kind: 'success' as const }
+    },
+    json(body: unknown) {
+      _body = body
+      _status = 200
+      return { _status, _body, _kind: 'json' as const }
     },
     badRequest(msg: string) {
       _status = 400
@@ -174,6 +184,11 @@ beforeEach(() => {
     conversationId: CONV_ID,
     cardInstruction: 'ACK pt-BR seed',
   })
+  mockApplyRefinementRun.mockResolvedValue({
+    ok: true,
+    conversationId: CONV_ID,
+    cardInstruction: 'Refinamento concluído',
+  })
   // findUnique backs BOTH the silent JSON response (builderState) and the
   // conversational stateSummary read.
   mockFindUnique.mockResolvedValue({
@@ -213,9 +228,9 @@ describe('submitCard — ackMode "silent" (allowlisted Capabilities toggle)', ()
     expect(mockApplyCardSubmit).toHaveBeenCalledTimes(1)
 
     // 2) Resposta é JSON simples — sem turno LLM, sem SSE.
-    expect(res._kind).toBe('success')
+    expect(res._kind).toBe('json')
     expect(res._status).toBe(200)
-    expect(res._body).toMatchObject({ ok: true })
+    expect(res._body).toMatchObject({ success: true, data: { ok: true } })
 
     // 3) NENHUMA chamada a ensureBuilderAgent / buildSseResponse (zero custo LLM).
     expect(mockEnsureBuilderAgent).not.toHaveBeenCalled()
@@ -244,10 +259,13 @@ describe('submitCard — ackMode "silent" (allowlisted Capabilities toggle)', ()
       }),
     )
 
-    expect(res._kind).toBe('success')
+    expect(res._kind).toBe('json')
     expect(res._body).toEqual({
-      ok: true,
-      builderState: parseBuilderState({ journeyVersion: 2 }),
+      success: true,
+      data: {
+        ok: true,
+        builderState: parseBuilderState({ journeyVersion: 2 }),
+      },
     })
     // O read do builderState foi pelo conversationId devolvido por applyCardSubmit.
     expect(mockFindUnique).toHaveBeenCalledWith(
@@ -274,8 +292,8 @@ describe('submitCard — ackMode "silent" (allowlisted Capabilities toggle)', ()
     expect(mockApplyKnowledgeAck).toHaveBeenCalledTimes(1)
     expect(mockApplyCardSubmit).not.toHaveBeenCalled()
 
-    expect(res._kind).toBe('success')
-    expect(res._body).toMatchObject({ ok: true })
+    expect(res._kind).toBe('json')
+    expect(res._body).toMatchObject({ success: true, data: { ok: true } })
     expect(mockEnsureBuilderAgent).not.toHaveBeenCalled()
     expect(mockBuildSseResponse).not.toHaveBeenCalled()
   })
@@ -396,5 +414,30 @@ describe('submitCard — modo default (sem ackMode) permanece conversacional', (
     expect(mockApplyCardSubmit).toHaveBeenCalledTimes(1)
     expect(mockBuildSseResponse).toHaveBeenCalledTimes(1)
     expect(res).toBeInstanceOf(Response)
+  })
+
+  it('roteia refinement para o handler determinístico e transmite ACK via SSE', async () => {
+    const res = await invoke({
+      params: { id: PROJECT_ID, cardKey: 'refinement' },
+      body: {
+        cardKey: 'refinement',
+        action: 'run',
+      },
+    })
+
+    expect(mockApplyRefinementRun).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      organizationId: ORG_ID,
+    })
+    expect(mockApplyCardSubmit).not.toHaveBeenCalled()
+    expect(mockBuildSseResponse).toHaveBeenCalledTimes(1)
+    expect(res).toBeInstanceOf(Response)
+
+    const sseParams = mockBuildSseResponse.mock.calls[0]![0] as {
+      userMessage: string
+      cardInstruction: string
+    }
+    expect(sseParams.cardInstruction).toBe('Refinamento concluído')
+    expect(sseParams.userMessage).toBe('Refinamento concluído')
   })
 })

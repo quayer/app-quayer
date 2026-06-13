@@ -23,8 +23,11 @@
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { database } from '@/server/services/database'
+import { parseBuilderState } from '../cards/builder-state'
+import { recommendAgentCapabilities } from './recommend-capabilities.pure'
 import { hasActiveCalendarConnection } from '../deploy/enabled-tools-derivation'
 import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
+import { readBuilderStateByProject } from '../sources/builder-state-db'
 
 type AuthedUser = { id: string; currentOrgId?: string | null }
 
@@ -67,6 +70,7 @@ const getCapabilities = igniter.query({
       sourceImagesPendingCount,
       knowledgeSourceCount,
       calendarConnected,
+      rawBuilderState,
     ] = await Promise.all([
       database.agentTool.findMany({
         // String literal de AgentToolType — idiom verificado em custom-tools.ts.
@@ -109,7 +113,23 @@ const getCapabilities = igniter.query({
           })
         : Promise.resolve(0),
       hasActiveCalendarConnection(organizationId, projectId),
+      // builderState do projeto (1:1 com a conversa). O projeto já foi provado
+      // org-scoped acima (loadProject), então o read by-project é seguro. Custo
+      // ZERO além do batch que já roda (NFR-05 — sem fetch extra fora deste lote).
+      readBuilderStateByProject(projectId),
     ])
+
+    // ── Recomendações (FR-51/FR-52, NFR-13) ──────────────────────────────────
+    // PRÉ-marcação read-only: a partir da missão/nicho + insumos JÁ carregados
+    // acima (customTools, calendar, pricing items), o recomendador puro devolve
+    // as capacidades sugeridas em linguagem de negócio. NUNCA escreve nada — só
+    // alimenta a UI; aceitar uma sugestão roteia para o card/toggle de domínio.
+    const builderState = parseBuilderState(rawBuilderState)
+    const recommendations = recommendAgentCapabilities(builderState, {
+      calendarConnected,
+      customToolsCount: customTools.length,
+      pricingItemCount: builderState.pricing.items.length,
+    })
 
     return response.success({
       customTools,
@@ -118,6 +138,7 @@ const getCapabilities = igniter.query({
       sourceImagesPendingCount,
       knowledgeSourceCount,
       calendarConnected,
+      recommendations,
     })
   },
 })

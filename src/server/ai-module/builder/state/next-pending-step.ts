@@ -23,6 +23,7 @@ import type {
   FieldOwnership,
 } from './readiness.types'
 import { type StepDefinition, confirmed, hasText } from './step-helpers'
+import { getRefinementPublishGateMessage } from '../refinement/refinement-gate'
 
 // ==========================================
 // Tunables
@@ -315,6 +316,8 @@ export const FIELD_OWNERSHIP: Readonly<Record<string, FieldOwnership>> = {
   'selectedToolKeys': 'card',
   'selectedChannelKey': 'card',
   'sourceIngestion.sources': 'card',
+  'conversationBlueprint.status': 'card',
+  'refinement.status': 'card',
 }
 
 // ==========================================
@@ -387,6 +390,15 @@ export function computeBlockers(
       message: 'Nenhum canal WhatsApp configurado.',
       cta: 'Conecte um canal WhatsApp',
       redirect: REDIRECT_CHANNEL,
+    })
+  }
+
+  const refinementMessage = getRefinementPublishGateMessage(state)
+  if (refinementMessage) {
+    blockers.push({
+      check: 'refinement',
+      message: refinementMessage,
+      cta: 'Corrigir refinamento',
     })
   }
 
