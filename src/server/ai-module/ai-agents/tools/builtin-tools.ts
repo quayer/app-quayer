@@ -28,6 +28,8 @@ import { createSearchMediaTool } from './media-search.tool'
 import { createCalculatorTool } from './calculator.tool'
 import { createThinkTool } from './think.tool'
 import { createTransferToHumanTool } from './transfer-to-human.tool'
+import { enqueueScheduledMessage } from '@/server/services/jobs/scheduled-message.queue'
+import { resolveScheduledAt } from './followup/resolve-scheduled-at'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -358,6 +360,130 @@ export function createBuiltinTools(ctx: ToolExecutionContext) {
     }),
 
     // -----------------------------------------------------------------------
+    // create_followup — agenda um envio PROATIVO atrasado (follow-up) TPRO-01.
+    // -----------------------------------------------------------------------
+    // Cria um ScheduledMessage (status='pending') org/contato-scoped a partir do
+    // ctx e ENFILEIRA na fila scheduled-message com delay até scheduledAt.
+    // NÃO ENVIA: o worker de ENVIO é F2b (depende do FSM-outbound durável) e
+    // reavalia elegibilidade com estado fresco (opt-out/janela 24h/supressão/
+    // anti-spam) no momento do disparo. Aqui só agendamos.
+    create_followup: tool({
+      description:
+        'Agenda uma mensagem de follow-up proativa para o cliente em um momento futuro (ex: lembrar de retornar, confirmar interesse). NÃO envia agora — apenas agenda. Use scheduledAt como ISO (YYYY-MM-DDTHH:mm:ssZ) ou offset relativo (+2h, +30m, +1d).',
+      inputSchema: z.object({
+        reason: z
+          .string()
+          .min(3)
+          .max(300)
+          .describe(
+            'Motivo do follow-up (ex: "cliente ia pensar no orçamento")',
+          ),
+        scheduledAt: z
+          .string()
+          .min(1)
+          .describe(
+            'Quando enviar: ISO completo (2026-06-14T09:00:00Z) ou offset relativo a agora (+2h, +30m, +1d).',
+          ),
+        messageGoal: z
+          .string()
+          .max(500)
+          .optional()
+          .describe(
+            'O que a mensagem deve buscar (ex: "perguntar se decidiu sobre o plano")',
+          ),
+        maxAttempts: z
+          .number()
+          .int()
+          .min(1)
+          .max(5)
+          .default(1)
+          .describe('Máximo de tentativas de follow-up (default 1).'),
+        cancelIfCustomerReplies: z
+          .boolean()
+          .default(true)
+          .describe(
+            'Cancela o follow-up se o cliente responder antes do horário (default true).',
+          ),
+      }),
+      execute: async (input) => {
+        const { reason, scheduledAt, messageGoal, maxAttempts, cancelIfCustomerReplies } =
+          input
+
+        try {
+          const now = new Date()
+          const resolved = resolveScheduledAt(scheduledAt, now)
+          if (!resolved) {
+            return {
+              success: false,
+              message:
+                'Horário inválido. Use ISO futuro (2026-06-14T09:00:00Z) ou offset (+2h, +30m, +1d).',
+            }
+          }
+
+          // contactPhone não vem no ctx — resolve da sessão (mesma origem
+          // autoritativa que schedule_appointment usa). Org-scoped pelo ctx.
+          const session = await database.chatSession.findUnique({
+            where: { id: ctx.sessionId },
+            select: { contactPhone: true },
+          })
+          if (!session?.contactPhone) {
+            return {
+              success: false,
+              message: 'Sessão não encontrada ou sem telefone do contato.',
+            }
+          }
+
+          const scheduled = await database.scheduledMessage.create({
+            data: {
+              organizationId: ctx.organizationId,
+              // Follow-up ad-hoc (não vem de ScheduledAutomation).
+              automationId: null,
+              connectionId: ctx.connectionId,
+              contactPhone: session.contactPhone,
+              sessionId: ctx.sessionId,
+              scheduledAt: resolved.at,
+              reason,
+              messageGoal: messageGoal ?? null,
+              maxAttempts,
+              cancelIfCustomerReplies,
+              // status default 'pending', attemptsSoFar default 0 no schema.
+            },
+            select: { id: true },
+          })
+
+          // Enfileira com delay até scheduledAt. NÃO envia (worker = F2b). O
+          // producer é fail-safe: sem Redis não derruba o turno — o registro
+          // pending já está persistido e pode ser reenfileirado depois.
+          const enqueue = await enqueueScheduledMessage(
+            {
+              scheduledMessageId: scheduled.id,
+              organizationId: ctx.organizationId,
+              connectionId: ctx.connectionId,
+              contactPhone: session.contactPhone,
+              sessionId: ctx.sessionId,
+              scheduledAt: resolved.at.toISOString(),
+              reason,
+            },
+            { delayMs: resolved.delayMs },
+          )
+
+          return {
+            success: true,
+            scheduledMessageId: scheduled.id,
+            scheduledAt: resolved.at.toISOString(),
+            enqueued: enqueue.enqueued,
+            message: `Follow-up agendado para ${resolved.at.toISOString()}.`,
+          }
+        } catch (error) {
+          const msg =
+            error instanceof Error ? error.message : 'Erro desconhecido'
+          console.error('[create_followup] Failed:', msg)
+          return { success: false, message: `Erro ao agendar follow-up: ${msg}` }
+        }
+      },
+    }),
+
+    // -----------------------------------------------------------------------
     // transfer_to_human — UNIFICADA: routing queue|department|self + pauseAI.
     // Consolidou os antigos notify_team (routing:queue,pauseAI:false) e
     // dispatch_to_agent (routing:department → delega à roleta madura via
@@ -446,6 +572,7 @@ export const BUILTIN_TOOL_NAMES: BuiltinToolName[] = [
   'schedule_appointment',
   'send_pricing',
   'create_lead',
+  'create_followup',
   'transfer_to_human',
   'check_availability',
   'create_event',

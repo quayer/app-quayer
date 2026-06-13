@@ -21,6 +21,7 @@ import {
   sendAgentResponse,
   type OutboundDatabase,
 } from '@/server/communication/services/outbound.service'
+import { deriveDispatchKey } from '@/server/communication/services/outbound-dispatch.pure'
 import { enqueueOutboundRetry } from '@/server/communication/services/outbound-retry.queue'
 import { sendTypingIndicator } from '@/server/communication/services/typing-indicator.service'
 import {
@@ -249,6 +250,12 @@ export async function dispatchAiAndRespond(input: DispatchAiInput): Promise<Next
             agentText: aiText,
             tts: runtimeSettings.tts,
             aiMeta,
+            // FSM outbound durável: ancora o checkpoint por bloco neste turno.
+            // O retry via outbound-retry.queue reenfileira o OutboundRequest
+            // inteiro (dispatchKey junto), então o reprocessamento PULA blocos já
+            // enviados = fim da duplicação. externalMessageId = waMessageId inbound
+            // (mesmo id usado como inboundMessageId do turno).
+            dispatchKey: deriveDispatchKey(session.id, externalMessageId),
           },
           {
             // Documented structural-subset cast: `OutboundDatabase` is a loose

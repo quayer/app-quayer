@@ -2130,6 +2130,94 @@ model BuilderContextSnapshot {
   @@map("builder_context_snapshots")
 }
 
+// ── Mensagens Proativas / Automações Programadas (épico builder-proatividade) ──
+// RUNTIME: o agente envia proativamente (follow-up de lead parado, lembrete de
+// agenda, data importante). A F1 (design-time) liga a capacidade no builderState;
+// a saga materializa em ScheduledAutomation (a REGRA); o worker BullMQ cria
+// ScheduledMessage (INSTÂNCIA por contato) e dispara via sendAgentResponse,
+// respeitando opt-out (ContactOptOut), janela 24h e gates de supressão. Sem FK
+// relacional (padrão do módulo, igual BuilderJourneyEvent). NFR-01: org-scoped.
+
+model ScheduledAutomation {
+  id              String   @id @default(uuid())
+  organizationId  String // multi-tenant (NFR-01)
+  projectId       String // BuilderProject.id (sem FK, igual BuilderJourneyEvent)
+  trigger         String // lead_idle | appointment_before | appointment_after | birthday | renewal_due | custom_date
+  audience        String // contact | lead | customer
+  timing          Json // shape por trigger (ex.: { hoursBefore: 2 } | { at: "09:00" })
+  messageTemplate String   @db.Text
+  cancelRules     String[] // [customer_replied, opted_out, human_took_over, session_closed]
+  maxAttempts     Int      @default(1)
+  status          String   @default("active") // active | paused
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId, projectId])
+  @@map("scheduled_automations")
+}
+
+model ScheduledMessage {
+  id                      String    @id @default(uuid())
+  organizationId          String // multi-tenant (NFR-01)
+  automationId            String? // id lógico p/ ScheduledAutomation (sem FK; null = follow-up ad-hoc via create_followup)
+  connectionId            String
+  contactPhone            String // E.164-BR normalizado (não há modelo Contact)
+  sessionId               String?
+  scheduledAt             DateTime
+  reason                  String
+  messageGoal             String?
+  attemptsSoFar           Int       @default(0)
+  maxAttempts             Int       @default(1)
+  cancelIfCustomerReplies Boolean   @default(true)
+  status                  String    @default("pending") // pending | sent | cancelled | failed
+  sentAt                  DateTime?
+  cancelledReason         String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([status, scheduledAt]) // worker varre pendentes por horário
+  @@index([organizationId, contactPhone]) // cancel-on-inbound por contato
+  @@map("scheduled_messages")
+}
+
+model ContactOptOut {
+  id             String   @id @default(uuid())
+  organizationId String // multi-tenant (NFR-01)
+  phone          String // E.164-BR normalizado
+  reason         String? // palavra-chave que disparou (parar/não quero/remover)
+  optedOutAt     DateTime @default(now())
+
+  @@unique([organizationId, phone])
+  @@map("contact_opt_outs")
+}
+
+// FSM outbound durável (pré-requisito do F2b proatividade) — checkpoint POR BLOCO
+// do providerMessageId. Resolve o reenvio de blocos duplicados em crash no meio do
+// loop de envio (sendAgentResponse). dispatchKey = sha256(sessionId:inboundMessageId)
+// único → idempotência. FAIL-OPEN: ausência do registro/dep cai p/ envio sem checkpoint.
+// Sem FK relacional (padrão do módulo, igual scheduled_automations/builder_journey_events).
+// org-scoped (NFR-01).
+model OutboundDispatch {
+  id             String   @id @default(cuid())
+  dispatchKey    String   @unique // sha256(sessionId:inboundMessageId) — idempotência
+  organizationId String
+  sessionId      String
+  connectionId   String
+  contactPhone   String
+  agentText      String   @db.Text // fonte p/ reconstruir blocos no resume
+  status         String   @default("queued") // queued|sending|sent|partial|failed
+  blocks         Json // [{idx:number, providerMessageId?:string, status:'pending'|'sent'|'failed'}]
+  totalBlocks    Int      @default(0)
+  sentBlocks     Int      @default(0)
+  attempt        Int      @default(0)
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status, updatedAt])
+  @@map("outbound_dispatches")
+}
+
 enum BuilderContextSnapshotTrigger {
   auto // shouldCompact returned true
   manual // user called /chat/compact

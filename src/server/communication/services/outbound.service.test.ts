@@ -75,6 +75,7 @@ import {
   type OutboundDeps,
   type OutboundRequest,
 } from './outbound.service'
+import { deriveDispatchKey } from './outbound-dispatch.pure'
 
 // ---------------------------------------------------------------------------
 // Test fixtures + factory helpers
@@ -847,5 +848,240 @@ describe('sendAgentResponse — QH-09 TTS outbound (text → áudio)', () => {
     expect(arg.data.content).toBe('texto que vira áudio')
     expect(arg.data.direction).toBe('OUTBOUND')
     expect(arg.data.waMessageId).toBe('wa-audio-3')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FSM outbound durável — checkpoint por bloco (idempotência de turno)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fake in-memory de `outboundDispatch` (Map por dispatchKey). Espelha o subset
+ * usado pelo service (findUnique/upsert/update) e expõe os spies + o store para
+ * asserções. Sem rede, sem Prisma — coerente com o deps-injection do arquivo.
+ */
+type DispatchRow = {
+  dispatchKey: string
+  status: string
+  blocks: unknown
+  sentBlocks: number
+  attempt: number
+  totalBlocks?: number
+  lastError?: string
+}
+
+function buildDispatchFake(seed?: DispatchRow) {
+  const store = new Map<string, DispatchRow>()
+  if (seed) store.set(seed.dispatchKey, { ...seed })
+
+  const findUnique = vi.fn(async (args: { where: { dispatchKey: string } }) => {
+    const row = store.get(args.where.dispatchKey)
+    if (!row) return null
+    return {
+      status: row.status,
+      blocks: row.blocks,
+      sentBlocks: row.sentBlocks,
+      attempt: row.attempt,
+    }
+  })
+
+  const upsert = vi.fn(
+    async (args: {
+      where: { dispatchKey: string }
+      create: Record<string, unknown>
+      update: Record<string, unknown>
+    }) => {
+      const existing = store.get(args.where.dispatchKey)
+      if (existing) {
+        Object.assign(existing, args.update)
+        store.set(args.where.dispatchKey, existing)
+        return { status: existing.status, blocks: existing.blocks, attempt: existing.attempt }
+      }
+      const created = args.create as unknown as DispatchRow
+      store.set(args.where.dispatchKey, { ...created })
+      return { status: created.status, blocks: created.blocks, attempt: created.attempt }
+    },
+  )
+
+  const update = vi.fn(
+    async (args: { where: { dispatchKey: string }; data: Record<string, unknown> }) => {
+      const row = store.get(args.where.dispatchKey)
+      if (row) {
+        Object.assign(row, args.data)
+        store.set(args.where.dispatchKey, row)
+      }
+      return row
+    },
+  )
+
+  return { outboundDispatch: { findUnique, upsert, update }, store, findUnique, upsert, update }
+}
+
+/** Deps com a dep durável injetada. */
+function buildDurableDeps(
+  dispatchFake: ReturnType<typeof buildDispatchFake>,
+  overrides: Parameters<typeof buildDeps>[0] = {},
+): ReturnType<typeof buildDeps> {
+  const deps = buildDeps(overrides)
+  ;(deps.database as unknown as { outboundDispatch: unknown }).outboundDispatch =
+    dispatchFake.outboundDispatch
+  return deps
+}
+
+const DISPATCH_KEY = 'dk-test-1'
+
+describe('sendAgentResponse — FSM outbound durável (checkpoint por bloco)', () => {
+  it('CLAIM "sent" → skip idempotente: não chama sender nem persiste de novo', async () => {
+    const dispatchFake = buildDispatchFake({
+      dispatchKey: DISPATCH_KEY,
+      status: 'sent',
+      blocks: [{ idx: 0, providerMessageId: 'wa-prev', status: 'sent' }],
+      sentBlocks: 1,
+      attempt: 1,
+    })
+    const deps = buildDurableDeps(dispatchFake)
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi', dispatchKey: DISPATCH_KEY }),
+      deps,
+    )
+
+    // Idempotente: nada reenviado, nada re-persistido, persisted=true.
+    expect(res.persisted).toBe(true)
+    expect(res.blocksSent).toBe(1)
+    expect(deps._sendTextMock).not.toHaveBeenCalled()
+    expect(deps._messageCreateMock).not.toHaveBeenCalled()
+    // upsert/update NÃO são chamados no skip (saímos antes).
+    expect(dispatchFake.upsert).not.toHaveBeenCalled()
+    expect(dispatchFake.update).not.toHaveBeenCalled()
+  })
+
+  it('RESUME "partial": bloco 0 já sent → só o bloco 1 é enviado; checkpoint final "sent"', async () => {
+    // Texto de 2 blocos (\n\n). Bloco 0 já enviado (crash antes do bloco 1).
+    const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}`
+    const dispatchFake = buildDispatchFake({
+      dispatchKey: DISPATCH_KEY,
+      status: 'partial',
+      blocks: [
+        { idx: 0, providerMessageId: 'wa-0', status: 'sent' },
+        { idx: 1, status: 'pending' },
+      ],
+      sentBlocks: 1,
+      attempt: 1,
+    })
+    const deps = buildDurableDeps(dispatchFake, {
+      sendTextResults: [{ success: true, messageId: 'wa-1' }],
+    })
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: text, dispatchKey: DISPATCH_KEY }),
+      deps,
+    )
+
+    // Só o bloco 1 foi (re)enviado — o bloco 0 foi pulado (anti-duplicação).
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(res.blocksSent).toBe(2) // 1 pulado + 1 enviado
+    // markBotMessage só no bloco efetivamente enviado.
+    expect(deps._markBotMessageMock).toHaveBeenCalledTimes(1)
+    // Persistência usa o waMessageId do bloco 0 (recuperado do checkpoint).
+    const arg = deps._messageCreateMock.mock.calls[0][0] as { data: Record<string, unknown> }
+    expect(arg.data.waMessageId).toBe('wa-0')
+    // Estado final: status 'sent', 2 blocos.
+    const row = dispatchFake.store.get(DISPATCH_KEY)
+    expect(row?.status).toBe('sent')
+    expect(row?.sentBlocks).toBe(2)
+  })
+
+  it('FRESH: 2 blocos enviados, dispatch criado "sending" → "sent", checkpoint por bloco', async () => {
+    const text = `${'a'.repeat(500)}\n\n${'b'.repeat(500)}`
+    const dispatchFake = buildDispatchFake() // sem seed → findUnique=null → fresh
+    const deps = buildDurableDeps(dispatchFake, {
+      sendTextResults: [
+        { success: true, messageId: 'wa-1' },
+        { success: true, messageId: 'wa-2' },
+      ],
+    })
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: text, dispatchKey: DISPATCH_KEY }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(2)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(2)
+    // upsert criou a linha; update foi chamado por bloco (2) + finalize (1) = 3.
+    expect(dispatchFake.upsert).toHaveBeenCalledOnce()
+    expect(dispatchFake.update).toHaveBeenCalledTimes(3)
+    // Estado final e checkpoint com providerMessageId por bloco.
+    const row = dispatchFake.store.get(DISPATCH_KEY)
+    expect(row?.status).toBe('sent')
+    expect(row?.sentBlocks).toBe(2)
+    const blocks = row?.blocks as Array<{ idx: number; providerMessageId?: string; status: string }>
+    expect(blocks.map((b) => b.providerMessageId)).toEqual(['wa-1', 'wa-2'])
+    expect(blocks.every((b) => b.status === 'sent')).toBe(true)
+    // Persistiu o Message com o waMessageId do 1o bloco.
+    const arg = deps._messageCreateMock.mock.calls[0][0] as { data: Record<string, unknown> }
+    expect(arg.data.waMessageId).toBe('wa-1')
+  })
+
+  it('FAIL-OPEN: findUnique lança → cai pro legado (envia tudo, persiste), nunca lança', async () => {
+    const dispatchFake = buildDispatchFake()
+    dispatchFake.findUnique.mockRejectedValueOnce(new Error('db down'))
+    const deps = buildDurableDeps(dispatchFake)
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi', dispatchKey: DISPATCH_KEY }),
+      deps,
+    )
+
+    // Caminho legado: enviou e persistiu normalmente, sem propagar o erro.
+    expect(res.blocksSent).toBe(1)
+    expect(res.persisted).toBe(true)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._messageCreateMock).toHaveBeenCalledTimes(1)
+    // Como o claim falhou, durable=false → upsert/update NÃO foram chamados.
+    expect(dispatchFake.upsert).not.toHaveBeenCalled()
+    expect(dispatchFake.update).not.toHaveBeenCalled()
+  })
+
+  it('SEM dispatchKey: comportamento idêntico ao legado (não toca outboundDispatch)', async () => {
+    const dispatchFake = buildDispatchFake()
+    const deps = buildDurableDeps(dispatchFake) // dep presente, mas req sem dispatchKey
+
+    const res = await sendAgentResponse(buildRequest({ agentText: 'oi' }), deps)
+
+    expect(res.blocksSent).toBe(1)
+    expect(res.persisted).toBe(true)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    // Sem dispatchKey → durável desligado → nada tocado.
+    expect(dispatchFake.findUnique).not.toHaveBeenCalled()
+    expect(dispatchFake.upsert).not.toHaveBeenCalled()
+    expect(dispatchFake.update).not.toHaveBeenCalled()
+  })
+
+  it('checkpoint falha (update lança) → não derruba o turno: envia e persiste', async () => {
+    const dispatchFake = buildDispatchFake()
+    // upsert ok; mas o checkpoint por bloco (update) lança → fail-open.
+    dispatchFake.update.mockRejectedValue(new Error('checkpoint write failed'))
+    const deps = buildDurableDeps(dispatchFake)
+
+    const res = await sendAgentResponse(
+      buildRequest({ agentText: 'oi', dispatchKey: DISPATCH_KEY }),
+      deps,
+    )
+
+    expect(res.blocksSent).toBe(1)
+    expect(res.persisted).toBe(true)
+    expect(deps._sendTextMock).toHaveBeenCalledTimes(1)
+    expect(deps._messageCreateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('deriveDispatchKey é determinístico e estável (idempotência de turno)', async () => {
+    const a = deriveDispatchKey('sess-x', 'wamid-y')
+    const b = deriveDispatchKey('sess-x', 'wamid-y')
+    const c = deriveDispatchKey('sess-x', 'wamid-z')
+    expect(a).toBe(b)
+    expect(a).not.toBe(c)
+    expect(a).toMatch(/^[0-9a-f]{64}$/)
   })
 })

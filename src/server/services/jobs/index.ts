@@ -12,6 +12,11 @@
  *   - journey-events-purge: cron de retenção (NFR-10) — apaga
  *     builder_journey_events > 180 dias. Schedule FIXO (sem env), mesmo padrão
  *     BullMQ repeat do session-close.
+ *   - scheduled-message (TPRO-01 / F2b): envio PROATIVO atrasado — on-demand,
+ *     enfileirado pela tool create_followup. O worker reavalia elegibilidade
+ *     com estado FRESCO (canSendProactive) e entrega via sendAgentResponse
+ *     (FSM-durável). Worker em ai-module/ai-agents/proactive/
+ *     scheduled-message-send.ts; producer em ./scheduled-message.queue.
  *
  * Como agendar:
  *   - BullMQ "repeat" via registerSessionCloseQueueSchedule (chamado uma
@@ -49,6 +54,17 @@ import {
   OUTBOUND_RETRY_QUEUE,
   OUTBOUND_RETRY_JOB_NAME,
 } from '@/server/communication/services/outbound-retry.queue'
+import {
+  registerOutboundResumeWorker,
+  registerOutboundResumeSchedule,
+  OUTBOUND_RESUME_QUEUE,
+  OUTBOUND_RESUME_JOB_NAME,
+} from '@/server/communication/services/outbound-resume.queue'
+import {
+  SCHEDULED_MESSAGE_QUEUE,
+  SCHEDULED_MESSAGE_JOB_NAME,
+} from './scheduled-message.queue'
+import { registerScheduledMessageWorker } from '@/server/ai-module/ai-agents/proactive/scheduled-message-send'
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -98,12 +114,35 @@ export const REGISTERED_JOBS = {
     // registerWorker abaixo.
     registerWorker: registerOutboundRetryWorker,
   },
+  outboundResume: {
+    queue: OUTBOUND_RESUME_QUEUE,
+    jobName: OUTBOUND_RESUME_JOB_NAME,
+    // FSM outbound durável (Unidade 4): cron de resgate de dispatches presos
+    // ('sending'/'partial' após crash, sem retry agendado). Re-roda o envio com
+    // a mesma dispatchKey → pula blocos já checkpointados (anti-duplicação). O
+    // Worker lazy-importa o caminho de envio; o schedule é registrado por
+    // registerOutboundResumeSchedule (cron fixo a cada 2min).
+    registerWorker: registerOutboundResumeWorker,
+  },
   journeyEventsPurge: {
     queue: JOURNEY_EVENTS_PURGE_QUEUE,
     jobName: JOURNEY_EVENTS_PURGE_JOB_NAME,
     // NFR-10: cron de retenção. Handler puro (utilizável por cron externo sem
     // BullMQ, igual ao session-close).
     handler: runJourneyEventsPurge,
+  },
+  scheduledMessage: {
+    queue: SCHEDULED_MESSAGE_QUEUE,
+    jobName: SCHEDULED_MESSAGE_JOB_NAME,
+    // TPRO-01: on-demand — enfileirado pela tool create_followup com delay até
+    // scheduledAt. O worker de ENVIO (F2b) já existe em
+    // ai-module/ai-agents/proactive/scheduled-message-send.ts: recarrega o
+    // ScheduledMessage por id (status='pending'), reavalia elegibilidade com
+    // estado FRESCO (canSendProactive: opt-out, janela 24h, supressão,
+    // anti-spam), envia via sendAgentResponse (FSM-durável, dispatchKey) e marca
+    // status='sent'/'cancelled'/'failed'. O Worker lazy-importa o caminho de
+    // envio. Boot via registerWorker abaixo.
+    registerWorker: registerScheduledMessageWorker,
   },
 } as const
 
@@ -215,6 +254,15 @@ export function registerAllWorkers(redisUrl: string): Worker[] {
     // journey-events-purge (NFR-10): cron de retenção (> 180 dias). Worker do
     // cron; o schedule é registrado por registerJourneyEventsPurgeSchedule.
     registerJourneyEventsPurgeWorker(redisUrl),
+    // outbound-resume (FSM durável, Unidade 4): cron de resgate de dispatches
+    // presos. Worker do cron; o schedule é registrado por
+    // registerOutboundResumeSchedule.
+    registerOutboundResumeWorker(redisUrl),
+    // scheduled-message (TPRO-01 / F2b): on-demand — enfileirado pela tool
+    // create_followup com delay até scheduledAt. Worker reavalia elegibilidade
+    // com estado fresco (canSendProactive) e envia via sendAgentResponse
+    // (FSM-durável). O Worker lazy-importa o caminho de envio.
+    registerScheduledMessageWorker(redisUrl),
   ]
 }
 
@@ -245,3 +293,41 @@ export {
   OUTBOUND_RETRY_JOB_NAME,
   type OutboundRetryJobPayload,
 } from '@/server/communication/services/outbound-retry.queue'
+
+// TPRO-01: re-exporta o producer + constantes + payload da fila de envio
+// proativo agendado. create_followup importa o producer daqui ou direto de
+// ./scheduled-message.queue.
+export {
+  enqueueScheduledMessage,
+  SCHEDULED_MESSAGE_QUEUE,
+  SCHEDULED_MESSAGE_JOB_NAME,
+  type ScheduledMessageJobPayload,
+  type EnqueueScheduledMessageResult,
+} from './scheduled-message.queue'
+
+// TPRO-01 (F2b): re-exporta o worker registrar do envio proativo agendado
+// (handler + deps reais + worker vivem em ai-module/ai-agents/proactive/
+// scheduled-message-send.ts). Boot importa daqui de um só lugar.
+export {
+  registerScheduledMessageWorker,
+  runScheduledMessageSend,
+  type ProactiveSendDeps,
+  type ProactiveSendResult,
+  type ProactiveScheduledRow,
+  type ProactiveEligibilitySnapshot,
+} from '@/server/ai-module/ai-agents/proactive/scheduled-message-send'
+
+// FSM outbound durável (Unidade 4): re-exporta a camada de fila do resume
+// (handler puro + worker registrar + schedule + constantes) para o boot importar
+// de um só lugar. O schedule (registerOutboundResumeSchedule) é chamado uma vez
+// no boot do worker dedicado, junto de registerJourneyEventsPurgeSchedule.
+export {
+  registerOutboundResumeWorker,
+  registerOutboundResumeSchedule,
+  runOutboundResumeBatch,
+  OUTBOUND_RESUME_QUEUE,
+  OUTBOUND_RESUME_JOB_NAME,
+  type OutboundResumeDeps,
+  type OutboundResumeBatchResult,
+  type StuckDispatchRow,
+} from '@/server/communication/services/outbound-resume.queue'

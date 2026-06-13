@@ -26,183 +26,34 @@
  *   - Rate-limit estourado → `rateLimited: true` e NADA é enviado.
  */
 
-import { parseTags, type ParsedTag } from './tag-parser.service'
-import { splitMessage, type MessageBlock } from './message-splitter.service'
-import type {
-  SendResult,
-  SendOptions,
-  SendButtonsPayload,
-  SendCarouselPayload,
-  SendListPayload,
-} from './uazapi-sender.service'
-import { synthesizeTtsToMediaUrl } from './tts.service'
+import { splitMessage } from './message-splitter.service'
+import { buildOutboundBlocks, sendBlock } from './outbound-blocks.service'
 import { checkOutboundRateLimit } from './outbound-rate-limit'
 import { sendWithRetry, pushDeadLetter } from './outbound-deadletter'
-import type { AgentRuntimeSettings } from '@/lib/agent-runtime-settings'
+import {
+  initBlockPlan,
+  resumeDecision,
+  shouldSendBlock,
+  applyBlockResult,
+  summarizeStatus,
+  type BlockCheckpoint,
+} from './outbound-dispatch.pure'
 import { checkRateLimit } from '@/server/ai-module/ai-agents/infra/rate-limit.service'
+import type {
+  OutboundRequest,
+  OutboundResult,
+  OutboundDeps,
+} from './outbound.types'
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-export interface OutboundRequest {
-  connectionId: string
-  sessionId: string
-  organizationId: string
-  contactPhone: string
-  agentText: string
-  tts?: AgentRuntimeSettings['tts']
-  /**
-   * QH-02: nº da tentativa de retry deste envio. 0/ausente = envio original.
-   * Incrementado a cada reenfileiramento pelo worker de retry; ao atingir
-   * MAX_RETRY_ATTEMPTS, o turno barrado por rate-limit de instância vai para a
-   * dead-letter em vez de reenfileirar de novo.
-   */
-  attempt?: number
-  /**
-   * Per-turn AI attribution (cost/tokens/model). Persisted on the OUTBOUND
-   * Message so spend and latency are queryable per reply. Optional — operator
-   * (human) messages won't carry it.
-   */
-  aiMeta?: {
-    model?: string
-    provider?: string
-    agentId?: string | null
-    inputTokens?: number
-    outputTokens?: number
-    inputCost?: number
-    outputCost?: number
-    totalCost?: number
-    latencyMs?: number
-  }
-}
-
-export interface OutboundResult {
-  blocksSent: number
-  persisted: boolean
-  errors: string[]
-  /**
-   * `true` quando o turno foi barrado por rate-limit (contato ou org) e NADA
-   * foi enviado. O caller isola isso como uma não-falha de infra.
-   */
-  rateLimited?: boolean
-  /**
-   * QH-02: `true` quando o turno foi barrado pelo limite de INSTÂNCIA e um retry
-   * com delay foi agendado (a resposta NÃO foi perdida — será reenviada). Quando
-   * `false` com `rateLimited:true`, o retry esgotou e foi para a dead-letter.
-   */
-  retryScheduled?: boolean
-  /** QH-02: delay (ms) com que o retry foi agendado, para observabilidade. */
-  retryAfterMs?: number
-}
-
-/**
- * Subset estrutural do PrismaClient que o orchestrator usa.
- * Mantido frouxo para evitar acoplamento com a versão exata do Prisma client.
- */
-export interface OutboundDatabase {
-  connection: {
-    findFirst: (args: {
-      where: Record<string, unknown>
-      select?: Record<string, boolean>
-    }) => Promise<{
-      id: string
-      uazapiToken?: string | null
-      uazapiBaseUrl?: string | null
-    } | null>
-  }
-  message: {
-    create: (args: { data: Record<string, unknown> }) => Promise<unknown>
-  }
-  chatSession?: {
-    update?: (args: unknown) => Promise<unknown>
-    findFirst?: (args: unknown) => Promise<unknown>
-  }
-}
-
-export interface OutboundSender {
-  sendText: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    content: string,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendImage?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    imageUrl: string,
-    caption?: string,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendAudio?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    audioUrl: string,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendDocument?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    documentUrl: string,
-    caption?: string,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendVideo?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    videoUrl: string,
-    caption?: string,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendLocation?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    location: NonNullable<MessageBlock['location']>,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendButtons?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    payload: SendButtonsPayload,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendList?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    payload: SendListPayload,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-  sendCarousel?: (
-    token: string,
-    baseUrl: string,
-    recipient: string,
-    payload: SendCarouselPayload,
-    options?: SendOptions,
-  ) => Promise<SendResult>
-}
-
-export interface OutboundDeps {
-  database: OutboundDatabase
-  sender: OutboundSender
-  markBotMessage: (organizationId: string, externalMessageId: string) => Promise<boolean>
-  /**
-   * QH-02: agenda um retry deste envio com `delayMs` (injetado para não acoplar
-   * o service à fila BullMQ — testes injetam um spy). Quando ausente, um turno
-   * barrado pelo limite de instância vai direto para a dead-letter.
-   */
-  scheduleRetry?: (
-    payload: OutboundRequest & { attempt: number },
-    delayMs: number,
-  ) => Promise<void>
-}
+// Re-exporta os tipos públicos para preservar a superfície de import deste módulo
+// (callers e testes importam estes tipos de './outbound.service').
+export type {
+  OutboundRequest,
+  OutboundResult,
+  OutboundDatabase,
+  OutboundSender,
+  OutboundDeps,
+} from './outbound.types'
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -305,12 +156,92 @@ export async function sendAgentResponse(
   // 3. Parse tags ricas + split de texto puro
   const blocks = buildOutboundBlocks(req.agentText, MAX_BLOCK_CHARS)
 
+  // 3b. FSM outbound durável — claim do dispatch por dispatchKey (checkpoint por
+  //     bloco). Só ativa quando há `req.dispatchKey` E a dep `outboundDispatch`.
+  //     REGRA DE OURO — FAIL-OPEN: qualquer passo do claim que lance desliga o
+  //     durável (durable=false) e segue pelo caminho legado, NUNCA propaga nem
+  //     bloqueia a mensagem. Preserva 100% dos testes que não passam dispatchKey.
+  const dispatchKey = req.dispatchKey
+  const dispatchDb = deps.database.outboundDispatch
+  let durable = Boolean(dispatchKey) && Boolean(dispatchDb)
+  let plan: BlockCheckpoint[] = []
+
+  if (durable && dispatchKey && dispatchDb) {
+    try {
+      const existing = await dispatchDb.findUnique({ where: { dispatchKey } })
+      const decision = resumeDecision(existing)
+
+      // 'skip': dispatch já 'sent' → retorno idempotente, NÃO reenvia nem
+      // re-persiste o Message (a duplicação que este épico evita).
+      if (decision.action === 'skip') {
+        return {
+          blocksSent: existing?.sentBlocks ?? blocks.length,
+          persisted: true,
+          errors,
+        }
+      }
+
+      // 'fresh': plano novo (todos pending). 'resume': reconstrói o plano com os
+      // blocos já 'sent' marcados (preservando providerMessageId quando houver),
+      // para PULAR o que já foi enviado.
+      if (decision.action === 'resume') {
+        plan = rebuildResumePlan(blocks.length, decision.sentIdx, existing?.blocks)
+      } else {
+        plan = initBlockPlan(blocks.length)
+      }
+
+      const alreadySent = plan.filter((b) => b.status === 'sent').length
+      const attempt = existing?.attempt ?? 0
+      await dispatchDb.upsert({
+        where: { dispatchKey },
+        create: {
+          dispatchKey,
+          organizationId: req.organizationId,
+          sessionId: req.sessionId,
+          connectionId: req.connectionId,
+          contactPhone: req.contactPhone,
+          agentText: req.agentText,
+          status: 'sending',
+          blocks: plan,
+          totalBlocks: blocks.length,
+          sentBlocks: alreadySent,
+          attempt,
+        },
+        update: {
+          status: 'sending',
+          attempt: attempt + 1,
+        },
+      })
+    } catch (err) {
+      // Claim falhou → desliga o durável e segue legado. NUNCA propaga.
+      console.warn(
+        '[outbound] dispatch claim failed, falling back to legacy (no checkpoint):',
+        err instanceof Error ? err.message : String(err),
+      )
+      durable = false
+      plan = []
+    }
+  }
+
   // 4. Envio sequencial + bot-echo tracking. Cada bloco usa retry+backoff
   //    exponencial; ao esgotar, vai para a dead-letter (sem derrubar o turno).
   let blocksSent = 0
   let firstSuccessMessageId: string | undefined
 
-  for (const block of blocks) {
+  for (let idx = 0; idx < blocks.length; idx++) {
+    const block = blocks[idx]
+
+    // Durável: bloco já checkpointado 'sent' (crash/retry) → PULA o envio para
+    // não duplicar. Conta como enviado e recupera o waMessageId do bloco 0.
+    if (durable && !shouldSendBlock(plan, idx)) {
+      blocksSent += 1
+      if (idx === 0 && !firstSuccessMessageId) {
+        const checkpoint = plan.find((b) => b.idx === 0)
+        if (checkpoint?.providerMessageId) firstSuccessMessageId = checkpoint.providerMessageId
+      }
+      continue
+    }
+
     const result = await sendWithRetry(
       () =>
         sendBlock(
@@ -339,10 +270,44 @@ export async function sendAgentResponse(
     } else {
       errors.push(result.error ?? 'erro desconhecido')
     }
+
+    // Durável: CHECKPOINT do bloco ANTES do próximo — persiste o providerMessageId
+    // e o status, de forma que um crash aqui retome do bloco seguinte. FAIL-OPEN:
+    // falha no checkpoint apenas loga e segue (não derruba o turno nem reenvia).
+    if (durable && dispatchKey && dispatchDb) {
+      plan = applyBlockResult(plan, idx, {
+        success: result.success,
+        providerMessageId: result.messageId,
+      })
+      try {
+        await dispatchDb.update({
+          where: { dispatchKey },
+          data: {
+            blocks: plan,
+            sentBlocks: plan.filter((b) => b.status === 'sent').length,
+            status: 'sending',
+            ...(result.success ? {} : { lastError: result.error ?? 'erro desconhecido' }),
+          },
+        })
+      } catch (err) {
+        console.warn(
+          '[outbound] dispatch block checkpoint failed (non-fatal):',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    }
   }
 
-  // 5. Persistência (só se enviou algo)
+  // 5. Persistência do Message + finalização do dispatch.
+  //     B1: o status final 'sent' do dispatch SÓ é gravado DEPOIS de o Message
+  //     ser persistido. Assim, um crash entre "blocos enviados" e "Message
+  //     gravado" deixa o dispatch em 'sending' → o resume re-roda pulando os
+  //     blocos já enviados (sem duplicar ao cliente) e grava o Message que
+  //     faltou. Marcar 'sent' cedo demais faria o resume cair em 'skip' e perder
+  //     o registro interno do Message.
   if (blocksSent === 0) {
+    // Nada entregue → finaliza o dispatch (status 'failed', terminal) e retorna.
+    await finalizeDispatch(deps, durable, dispatchKey, plan)
     return { blocksSent: 0, persisted: false, errors }
   }
 
@@ -377,18 +342,89 @@ export async function sendAgentResponse(
           : {}),
       },
     })
+    // Message persistido → AGORA é seguro marcar o status final do dispatch.
+    await finalizeDispatch(deps, durable, dispatchKey, plan)
     return { blocksSent, persisted: true, errors }
   } catch (err) {
     errors.push(
       `persist Message failed: ${err instanceof Error ? err.message : String(err)}`,
     )
+    // NÃO finaliza o dispatch aqui: deixa em 'sending' para o resume re-tentar a
+    // persistência (pulando os blocos já enviados). Evita a perda do Message (B1).
     return { blocksSent, persisted: false, errors }
+  }
+}
+
+/**
+ * FSM outbound durável: finaliza o dispatch com o status sumarizado
+ * (sent/partial/failed). Chamado SOMENTE após a persistência do Message (B1) —
+ * marcar 'sent' antes faria um crash perder o registro interno do Message.
+ * FAIL-OPEN: qualquer falha aqui apenas loga; nunca derruba o turno.
+ */
+async function finalizeDispatch(
+  deps: OutboundDeps,
+  durable: boolean,
+  dispatchKey: string | undefined,
+  plan: BlockCheckpoint[],
+): Promise<void> {
+  const dispatchDb = deps.database.outboundDispatch
+  if (!durable || !dispatchKey || !dispatchDb) return
+  try {
+    const summary = summarizeStatus(plan)
+    await dispatchDb.update({
+      where: { dispatchKey },
+      data: { status: summary.status, sentBlocks: summary.sentBlocks },
+    })
+  } catch (err) {
+    console.warn(
+      '[outbound] dispatch finalize failed (non-fatal):',
+      err instanceof Error ? err.message : String(err),
+    )
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * FSM outbound durável: reconstrói o plano de blocos no RESUME (crash no meio).
+ * Parte de `initBlockPlan(total)` (todos pending) e marca como 'sent' os índices
+ * em `sentIdx`, recuperando o `providerMessageId` do `blocks` Json persistido
+ * quando disponível (necessário p/ o waMessageId do Message no bloco 0).
+ *
+ * Defensivo: `persistedBlocks` é parseado frouxamente (Json `unknown`); índices
+ * fora do range são ignorados. Imutável (retorna novo array).
+ */
+function rebuildResumePlan(
+  total: number,
+  sentIdx: number[],
+  persistedBlocks: unknown,
+): BlockCheckpoint[] {
+  const providerById = new Map<number, string>()
+  if (Array.isArray(persistedBlocks)) {
+    for (const raw of persistedBlocks) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const candidate = raw as { idx?: unknown; providerMessageId?: unknown }
+      if (
+        typeof candidate.idx === 'number' &&
+        Number.isFinite(candidate.idx) &&
+        typeof candidate.providerMessageId === 'string'
+      ) {
+        providerById.set(candidate.idx, candidate.providerMessageId)
+      }
+    }
+  }
+
+  const sentSet = new Set(sentIdx)
+  return initBlockPlan(total).map((block) => {
+    if (!sentSet.has(block.idx)) return block
+    const providerMessageId = providerById.get(block.idx)
+    const updated: BlockCheckpoint = { idx: block.idx, status: 'sent' }
+    if (providerMessageId !== undefined) updated.providerMessageId = providerMessageId
+    return updated
+  })
+}
 
 /**
  * Divide o texto em blocos de até `maxChars`, respeitando:
@@ -402,205 +438,4 @@ export async function sendAgentResponse(
  */
 export function splitIntoBlocks(text: string, maxChars: number): string[] {
   return splitMessage(text, { maxChars, useDelay: false }).map((block) => block.content)
-}
-
-function buildOutboundBlocks(text: string, maxChars: number): MessageBlock[] {
-  const parsed = parseTags(text)
-  if (parsed.tagsFound.length === 0) {
-    return splitMessage(text, { maxChars })
-  }
-
-  const blocks: MessageBlock[] = []
-  const parts = parsed.textWithPlaceholders.split(/(__TAG_\d+__)/g)
-
-  for (const part of parts) {
-    if (!part) continue
-
-    const placeholder = /^__TAG_(\d+)__$/.exec(part)
-    if (placeholder) {
-      const tag = parsed.tagsFound[Number(placeholder[1])]
-      if (tag) blocks.push(blockFromTag(tag, blocks.length))
-      continue
-    }
-
-    blocks.push(
-      ...splitMessage(part, { maxChars }).map((block) => ({
-        ...block,
-        index: blocks.length + block.index,
-      })),
-    )
-  }
-
-  return blocks.map((block, index) => ({
-    ...block,
-    index,
-    delay_ms: index === 0 ? 0 : block.delay_ms,
-  }))
-}
-
-function blockFromTag(tag: ParsedTag, index: number): MessageBlock {
-  return {
-    type: tag.type,
-    content: tag.content ?? tag.caption ?? tag.raw,
-    url: tag.url,
-    caption: tag.caption,
-    index,
-    delay_ms: index === 0 ? 0 : undefined,
-    buttons: tag.buttons,
-    list: tag.list,
-    location: tag.location,
-    flow: tag.flow,
-    carousel: tag.carousel,
-    cta_url: tag.cta_url,
-  }
-}
-
-async function sendBlock(
-  sender: OutboundSender,
-  token: string,
-  baseUrl: string,
-  recipient: string,
-  block: MessageBlock,
-  organizationId: string,
-  tts?: AgentRuntimeSettings['tts'],
-): Promise<SendResult> {
-  const options = { delayMs: block.delay_ms }
-
-  switch (block.type) {
-    case 'text':
-      if (tts?.enabled && sender.sendAudio) {
-        try {
-          const audioUrl = await synthesizeTtsToMediaUrl({
-            organizationId,
-            text: block.content,
-            settings: tts,
-          })
-          if (audioUrl) {
-            return sender.sendAudio(token, baseUrl, recipient, audioUrl, options)
-          }
-        } catch (err) {
-          console.warn(
-            '[outbound] TTS failed, falling back to text:',
-            err instanceof Error ? err.message : String(err),
-          )
-        }
-      }
-      return sender.sendText(token, baseUrl, recipient, block.content, options)
-    case 'image':
-      if (sender.sendImage && block.url) {
-        return sender.sendImage(token, baseUrl, recipient, block.url, block.caption, options)
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'audio':
-      if (sender.sendAudio && block.url) {
-        return sender.sendAudio(token, baseUrl, recipient, block.url, options)
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'document':
-      if (sender.sendDocument && block.url) {
-        return sender.sendDocument(token, baseUrl, recipient, block.url, block.caption, options)
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'video':
-      if (sender.sendVideo && block.url) {
-        return sender.sendVideo(token, baseUrl, recipient, block.url, block.caption, options)
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'location':
-      if (sender.sendLocation && block.location) {
-        return sender.sendLocation(token, baseUrl, recipient, block.location, options)
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'buttons':
-      if (sender.sendButtons && block.buttons?.length) {
-        return sender.sendButtons(
-          token,
-          baseUrl,
-          recipient,
-          { text: block.content, buttons: block.buttons },
-          options,
-        )
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'list':
-      if (sender.sendList && block.list?.sections.length) {
-        return sender.sendList(
-          token,
-          baseUrl,
-          recipient,
-          { text: block.content, button: block.list.button, sections: block.list.sections },
-          options,
-        )
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'carousel':
-      if (sender.sendCarousel && block.carousel?.cards.length) {
-        return sender.sendCarousel(
-          token,
-          baseUrl,
-          recipient,
-          { text: block.content, cards: block.carousel.cards },
-          options,
-        )
-      }
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    case 'cta_url':
-    case 'flow':
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-    default:
-      return sendFallbackText(sender, token, baseUrl, recipient, block, options)
-  }
-}
-
-function sendFallbackText(
-  sender: OutboundSender,
-  token: string,
-  baseUrl: string,
-  recipient: string,
-  block: MessageBlock,
-  options: SendOptions,
-): Promise<SendResult> {
-  return sender.sendText(token, baseUrl, recipient, fallbackTextForBlock(block), options)
-}
-
-function fallbackTextForBlock(block: MessageBlock): string {
-  if (block.type === 'cta_url' && block.cta_url) {
-    return [block.content, `${block.cta_url.display_text}: ${block.cta_url.url}`]
-      .filter(Boolean)
-      .join('\n')
-  }
-  if (block.type === 'flow' && block.flow) {
-    const flowLabel = block.flow.flow_name ?? block.flow.flow_id
-    return [block.flow.flow_cta, flowLabel ? `Formulario: ${flowLabel}` : 'Formulario']
-      .filter(Boolean)
-      .join('\n')
-  }
-  if (block.type === 'location' && block.location) {
-    const { latitude, longitude, name, address } = block.location
-    return [name, address, `https://maps.google.com/?q=${latitude},${longitude}`]
-      .filter(Boolean)
-      .join('\n')
-  }
-  if (block.url) {
-    return [block.caption ?? block.content, block.url].filter(Boolean).join('\n')
-  }
-  if (block.buttons?.length) {
-    return [block.content, ...block.buttons.map((button) => `- ${button.title}`)]
-      .filter(Boolean)
-      .join('\n')
-  }
-  if (block.list?.sections.length) {
-    const rows = block.list.sections.flatMap((section) => [
-      section.title,
-      ...section.rows.map((row) => `- ${row.title}`),
-    ])
-    return [block.content, ...rows].filter(Boolean).join('\n')
-  }
-  if (block.carousel?.cards.length) {
-    const cards = block.carousel.cards.map((card) =>
-      [card.body, card.button_url ?? card.header_url].filter(Boolean).join(' - '),
-    )
-    return [block.content, ...cards].filter(Boolean).join('\n')
-  }
-  return block.content
 }

@@ -60,6 +60,8 @@ import {
   dispatchAiAndRespond,
 } from '@/server/communication/webhooks/uazapi/dispatch-ai'
 import { extractConnectionRuntimeFields } from '@/server/communication/webhooks/uazapi/types'
+import { cancelPendingProactiveOnInbound } from '@/server/ai-module/ai-agents/proactive/cancel-on-inbound'
+import { database } from '@/server/services/database'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -146,6 +148,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   })
   if ('response' in inbound) return inbound.response
   const { enrichedContent, pipelineResult } = inbound
+
+  // F2b: cancel-on-inbound. Aqui o inbound é GENUÍNO do cliente — pós-dedup
+  // (passo 3), não-echo (passo 5: IN ⇒ author=CUSTOMER), org + telefone
+  // resolvidos e o pipeline NÃO entrou em buffer (não houve short-circuit). Um
+  // follow-up proativo pendente perde o sentido quando o cliente responde →
+  // cancelamos os ScheduledMessage 'pending' do par (org, telefone). FAIL-OPEN:
+  // qualquer erro só loga — cancelar NUNCA pode quebrar o atendimento ao cliente.
+  if (direction === 'IN') {
+    try {
+      await cancelPendingProactiveOnInbound(database, {
+        organizationId,
+        contactPhone,
+      })
+    } catch (err) {
+      logger.warn('[uazapi-webhook] cancel-on-inbound falhou (não-fatal)', {
+        traceId,
+        contactPhone: maskPhone(contactPhone),
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
 
   // 7) ChatSession upsert + operator takeover/commands + Message persistence.
   const session = await upsertChatSession({
