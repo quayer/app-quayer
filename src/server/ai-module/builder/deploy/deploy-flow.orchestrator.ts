@@ -29,6 +29,10 @@ import { materializeKnowledge } from './materialize-knowledge.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
+import {
+  buildRefinementPublishBlockerMessage,
+  getRefinementPublishGateMessage,
+} from '../refinement/refinement-gate'
 
 export interface ExecuteDeployFlowInput {
   projectId: string
@@ -43,6 +47,41 @@ type BuilderDeploymentDelegate = {
     where: { id: string }
     data: Record<string, unknown>
   }) => Promise<unknown>
+}
+
+/**
+ * Pure detector for the optional builderState.refinement subtree. It accepts
+ * unknown persisted JSON, then coerces through the canonical BuilderState schema
+ * so deploy and readiness use the same typed contract.
+ */
+export function getCriticalRefinementPublishBlockerMessage(
+  builderState: unknown,
+): string | null {
+  const detail = getRefinementPublishGateMessage(parseBuilderState(builderState))
+  return detail ? buildRefinementPublishBlockerMessage(detail) : null
+}
+
+export async function readCriticalRefinementPublishBlockerMessage(input: {
+  projectId: string
+  organizationId: string
+}): Promise<string | null> {
+  const row = await database.builderProjectConversation.findFirst({
+    where: {
+      projectId: input.projectId,
+      organizationId: input.organizationId,
+    },
+    select: { builderState: true },
+  })
+
+  return getCriticalRefinementPublishBlockerMessage(row?.builderState ?? null)
+}
+
+export async function assertNoCriticalRefinementPublishBlocker(input: {
+  projectId: string
+  organizationId: string
+}): Promise<void> {
+  const message = await readCriticalRefinementPublishBlockerMessage(input)
+  if (message) throw new Error(message)
 }
 
 function getBuilderDeployment(): BuilderDeploymentDelegate | null {
@@ -95,6 +134,11 @@ export async function executeDeployFlow(
       'Projeto ainda não possui agente associado — complete o fluxo no Builder antes de publicar',
     )
   }
+
+  await assertNoCriticalRefinementPublishBlocker({
+    projectId: project.id,
+    organizationId: input.organizationId,
+  })
 
   // Attempt to persist a BuilderDeployment row. Degrade gracefully.
   let deploymentId: string | null = null

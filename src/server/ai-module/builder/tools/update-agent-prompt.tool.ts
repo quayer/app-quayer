@@ -21,6 +21,7 @@ import {
   resolveProjectAgent,
   OPTIONAL_AGENT_ID_DESCRIPTION,
 } from './resolve-project-agent'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -114,6 +115,13 @@ export function updateAgentPromptTool(ctx: BuilderToolContext) {
             createdBy: 'chat',
           },
           select: { id: true },
+        })
+
+        await invalidateProjectRefinement({
+          projectId: ctx.projectId,
+          organizationId: ctx.organizationId,
+          reason:
+            'update_agent_prompt criou uma nova versão de prompt depois do refinamento.',
         })
 
         return {

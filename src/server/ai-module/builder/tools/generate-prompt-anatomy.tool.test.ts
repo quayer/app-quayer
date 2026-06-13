@@ -87,6 +87,47 @@ const GENERATED = {
 
 const BUILDER_CONTEXT = { hours: { preset: 'comercial' } }
 
+const APPROVED_BLUEPRINT = {
+  status: 'approved',
+  objective: 'Qualificar interessados em imoveis e conduzir para visita.',
+  niche: 'imobiliario',
+  stages: [
+    {
+      id: 'qualificacao',
+      title: 'Qualificacao',
+      goal: 'Entender interesse e proximo passo.',
+    },
+  ],
+  questions: [
+    {
+      id: 'regiao',
+      stageId: 'qualificacao',
+      text: 'Qual bairro voce busca?',
+      purpose: 'Descobrir a regiao de interesse.',
+      variableKey: 'regiao_interesse',
+      skipWhenKnown: 'Pular se a regiao ja estiver clara no contexto.',
+    },
+  ],
+  variables: [
+    {
+      key: 'regiao_interesse',
+      label: 'Regiao de interesse',
+      type: 'location',
+      source: 'user',
+      reviewRequired: false,
+    },
+  ],
+  skipRules: [],
+  successCriteria: ['Regiao e proximo passo claros.'],
+  handoffTriggers: [],
+  toolTriggers: [],
+  objectionRules: [],
+  doRules: [],
+  dontRules: ['Nunca inventar disponibilidade.'],
+  sourceRefs: [],
+  approvedAt: '2026-06-12T12:00:00.000Z',
+}
+
 function writerOk(data = GENERATED) {
   return { success: true as const, data, durationMs: 50 }
 }
@@ -245,6 +286,76 @@ describe('generate_prompt_anatomy — self-correction loop', () => {
     expect(result.attempts).toBe(1)
     expect(result.prompt).toBe(GENERATED.prompt)
     expect(result.validation).toMatchObject({ ran: true, pass: false })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 2b. Builder Playbook guard + preservation
+// ---------------------------------------------------------------------------
+
+describe('generate_prompt_anatomy — Builder Playbook', () => {
+  it('requires an approved conversation blueprint before generating v2 prompts', async () => {
+    mockDbConversationFindFirst.mockResolvedValueOnce({
+      builderState: { journeyVersion: 2 },
+    })
+
+    const result = await execute()
+
+    expect(result.success).toBe(false)
+    expect(result.code).toBe('BLUEPRINT_REQUIRED')
+    expect(String(result.message)).toContain('Plano de atendimento')
+    expect(mockWriterRun).not.toHaveBeenCalled()
+    expect(mockValidatorRun).not.toHaveBeenCalled()
+  })
+
+  it('retries when the prompt does not preserve the approved blueprint', async () => {
+    mockDbConversationFindFirst.mockResolvedValueOnce({
+      builderState: {
+        journeyVersion: 2,
+        conversationBlueprint: APPROVED_BLUEPRINT,
+      },
+    })
+    mockToContext.mockReturnValueOnce({
+      ...BUILDER_CONTEXT,
+      conversationBlueprint: APPROVED_BLUEPRINT,
+    })
+
+    const promptWithBlueprint = `
+# Fluxo de atendimento
+Pergunte: "Qual bairro voce busca?".
+Capture regiao_interesse / regiao de interesse.
+Nao repetir se a regiao ja estiver clara no contexto.
+
+# Regras criticas
+Nunca inventar disponibilidade.
+`
+
+    mockWriterRun
+      .mockResolvedValueOnce(
+        writerOk({ ...GENERATED, prompt: 'Prompt generico sem roteiro.' }),
+      )
+      .mockResolvedValueOnce(writerOk({ ...GENERATED, prompt: promptWithBlueprint }))
+    mockValidatorRun.mockResolvedValue(validatorOk(true))
+
+    const result = await execute()
+
+    expect(mockWriterRun).toHaveBeenCalledTimes(2)
+    expect(mockValidatorRun).toHaveBeenCalledTimes(2)
+
+    const [firstWriterInput] = mockWriterRun.mock.calls[0]
+    expect(firstWriterInput.builderContext).toMatchObject({
+      conversationBlueprint: { status: 'approved' },
+    })
+
+    const [retryInput] = mockWriterRun.mock.calls[1]
+    expect(retryInput.validatorFeedback).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Pergunta do blueprint ausente'),
+      ]),
+    )
+    expect(result.success).toBe(true)
+    expect(result.attempts).toBe(2)
+    expect(result.validation).toMatchObject({ ran: true, pass: true })
   })
 })
 

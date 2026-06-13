@@ -32,6 +32,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFindFirstProject = vi.hoisted(() => vi.fn())
 const mockFindFirstVersion = vi.hoisted(() => vi.fn())
 const mockCreateVersion    = vi.hoisted(() => vi.fn())
+const mockInvalidateProjectRefinement = vi.hoisted(() => vi.fn())
 
 vi.mock('@/server/services/database', () => ({
   database: {
@@ -43,6 +44,10 @@ vi.mock('@/server/services/database', () => ({
       create:    mockCreateVersion,
     },
   },
+}))
+
+vi.mock('../refinement/refinement-state', () => ({
+  invalidateProjectRefinement: mockInvalidateProjectRefinement,
 }))
 
 // We do NOT mock validatePrompt — we use the real implementation so that
@@ -231,6 +236,7 @@ function getExecute(tool: ReturnType<typeof editPromptSectionTool>) {
 describe('editPromptSectionTool — handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockInvalidateProjectRefinement.mockResolvedValue(undefined)
     // Default happy-path DB stubs — resolver finds the project's REAL agent.
     mockFindFirstProject.mockResolvedValue({ aiAgentId: AGENT_ID })
     mockFindFirstVersion.mockResolvedValue({

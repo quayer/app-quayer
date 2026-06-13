@@ -45,6 +45,9 @@ const mockAgentToolFindUnique = vi.hoisted(() => vi.fn())
 const mockAgentToolUpdate = vi.hoisted(() => vi.fn())
 const mockAgentConfigFindFirst = vi.hoisted(() => vi.fn())
 const mockAgentConfigUpdate = vi.hoisted(() => vi.fn())
+// invalidateProjectRefinement (chamado por pause/resume/delete via integration-lifecycle)
+// lê tx.builderProjectConversation — precisa existir no fakeDb da $transaction.
+const mockBuilderConvFindFirst = vi.hoisted(() => vi.fn())
 
 const fakeDb = vi.hoisted(() => {
   const db = {
@@ -54,6 +57,11 @@ const fakeDb = vi.hoisted(() => {
     customIntegration: { findMany: undefined as unknown, update: undefined as unknown },
     agentTool: { findUnique: undefined as unknown, update: undefined as unknown },
     aIAgentConfig: { findFirst: undefined as unknown, update: undefined as unknown },
+    builderProjectConversation: {
+      findFirst: undefined as unknown,
+      updateMany: undefined as unknown,
+    },
+    agentDeployment: { updateMany: undefined as unknown },
     $transaction: undefined as unknown,
   }
   return db
@@ -271,6 +279,13 @@ beforeEach(() => {
   mockAgentConfigFindFirst.mockResolvedValue({ id: 'agent-1', enabledTools: [] })
   fakeDb.aIAgentConfig.update = mockAgentConfigUpdate
   mockAgentConfigUpdate.mockResolvedValue({})
+
+  // invalidateProjectRefinement: findFirst → null faz a função retornar cedo
+  // (sem conversa v2); updateMany/agentDeployment ficam como no-op seguros.
+  fakeDb.builderProjectConversation.findFirst = mockBuilderConvFindFirst
+  mockBuilderConvFindFirst.mockResolvedValue(null)
+  fakeDb.builderProjectConversation.updateMany = vi.fn().mockResolvedValue({})
+  fakeDb.agentDeployment.updateMany = vi.fn().mockResolvedValue({})
 
   // `$transaction(cb)` runs the callback against the same fake db (tx === db).
   fakeDb.$transaction = (cb: (tx: typeof fakeDb) => Promise<unknown>) => cb(fakeDb)

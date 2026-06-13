@@ -54,6 +54,7 @@ const mockTxAgentToolUpdate = vi.hoisted(() => vi.fn())
 const mockTxAgentToolFindUnique = vi.hoisted(() => vi.fn())
 const mockTxAgentConfigFindFirst = vi.hoisted(() => vi.fn())
 const mockTxAgentConfigUpdate = vi.hoisted(() => vi.fn())
+const mockInvalidateProjectRefinement = vi.hoisted(() => vi.fn())
 
 /** The `tx` object handed to `db.$transaction(async (tx) => ...)`. */
 const txClient = vi.hoisted(() => ({
@@ -85,6 +86,10 @@ const dbClient = vi.hoisted(() => ({
 vi.mock('@/server/services/database', () => ({
   getDatabase: () => dbClient,
   database: dbClient,
+}))
+
+vi.mock('../refinement/refinement-state', () => ({
+  invalidateProjectRefinement: mockInvalidateProjectRefinement,
 }))
 
 // Auth procedure is a no-op stub: the harness injects `context.auth` directly.
@@ -246,6 +251,7 @@ function validatedIntegration(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockInvalidateProjectRefinement.mockResolvedValue(undefined)
 
   // Role-gate passes by default (T47 covers the deny path).
   mockAssertRole.mockResolvedValue({ allowed: true })

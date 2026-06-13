@@ -9,6 +9,8 @@
  */
 
 import { getDatabase } from '@/server/services/database'
+import { parseBuilderState } from '../cards/builder-state'
+import { getRefinementPublishGateMessage } from '../refinement/refinement-gate'
 
 export async function attachConnectionToProjectAgent(
   db: ReturnType<typeof getDatabase>,
@@ -21,6 +23,15 @@ export async function attachConnectionToProjectAgent(
     select: { aiAgentId: true },
   })
   if (!project?.aiAgentId) return
+
+  const stateRow = await db.builderProjectConversation.findFirst({
+    where: { projectId, organizationId },
+    select: { builderState: true },
+  })
+  const refinementBlocksActivation = Boolean(
+    getRefinementPublishGateMessage(parseBuilderState(stateRow?.builderState)),
+  )
+  const nextStatus = refinementBlocksActivation ? 'PAUSED' : 'ACTIVE'
 
   // Multi-canal (plan §3.7): pausa SÓ deployments ACTIVE da MESMA conexão
   // (re-attach daquele canal). Sem o filtro connectionId, anexar um segundo
@@ -39,7 +50,7 @@ export async function attachConnectionToProjectAgent(
   if (existing) {
     await db.agentDeployment.update({
       where: { id: existing.id },
-      data: { status: 'ACTIVE', updatedAt: new Date() },
+      data: { status: nextStatus, updatedAt: new Date() },
     })
   } else {
     await db.agentDeployment.create({
@@ -47,7 +58,7 @@ export async function attachConnectionToProjectAgent(
         agentConfigId: project.aiAgentId,
         connectionId,
         mode: 'CHAT',
-        status: 'ACTIVE',
+        status: nextStatus,
       },
     })
   }

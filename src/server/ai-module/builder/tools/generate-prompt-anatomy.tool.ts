@@ -34,7 +34,11 @@ import {
   type PromptWriterOutput,
 } from '../sub-agents'
 import { parseBuilderState } from '../cards/builder-state'
-import type { ValidationIssue } from '../validators'
+import {
+  validateBlueprintPreservation,
+  type ValidationIssue,
+} from '../validators'
+import type { ConversationBlueprint } from '../playbook/blueprint.schema'
 
 // ---------------------------------------------------------------------------
 // Constants & result shapes
@@ -64,6 +68,9 @@ type ToolValidation = ToolValidationRan | ToolValidationSkipped
 interface LoadedBuilderContext {
   builderContext: PromptWriterBuilderContext | undefined
   selectedToolKeys: string[]
+  journeyVersion: 1 | 2
+  blueprintApproved: boolean
+  conversationBlueprint: ConversationBlueprint | undefined
 }
 
 /**
@@ -81,15 +88,34 @@ async function loadBuilderContext(
       select: { builderState: true },
     })
     if (!conversation) {
-      return { builderContext: undefined, selectedToolKeys: [] }
+      return {
+        builderContext: undefined,
+        selectedToolKeys: [],
+        journeyVersion: 1,
+        blueprintApproved: false,
+        conversationBlueprint: undefined,
+      }
     }
     const state = parseBuilderState(conversation.builderState)
+    const conversationBlueprint =
+      state.conversationBlueprint?.status === 'approved'
+        ? state.conversationBlueprint
+        : undefined
     return {
       builderContext: builderStateToPromptWriterContext(state),
       selectedToolKeys: state.selectedToolKeys,
+      journeyVersion: state.journeyVersion,
+      blueprintApproved: Boolean(conversationBlueprint),
+      conversationBlueprint,
     }
   } catch {
-    return { builderContext: undefined, selectedToolKeys: [] }
+    return {
+      builderContext: undefined,
+      selectedToolKeys: [],
+      journeyVersion: 1,
+      blueprintApproved: false,
+      conversationBlueprint: undefined,
+    }
   }
 }
 
@@ -98,6 +124,7 @@ async function runValidation(
   prompt: string,
   attachedTools: string[],
   ctx: BuilderToolExecutionContext,
+  conversationBlueprint?: ConversationBlueprint,
 ): Promise<ToolValidation> {
   const validation = await validatorSubAgent.run(
     { prompt, attachedTools },
@@ -114,14 +141,34 @@ async function runValidation(
     return { ran: false, error: validation.error, code: validation.code }
   }
 
-  return {
-    ran: true,
-    pass: validation.data.pass,
-    issues: validation.data.issues.map((issue: ValidationIssue) => ({
+  const issues: ToolValidationRan['issues'] = validation.data.issues.map(
+    (issue: ValidationIssue) => ({
       validator: issue.validator,
       severity: issue.severity,
       message: issue.message,
-    })),
+    }),
+  )
+
+  let blueprintPass = true
+  if (conversationBlueprint) {
+    const blueprintValidation = validateBlueprintPreservation({
+      prompt,
+      blueprint: conversationBlueprint,
+    })
+    blueprintPass = blueprintValidation.pass
+    issues.push(
+      ...blueprintValidation.issues.map((issue) => ({
+        validator: issue.validator,
+        severity: issue.severity,
+        message: issue.message,
+      })),
+    )
+  }
+
+  return {
+    ran: true,
+    pass: validation.data.pass && blueprintPass,
+    issues,
   }
 }
 
@@ -217,8 +264,21 @@ export function generatePromptAnatomyTool(ctx: BuilderToolExecutionContext) {
 
         // 0. Project builderState (cards already collected) into writer input.
         //    Tools selected via card union with the LLM-provided list.
-        const { builderContext, selectedToolKeys } =
-          await loadBuilderContext(ctx)
+        const {
+          builderContext,
+          selectedToolKeys,
+          journeyVersion,
+          blueprintApproved,
+          conversationBlueprint,
+        } = await loadBuilderContext(ctx)
+        if (journeyVersion === 2 && !blueprintApproved) {
+          return {
+            success: false as const,
+            code: 'BLUEPRINT_REQUIRED',
+            message:
+              'Antes de gerar o prompt final, gere e aprove o Plano de atendimento com generate_conversation_blueprint e o card conversation_blueprint.',
+          }
+        }
         const attachedTools = Array.from(
           new Set([...input.attachedTools, ...selectedToolKeys]),
         )
@@ -259,6 +319,7 @@ export function generatePromptAnatomyTool(ctx: BuilderToolExecutionContext) {
             best.prompt,
             attachedTools,
             ctx,
+            conversationBlueprint,
           )
 
           // Stop when QA passed or could not run (retry would be blind).

@@ -33,7 +33,7 @@ import { finalizeLogin } from '../_shared/finalize-login';
 async function sendSignupOtpForUnknownUser(
   email: string,
   response: any,
-): Promise<{ sent: true; message: string; magicLinkSessionId: string }> {
+): Promise<{ sent: true; message: string; isNewUser: true; magicLinkSessionId: string }> {
   const signupOtpCode = generateOTPCode();
   const signupExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const tempName = email.split('@')[0];
@@ -81,7 +81,12 @@ async function sendSignupOtpForUnknownUser(
     maxAge: 600,
   });
 
-  return { sent: true, message: 'Código enviado para seu email', magicLinkSessionId: signupVerificationCode.id };
+  return {
+    sent: true,
+    message: 'Código enviado para seu email',
+    isNewUser: true,
+    magicLinkSessionId: signupVerificationCode.id,
+  };
 }
 
 // ---------------------------------------------------------------------------

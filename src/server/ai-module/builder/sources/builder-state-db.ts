@@ -30,6 +30,7 @@ import { Prisma } from '@prisma/client'
 
 import { database } from '@/server/services/database'
 import {
+  invalidateRefinement,
   parseBuilderState,
   patchBuilderState,
   type BuilderState,
@@ -397,7 +398,10 @@ export async function patchSourceIngestionAtomic(
       ...(reopenSource ? { confirmations: { source: false } } : {}),
     }
 
-    const next = patchBuilderState(current, subtreePatch)
+    const next = invalidateRefinement(
+      patchBuilderState(current, subtreePatch),
+      'Fontes/conhecimento ingerido mudaram depois do refinamento.',
+    )
 
     await tx.builderProjectConversation.updateMany({
       where: { id: conversationId, organizationId },

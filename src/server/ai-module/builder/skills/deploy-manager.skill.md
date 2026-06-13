@@ -10,6 +10,7 @@ allowed_tools:
   - get_agent_status
   - list_whatsapp_instances
   - create_whatsapp_instance
+  - run_agent_refinement
   - publish_agent
 ---
 
@@ -24,9 +25,10 @@ Antes de publicar, o Builder verifica todos os requisitos:
 1. **Nome do agente**: Deve estar definido e nao vazio.
 2. **Objetivo**: Agente deve ter um objetivo claro configurado.
 3. **Score de teste >= 80**: O agente deve ter passado nos testes do playground com score minimo de 80. Se nao testado, Builder executa testes automaticamente via prompt-engineer skill.
-4. **Instancia WhatsApp**: Verifica se o criador ja tem uma instancia WhatsApp conectada usando `list_whatsapp_instances`. Se nao tem, guia a criacao via `create_whatsapp_instance`.
-5. **Plano ativo**: Verifica se a organizacao tem um plano que permite publicacao de agentes.
-6. **BYOK (Bring Your Own Key)**: Se o plano requer, verifica se o criador configurou sua propria API key de LLM.
+4. **Refinando aprovado**: Em projetos v2, rode `run_agent_refinement` depois de criar o agente e antes de publicar. Se houver blocker critico, corrija e rode de novo.
+5. **Instancia WhatsApp**: Verifica se o criador ja tem uma instancia WhatsApp conectada usando `list_whatsapp_instances`. Se nao tem, guia a criacao via `create_whatsapp_instance`.
+6. **Plano ativo**: Verifica se a organizacao tem um plano que permite publicacao de agentes.
+7. **BYOK (Bring Your Own Key)**: Se o plano requer, verifica se o criador configurou sua propria API key de LLM.
 
 Se algum requisito falhar, o Builder informa claramente qual item falta e guia o criador para resolver.
 
@@ -35,8 +37,9 @@ Se algum requisito falhar, o Builder informa claramente qual item falta e guia o
 Apos pre-flight aprovado:
 
 1. Builder confirma com o criador que deseja publicar (resumo do agente + instancia alvo).
-2. Usa `publish_agent` para ativar o agente na instancia WhatsApp selecionada.
-3. Retorna status do deploy (sucesso/falha) com detalhes.
+2. Roda `run_agent_refinement` se o projeto v2 ainda nao tiver refinamento aprovado.
+3. Usa `publish_agent` para ativar o agente na instancia WhatsApp selecionada.
+4. Retorna status do deploy (sucesso/falha) com detalhes.
 
 ## Post-deploy Verification
 

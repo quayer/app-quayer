@@ -20,11 +20,18 @@ import {
   type AgentRuntimeSettings,
 } from '@/lib/agent-runtime-settings'
 import { isBuilderV2Enabled } from '@/lib/feature-flags/builder-v2'
+import { isBuilderMissionFirstEnabled } from '@/lib/feature-flags/builder-mission-first'
 import { trackJourneyEvent } from '@/server/services/journey-events'
 import {
   DEFAULT_BUILDER_STATE,
   parseBuilderState,
 } from '../cards/builder-state'
+import {
+  buildRefinementPublishBlockerMessage,
+  getRefinementPublishGateMessage,
+} from '../refinement/refinement-gate'
+import { buildRefinementMaterial } from '../refinement/refinement-material'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 export const builderProjectRepository = {
   /**
@@ -34,11 +41,17 @@ export const builderProjectRepository = {
    * Jornada v2 (T10, plan §2.2 item 1): a versão da jornada é decidida AQUI no
    * backend pelo flag `BUILDER_JOURNEY_V2` (coorte estável por organizationId) e
    * CONGELADA no `builderState.journeyVersion` da conversa inicial (sem coluna
-   * nova em BuilderProject). O cookie de override `builder-v2-override` (QA) NÃO
-   * está disponível nesta camada de repositório — `isBuilderV2Enabled` é chamado
-   * apenas com o seed por env/org; o override de QA é aplicado nas camadas
-   * superiores que têm acesso ao request. O `journey_started` é emitido com a
-   * versão congelada (fire-and-forget, fora da transação).
+   * nova em BuilderProject). A rota repassa o cookie de override
+   * `builder-v2-override` (QA) quando ele existe. O `journey_started` é emitido
+   * com a versão congelada (fire-and-forget, fora da transação).
+   *
+   * Jornada v3 (mission-first, FR-37/FR-48): quando o projeto nasce em
+   * `journeyVersion === 2` E o flag `BUILDER_MISSION_FIRST` resolve ON para a org
+   * (coorte estável por organizationId; cookie `builder-mission-first-override`
+   * repassado pela rota para QA), semeamos `builderState.missionFirst: true`. É
+   * ADITIVO e DARK por default: se o flag estiver off (ou o projeto for v1) a
+   * chave NEM é escrita — o state legado parseia `missionFirst: undefined` e o
+   * engine se comporta exatamente como a v2 atual (NFR-12).
    */
   async createWithInitialMessage(params: {
     organizationId: string
@@ -46,6 +59,8 @@ export const builderProjectRepository = {
     prompt: string
     type: 'ai_agent'
     name: string
+    builderV2OverrideCookie?: string | null
+    missionFirstOverrideCookie?: string | null
   }) {
     const database = getDatabase()
     if (!database.builderProject) {
@@ -54,12 +69,29 @@ export const builderProjectRepository = {
       )
     }
 
-    const journeyVersion: 1 | 2 = isBuilderV2Enabled(params.organizationId)
+    const journeyVersion: 1 | 2 = isBuilderV2Enabled(
+      params.organizationId,
+      params.builderV2OverrideCookie,
+    )
       ? 2
       : 1
+    // Mission-first só vale dentro da v2: gateia por journeyVersion === 2 ANTES
+    // de consultar o flag. Dark por default — quando false, a chave não é escrita.
+    const missionFirst =
+      journeyVersion === 2 &&
+      isBuilderMissionFirstEnabled(
+        params.organizationId,
+        params.missionFirstOverrideCookie,
+      )
     const initialBuilderState = {
       ...DEFAULT_BUILDER_STATE,
+      project: {
+        ...DEFAULT_BUILDER_STATE.project,
+        name: params.name,
+        objective: params.prompt.trim(),
+      },
       journeyVersion,
+      ...(missionFirst ? { missionFirst: true } : {}),
     }
 
     const result = await database.$transaction(async (tx) => {
@@ -99,6 +131,11 @@ export const builderProjectRepository = {
     console.info(
       `[journey-v2] projeto ${result.project.id} criado com journeyVersion=${journeyVersion} (org ${params.organizationId})`,
     )
+    if (missionFirst) {
+      console.info(
+        `[mission-first] projeto ${result.project.id} semeado com missionFirst=true (org ${params.organizationId})`,
+      )
+    }
     // Fire-and-forget: nunca lança, jamais quebra a criação do projeto.
     void trackJourneyEvent({
       organizationId: params.organizationId,
@@ -314,7 +351,8 @@ export const builderProjectRepository = {
     if (!project?.aiAgentId) return null
     const aiAgentId = project.aiAgentId
 
-    return database.$transaction(async (tx) => {
+    let promptChanged = false
+    const result = await database.$transaction(async (tx) => {
       const agent = await tx.aIAgentConfig.findUnique({
         where: { id: aiAgentId },
         select: { id: true, systemPrompt: true, updatedAt: true },
@@ -340,6 +378,7 @@ export const builderProjectRepository = {
         data: { systemPrompt },
         select: { id: true, systemPrompt: true, updatedAt: true },
       })
+      promptChanged = true
 
       // Upsert da draft manual reutilizável (1 por sequência de edição —
       // nunca 1 por keystroke).
@@ -373,6 +412,16 @@ export const builderProjectRepository = {
 
       return { conflict: false as const, agent: updated }
     })
+
+    if (promptChanged) {
+      await invalidateProjectRefinement({
+        projectId,
+        organizationId,
+        reason: 'O editor manual alterou o systemPrompt depois do refinamento.',
+      })
+    }
+
+    return result
   },
 
   /**
@@ -496,6 +545,27 @@ export const builderProjectRepository = {
 
     if (!targetVersion || targetVersion.aiAgentId !== project.aiAgentId) {
       return null
+    }
+
+    const stateRow = await database.builderProjectConversation.findFirst({
+      where: { projectId, organizationId },
+      select: { builderState: true },
+    })
+    const builderState = parseBuilderState(stateRow?.builderState ?? null)
+    const expectedMaterial =
+      builderState.conversationBlueprint?.status === 'approved'
+        ? buildRefinementMaterial({
+            state: builderState,
+            blueprint: builderState.conversationBlueprint,
+            promptVersion: targetVersion,
+          })
+        : undefined
+    const refinementMessage = getRefinementPublishGateMessage(
+      builderState,
+      expectedMaterial,
+    )
+    if (refinementMessage) {
+      throw new Error(buildRefinementPublishBlockerMessage(refinementMessage))
     }
 
     const aggregate = await database.builderPromptVersion.aggregate({
@@ -630,12 +700,17 @@ export const builderProjectRepository = {
     // Inherit the journey version from the source conversation's builderState
     // (legacy/missing rows backfill to 1 via parseBuilderState). Frozen into the
     // clone's fresh conversation so the engine never downgrades a v2 clone.
-    const journeyVersion: 1 | 2 = parseBuilderState(
+    const sourceState = parseBuilderState(
       original.conversation?.builderState ?? null,
-    ).journeyVersion
+    )
+    const journeyVersion: 1 | 2 = sourceState.journeyVersion
+    // NFR-12 paridade: herda o marcador mission-first (v3) do projeto de origem
+    // para o clone NÃO regredir para a v2 pura quando o flag estiver on (mesmo
+    // racional do journeyVersion herdado acima).
     const clonedBuilderState = {
       ...DEFAULT_BUILDER_STATE,
       journeyVersion,
+      ...(sourceState.missionFirst ? { missionFirst: true } : {}),
     }
 
     const newProject = await database.$transaction(async (tx) => {

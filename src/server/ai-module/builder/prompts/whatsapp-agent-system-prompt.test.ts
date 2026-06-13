@@ -9,7 +9,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { BUILDER_JOURNEY_RULES } from './journey-rules'
-import { BUILDER_SYSTEM_PROMPT } from './whatsapp-agent-system-prompt'
+import {
+  BUILDER_AGENT_DEFAULTS,
+  BUILDER_SYSTEM_PROMPT,
+} from './whatsapp-agent-system-prompt'
 
 describe('BUILDER_SYSTEM_PROMPT — regras duras', () => {
   it('limita o research_niche a 3 bullets e o trata como insumo interno', () => {
@@ -57,6 +60,17 @@ describe('BUILDER_SYSTEM_PROMPT — regras duras', () => {
     expect(BUILDER_SYSTEM_PROMPT).toContain('ajustei detalhes técnicos do prompt')
     // O texto antigo mandava listar validation.issues ao usuário — não pode voltar.
     expect(BUILDER_SYSTEM_PROMPT).not.toContain('liste as pendências')
+  })
+
+  it('exige run_agent_refinement antes de publicar projetos v2', () => {
+    expect(BUILDER_SYSTEM_PROMPT).toContain('# Fluxo Refinando (antes de publicar)')
+    expect(BUILDER_SYSTEM_PROMPT).toContain(
+      'depois de create_agent criar o agente e antes de publish_agent',
+    )
+    expect(BUILDER_SYSTEM_PROMPT).toContain('chame run_agent_refinement uma vez')
+    expect(BUILDER_SYSTEM_PROMPT).toContain('NÃO publique')
+    expect(BUILDER_AGENT_DEFAULTS.enabledTools).toContain('run_agent_refinement')
+    expect(BUILDER_AGENT_DEFAULTS.enabledTools).toContain('publish_agent')
   })
 })
 

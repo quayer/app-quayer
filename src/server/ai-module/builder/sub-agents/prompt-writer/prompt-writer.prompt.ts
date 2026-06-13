@@ -58,6 +58,7 @@ Regras duras:
 - Sempre em pt-BR.
 - Máximo ~700 palavras no total; nenhuma seção acima de 120 palavras — prompts enxutos performam melhor.
 - Use os "Dados já coletados do negócio" como fonte autoritativa: horário, handoff, time, ativação e identidade DEVEM refletir esses dados.
+- Se houver "Plano de atendimento aprovado", ele é contrato forte: preserve etapas, perguntas, variáveis capturadas, regras de pulo, gatilhos de humano/ferramentas e limites. A seção "# Fluxo de atendimento" deve refletir esse plano, não um fluxo genérico.
 - Quando um dado vier marcado como "NÃO INFORMADO", preencha com um default sensato para o nicho e marque cada linha gerada assim com o sufixo [REVISAR] para o dono revisar depois.
 - SOMENTE referencie ferramentas específicas (transfer_to_human, criar_agendamento, etc.) se elas estiverem explicitamente listadas em "Ferramentas habilitadas". Se a lista estiver vazia ou ausente, descreva apenas COMPORTAMENTOS (ex: "informe que não pode ajudar") sem mencionar nomes de ferramentas ou integrações.
 - NUNCA invente integrações, nomes próprios, preços ou dados sensíveis que não estejam no brief ou nos dados coletados.

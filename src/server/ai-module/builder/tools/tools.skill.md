@@ -4,7 +4,7 @@ Tools invocáveis pelo **meta-agente Builder IA**. É a interface que traduz "qu
 
 ---
 
-## Inventário (11 tools)
+## Inventário principal
 
 Registrados em `tools/index.ts` via `buildBuilderToolset(ctx)`:
 
@@ -17,6 +17,7 @@ Registrados em `tools/index.ts` via `buildBuilderToolset(ctx)`:
 | `attach_tool_to_agent` | `attach-tool.tool.ts` | Liga tool do catálogo ao agente (ver `catalog/official-tools.ts`) |
 | `search_web` | `search-web.tool.ts` | Busca na web (auxílio para research durante design) |
 | `generate_prompt_anatomy` | `generate-prompt-anatomy.tool.ts` | Estrutura o prompt seguindo template pedagógico |
+| `run_agent_refinement` | `run-agent-refinement.tool.ts` | Roda a fase Refinando antes da publicação e grava o resultado agregado no builderState |
 | `publish_agent` | `publish-agent.tool.ts` | Dispara deploy saga (ver deploy.skill.md) |
 | `get_agent_status` | `get-agent-status.tool.ts` | Lê estado atual (versão ativa, instance, connection) |
 | `run_playground_test` | `run-playground-test.tool.ts` | Roda mensagem de teste contra o agente em sandbox |

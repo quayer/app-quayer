@@ -40,6 +40,7 @@ import {
   resolveProjectAgent,
   OPTIONAL_AGENT_ID_DESCRIPTION,
 } from './resolve-project-agent'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 // ---------------------------------------------------------------------------
 // Context (shared shape with the other builder tools)
@@ -147,6 +148,12 @@ export function attachToolToAgentTool(ctx: BuilderToolExecutionContext) {
           data: {
             enabledTools: { set: [...agent.enabledTools, input.toolKey] },
           },
+        })
+
+        await invalidateProjectRefinement({
+          projectId: ctx.projectId,
+          organizationId: ctx.organizationId,
+          reason: `A ferramenta ${input.toolKey} foi anexada depois do refinamento.`,
         })
 
         return {

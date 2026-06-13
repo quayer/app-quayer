@@ -42,8 +42,13 @@ vi.mock('../../validators', () => ({
 }))
 
 const mockExecuteDeployFlow = vi.hoisted(() => vi.fn())
+const mockReadCriticalRefinementPublishBlockerMessage = vi.hoisted(() =>
+  vi.fn(),
+)
 vi.mock('../../deploy/deploy-flow.orchestrator', () => ({
   executeDeployFlow: mockExecuteDeployFlow,
+  readCriticalRefinementPublishBlockerMessage:
+    mockReadCriticalRefinementPublishBlockerMessage,
 }))
 
 // Imported AFTER vi.mock so the mocked modules take effect.
@@ -101,6 +106,7 @@ beforeEach(() => {
   mockValidatePrompt.mockReturnValue(passingValidation())
   mockBuilderPromptVersionFindFirst.mockResolvedValue({ id: VALID_PROMPT_VERSION_ID })
   mockWhatsAppInstanceFindFirst.mockResolvedValue({ id: 'wa-1' })
+  mockReadCriticalRefinementPublishBlockerMessage.mockResolvedValue(null)
 })
 
 // ---------------------------------------------------------------------------
@@ -201,6 +207,35 @@ describe('deployRunnerSubAgent', () => {
     expect(result.data.blockers).toHaveLength(3)
     const checks = result.data.blockers.map((b) => b.check).sort()
     expect(checks).toEqual(['channel', 'prompt', 'version'])
+    expect(mockExecuteDeployFlow).not.toHaveBeenCalled()
+  })
+
+  it('blocks with check=refinement when refinement has a critical blocker', async () => {
+    mockBuilderProjectFindUnique.mockResolvedValue(baseProjectRow())
+    mockReadCriticalRefinementPublishBlockerMessage.mockResolvedValue(
+      'Publicação bloqueada pelo refinamento: ajuste a coleta de consentimento.',
+    )
+
+    const result = await deployRunnerSubAgent.run(
+      { projectId: VALID_PROJECT_ID, promptVersionId: VALID_PROMPT_VERSION_ID },
+      BASE_CONTEXT,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    if (result.data.status !== 'blocked') throw new Error('expected blocked')
+    expect(result.data.blockers).toContainEqual({
+      check: 'refinement',
+      message:
+        'Publicação bloqueada pelo refinamento: ajuste a coleta de consentimento.',
+      cta: 'Corrigir refinamento antes de publicar',
+    })
+    expect(mockReadCriticalRefinementPublishBlockerMessage).toHaveBeenCalledWith(
+      {
+        projectId: VALID_PROJECT_ID,
+        organizationId: 'org-test',
+      },
+    )
     expect(mockExecuteDeployFlow).not.toHaveBeenCalled()
   })
 

@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { getDatabase } from '@/server/services/database'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 import {
   ensureCollection as ensureCollectionFor,
   loadProject,
@@ -98,6 +99,12 @@ const ensureCollection = igniter.mutation({
       user.currentOrgId,
       request.body.description,
     )
+    await invalidateProjectRefinement({
+      projectId: project.id,
+      organizationId: user.currentOrgId,
+      reason:
+        'A coleção de conhecimento foi criada/vinculada depois do refinamento.',
+    })
     return response.success({ collection })
   },
 })
@@ -125,6 +132,11 @@ const toggleRAG = igniter.mutation({
     await db.aIAgentConfig.update({
       where: { id: project.aiAgentId },
       data: { useRAG: request.body.enabled },
+    })
+    await invalidateProjectRefinement({
+      projectId: project.id,
+      organizationId: user.currentOrgId,
+      reason: 'O uso de RAG foi alterado depois do refinamento.',
     })
     return response.success({ useRAG: request.body.enabled })
   },

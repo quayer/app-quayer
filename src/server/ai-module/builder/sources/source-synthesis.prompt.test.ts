@@ -50,6 +50,22 @@ describe('parseSourceSynthesisJSON — address + description (Onda E)', () => {
     expect(parsed.ungrounded).toBe(true)
   })
 
+  it('normaliza texto quebrado de CMS antes de persistir o proposal', () => {
+    const parsed = parseSourceSynthesisJSON(
+      JSON.stringify({
+        differentiators: [
+          'a minuto(s) do(a) Estação BUTANTÃ (Linha Amarela)',
+          'a minuto(s) do(a) Estação BUTANTÃ (Linha Amarela)',
+        ],
+      }),
+    )
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.value.differentiators).toEqual([
+      'próximo à Estação Butantã (Linha Amarela)',
+    ])
+  })
+
   it('rejeita address com tipo errado (number) — nunca persiste garbage', () => {
     const parsed = parseSourceSynthesisJSON(JSON.stringify({ address: 161 }))
     expect(parsed.ok).toBe(false)
@@ -69,5 +85,12 @@ describe('parseSourceSynthesisJSON — address + description (Onda E)', () => {
   it('system prompt documenta os campos novos no shape JSON', () => {
     expect(SOURCE_SYNTHESIS_SYSTEM).toContain('"address"')
     expect(SOURCE_SYNTHESIS_SYSTEM).toContain('"description"')
+  })
+
+  it('system prompt preserva status de oferta e normaliza placeholder quebrado', () => {
+    expect(SOURCE_SYNTHESIS_SYSTEM).toContain('100% vendido')
+    expect(SOURCE_SYNTHESIS_SYSTEM).toContain('pronto e 100% vendido')
+    expect(SOURCE_SYNTHESIS_SYSTEM).toContain('a minuto(s) do(a)')
+    expect(SOURCE_SYNTHESIS_SYSTEM).toContain('próximo à Estação X')
   })
 })

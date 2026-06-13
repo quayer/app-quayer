@@ -15,6 +15,12 @@
 
 import { builderProjectRepository } from '../projects/projects.repository'
 import { database } from '@/server/services/database'
+import { parseBuilderState } from '../cards/builder-state'
+import {
+  buildRefinementPublishBlockerMessage,
+  getRefinementPublishGateMessage,
+} from '../refinement/refinement-gate'
+import { buildRefinementMaterial } from '../refinement/refinement-material'
 import type { DeployContext } from './deploy.contract'
 
 export interface PublishVersionResult {
@@ -39,13 +45,37 @@ export async function publishVersion(
       id: context.promptVersionId,
       aiAgentId: context.aiAgentId,
     },
-    select: { id: true, versionNumber: true, aiAgentId: true },
+    select: { id: true, versionNumber: true, aiAgentId: true, content: true },
   })
 
   if (!version) {
     throw new Error(
       `Versão de prompt ${context.promptVersionId} não pertence ao agente ${context.aiAgentId}`,
     )
+  }
+
+  const stateRow = await database.builderProjectConversation.findFirst({
+    where: {
+      projectId: context.projectId,
+      organizationId: context.organizationId,
+    },
+    select: { builderState: true },
+  })
+  const builderState = parseBuilderState(stateRow?.builderState ?? null)
+  const expectedMaterial =
+    builderState.conversationBlueprint?.status === 'approved'
+      ? buildRefinementMaterial({
+          state: builderState,
+          blueprint: builderState.conversationBlueprint,
+          promptVersion: version,
+        })
+      : undefined
+  const refinementMessage = getRefinementPublishGateMessage(
+    builderState,
+    expectedMaterial,
+  )
+  if (refinementMessage) {
+    throw new Error(buildRefinementPublishBlockerMessage(refinementMessage))
   }
 
   // Idempotency short-circuit — if the caller already has state, skip.

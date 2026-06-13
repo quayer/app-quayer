@@ -27,6 +27,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockProjectFindFirst = vi.hoisted(() => vi.fn())
 const mockProjectCreate = vi.hoisted(() => vi.fn())
 const mockConvCreate = vi.hoisted(() => vi.fn())
+const mockMessageCreate = vi.hoisted(() => vi.fn())
 const mockTransaction = vi.hoisted(() => vi.fn())
 const mockTrackJourneyEvent = vi.hoisted(() => vi.fn())
 
@@ -37,6 +38,9 @@ vi.mock('@/server/services/database', () => {
     },
     builderProjectConversation: {
       create: mockConvCreate,
+    },
+    builderProjectMessage: {
+      create: mockMessageCreate,
     },
     aIAgentConfig: { create: vi.fn() },
     builderPromptVersion: { create: vi.fn() },
@@ -101,12 +105,14 @@ describe('builderProjectRepository.duplicate — herança de journeyVersion (T60
         fn({
           builderProject: { create: mockProjectCreate },
           builderProjectConversation: { create: mockConvCreate },
+          builderProjectMessage: { create: mockMessageCreate },
           aIAgentConfig: { create: vi.fn() },
           builderPromptVersion: { create: vi.fn() },
         }),
     )
     mockProjectCreate.mockResolvedValue({ id: CLONE_ID })
     mockConvCreate.mockResolvedValue({ id: 'conv-clone' })
+    mockMessageCreate.mockResolvedValue({ id: 'msg-1' })
     vi.spyOn(console, 'info').mockImplementation(() => {})
   })
 
@@ -191,5 +197,62 @@ describe('builderProjectRepository.duplicate — herança de journeyVersion (T60
     expect(result).toBeNull()
     expect(mockConvCreate).not.toHaveBeenCalled()
     expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('builderProjectRepository.createWithInitialMessage — seed journeyVersion (T10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubEnv('BUILDER_JOURNEY_V2', 'off')
+    mockTransaction.mockImplementation(
+      async (fn: (t: unknown) => Promise<unknown>) =>
+        fn({
+          builderProject: { create: mockProjectCreate },
+          builderProjectConversation: { create: mockConvCreate },
+          builderProjectMessage: { create: mockMessageCreate },
+        }),
+    )
+    mockProjectCreate.mockResolvedValue({ id: 'proj-created' })
+    mockConvCreate.mockResolvedValue({ id: 'conv-created' })
+    mockMessageCreate.mockResolvedValue({ id: 'msg-created' })
+    vi.spyOn(console, 'info').mockImplementation(() => {})
+  })
+
+  it('cookie override on congela journeyVersion 2 mesmo com env off', async () => {
+    await builderProjectRepository.createWithInitialMessage({
+      organizationId: ORG,
+      userId: USER,
+      prompt: 'Criar agente',
+      type: 'ai_agent',
+      name: 'Criar agente',
+      builderV2OverrideCookie: 'on',
+    })
+
+    expect(clonedConversationState().journeyVersion).toBe(2)
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG,
+      projectId: 'proj-created',
+      journeyVersion: 2,
+      event: 'journey_started',
+    })
+  })
+
+  it('sem override respeita env off e congela journeyVersion 1', async () => {
+    await builderProjectRepository.createWithInitialMessage({
+      organizationId: ORG,
+      userId: USER,
+      prompt: 'Criar agente',
+      type: 'ai_agent',
+      name: 'Criar agente',
+    })
+
+    expect(clonedConversationState().journeyVersion).toBe(1)
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'proj-created',
+        journeyVersion: 1,
+        event: 'journey_started',
+      }),
+    )
   })
 })

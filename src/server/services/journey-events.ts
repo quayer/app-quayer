@@ -11,11 +11,10 @@
  * Vocabulário FECHADO em union TS (plan §6.2) — o evento é validado no tipo,
  * não em runtime: `JourneyEventName` é a única superfície de escrita.
  *
- * LGPD (NFR-02): `metadata` é um tipo ESTREITO de chaves escalares
- * (string | number | boolean) — sem campos livres. É PROIBIDO carregar
- * telefone, nome de contato ou qualquer PII: números nunca saem do
- * `builderState`. Retenção: linhas > 180 dias são purgadas por cron no worker
- * (NFR-10, `jobs/journey-events-purge.job.ts`).
+ * LGPD (NFR-02): `metadata` é um contrato FECHADO por evento — sem `Record`
+ * livre e sem chaves arbitrárias. É PROIBIDO carregar telefone, nome de contato
+ * ou qualquer PII: números nunca saem do `builderState`. Retenção: linhas > 180
+ * dias são purgadas por cron no worker (NFR-10, `jobs/journey-events-purge.job.ts`).
  */
 
 import { database } from '@/server/services/database'
@@ -27,6 +26,7 @@ import { database } from '@/server/services/database'
 export type JourneyEventName =
   | 'journey_started'
   | 'identity_done'
+  | 'mission_selected'
   | 'review_done'
   | 'agent_created'
   | 'test_done'
@@ -36,22 +36,59 @@ export type JourneyEventName =
   | 'next_steps_ack'
 
 /**
- * Metadata do evento — tipo ESTREITO, escalares apenas (NFR-02/LGPD).
+ * Metadata do evento — contrato FECHADO (NFR-02/LGPD).
  *
- * Sem campos livres de PII: nada de telefone/nome de contato. As chaves são
- * livres de nome, mas os VALORES são restritos a escalares — impede aninhar
- * objetos arbitrários que poderiam vazar dados sensíveis.
+ * O shape é deliberadamente pequeno e sem índice livre: cada evento declara
+ * explicitamente quais chaves pode carregar. Eventos que ainda não precisam de
+ * metadata usam `undefined`, então o tipo impede payload arbitrário.
  */
-export type JourneyEventMetadata = Record<string, string | number | boolean>
+export type JourneyEventMetadataByName = {
+  journey_started: undefined
+  identity_done: undefined
+  // mission-first v3 (FR-48) — metadata FECHADO/sem PII (NFR-02): só enums
+  // resolvidos da missão. O handler (`apply/journey-v2.ts:applyMission`) mapeia
+  // mission.role/objective (strings) para estes enums quando válidos, senão omite.
+  mission_selected: {
+    role?:
+      | 'sdr'
+      | 'closer'
+      | 'secretaria'
+      | 'suporte'
+      | 'vendas'
+      | 'cobranca'
+      | 'onboarding'
+    objectiveKind?: 'qualificar' | 'agendar' | 'vender' | 'suportar' | 'transferir'
+    framework?: 'bant_lite' | 'spin' | 'meddic' | 'triage' | 'appointment'
+  }
+  review_done: undefined
+  agent_created: undefined
+  test_done: { origin?: 'card' | 'playground' }
+  test_skipped: undefined
+  channel_connected: {
+    platform?: 'whatsapp' | 'instagram'
+    provider?: 'uazapi' | 'manual'
+  }
+  published: { versionNumber?: number }
+  next_steps_ack: undefined
+}
 
-export interface TrackJourneyEventInput {
+export type JourneyEventMetadata = NonNullable<
+  JourneyEventMetadataByName[JourneyEventName]
+>
+
+type TrackJourneyEventInputFor<E extends JourneyEventName> = {
   organizationId: string
   projectId: string
   /** Versão da jornada congelada no evento (1 | 2 — plan §2.2). */
   journeyVersion: 1 | 2
-  event: JourneyEventName
-  metadata?: JourneyEventMetadata
-}
+  event: E
+} & (JourneyEventMetadataByName[E] extends undefined
+  ? { metadata?: never }
+  : { metadata?: JourneyEventMetadataByName[E] })
+
+export type TrackJourneyEventInput = {
+  [E in JourneyEventName]: TrackJourneyEventInputFor<E>
+}[JourneyEventName]
 
 /**
  * Grava um evento do funil. Fire-and-forget: resolve sempre, nunca lança.

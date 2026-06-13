@@ -30,6 +30,7 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 import {
+  invalidateRefinement,
   parseBuilderState,
   patchBuilderState,
   type BuilderState,
@@ -176,7 +177,10 @@ export function setProjectBasicsTool(ctx: BuilderToolExecutionContext) {
                   }
                 : {}),
             }
-            const next = patchBuilderState(current, patch)
+            const next = invalidateRefinement(
+              patchBuilderState(current, patch),
+              'set_project_basics alterou objetivo, identidade ou tom depois do refinamento.',
+            )
 
             await tx.builderProjectConversation.updateMany({
               where: { id: conversation.id, organizationId: ctx.organizationId },

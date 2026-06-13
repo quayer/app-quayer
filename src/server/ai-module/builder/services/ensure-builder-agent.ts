@@ -39,6 +39,15 @@ export function builderPromptHash(prompt: string): string {
   return createHash('sha256').update(prompt, 'utf8').digest('hex').slice(0, 16)
 }
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  )
+}
+
 /**
  * Garante (cria se faltar) o meta-agente do Builder da org com o systemPrompt
  * RESOLVIDO e atualizado. Retorna a row (já refrescada quando havia drift).
@@ -47,34 +56,50 @@ export async function ensureBuilderAgent(organizationId: string) {
   const resolvedPrompt = await buildResolvedSystemPrompt()
   const resolvedHash = builderPromptHash(resolvedPrompt)
 
-  const agent = await database.aIAgentConfig.upsert({
-    where: {
-      organizationId_name: {
+  let agent: Awaited<ReturnType<typeof database.aIAgentConfig.upsert>>
+  try {
+    agent = await database.aIAgentConfig.upsert({
+      where: {
+        organizationId_name: {
+          organizationId,
+          name: BUILDER_RESERVED_NAME,
+        },
+      },
+      // Já existe → não sobrescreve aqui (preserva ajustes/contadores); o refresh
+      // do prompt é decidido abaixo por comparação de hash.
+      update: {},
+      create: {
         organizationId,
         name: BUILDER_RESERVED_NAME,
+        isActive: true,
+        provider: BUILDER_AGENT_DEFAULTS.provider,
+        model: BUILDER_AGENT_DEFAULTS.model,
+        temperature: BUILDER_AGENT_DEFAULTS.temperature,
+        maxTokens: BUILDER_AGENT_DEFAULTS.maxTokens,
+        systemPrompt: resolvedPrompt,
+        personality: BUILDER_AGENT_DEFAULTS.personality,
+        agentTarget: 'builder',
+        agentBehavior: BUILDER_AGENT_DEFAULTS.name,
+        useMemory: true,
+        memoryWindow: BUILDER_AGENT_DEFAULTS.memoryWindow,
+        useRAG: false,
+        enabledTools: BUILDER_AGENT_DEFAULTS.enabledTools,
       },
-    },
-    // Já existe → não sobrescreve aqui (preserva ajustes/contadores); o refresh
-    // do prompt é decidido abaixo por comparação de hash.
-    update: {},
-    create: {
-      organizationId,
-      name: BUILDER_RESERVED_NAME,
-      isActive: true,
-      provider: BUILDER_AGENT_DEFAULTS.provider,
-      model: BUILDER_AGENT_DEFAULTS.model,
-      temperature: BUILDER_AGENT_DEFAULTS.temperature,
-      maxTokens: BUILDER_AGENT_DEFAULTS.maxTokens,
-      systemPrompt: resolvedPrompt,
-      personality: BUILDER_AGENT_DEFAULTS.personality,
-      agentTarget: 'builder',
-      agentBehavior: BUILDER_AGENT_DEFAULTS.name,
-      useMemory: true,
-      memoryWindow: BUILDER_AGENT_DEFAULTS.memoryWindow,
-      useRAG: false,
-      enabledTools: BUILDER_AGENT_DEFAULTS.enabledTools,
-    },
-  })
+    })
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error
+
+    const existing = await database.aIAgentConfig.findUnique({
+      where: {
+        organizationId_name: {
+          organizationId,
+          name: BUILDER_RESERVED_NAME,
+        },
+      },
+    })
+    if (!existing) throw error
+    agent = existing
+  }
 
   // Row recém-criada já carrega o prompt resolvido (hash igual) → no-op.
   const storedHash = agent.systemPrompt

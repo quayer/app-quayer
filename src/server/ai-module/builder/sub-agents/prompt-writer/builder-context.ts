@@ -16,6 +16,7 @@
 
 import { z } from 'zod'
 import type { BuilderState } from '../../cards/builder-state'
+import { conversationBlueprintSchema } from '../../playbook/blueprint.schema'
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -71,6 +72,8 @@ export const promptWriterBuilderContextSchema = z.object({
       description: z.string().optional(),
     })
     .optional(),
+  /** Builder Playbook — approved conversational route. */
+  conversationBlueprint: conversationBlueprintSchema.optional(),
 })
 
 export type PromptWriterBuilderContext = z.infer<
@@ -172,6 +175,10 @@ export function builderStateToPromptWriterContext(
     business: hasBusiness
       ? { address: businessAddress, description: businessDescription }
       : undefined,
+    conversationBlueprint:
+      state.conversationBlueprint?.status === 'approved'
+        ? state.conversationBlueprint
+        : undefined,
   }
 }
 
@@ -287,6 +294,52 @@ export function formatBuilderContextBlock(
       lines.push(
         `  - Endereço: ${ctx.business.address} (informar quando o cliente perguntar localização)`,
       )
+    }
+  }
+
+  // Conversation Blueprint — roteiro aprovado pelo usuário antes do prompt.
+  if (ctx.conversationBlueprint) {
+    const blueprint = ctx.conversationBlueprint
+    lines.push('- Plano de atendimento aprovado (preservar no prompt final):')
+    if (blueprint.objective) lines.push(`  - Objetivo: ${blueprint.objective}`)
+    if (blueprint.niche) lines.push(`  - Nicho: ${blueprint.niche}`)
+    if (blueprint.stages.length > 0) {
+      lines.push('  - Etapas:')
+      lines.push(
+        blueprint.stages
+          .map((stage) => `    - ${stage.title}: ${stage.goal}`)
+          .join('\n'),
+      )
+    }
+    if (blueprint.questions.length > 0) {
+      lines.push('  - Perguntas principais (uma por vez; pular quando já souber):')
+      lines.push(
+        blueprint.questions
+          .map(
+            (question) =>
+              `    - "${question.text}" → captura ${question.variableKey}; pular quando: ${question.skipWhenKnown}`,
+          )
+          .join('\n'),
+      )
+    }
+    if (blueprint.toolTriggers.length > 0) {
+      lines.push('  - Gatilhos de ferramentas/capacidades:')
+      lines.push(
+        blueprint.toolTriggers
+          .map(
+            (trigger) =>
+              `    - ${trigger.capability}: ${trigger.when}${trigger.requiredVariables.length > 0 ? ` (dados: ${trigger.requiredVariables.join(', ')})` : ''}`,
+          )
+          .join('\n'),
+      )
+    }
+    if (blueprint.handoffTriggers.length > 0) {
+      lines.push('  - Gatilhos de humano:')
+      lines.push(blueprint.handoffTriggers.map((t) => `    - ${t}`).join('\n'))
+    }
+    if (blueprint.dontRules.length > 0) {
+      lines.push('  - Nunca fazer:')
+      lines.push(blueprint.dontRules.map((r) => `    - ${r}`).join('\n'))
     }
   }
 

@@ -34,6 +34,8 @@ import { buildUserMessage, SUB_LLM_SYSTEM } from './prompt-writer.prompt'
 import { builderStateToPromptWriterContext } from './builder-context'
 import { parseBuilderState } from '../../cards/builder-state'
 import { REQUIRED_PROMPT_SECTIONS } from '../../templates/prompt-section-checklist'
+import type { ConversationBlueprint } from '../../playbook/blueprint.schema'
+import { buildNicheBlueprintFixture } from '../../playbook/niche-blueprint-fixtures'
 
 const mockedRunLLM = vi.mocked(runLLMSubAgent)
 
@@ -52,6 +54,74 @@ const baseInput: PromptWriterInput = {
   nicho: 'barbearia',
   objetivo: 'Qualificar clientes e agendar cortes de cabelo',
   attachedTools: [],
+}
+
+const APPROVED_AT = '2026-06-12T00:00:00.000Z'
+
+function approvedRealEstateBlueprint(): ConversationBlueprint {
+  const fixture = buildNicheBlueprintFixture({
+    objective:
+      'Qualificar interessados em imóveis e conduzir para visita ou atendimento humano.',
+    niche: 'imobiliário residencial',
+  })
+
+  return {
+    ...fixture,
+    status: 'approved',
+    approvedAt: APPROVED_AT,
+    toolTriggers: [
+      {
+        capability: 'enviar lista de imóveis',
+        toolKey: 'search_properties',
+        when:
+          'Quando objetivo_compra, tipologia_regiao e faixa_valor estiverem claros.',
+        requiredVariables: [
+          'objetivo_compra',
+          'tipologia_regiao',
+          'faixa_valor',
+        ],
+        fallback: 'Se faltar dado, pergunte antes de buscar opções.',
+        active: true,
+      },
+    ],
+  }
+}
+
+function approvedB2BBlueprint(): ConversationBlueprint {
+  const fixture = buildNicheBlueprintFixture({
+    objective:
+      'Qualificar oportunidades B2B e conduzir empresas para diagnóstico comercial.',
+    niche: 'SaaS B2B',
+  })
+
+  return {
+    ...fixture,
+    status: 'approved',
+    approvedAt: APPROVED_AT,
+    handoffTriggers: [
+      ...fixture.handoffTriggers,
+      'Lead pede proposta comercial ou precisa negociar contrato.',
+    ],
+    toolTriggers: [
+      {
+        capability: 'agendar diagnóstico',
+        toolKey: 'calendar_booking',
+        when:
+          'Quando problema_atual, porte_volume e agenda_diagnostico estiverem claros.',
+        requiredVariables: [
+          'problema_atual',
+          'porte_volume',
+          'agenda_diagnostico',
+        ],
+        fallback: 'Se faltar contexto, faça a pergunta pendente antes de agendar.',
+        active: true,
+      },
+    ],
+    dontRules: [
+      ...fixture.dontRules,
+      'Não prometer ROI ou prazo de implantação sem validação humana.',
+    ],
+  }
 }
 
 /** Well-formed 10-section markdown matching the canonical template headings. */
@@ -400,7 +470,140 @@ describe('buildUserMessage — builder context & validator feedback', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 8. builderStateToPromptWriterContext (builderState → writer context)
+// 8. Builder Playbook — approved conversation blueprint preservation
+// ---------------------------------------------------------------------------
+
+describe('buildUserMessage — conversation blueprint preservation', () => {
+  it('renders an approved imobiliário fixture with stages, questions, variables and triggers', () => {
+    const blueprint = approvedRealEstateBlueprint()
+    const context = builderStateToPromptWriterContext(
+      parseBuilderState({ conversationBlueprint: blueprint }),
+    )
+
+    expect(context.conversationBlueprint).toEqual(blueprint)
+    expect(context.conversationBlueprint?.variables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'objetivo_compra',
+          label: 'Descobrir a intenção principal do lead.',
+        }),
+        expect.objectContaining({
+          key: 'faixa_valor',
+          reviewRequired: true,
+        }),
+      ]),
+    )
+
+    const msg = buildUserMessage({
+      brief:
+        'Imobiliária residencial que atende compradores de apartamentos e casas na cidade.',
+      nicho: 'imobiliário residencial',
+      objetivo:
+        'Qualificar interessados em imóveis e conduzir para visita ou consultor.',
+      attachedTools: ['search_properties', 'transfer_to_human'],
+      builderContext: context,
+    })
+
+    expect(msg).toContain(
+      'Plano de atendimento aprovado (preservar no prompt final)',
+    )
+    expect(msg).toContain(
+      'Entender interesse: Descobrir se o lead quer morar, investir ou só tirar dúvidas.',
+    )
+    expect(msg).toContain(
+      '"Você está procurando para morar, investir ou ainda está pesquisando?"',
+    )
+    expect(msg).toContain('captura objetivo_compra')
+    expect(msg).toContain(
+      'pular quando: Pular se o lead já disse que quer morar, investir ou pesquisar.',
+    )
+    expect(msg).toContain(
+      'enviar lista de imóveis: Quando objetivo_compra, tipologia_regiao e faixa_valor estiverem claros.',
+    )
+    expect(msg).toContain(
+      '(dados: objetivo_compra, tipologia_regiao, faixa_valor)',
+    )
+    expect(msg).toContain(
+      'Lead pede visita, proposta ou atendimento com consultor.',
+    )
+    expect(msg).toContain('Não inventar preço ou condição.')
+  })
+
+  it('renders a simple B2B blueprint with its own route and guardrails', () => {
+    const blueprint = approvedB2BBlueprint()
+
+    const msg = buildUserMessage({
+      brief:
+        'Consultoria SaaS B2B que qualifica empresas interessadas em automação comercial.',
+      nicho: 'SaaS B2B',
+      objetivo:
+        'Qualificar oportunidades B2B e conduzir empresas para diagnóstico comercial.',
+      attachedTools: ['calendar_booking', 'transfer_to_human'],
+      builderContext: { conversationBlueprint: blueprint },
+    })
+
+    expect(blueprint.variables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'problema_atual' }),
+        expect.objectContaining({ key: 'agenda_diagnostico' }),
+      ]),
+    )
+    expect(msg).toContain('Entender dor: Descobrir o problema principal.')
+    expect(msg).toContain('"Qual problema você quer resolver primeiro?"')
+    expect(msg).toContain('captura problema_atual')
+    expect(msg).toContain(
+      'agendar diagnóstico: Quando problema_atual, porte_volume e agenda_diagnostico estiverem claros.',
+    )
+    expect(msg).toContain(
+      '(dados: problema_atual, porte_volume, agenda_diagnostico)',
+    )
+    expect(msg).toContain('Lead aceita diagnóstico ou pede proposta.')
+    expect(msg).toContain(
+      'Lead pede proposta comercial ou precisa negociar contrato.',
+    )
+    expect(msg).toContain('Não forçar reunião antes de entender a dor.')
+    expect(msg).toContain(
+      'Não prometer ROI ou prazo de implantação sem validação humana.',
+    )
+  })
+
+  it('keeps legacy builderContext output when no blueprint is approved', () => {
+    const proposedBlueprint = buildNicheBlueprintFixture({
+      objective: 'Qualificar interessados em serviço local.',
+      niche: 'serviço local',
+    })
+    const context = builderStateToPromptWriterContext(
+      parseBuilderState({
+        persona: { name: 'Lia', tone: 'direto' },
+        hours: { preset: 'comercial', timezone: 'America/Sao_Paulo' },
+        handoff: {
+          mode: 'roleta',
+          steps: ['Perguntar nome'],
+          members: [{ name: 'Ana', position: 0 }],
+        },
+        conversationBlueprint: proposedBlueprint,
+      }),
+    )
+
+    const msg = buildUserMessage({
+      brief: 'Atendimento de serviço local com orçamento e encaminhamento.',
+      nicho: 'serviço local',
+      objetivo: 'Qualificar interessados e encaminhar para orçamento',
+      builderContext: context,
+    })
+
+    expect(context.conversationBlueprint).toBeUndefined()
+    expect(msg).toContain('Nome: Lia')
+    expect(msg).toContain('Preset: comercial')
+    expect(msg).toContain('modo roleta')
+    expect(msg).toContain('Perguntar nome')
+    expect(msg).not.toContain('Plano de atendimento aprovado')
+    expect(msg).not.toContain('Qual serviço você precisa?')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 9. builderStateToPromptWriterContext (builderState → writer context)
 // ---------------------------------------------------------------------------
 
 describe('builderStateToPromptWriterContext', () => {
@@ -444,7 +647,7 @@ describe('builderStateToPromptWriterContext', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 9. parsePromptSections unit tests
+// 10. parsePromptSections unit tests
 // ---------------------------------------------------------------------------
 
 describe('parsePromptSections', () => {

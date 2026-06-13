@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { getDatabase } from '@/server/services/database'
+import { attachConnectionToProjectAgent } from '../../channel/attach-to-agent'
 
 // ---------------------------------------------------------------------------
 // Shared param schema (reuses the same shape as getProjectParamsSchema)
@@ -166,35 +167,12 @@ export const channelRoutes = {
 
       if (!connection) return response.notFound('Canal não encontrado ou não pertence à sua organização')
 
-      // Pausa só o deployment ACTIVE da MESMA conexão (re-attach daquele canal) —
-      // escopo por connectionId habilita multi-canal simultâneo: N deployments
-      // ACTIVE por agente, 1 por conexão (espelha attach-to-agent.ts, plan §3.7/Onda 5b).
-      await database.agentDeployment.updateMany({
-        where: { agentConfigId: project.aiAgentId, connectionId, status: 'ACTIVE' },
-        data: { status: 'PAUSED', updatedAt: new Date() },
-      })
-
-      // Create or reactivate deployment for the chosen connection
-      const existing = await database.agentDeployment.findFirst({
-        where: { agentConfigId: project.aiAgentId, connectionId },
-        select: { id: true },
-      })
-
-      if (existing) {
-        await database.agentDeployment.update({
-          where: { id: existing.id },
-          data: { status: 'ACTIVE', updatedAt: new Date() },
-        })
-      } else {
-        await database.agentDeployment.create({
-          data: {
-            agentConfigId: project.aiAgentId,
-            connectionId,
-            mode: 'CHAT',
-            status: 'ACTIVE',
-          },
-        })
-      }
+      await attachConnectionToProjectAgent(
+        database,
+        id,
+        connectionId,
+        user.currentOrgId,
+      )
 
       return response.success({ connectionId, name: connection.name })
     },

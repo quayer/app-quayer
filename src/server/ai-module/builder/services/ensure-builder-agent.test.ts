@@ -20,12 +20,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockUpsert = vi.hoisted(() => vi.fn())
 const mockUpdate = vi.hoisted(() => vi.fn())
+const mockFindUnique = vi.hoisted(() => vi.fn())
 
 vi.mock('@/server/services/database', () => ({
   database: {
     aIAgentConfig: {
       upsert: mockUpsert,
       update: mockUpdate,
+      findUnique: mockFindUnique,
     },
   },
 }))
@@ -125,6 +127,27 @@ describe('ensureBuilderAgent', () => {
 
     expect(mockUpdate).toHaveBeenCalledOnce()
     logSpy.mockRestore()
+  })
+
+  it('recovers from P2002 on upsert by re-reading the existing builder agent', async () => {
+    mockUpsert.mockRejectedValue({ code: 'P2002' })
+    mockFindUnique.mockResolvedValue({
+      id: 'agent-1',
+      systemPrompt: RESOLVED_PROMPT,
+    })
+
+    const agent = await ensureBuilderAgent(ORG_ID)
+
+    expect(mockFindUnique).toHaveBeenCalledWith({
+      where: {
+        organizationId_name: {
+          organizationId: ORG_ID,
+          name: '__quayer_builder__',
+        },
+      },
+    })
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(agent).toEqual({ id: 'agent-1', systemPrompt: RESOLVED_PROMPT })
   })
 })
 

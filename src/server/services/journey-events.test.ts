@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-import { trackJourneyEvent } from './journey-events'
+import { trackJourneyEvent, type TrackJourneyEventInput } from './journey-events'
 
 const create = vi.fn()
 
@@ -51,7 +51,7 @@ describe('trackJourneyEvent', () => {
     })
   })
 
-  it('inclui metadata escalar quando fornecida', async () => {
+  it('inclui metadata do contrato fechado quando fornecida', async () => {
     create.mockResolvedValue({ id: 'evt_2' })
 
     await trackJourneyEvent({
@@ -59,7 +59,7 @@ describe('trackJourneyEvent', () => {
       projectId: 'proj_1',
       journeyVersion: 2,
       event: 'channel_connected',
-      metadata: { platform: 'whatsapp', attempts: 1, viaShare: true },
+      metadata: { platform: 'whatsapp', provider: 'uazapi' },
     })
 
     expect(create).toHaveBeenCalledWith({
@@ -68,9 +68,31 @@ describe('trackJourneyEvent', () => {
         projectId: 'proj_1',
         journeyVersion: 2,
         event: 'channel_connected',
-        metadata: { platform: 'whatsapp', attempts: 1, viaShare: true },
+        metadata: { platform: 'whatsapp', provider: 'uazapi' },
       },
     })
+  })
+
+  it('mantém o contrato TS sem metadata livre para eventos que não declaram shape', () => {
+    const valid: TrackJourneyEventInput = {
+      organizationId: 'org_1',
+      projectId: 'proj_1',
+      journeyVersion: 2,
+      event: 'published',
+      metadata: { versionNumber: 3 },
+    }
+
+    const invalid: TrackJourneyEventInput = {
+      organizationId: 'org_1',
+      projectId: 'proj_1',
+      journeyVersion: 2,
+      event: 'identity_done',
+      // @ts-expect-error identity_done não aceita metadata arbitrária/PII.
+      metadata: { phone: '+5511999999999' },
+    }
+
+    expect(valid.metadata).toEqual({ versionNumber: 3 })
+    void invalid
   })
 
   it('omite a chave metadata do data quando ausente', async () => {

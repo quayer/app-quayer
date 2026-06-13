@@ -22,16 +22,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Prisma } from '@prisma/client'
 
-import { resolveAgentIdForConnection } from './resolve-connection'
+import {
+  promoteConnectionFromEvent,
+  resolveAgentIdForConnection,
+} from './resolve-connection'
 
-const findFirst = vi.fn()
+const databaseMock = vi.hoisted(() => ({
+  agentDeployment: {
+    findFirst: vi.fn(),
+  },
+  connection: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
+  },
+  builderProjectConversation: {
+    findUnique: vi.fn(),
+    updateMany: vi.fn(),
+  },
+}))
+const mockTrackJourneyEvent = vi.hoisted(() => vi.fn())
+const mockParseBuilderState = vi.hoisted(() => vi.fn())
+const mockApplyConfirmation = vi.hoisted(() => vi.fn())
+
+const findFirst = databaseMock.agentDeployment.findFirst
 
 vi.mock('@/server/services/database', () => ({
-  database: {
-    agentDeployment: {
-      findFirst: (...args: unknown[]) => findFirst(...args),
-    },
-  },
+  database: databaseMock,
 }))
 
 vi.mock('@/server/services/logger', () => ({
@@ -39,13 +55,17 @@ vi.mock('@/server/services/logger', () => ({
 }))
 
 // Imports de módulo que carregam serviços reais — neutralizados no load.
-vi.mock('@/server/services/journey-events', () => ({ trackJourneyEvent: vi.fn() }))
+vi.mock('@/server/services/journey-events', () => ({
+  trackJourneyEvent: mockTrackJourneyEvent,
+}))
 vi.mock('@/server/ai-module/builder/cards/builder-state', () => ({
-  parseBuilderState: vi.fn(),
-  applyConfirmation: vi.fn(),
+  parseBuilderState: mockParseBuilderState,
+  applyConfirmation: mockApplyConfirmation,
 }))
 
 const ORG = 'org_1'
+const PROJECT_ID = 'project_1'
+const CONVERSATION_ID = 'conversation_1'
 
 /**
  * Fixture: o MESMO agente (`agent_main`) com deployments ACTIVE em DUAS conexões
@@ -220,5 +240,127 @@ describe('resolveAgentIdForConnection — resolução POR connection (T93)', () 
     const result = await resolveAgentIdForConnection('conn_instagram', ORG, 'agent_loose')
 
     expect(result).toBe('agent_main')
+  })
+})
+
+describe('promoteConnectionFromEvent — T35 channel_connected', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    findFirst.mockReset()
+    databaseMock.connection.update.mockResolvedValue({ id: 'conn_whatsapp' })
+    databaseMock.builderProjectConversation.updateMany.mockResolvedValue({
+      count: 1,
+    })
+    mockTrackJourneyEvent.mockResolvedValue(undefined)
+  })
+
+  function connectedPayload() {
+    return {
+      event: 'connection.status',
+      instance: 'uaz_instance_1',
+      data: { status: 'connected' },
+    } as unknown as Parameters<typeof promoteConnectionFromEvent>[0]
+  }
+
+  function armDisconnectedConnection() {
+    databaseMock.connection.findFirst.mockResolvedValueOnce({
+      id: 'conn_whatsapp',
+      status: 'DISCONNECTED',
+      organizationId: ORG,
+      projectId: null,
+    })
+  }
+
+  function armBuilderProjectConnection(options?: {
+    whatsappConnectedOnce?: boolean
+  }) {
+    databaseMock.agentDeployment.findFirst.mockResolvedValueOnce({
+      agentConfig: { builderProject: { id: PROJECT_ID } },
+    })
+    const state = {
+      journeyVersion: 2,
+      confirmations: {
+        whatsappConnectedOnce: options?.whatsappConnectedOnce ?? false,
+      },
+    }
+    const next = {
+      ...state,
+      confirmations: { ...state.confirmations, whatsappConnectedOnce: true },
+    }
+
+    databaseMock.builderProjectConversation.findUnique.mockResolvedValueOnce({
+      id: CONVERSATION_ID,
+      organizationId: ORG,
+      builderState: state,
+    })
+    mockParseBuilderState.mockReturnValueOnce(state)
+    mockApplyConfirmation.mockReturnValueOnce(next)
+
+    return { state, next }
+  }
+
+  it('transição para CONNECTED emite channel_connected e flipa whatsappConnectedOnce', async () => {
+    armDisconnectedConnection()
+    const { state, next } = armBuilderProjectConnection()
+
+    await expect(promoteConnectionFromEvent(connectedPayload())).resolves.toBe(
+      true,
+    )
+
+    expect(databaseMock.connection.update).toHaveBeenCalledWith({
+      where: { id: 'conn_whatsapp' },
+      data: { status: 'CONNECTED' },
+    })
+    expect(mockTrackJourneyEvent).toHaveBeenCalledOnce()
+    expect(mockTrackJourneyEvent).toHaveBeenCalledWith({
+      organizationId: ORG,
+      projectId: PROJECT_ID,
+      journeyVersion: 2,
+      event: 'channel_connected',
+    })
+    expect(mockApplyConfirmation).toHaveBeenCalledWith(
+      state,
+      'whatsappConnectedOnce',
+    )
+    expect(
+      databaseMock.builderProjectConversation.updateMany,
+    ).toHaveBeenCalledWith({
+        where: { id: CONVERSATION_ID, organizationId: ORG },
+        data: { builderState: next },
+      })
+  })
+
+  it('fail-open: falha de telemetria não aborta a promoção para CONNECTED', async () => {
+    armDisconnectedConnection()
+    armBuilderProjectConnection()
+    mockTrackJourneyEvent.mockRejectedValueOnce(new Error('telemetry down'))
+
+    await expect(promoteConnectionFromEvent(connectedPayload())).resolves.toBe(
+      true,
+    )
+
+    expect(databaseMock.connection.update).toHaveBeenCalledWith({
+      where: { id: 'conn_whatsapp' },
+      data: { status: 'CONNECTED' },
+    })
+  })
+
+  it('connection sem BuilderProject resolvível não emite evento nem flipa o sentinel', async () => {
+    armDisconnectedConnection()
+    databaseMock.agentDeployment.findFirst.mockResolvedValueOnce(null)
+
+    await expect(promoteConnectionFromEvent(connectedPayload())).resolves.toBe(
+      true,
+    )
+
+    expect(databaseMock.connection.update).toHaveBeenCalledWith({
+      where: { id: 'conn_whatsapp' },
+      data: { status: 'CONNECTED' },
+    })
+    expect(mockTrackJourneyEvent).not.toHaveBeenCalled()
+    expect(mockApplyConfirmation).not.toHaveBeenCalled()
+    expect(
+      databaseMock.builderProjectConversation.updateMany,
+    ).not.toHaveBeenCalled()
   })
 })

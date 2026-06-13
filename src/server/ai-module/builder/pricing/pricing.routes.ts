@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { getDatabase } from '@/server/services/database'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 type AuthedUser = { id: string; currentOrgId?: string | null }
 
@@ -110,6 +111,11 @@ const ensureList = igniter.mutation({
     if (!project) return response.notFound('Projeto não encontrado')
 
     const listId = await ensureListId(project, user.currentOrgId)
+    await invalidateProjectRefinement({
+      projectId: project.id,
+      organizationId: user.currentOrgId,
+      reason: 'A lista de preços foi vinculada depois do refinamento.',
+    })
     return response.success({ listId })
   },
 })
@@ -149,6 +155,11 @@ const addItem = igniter.mutation({
       },
       select: { id: true },
     })
+    await invalidateProjectRefinement({
+      projectId: project.id,
+      organizationId: user.currentOrgId,
+      reason: 'Um item de preço foi adicionado depois do refinamento.',
+    })
     return response.success({ itemId: item.id })
   },
 })
@@ -175,6 +186,11 @@ const deleteItem = igniter.mutation({
     if (!item) return response.notFound('Item não encontrado')
 
     await db.priceItem.delete({ where: { id: item.id } })
+    await invalidateProjectRefinement({
+      projectId: params.projectId,
+      organizationId: user.currentOrgId,
+      reason: 'Um item de preço foi removido depois do refinamento.',
+    })
     return response.success({ deleted: true })
   },
 })

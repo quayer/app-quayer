@@ -40,13 +40,22 @@ type AuthedUser = {
 const envelopeSchema = z.object({
   /** Target Connection to update; omit to create a new one. */
   connectionId: z.string().uuid('connectionId inválido').optional(),
-  /** BuilderProject to link the Connection to (so the project finds its channel). */
+  /**
+   * BuilderProject to link through AgentDeployment. Do not write it to
+   * Connection.projectId: that FK points at the legacy Project table.
+   */
   projectId: z.string().uuid('projectId inválido').optional(),
   /** Optional human label for a newly-created Connection. */
   name: z.string().trim().min(1).max(120).optional(),
 })
 
 const saveBodySchema = saveChannelCredentialsSchema.and(envelopeSchema)
+
+/**
+ * Manual Meta credentials are the connection proof for Cloud API / Instagram.
+ * QR-based WhatsApp stays on provision-whatsapp and is promoted by webhook scan.
+ */
+const MANUAL_CREDENTIAL_STATUS = 'CONNECTED' as const
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -88,7 +97,11 @@ const save = igniter.mutation({
 
         const updated = await database.connection.update({
           where: { id: existing.id },
-          data: { ...columns, updatedAt: new Date() },
+          data: {
+            ...columns,
+            status: MANUAL_CREDENTIAL_STATUS,
+            updatedAt: new Date(),
+          },
           select: { id: true, name: true, provider: true, channel: true, status: true },
         })
 
@@ -111,10 +124,8 @@ const save = igniter.mutation({
         data: {
           ...columns,
           organizationId: user.currentOrgId,
-          // Link to the BuilderProject so deploy/runtime resolve the channel.
-          ...(projectId ? { projectId } : {}),
           name: name ?? `${kind} channel`,
-          status: 'DISCONNECTED',
+          status: MANUAL_CREDENTIAL_STATUS,
         } as never,
         select: { id: true, name: true, provider: true, channel: true, status: true },
       })

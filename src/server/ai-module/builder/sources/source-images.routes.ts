@@ -40,6 +40,7 @@ import { BUCKETS, storage } from '@/server/services/storage'
 
 import { loadProject, resolveCollectionId } from '../knowledge/knowledge-helpers'
 import { syncGalleryMediaAssets } from '../media/gallery-media-sync'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 import {
   knowledgeImagesRepository,
   type KnowledgeImageRow,
@@ -311,6 +312,11 @@ const bulkSourceImages = igniter.mutation({
           err instanceof Error ? err.message : String(err),
         )
       }
+      await invalidateProjectRefinement({
+        projectId,
+        organizationId,
+        reason: 'Imagens de fonte foram aprovadas em massa depois do refinamento.',
+      })
       return response.success({ action, confirmed })
     }
 
@@ -319,6 +325,12 @@ const bulkSourceImages = igniter.mutation({
       projectId,
       organizationId,
     )
+    await invalidateProjectRefinement({
+      projectId,
+      organizationId,
+      reason:
+        'Imagens de baixa qualidade foram removidas em massa depois do refinamento.',
+    })
     return response.success({ action, deleted })
   },
 })

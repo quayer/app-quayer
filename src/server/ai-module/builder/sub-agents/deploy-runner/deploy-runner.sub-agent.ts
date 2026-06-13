@@ -21,7 +21,10 @@ import { z } from 'zod'
 import { database } from '@/server/services/database'
 import { measure } from '../base'
 import type { SubAgent, SubAgentContext, SubAgentResult } from '../types'
-import { executeDeployFlow } from '../../deploy/deploy-flow.orchestrator'
+import {
+  executeDeployFlow,
+  readCriticalRefinementPublishBlockerMessage,
+} from '../../deploy/deploy-flow.orchestrator'
 import { validatePrompt } from '../../validators'
 
 // ---------------------------------------------------------------------------
@@ -44,6 +47,7 @@ export type DeployRunnerBlockerCheck =
   | 'channel'
   | 'agent'
   | 'version'
+  | 'refinement'
 
 export interface DeployRunnerBlocker {
   check: DeployRunnerBlockerCheck
@@ -225,6 +229,19 @@ export const deployRunnerSubAgent: SubAgent<
       }
 
       const blockers: DeployRunnerBlocker[] = []
+
+      const refinementMessage =
+        await readCriticalRefinementPublishBlockerMessage({
+          projectId: project.id,
+          organizationId: context.organizationId,
+        })
+      if (refinementMessage) {
+        blockers.push({
+          check: 'refinement',
+          message: refinementMessage,
+          cta: 'Corrigir refinamento antes de publicar',
+        })
+      }
 
       // 2a. Agent must be bound.
       if (!project.aiAgentId) {

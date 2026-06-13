@@ -27,6 +27,7 @@ import { database } from '@/server/services/database'
 import { buildBuilderTool } from './build-tool'
 import type { BuilderToolExecutionContext } from './create-agent.tool'
 import {
+  invalidateRefinement,
   parseBuilderState,
   patchBuilderState,
   capturedPersonaProposalSchema,
@@ -149,7 +150,10 @@ export function proposeFieldValuesTool(ctx: BuilderToolExecutionContext) {
               ...(input.activation ? { activation: input.activation } : {}),
             }
             const patch: DeepPartial<BuilderState> = { capturedProposals }
-            const next = patchBuilderState(current, patch)
+            const next = invalidateRefinement(
+              patchBuilderState(current, patch),
+              'propose_field_values alterou propostas usadas pelo contexto do agente.',
+            )
 
             await tx.builderProjectConversation.updateMany({
               where: { id: conversation.id, organizationId: ctx.organizationId },

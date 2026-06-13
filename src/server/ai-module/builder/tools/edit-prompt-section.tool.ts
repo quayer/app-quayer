@@ -18,6 +18,7 @@ import {
   resolveProjectAgent,
   OPTIONAL_AGENT_ID_DESCRIPTION,
 } from './resolve-project-agent'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 // ---------------------------------------------------------------------------
 // Section catalogue
@@ -178,6 +179,13 @@ export function editPromptSectionTool(ctx: BuilderToolExecutionContext) {
               createdBy:     'chat',
             },
             select: { id: true },
+          })
+
+          await invalidateProjectRefinement({
+            projectId: ctx.projectId,
+            organizationId: ctx.organizationId,
+            reason:
+              'edit_prompt_section alterou uma seção do prompt depois do refinamento.',
           })
 
           return {

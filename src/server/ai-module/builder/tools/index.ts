@@ -21,6 +21,7 @@ import { attachToolToAgentTool } from './attach-tool.tool'
 import { searchWebTool } from './search-web.tool'
 import { researchNicheTool } from './research-niche.tool'
 import { generatePromptAnatomyTool } from './generate-prompt-anatomy.tool'
+import { generateConversationBlueprintTool } from './generate-conversation-blueprint.tool'
 import { publishAgentTool } from './publish-agent.tool'
 import { getAgentStatusTool } from './get-agent-status.tool'
 import { runPlaygroundTestTool } from './run-playground-test.tool'
@@ -28,6 +29,7 @@ import { createCustomToolTool } from './create-custom-tool.tool'
 import { selectChannelTool } from './select-channel.tool'
 import { proposeAgentCreationTool } from './propose-agent-creation.tool'
 import { runPromptPreviewTool } from './run-prompt-preview.tool'
+import { runAgentRefinementTool } from './run-agent-refinement.tool'
 import { adjustPromptToneTool } from './adjust-prompt-tone.tool'
 import { proposeToolSelectionTool } from './propose-tool-selection.tool'
 import { proposePlanUpgradeTool } from './propose-plan-upgrade.tool'
@@ -59,6 +61,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     attach_tool_to_agent: attachToolToAgentTool(ctx),
     search_web: searchWebTool(ctx),
     research_niche: researchNicheTool(ctx),
+    generate_conversation_blueprint: generateConversationBlueprintTool(ctx),
     generate_prompt_anatomy: generatePromptAnatomyTool(ctx),
     publish_agent: publishAgentTool(ctx),
     get_agent_status: getAgentStatusTool(ctx),
@@ -67,6 +70,7 @@ export function buildBuilderToolset(ctx: BuilderToolExecutionContext) {
     select_channel: selectChannelTool(ctx),
     propose_agent_creation: proposeAgentCreationTool(ctx),
     run_prompt_preview: runPromptPreviewTool(ctx),
+    run_agent_refinement: runAgentRefinementTool(ctx),
     adjust_prompt_tone: adjustPromptToneTool(ctx),
     propose_tool_selection: proposeToolSelectionTool(ctx),
     propose_plan_upgrade: proposePlanUpgradeTool(ctx),

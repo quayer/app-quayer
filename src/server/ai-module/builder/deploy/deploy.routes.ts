@@ -17,7 +17,10 @@ import { z } from 'zod'
 import { igniter } from '@/igniter'
 import { authOrApiKeyProcedure } from '@/server/core/auth/procedures/api-key.procedure'
 import { database } from '@/server/services/database'
-import { executeDeployFlow } from './deploy-flow.orchestrator'
+import {
+  assertNoCriticalRefinementPublishBlocker,
+  executeDeployFlow,
+} from './deploy-flow.orchestrator'
 import { publishVersion as publishVersionStep } from './publish-version.handler'
 import { rollbackDeployment } from './rollback.handler'
 import type { DeployStatus } from './deploy.contract'
@@ -278,6 +281,11 @@ const publishVersion = igniter.mutation({
     }
 
     try {
+      await assertNoCriticalRefinementPublishBlocker({
+        projectId: project.id,
+        organizationId: user.currentOrgId,
+      })
+
       const result = await publishVersionStep({
         deploymentId: null,
         projectId: project.id,

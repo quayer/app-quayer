@@ -23,13 +23,14 @@ import { database } from '@/server/services/database'
 import { trackJourneyEvent } from '@/server/services/journey-events'
 import { buildBuilderTool } from './build-tool'
 import { BUILDER_RESERVED_NAME } from '../builder.constants'
-import { collectionNameFor } from '../knowledge/knowledge-helpers'
+import { collectionNameFor, metaCollectionId } from '../knowledge/knowledge-helpers'
 import { parseBuilderState } from '../cards/builder-state'
 import {
   IDENTITY_CARD_METADATA_KEY,
   getIdentityCardFromMetadata,
   injectDisclosureIntoPrompt,
 } from '@/lib/agent-identity-card'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 // ---------------------------------------------------------------------------
 // Context
@@ -144,14 +145,27 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
         // buscar_media ficam mortos no WhatsApp enquanto o playground funciona
         // via fallback próprio. Backfill barato no próprio create; a v2 fará o
         // equivalente como passo da saga de deploy.
-        const existingCollection = await database.knowledgeCollection.findFirst({
-          where: {
-            organizationId: ctx.organizationId,
-            name: collectionNameFor(ctx.projectId),
-            isActive: true,
-          },
-          select: { id: true },
-        })
+        const metadataCollectionId = metaCollectionId(project.metadata)
+        const metadataCollection = metadataCollectionId
+          ? await database.knowledgeCollection.findFirst({
+              where: {
+                id: metadataCollectionId,
+                organizationId: ctx.organizationId,
+                isActive: true,
+              },
+              select: { id: true },
+            })
+          : null
+        const existingCollection =
+          metadataCollection ??
+          (await database.knowledgeCollection.findFirst({
+            where: {
+              organizationId: ctx.organizationId,
+              name: collectionNameFor(ctx.projectId),
+              isActive: true,
+            },
+            select: { id: true },
+          }))
 
         // T25 (FR-22, plan §4.5) — disclosure no prompt ANTES de o agente existir.
         // No v2 a identidade é decidida no agent_review e vive em
@@ -221,6 +235,12 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
             project.conversation?.builderState ?? null,
           ).journeyVersion,
           event: 'agent_created',
+        })
+
+        await invalidateProjectRefinement({
+          projectId: ctx.projectId,
+          organizationId: ctx.organizationId,
+          reason: 'create_agent criou um novo agente/prompt depois do refinamento.',
         })
 
         return {

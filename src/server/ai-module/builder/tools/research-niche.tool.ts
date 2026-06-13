@@ -32,6 +32,7 @@ import {
   type NicheInsightsSource,
 } from '../sub-agents'
 import {
+  invalidateRefinement,
   parseBuilderState,
   patchBuilderState,
   type BuilderState,
@@ -114,7 +115,10 @@ async function proposeRegulatedHandoff(
       const patch: DeepPartial<BuilderState> = {
         capturedProposals: { handoff: { mode: 'solo', reason } },
       }
-      const next = patchBuilderState(current, patch)
+      const next = invalidateRefinement(
+        patchBuilderState(current, patch),
+        'research_niche alterou proposta regulatória depois do refinamento.',
+      )
 
       await tx.builderProjectConversation.updateMany({
         where: { id: conversation.id, organizationId: ctx.organizationId },

@@ -29,6 +29,7 @@ import {
   resolveProjectAgent,
   OPTIONAL_AGENT_ID_DESCRIPTION,
 } from './resolve-project-agent'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -135,6 +136,13 @@ export function revertPromptTool(ctx: BuilderToolExecutionContext) {
               createdBy: 'rollback',
             },
             select: { id: true },
+          })
+
+          await invalidateProjectRefinement({
+            projectId: ctx.projectId,
+            organizationId: ctx.organizationId,
+            reason:
+              'revert_prompt criou uma versão de rollback depois do refinamento.',
           })
 
           return {

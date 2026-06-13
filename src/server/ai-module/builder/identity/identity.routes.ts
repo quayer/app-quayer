@@ -22,6 +22,7 @@ import {
   toAgentConfigIdentityFields,
   type AgentIdentityCard,
 } from '@/lib/agent-identity-card'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 type AuthedUser = { id: string; currentOrgId?: string | null }
 
@@ -111,6 +112,12 @@ const updateIdentity = igniter.mutation({
             ...toAgentConfigIdentityFields(merged),
             systemPrompt: injectDisclosureIntoPrompt(agent?.systemPrompt ?? '', merged),
           },
+        })
+        await invalidateProjectRefinement({
+          projectId: project.id,
+          organizationId: user.currentOrgId,
+          reason:
+            'O card de identidade alterou disclosure/systemPrompt depois do refinamento.',
         })
       } catch (err) {
         console.warn('[identity] sync AIAgentConfig falhou (não-fatal):', err)

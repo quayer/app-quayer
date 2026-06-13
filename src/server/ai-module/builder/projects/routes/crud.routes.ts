@@ -13,6 +13,8 @@ import {
   getAgentRuntimeSettingsFromMetadata,
   normalizeAgentRuntimeSettings,
 } from '@/lib/agent-runtime-settings'
+import { BUILDER_V2_OVERRIDE_COOKIE } from '@/lib/feature-flags/builder-v2'
+import { BUILDER_MISSION_FIRST_OVERRIDE_COOKIE } from '@/lib/feature-flags/builder-mission-first'
 import {
   listProjectsQuerySchema,
   createProjectInputSchema,
@@ -133,6 +135,36 @@ type AuthedUser = {
   role?: string | null
 }
 
+function readBuilderV2OverrideCookie(request: {
+  headers: { get(name: string): string | null }
+}): string | null {
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const value = cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${BUILDER_V2_OVERRIDE_COOKIE}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=')
+  return value ?? null
+}
+
+function readBuilderMissionFirstOverrideCookie(request: {
+  headers: { get(name: string): string | null }
+}): string | null {
+  const cookieHeader = request.headers.get('cookie') ?? ''
+  const value = cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) =>
+      cookie.startsWith(`${BUILDER_MISSION_FIRST_OVERRIDE_COOKIE}=`),
+    )
+    ?.split('=')
+    .slice(1)
+    .join('=')
+  return value ?? null
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -250,6 +282,9 @@ export const crudRoutes = {
             prompt,
             type,
             name,
+            builderV2OverrideCookie: readBuilderV2OverrideCookie(request),
+            missionFirstOverrideCookie:
+              readBuilderMissionFirstOverrideCookie(request),
           })
 
         return response.json({

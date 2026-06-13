@@ -35,6 +35,7 @@ import {
   INTEGRATION_BUILDER_OVERRIDE_COOKIE,
 } from '@/lib/feature-flags/integration-builder'
 import { reconcileEnabledTools } from '@/server/ai-module/builder/deploy/enabled-tools-derivation'
+import { invalidateProjectRefinement } from '../refinement/refinement-state'
 
 import { integrationIdParamSchema } from './integration.schemas'
 import {
@@ -214,6 +215,11 @@ const activateIntegration = igniter.mutation({
       organizationId: orgId,
       metadata: { displayName: integration.displayName },
     })
+    await invalidateProjectRefinement({
+      projectId: integration.builderProjectId,
+      organizationId: orgId,
+      reason: 'Uma integração foi ativada depois do refinamento.',
+    })
 
     return response.success({ id: integration.id, status: 'active' })
   },
@@ -256,6 +262,11 @@ const pauseIntegration = igniter.mutation({
       userId: user.id,
       organizationId: orgId,
       metadata: { displayName: updated.displayName },
+    })
+    await invalidateProjectRefinement({
+      projectId: updated.builderProjectId,
+      organizationId: orgId,
+      reason: 'Uma integração foi pausada depois do refinamento.',
     })
 
     return response.success({ id: updated.id, status: 'paused' })
@@ -319,6 +330,11 @@ const resumeIntegration = igniter.mutation({
       userId: user.id,
       organizationId: orgId,
       metadata: { displayName: updated.displayName },
+    })
+    await invalidateProjectRefinement({
+      projectId: integration.builderProjectId,
+      organizationId: orgId,
+      reason: 'Uma integração foi reativada depois do refinamento.',
     })
 
     return response.success({ id: updated.id, status: 'active' })
@@ -397,6 +413,11 @@ const removeIntegration = igniter.mutation({
       userId: user.id,
       organizationId: orgId,
       metadata: { displayName: integration.displayName },
+    })
+    await invalidateProjectRefinement({
+      projectId: integration.builderProjectId,
+      organizationId: orgId,
+      reason: 'Uma integração foi removida depois do refinamento.',
     })
 
     return response.success({ id: deleted.id, deleted: true })

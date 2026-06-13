@@ -30,6 +30,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const mockFindFirstProject = vi.hoisted(() => vi.fn())
 const mockFindFirstVersion = vi.hoisted(() => vi.fn())
 const mockCreateVersion = vi.hoisted(() => vi.fn())
+const mockInvalidateProjectRefinement = vi.hoisted(() => vi.fn())
 
 vi.mock('@/server/services/database', () => ({
   database: {
@@ -41,6 +42,10 @@ vi.mock('@/server/services/database', () => ({
       create: mockCreateVersion,
     },
   },
+}))
+
+vi.mock('../refinement/refinement-state', () => ({
+  invalidateProjectRefinement: mockInvalidateProjectRefinement,
 }))
 
 // ---------------------------------------------------------------------------
@@ -71,6 +76,7 @@ function getExecute(t: ReturnType<typeof revertPromptTool>) {
 describe('revertPromptTool — handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockInvalidateProjectRefinement.mockResolvedValue(undefined)
     // Default happy-path stubs: resolver finds the project's REAL agent.
     mockFindFirstProject.mockResolvedValue({ aiAgentId: AGENT_ID })
     mockCreateVersion.mockResolvedValue({ id: 'ver-new-1' })

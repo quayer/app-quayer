@@ -15,9 +15,9 @@
  * Estratégia: o fonte recebe `db` por INJEÇÃO (param `ReturnType<typeof
  * getDatabase>`), então usamos um fake STATEFUL in-memory da tabela
  * `agent_deployments` em vez de vi.mock — verifica o EFEITO real (estado final
- * das linhas), não só as chamadas. Faithful o suficiente para os 4 delegates
- * que o fonte toca: builderProject.findFirst + agentDeployment.{updateMany,
- * findFirst,update,create}.
+ * das linhas), não só as chamadas. Faithful o suficiente para os delegates que
+ * o fonte toca: builderProject.findFirst, builderProjectConversation.findFirst
+ * e agentDeployment.{updateMany,findFirst,update,create}.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -67,6 +67,9 @@ function makeFakeDb(opts: { aiAgentId: string | null }) {
     __deployments: deployments,
     builderProject: {
       findFirst: async (_args: unknown) => (opts.aiAgentId ? { aiAgentId: opts.aiAgentId } : null),
+    },
+    builderProjectConversation: {
+      findFirst: async (_args: unknown) => null,
     },
     agentDeployment: {
       updateMany: async (args: {
