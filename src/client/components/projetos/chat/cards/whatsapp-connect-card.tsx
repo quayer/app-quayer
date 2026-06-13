@@ -70,6 +70,8 @@ export function WhatsAppConnectCard({
   projectId,
   value,
   disabled = false,
+  pollingExhausted,
+  onRearmPolling,
   tokens,
 }: CardComponentProps) {
   // FR-30: concluído NUNCA regride — o sentinel persiste o "conectou uma vez".
@@ -102,6 +104,8 @@ export function WhatsAppConnectCard({
       projectId={projectId}
       connected={connected}
       disabled={disabled}
+      pollingExhausted={pollingExhausted}
+      onRearmPolling={onRearmPolling}
       tokens={tokens}
     />
   )

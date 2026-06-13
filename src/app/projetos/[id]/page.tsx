@@ -10,6 +10,7 @@ import type {
   ChatMessage,
   WorkspaceProject,
 } from '@/client/components/projetos/types'
+import { parseBuilderState } from '@/server/ai-module/builder/cards/builder-state'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,6 +90,9 @@ export default async function ProjetoPage({ params }: ProjetoPageProps) {
     name: project.name,
     type: project.type as WorkspaceProject['type'],
     status: project.status as WorkspaceProject['status'],
+    journeyVersion: parseBuilderState(
+      project.conversation?.builderState ?? null,
+    ).journeyVersion,
     aiAgentId: project.aiAgentId,
     aiAgent: project.aiAgent
       ? {

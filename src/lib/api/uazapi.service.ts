@@ -37,6 +37,20 @@ function getBaseUrl(): string {
   )
 }
 
+function isE2eUazMockEnabled(): boolean {
+  return process.env.NODE_ENV !== 'production' && process.env.E2E_UAZ_MOCK === '1'
+}
+
+function slugForMock(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'instance'
+  )
+}
+
 function brokerError(data: unknown, fallback: string): string {
   const d = data as { error?: unknown; message?: unknown } | null
   const raw = d?.error ?? d?.message
@@ -45,6 +59,18 @@ function brokerError(data: unknown, fallback: string): string {
 
 export const uazapiService = {
   async createInstance(name: string): Promise<UazapiResult<{ token: string; instance?: { id: string } }>> {
+    if (isE2eUazMockEnabled()) {
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const slug = slugForMock(name)
+      return {
+        success: true,
+        data: {
+          token: `e2e-uaz-token-${slug}-${suffix}`,
+          instance: { id: `e2e-uaz-instance-${suffix}` },
+        },
+      }
+    }
+
     const adminToken = getAdminToken()
     const baseUrl = getBaseUrl()
     if (!adminToken) return { success: false, error: 'UAZAPI_ADMIN_TOKEN not configured' }
@@ -82,6 +108,13 @@ export const uazapiService = {
   },
 
   async generateQR(token: string): Promise<UazapiResult<{ qrcode: string }>> {
+    if (isE2eUazMockEnabled()) {
+      return {
+        success: true,
+        data: { qrcode: `e2e-uaz-qr:${token}:${Date.now()}` },
+      }
+    }
+
     const baseUrl = getBaseUrl()
     try {
       // v2: POST /instance/connect com header `token` — body vazio gera QR
@@ -126,6 +159,10 @@ export const uazapiService = {
     token: string,
     webhookUrl: string,
   ): Promise<UazapiResult> {
+    if (isE2eUazMockEnabled()) {
+      return { success: true, data: { token, webhookUrl, mocked: true } }
+    }
+
     const baseUrl = getBaseUrl()
     try {
       const res = await fetch(`${baseUrl}/webhook`, {

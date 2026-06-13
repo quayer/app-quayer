@@ -43,6 +43,7 @@ function resolveBuilderState(readiness: Readiness | undefined): BuilderState {
  */
 type AdjustableCardProps = CardComponentProps & {
   onAdjust?: (cardKey: CardKey) => void
+  onRun?: () => void
   /** Submissão multi-card (ex.: ativação encadeia silenced_contacts) — só os
    *  cards que declaram a prop a consomem; os demais ignoram. */
   onSubmitCard?: (cardKey: CardKey, payload: Record<string, unknown>) => void
@@ -71,6 +72,8 @@ type AdjustableCardProps = CardComponentProps & {
 export function ActiveStepCard({
   projectId,
   readiness,
+  pollingExhausted,
+  onRearmPolling,
   disabled,
   onSubmit,
   onDismiss,
@@ -81,6 +84,8 @@ export function ActiveStepCard({
 }: {
   projectId: string
   readiness: Readiness | undefined
+  pollingExhausted?: boolean
+  onRearmPolling?: () => void
   disabled: boolean
   onSubmit: (cardKey: CardKey, payload: Record<string, unknown>) => void
   /** Skip affordance ("Agora não") — forwarded to the ACTIVE-STEP card so the
@@ -114,6 +119,10 @@ export function ActiveStepCard({
     },
     [descriptor, onSubmit],
   )
+  const handleRunRefinement = React.useCallback(() => {
+    if (!descriptor || descriptor.cardKey !== "refinement") return
+    onSubmit("refinement", { action: "run" })
+  }, [descriptor, onSubmit])
 
   if (!descriptor) return null
 
@@ -159,7 +168,14 @@ export function ActiveStepCard({
         // Reopened cards' own dismiss button ("Agora não") must close
         // SILENTLY — never the "pular passo" chat turn of the active step.
         onDismiss={isReopen ? onCloseReopened : onDismiss}
+        pollingExhausted={pollingExhausted}
+        onRearmPolling={onRearmPolling}
         onAdjust={onAdjust}
+        onRun={
+          descriptor.cardKey === "refinement"
+            ? handleRunRefinement
+            : undefined
+        }
         onSubmitCard={onSubmit}
         tokens={tokens}
       />

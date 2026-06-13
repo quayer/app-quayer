@@ -21,14 +21,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { Rocket } from "lucide-react"
-import { api } from "@/igniter.client"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
+import type { Readiness } from "@/server/ai-module/builder/state/readiness.types"
 import { Button } from "@/client/components/ui/button"
 import { Card, CardContent } from "@/client/components/ui/card"
 import { Skeleton } from "@/client/components/ui/skeleton"
-import { unwrapReadiness } from "../overview/helpers/readiness-adapters"
 import { ConnectionStep, deriveChecklist } from "./connection-step"
 import type { ChecklistItem } from "./connection-step"
 import { InstanceStep } from "./instance-step"
@@ -42,6 +41,8 @@ import type { VersionListItem } from "./version-utils"
 
 interface DeployTabProps {
   project: WorkspaceProject
+  readiness?: Readiness
+  refetchReadiness?: () => void
 }
 
 // Shape returned by GET /projects/:id/channel
@@ -156,7 +157,11 @@ function RetryCard({
   )
 }
 
-export function DeployTab({ project }: DeployTabProps) {
+export function DeployTab({
+  project,
+  readiness,
+  refetchReadiness,
+}: DeployTabProps) {
   const { tokens } = useAppTokens()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -204,21 +209,10 @@ export function DeployTab({ project }: DeployTabProps) {
       ? project.hasWhatsAppConnection
       : false
 
-  // ── Readiness (step-engine) ─────────────────────────────────────────────────
-  // Mesma fonte da Overview: blockers tipados plan/byok/agent/prompt/version/
-  // channel. Substitui a heurística local que ignorava plano/BYOK/versão.
-  const readinessQuery = api.builder.getReadiness.useQuery({
-    params: { id: project.id },
-  })
-  const readiness = useMemo(
-    () => unwrapReadiness(readinessQuery.data),
-    [readinessQuery.data],
-  )
-
-  const refetchReadinessRef = useRef(readinessQuery.refetch)
+  const refetchReadinessRef = useRef(refetchReadiness)
   useEffect(() => {
-    refetchReadinessRef.current = readinessQuery.refetch
-  }, [readinessQuery.refetch])
+    refetchReadinessRef.current = refetchReadiness
+  }, [refetchReadiness])
 
   // Re-sincroniza o readiness quando o status do canal muda (ex.: QR escaneado
   // → CONNECTED) para o blocker de canal limpar sem F5.
@@ -227,7 +221,7 @@ export function DeployTab({ project }: DeployTabProps) {
   useEffect(() => {
     if (prevChannelStatusRef.current === channelStatus) return
     prevChannelStatusRef.current = channelStatus
-    void refetchReadinessRef.current()
+    refetchReadinessRef.current?.()
   }, [channelStatus])
 
   // Build a derived project that reflects the live channel state — usado só
@@ -262,13 +256,13 @@ export function DeployTab({ project }: DeployTabProps) {
 
   const handleVersionsChanged = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["project-versions", project.id] })
-    void refetchReadinessRef.current()
+    refetchReadinessRef.current?.()
   }, [queryClient, project.id])
 
   const onChannelAttached = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["project-channel", project.id] })
     await queryClient.invalidateQueries({ queryKey: ["project-channel-options", project.id] })
-    void refetchReadinessRef.current()
+    refetchReadinessRef.current?.()
   }, [queryClient, project.id])
 
   if (!project.aiAgent) {

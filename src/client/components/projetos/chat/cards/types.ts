@@ -52,6 +52,13 @@ export type CardKey =
   | "source_progress"
   | "silenced_contacts"
   | "business_identity"
+  | "mission"
+  | "build_mode"
+  | "qualification"
+  | "restrictions"
+  | "diagnosis"
+  | "conversation_blueprint"
+  | "refinement"
   | "agent_review"
   | "knowledge"
   | "media"
@@ -63,6 +70,9 @@ export type CardKey =
   // Integration Builder (W2)
   | "integration_proposal"
   | "integration_credentials"
+  // FR-PRO-01 (F1) — capacidade "Mensagens proativas" (toggle silencioso de
+  // Capacidades, sem card de jornada nem componente próprio).
+  | "proactive"
 
 /**
  * Compile-time assertion that every backend-registered key is also a valid FE
@@ -97,6 +107,12 @@ export interface CardComponentProps<TPayload = unknown> {
   disabled?: boolean
   onSubmit: (payload: TPayload) => void
   onDismiss?: () => void
+  /**
+   * Connection polling state owned by workspace readiness (FR-27). Only
+   * connection cards consume it; other cards ignore these optional props.
+   */
+  pollingExhausted?: boolean
+  onRearmPolling?: () => void
   tokens: AppTokens
 }
 

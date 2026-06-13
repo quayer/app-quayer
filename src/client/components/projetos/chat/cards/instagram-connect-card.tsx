@@ -19,11 +19,11 @@
  * AUTODETECÇÃO de conexão (sem card-submit próprio): `instagram_connect` NÃO é um
  * cardKey de submit — o passo é resolvido server-side por
  * `ctx.hasConnectedInstagramInstance` no readiness (readiness-resolver.ts). Salvar
- * as credenciais cria a Connection (status DISCONNECTED) e o vínculo com o agente;
- * quando a Meta confirma o webhook a Connection vira CONNECTED e o polling de
- * readiness do workspace (T51) deixa de surfar este card. Por isso o card NÃO
- * chama `onSubmit` (não há sentinel para flipar): após salvar, mostra um estado
- * honesto de "conectando…" e a jornada avança sozinha quando a conexão aparece.
+ * credenciais manuais válidas é a prova técnica neste fluxo: a rota grava a
+ * Connection como CONNECTED e o polling de readiness do workspace (T51) deixa de
+ * surfar este card. Por isso o card NÃO chama `onSubmit` (não há sentinel para
+ * flipar): após salvar, mostra um estado local de "conectado" enquanto o polling
+ * converge.
  *
  * Presentational + token-driven; copy PT-BR; benefício antes da tecnologia.
  *
@@ -93,10 +93,8 @@ export function InstagramConnectCard({
   const platforms = value.channel?.platforms
   const instagramSelected = platforms?.includes("instagram") ?? false
 
-  // Salvar credenciais cria a Connection; a confirmação real vem por
-  // autodetecção (hasConnectedInstagramInstance no readiness via webhook da Meta).
-  // Marcamos o estado local só para trocar a copy para "conectando…" — a jornada
-  // avança quando o polling de readiness do workspace deixa de surfar o card.
+  // Salvar credenciais cria/atualiza a Connection como CONNECTED; a conclusão
+  // da jornada vem por autodetecção do readiness no próximo polling.
   const [credentialsSaved, setCredentialsSaved] = React.useState(false)
 
   const handleConnected = React.useCallback(() => {
@@ -112,7 +110,7 @@ export function InstagramConnectCard({
       title="Conectar o Instagram"
       reason={
         credentialsSaved
-          ? "Credenciais salvas. Estamos conectando ao seu perfil — assim que a Meta confirmar, o agente passa a responder as DMs automaticamente. Isto atualiza sozinho."
+          ? "Credenciais salvas. O Instagram foi conectado e o agente passa a responder as DMs automaticamente. Isto atualiza sozinho."
           : "Cole as credenciais do app da Meta para que o agente responda as DMs do seu Instagram automaticamente. É o caminho oficial — os dados ficam guardados com segurança."
       }
     >

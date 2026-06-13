@@ -39,7 +39,7 @@ Tudo abaixo de 400 linhas. Zero `any`.
 | `hooks/use-prompt-autosave.ts` | Debounce 2s user-driven + precondição otimista (`baseUpdatedAt` → 409) + `forceSave`/`acceptServerState`. |
 | `hooks/use-prompt-actions.ts` | `handleCopy` (clipboard + toast) + `handleRegenerate` (event). |
 
-> **Removido (Jornada v2, 2026-06-11):** a antiga seção embutida `IdentityTab`
+> **Removido (Jornada v2, 2026-06-11):** a antiga seção embutida de identidade
 > foi deletada — o disclosure agora vive no card `agent_review` e é injetado no
 > systemPrompt pelo `create_agent` (ver `docs/deprecated/IDENTITY_TAB.md`). O
 > endpoint `PATCH /builder/identity/:projectId` permanece para edição pós-criação.
@@ -80,7 +80,7 @@ Evento disparado pelo "Regenerar": `window.dispatchEvent(new CustomEvent('builde
 ## Regras
 - Tema sempre via `useAppTokens()` — não hardcodar cores (exceto brand green/red das pills).
 - Endpoint real: `PATCH /api/v1/builder/projects/:id/prompt` via fetch direto
-  (mesmo padrão da IdentityTab) para tratar o corpo do 409.
+  (mesmo padrão do antigo formulário de identidade) para tratar o corpo do 409.
 - "Atual" no histórico é por CONTEÚDO (`version.content === editorValue`),
   nunca por posição na lista.
 - Textarea controlada pelo orquestrador; hooks não tocam DOM.

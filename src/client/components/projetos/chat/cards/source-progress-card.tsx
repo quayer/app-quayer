@@ -64,6 +64,11 @@ import {
   ImagesPreviewPanel,
   type CuratedImage,
 } from "./sources/images-preview-panel"
+import {
+  normalizeSourceProposalItems,
+  normalizeSourceProposalText,
+  sourceProposalAvailabilityWarning,
+} from "@/lib/builder/source-proposal-display"
 import type { CardComponentProps } from "./types"
 
 /**
@@ -911,20 +916,41 @@ function ProposalSummary({
   proposal: SourceProposal
   tokens: AppTokens
 }) {
-  const offer = proposal.services?.slice(0, 2).join(" · ")
-  const address = proposal.address?.trim()
-  const description = proposal.description?.trim()
-  const highlights = proposal.differentiators?.slice(0, 4) ?? []
+  const services = normalizeSourceProposalItems(proposal.services)
+  const differentiators = normalizeSourceProposalItems(proposal.differentiators)
+  const offer = services.slice(0, 2).join(" · ")
+  const address = proposal.address
+    ? normalizeSourceProposalText(proposal.address)
+    : undefined
+  const description = proposal.description
+    ? normalizeSourceProposalText(proposal.description)
+    : undefined
+  const highlights = differentiators.slice(0, 4)
   const hiddenHighlights = Math.max(
     0,
-    (proposal.differentiators?.length ?? 0) - highlights.length,
+    differentiators.length - highlights.length,
   )
+  const availabilityWarning = sourceProposalAvailabilityWarning(proposal)
 
   return (
     <div
       className="rounded-md border px-3 py-3"
       style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
     >
+      {availabilityWarning && (
+        <div
+          role="alert"
+          className="mb-3 flex items-start gap-2 rounded-md border px-3 py-2.5 text-[12px] leading-relaxed"
+          style={{
+            backgroundColor: tokens.warningSubtle,
+            borderColor: tokens.warning,
+            color: tokens.warningText,
+          }}
+        >
+          <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{availabilityWarning}</span>
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         <span
           className="text-[13px] font-semibold"

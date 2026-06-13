@@ -136,6 +136,10 @@ function cardSubmitReceipt(
       return "Enviando escopo do atendimento"
     case "agent_persona":
       return "Enviando persona do agente"
+    case "conversation_blueprint":
+      return payload.action === "generate"
+        ? "Gerando plano de atendimento"
+        : "Aprovando plano de atendimento"
     case "pricing":
       return "Enviando regras de preço"
     case "handoff":
@@ -161,6 +165,8 @@ export interface ReadinessContextValue {
   refetchReadiness: () => void
   readinessLoading: boolean
   readinessError: boolean
+  pollingExhausted: boolean
+  rearmPolling: () => void
 }
 
 /**
@@ -174,6 +180,8 @@ const READINESS_CONTEXT_DEFAULT: ReadinessContextValue = {
   refetchReadiness: () => {},
   readinessLoading: false,
   readinessError: false,
+  pollingExhausted: false,
+  rearmPolling: () => {},
 }
 
 /**
@@ -325,7 +333,8 @@ export function useChatStream({
   // CONSOME e drive o card de passo ativo no fim do fluxo da conversa. Os
   // triggers de invalidação (SSE finish + pós-card-submit) chamam o refetch
   // içado — comportamento preservado, agora sobre a fonte única.
-  const { readiness, refetchReadiness } = React.useContext(ReadinessContext)
+  const { readiness, refetchReadiness, pollingExhausted, rearmPolling } =
+    React.useContext(ReadinessContext)
 
   // Keep a stable ref so the stream-consumer can invalidate readiness on finish
   // without re-creating its useCallback on every readiness change.
@@ -701,6 +710,8 @@ export function useChatStream({
     handleScroll,
     textareaRef,
     readiness,
+    pollingExhausted,
+    rearmPolling,
     stableSubmitCard,
     handleCardDismiss,
     reopenedCardKey,

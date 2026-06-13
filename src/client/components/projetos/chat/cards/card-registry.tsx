@@ -42,10 +42,14 @@
 
 import type { ComponentType } from "react"
 import {
+  Ban,
   CalendarPlus,
   CheckCircle2,
+  ClipboardCheck,
+  ClipboardList,
   Clock,
   FlaskConical,
+  Hammer,
   Headset,
   Instagram,
   KeyRound,
@@ -53,10 +57,13 @@ import {
   MapPin,
   MessageCircle,
   PartyPopper,
+  Search,
+  ShieldCheck,
   ShieldOff,
   Sparkles,
   Store,
   Tag,
+  Target,
   UserRound,
   Wrench,
 } from "lucide-react"
@@ -79,6 +86,13 @@ import { QuickReplyChipsCard } from "./quick-reply-chips-card"
 import { SourceProgressCard } from "./source-progress-card"
 import { SilencedContactsCard } from "./silenced-contacts-card"
 import { BusinessIdentityCard } from "./business-identity-card"
+import { MissionCard } from "./mission-card"
+import { BuildModeCard } from "./build-mode-card"
+import { QualificationCard } from "./qualification-card"
+import { RestrictionsCard } from "./restrictions-card"
+import { DiagnosisCard } from "./diagnosis-card"
+import { ConversationBlueprintCard } from "./conversation-blueprint-card"
+import { RefinementCard } from "./refinement-card"
 import { TestDriveCard } from "./test-drive-card"
 import { ChannelPlatformCard } from "./channel-platform-card"
 import { WhatsAppConnectCard } from "./whatsapp-connect-card"
@@ -105,6 +119,13 @@ export type RegisteredW3CardKey =
   | "source_progress"
   | "silenced_contacts"
   | "business_identity"
+  | "mission"
+  | "build_mode"
+  | "qualification"
+  | "restrictions"
+  | "diagnosis"
+  | "conversation_blueprint"
+  | "refinement"
   | "test_drive"
   | "channel_platform"
   | "whatsapp_connect"
@@ -238,6 +259,83 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     title: "Conte sobre o negócio",
     icon: <Store className="h-4 w-4" />,
     component: BusinessIdentityCard as ComponentType<CardComponentProps>,
+  },
+  mission: {
+    // Jornada v3 (mission-first, FR-37/FR-48) — ACTIVE-STEP card da fase
+    // "Conhecer", depois de business_identity. Gateado pelo engine v2 via
+    // applies:(s)=>s.missionFirst===true; isDone via confirmations.mission. O
+    // usuário escolhe a missão do agente (5 presets + "montar do zero").
+    cardKey: "mission",
+    stepId: "mission",
+    title: "Qual a missão do agente?",
+    icon: <Target className="h-4 w-4" />,
+    component: MissionCard as ComponentType<CardComponentProps>,
+  },
+  build_mode: {
+    // Jornada v3 (mission-first, FR-39/FR-49) — ACTIVE-STEP card da fase
+    // "Conhecer", DEPOIS de objective e ANTES de business_identity/mission.
+    // Gateado pelo engine v2 via applies:(s)=>s.missionFirst===true; isDone via
+    // confirmations.buildMode. O usuário escolhe COMO quer construir o agente
+    // (recomendado/pesquisa/livre — recomendado pré-selecionado).
+    cardKey: "build_mode",
+    stepId: "build_mode",
+    title: "Como você quer construir?",
+    icon: <Hammer className="h-4 w-4" />,
+    component: BuildModeCard as ComponentType<CardComponentProps>,
+  },
+  qualification: {
+    // FR-44 (critérios de qualificação, backlog #10) — ACTIVE-STEP card da fase
+    // "Revisar", ANTES de conversation_blueprint. Gateado pelo engine v2 via
+    // applies:(s)=>s.missionFirst===true && missionQualifies(s); isDone via
+    // confirmations.qualification. O usuário escolhe (multi-seleção) quais dados o
+    // agente coleta para considerar o atendimento bom.
+    cardKey: "qualification",
+    stepId: "qualification",
+    title: "Critérios de qualificação",
+    icon: <ClipboardCheck className="h-4 w-4" />,
+    component: QualificationCard as ComponentType<CardComponentProps>,
+  },
+  restrictions: {
+    // FR-44 (restrições comerciais, backlog #3) — ACTIVE-STEP card da fase
+    // "Revisar", DEPOIS de qualification e ANTES de conversation_blueprint. Gateado
+    // pelo engine v2 via applies:(s)=>s.missionFirst===true && hasSoldOutSourceSignal(s);
+    // isDone via confirmations.restrictions. O usuário escolhe como o agente trata
+    // uma fonte 100% vendida/esgotada (move a decisão que a v2 fazia inline no plano).
+    cardKey: "restrictions",
+    stepId: "restrictions",
+    title: "Restrições comerciais",
+    icon: <Ban className="h-4 w-4" />,
+    component: RestrictionsCard as ComponentType<CardComponentProps>,
+  },
+  diagnosis: {
+    // FR-46 (diagnóstico do Modo Pesquisa, backlog #9) — ACTIVE-STEP card da fase
+    // "Conhecer", DEPOIS de build_mode/source e ANTES de mission. Gateado pelo
+    // engine v2 via applies:(s)=>s.missionFirst===true && s.buildMode==='pesquisa';
+    // isDone via confirmations.diagnosis. Card READ-MOSTLY de ACK: mostra o que já
+    // entendemos do negócio (degradação graciosa FR-47) e o usuário confirma.
+    cardKey: "diagnosis",
+    stepId: "diagnosis",
+    title: "O que entendi do seu negócio",
+    icon: <Search className="h-4 w-4" />,
+    component: DiagnosisCard as ComponentType<CardComponentProps>,
+  },
+  conversation_blueprint: {
+    // Builder Playbook — plano de atendimento aprovado antes do prompt final. Surfa
+    // como step `conversation_blueprint` na fase Revisar da Jornada v2.
+    cardKey: "conversation_blueprint",
+    stepId: "conversation_blueprint",
+    title: "Plano de atendimento",
+    icon: <ClipboardList className="h-4 w-4" />,
+    component: ConversationBlueprintCard as ComponentType<CardComponentProps>,
+  },
+  refinement: {
+    // Builder Playbook — fase "Refinando". Surfa como step persistente da fase
+    // Testar e também aparece inline pelo tool result `run_agent_refinement`.
+    cardKey: "refinement",
+    stepId: "refinement",
+    title: "Refinando",
+    icon: <ShieldCheck className="h-4 w-4" />,
+    component: RefinementCard as ComponentType<CardComponentProps>,
   },
   test_drive: {
     // Jornada v2 (T46, FR-20) — ACTIVE-STEP card da fase "Testar". Gate SOFT:

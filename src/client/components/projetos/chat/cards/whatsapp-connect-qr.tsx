@@ -15,8 +15,9 @@
  * polling unificado (T51, workspace) re-renderiza o card com `connected` true.
  * FR-30: com `whatsappConnectedOnce` true o card mostra "Conectado" e NUNCA regride.
  *
- * TETO DE POLLING (FR-27): relógio próprio desde o último arm; após 10min sem
- * conexão mostra "Ainda esperando?" com botão que RE-ARMA (re-zera + regenera QR).
+ * TETO DE POLLING (FR-27): no workspace real, o teto vem do readiness içado; o
+ * botão "Ainda esperando?" RE-ARMA o polling central e regenera o QR. O relógio
+ * local abaixo é só fallback para render isolado fora do workspace.
  *
  * Resolvers DEFENSIVOS em module-eval (mesmo idioma do connect-link-flow): se o
  * client gerado ainda não expõe as actions, os botões degradam sem crashar.
@@ -102,11 +103,15 @@ export function WhatsAppQrConnect({
   projectId,
   connected,
   disabled,
+  pollingExhausted,
+  onRearmPolling,
   tokens,
 }: {
   projectId: string
   connected: boolean
   disabled: boolean
+  pollingExhausted?: boolean
+  onRearmPolling?: () => void
   tokens: AppTokens
 }) {
   const [connectionId, setConnectionId] = React.useState<string | null>(null)
@@ -114,7 +119,8 @@ export function WhatsAppQrConnect({
   const [qr, setQr] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(true)
-  // Relógio do teto de polling (FR-27): re-zerado a cada arm.
+  // Fallback local para render isolado fora do workspace. No fluxo real do
+  // Builder, o teto vem do readiness içado (`pollingExhausted`).
   const [armedAt, setArmedAt] = React.useState(() => Date.now())
   const [waiting, setWaiting] = React.useState(false)
   const lastRefreshRef = React.useRef(0)
@@ -155,15 +161,15 @@ export function WhatsAppQrConnect({
     provisionMutate({ body: { projectId } })
   }, [connected, projectId, provisionMutate])
 
-  // Teto de polling (FR-27): após 10min sem conexão, oferece o re-arme.
+  // Teto local de fallback (FR-27): após 10min sem conexão, oferece o re-arme.
   React.useEffect(() => {
-    if (connected) return
+    if (connected || pollingExhausted !== undefined) return
     const id = window.setTimeout(
       () => setWaiting(true),
       Math.max(0, armedAt + POLL_CEILING_MS - Date.now()),
     )
     return () => window.clearTimeout(id)
-  }, [armedAt, connected])
+  }, [armedAt, connected, pollingExhausted])
 
   const { mutate: refreshMutate } = refresh
   const handleRegenerate = React.useCallback(() => {
@@ -178,10 +184,11 @@ export function WhatsAppQrConnect({
 
   // "Ainda esperando?" re-arma: re-zera o relógio E regenera o QR.
   const handleReArm = React.useCallback(() => {
+    onRearmPolling?.()
     setWaiting(false)
     setArmedAt(Date.now())
     handleRegenerate()
-  }, [handleRegenerate])
+  }, [handleRegenerate, onRearmPolling])
 
   if (connected) {
     return (
@@ -251,7 +258,7 @@ export function WhatsAppQrConnect({
         </Button>
       </div>
 
-      {waiting && (
+      {(pollingExhausted ?? waiting) && (
         <div
           role="status"
           className="mt-4 flex flex-col items-start gap-2 rounded-md border px-3 py-2 text-[12px]"

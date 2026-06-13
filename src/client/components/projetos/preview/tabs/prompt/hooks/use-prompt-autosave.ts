@@ -53,7 +53,7 @@ interface PromptPatchEnvelope {
 /**
  * Auto-save debounced (2s) do system prompt — estritamente user-driven.
  *
- * Usa fetch direto (mesmo padrão da IdentityTab) para poder tratar o 409 de
+ * Usa fetch direto (mesmo padrão do antigo formulário de identidade) para poder tratar o 409 de
  * precondição com corpo: `baseUpdatedAt` viaja no PATCH e o servidor rejeita
  * quando o prompt mudou desde o último save, evitando sobrescrita silenciosa
  * de regenerações/rollbacks/disclosure.

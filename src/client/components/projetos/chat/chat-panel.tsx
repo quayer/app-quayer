@@ -8,6 +8,11 @@ import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import { MessageInput } from "@/client/components/ds/message-input"
 
 import { ActiveStepCard } from "./active-step-card"
+import {
+  ByokGuidedCard,
+  findByokBlocker,
+  shouldRenderByokGuidedCard,
+} from "./cards/byok-guided-card"
 import { EmptyState, MessageBubble, StreamingBubble } from "./message-bubbles"
 import { SourceStatusChips } from "./source-status-chips"
 import { useChatStream } from "./use-chat-stream"
@@ -60,6 +65,8 @@ export function ChatPanel({
     handleScroll,
     textareaRef,
     readiness,
+    pollingExhausted,
+    rearmPolling,
     stableSubmitCard,
     handleCardDismiss,
     reopenedCardKey,
@@ -88,6 +95,11 @@ export function ChatPanel({
     }),
     [builderState],
   )
+  const shouldShowByokGuide = shouldRenderByokGuidedCard(
+    readiness?.blockers,
+    readiness?.journey?.activePhaseId,
+  )
+  const byokBlocker = findByokBlocker(readiness?.blockers)
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -184,9 +196,16 @@ export function ChatPanel({
             sourceConfirmed={builderState.confirmations.source}
             tokens={tokens}
           />
+          {shouldShowByokGuide && (
+            <div className="mx-auto mt-5 w-full max-w-2xl">
+              <ByokGuidedCard blocker={byokBlocker} tokens={tokens} />
+            </div>
+          )}
           <ActiveStepCard
             projectId={projectId}
             readiness={readiness}
+            pollingExhausted={pollingExhausted}
+            onRearmPolling={rearmPolling}
             disabled={isStreaming}
             onSubmit={stableSubmitCard}
             onDismiss={handleCardDismiss}

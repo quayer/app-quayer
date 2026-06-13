@@ -4,7 +4,7 @@
  * Builder Cards — review/disclosure-section (Jornada v2 · T43, FR-21)
  *
  * The "Como o agente se apresenta" advanced section of the composite `agent_review`
- * card, migrated from the removed IdentityTab (the only non-duplicated field it
+ * card, migrated from the removed identity surface (the only non-duplicated field it
  * carried): the disclosure mode (`ai_explicit` / `human_passthrough` / `custom`)
  * plus the legal acceptance gate for `human_passthrough`.
  *
@@ -78,7 +78,7 @@ export function DisclosureSection({
   const [accepted, setAccepted] = React.useState(false)
 
   // Lift the built value up. human_passthrough requires the legal acceptance
-  // first (mirrors the IdentityTab) — before that it stays out of the payload.
+  // first (mirrors the old identity surface) — before that it stays out of the payload.
   const built = React.useMemo<DisclosureValue | undefined>(() => {
     if (!mode) return undefined
     if (mode === "human_passthrough" && !accepted) return undefined

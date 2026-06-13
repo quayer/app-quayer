@@ -29,7 +29,7 @@ interface AppShellClientProps {
 
 const STORAGE_KEY = "quayer.sidebar.collapsed"
 const COOKIE_KEY = "quayer.sidebar.collapsed"
-const DEFAULT_SHORTCUT_LABEL = "Ctrl+B"
+const SIDEBAR_NAV_ID = "builder-sidebar-navigation"
 
 const useIsomorphicLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect
@@ -67,11 +67,18 @@ function persistCollapsedPreference(collapsed: boolean) {
   }
 }
 
-function getShortcutLabel(): string {
-  if (typeof navigator === "undefined") return DEFAULT_SHORTCUT_LABEL
-  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
-    ? "⌘B"
-    : DEFAULT_SHORTCUT_LABEL
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+
+  const tagName = target.tagName
+  return (
+    target.isContentEditable ||
+    target.closest('[contenteditable="true"]') !== null ||
+    target.getAttribute("role") === "textbox" ||
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT"
+  )
 }
 
 /**
@@ -79,7 +86,7 @@ function getShortcutLabel(): string {
  *
  * Responsável por:
  *  - Estado de colapso da sidebar (persistido em localStorage)
- *  - Botão flutuante pra reabrir a sidebar quando colapsada
+ *  - Handle lateral pra reabrir a sidebar quando colapsada
  *  - Atalho ⌘B / Ctrl+B pra toggle
  *  - Wrapper SidebarProvider (compat com páginas legadas que têm
  *    <SidebarTrigger> no header)
@@ -97,7 +104,6 @@ export function AppShellClient({
     () => initialCollapsed || isProjectWorkspace,
   )
   const [hydrated, setHydrated] = useState(false)
-  const [shortcutLabel, setShortcutLabel] = useState(DEFAULT_SHORTCUT_LABEL)
   const { resolvedTheme } = useTheme()
   const router = useRouter()
   const isLight = hydrated && resolvedTheme === "light"
@@ -114,11 +120,14 @@ export function AppShellClient({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollapsed(true)
     }
-    setShortcutLabel(getShortcutLabel())
     setHydrated(true)
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "b" && (e.metaKey || e.ctrlKey)) {
+      if (
+        e.key.toLowerCase() === "b" &&
+        (e.metaKey || e.ctrlKey) &&
+        !isEditableShortcutTarget(e.target)
+      ) {
         e.preventDefault()
         setCollapsed((prev) => {
           const next = !prev
@@ -170,7 +179,7 @@ export function AppShellClient({
     <BuilderSidebar
       recentProjects={recentProjects}
       onToggle={toggle}
-      shortcutLabel={shortcutLabel}
+      navigationId={SIDEBAR_NAV_ID}
     />
   )
 
@@ -200,21 +209,20 @@ export function AppShellClient({
               <button
                 type="button"
                 onClick={toggle}
-                className="fixed left-4 top-4 z-40 inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-all hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="bsb-focus-ring fixed left-0 top-4 z-40 inline-flex h-10 w-9 items-center justify-center rounded-r-md border border-l-0 bg-[var(--q-sidebar-bg)] text-[var(--q-text-secondary)] transition-colors hover:bg-[var(--q-hover-bg)] hover:text-[var(--q-text-primary)]"
                 style={{
-                  backgroundColor: "var(--color-bg-surface, #060402)",
-                  borderColor:
-                    "var(--color-border-strong, rgba(255,255,255,0.24))",
-                  color: "var(--color-text-primary, rgba(255,255,255,0.92))",
-                  boxShadow: "0 4px 12px -2px rgba(0,0,0,0.4)",
+                  borderColor: "var(--q-border-strong)",
+                  boxShadow: "0 8px 18px -16px rgba(0,0,0,0.7)",
                 }}
-                aria-label={`Abrir navegação lateral (${shortcutLabel})`}
+                aria-label="Abrir navegação lateral"
+                aria-controls={SIDEBAR_NAV_ID}
+                aria-expanded={false}
               >
-                <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
+                <PanelLeftOpen className="h-[18px] w-[18px]" aria-hidden="true" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">
-              Abrir navegação ({shortcutLabel})
+            <TooltipContent side="right" align="start">
+              Abrir navegação lateral
             </TooltipContent>
           </Tooltip>
         )}

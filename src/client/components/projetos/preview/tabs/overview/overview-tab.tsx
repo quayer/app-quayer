@@ -220,7 +220,7 @@ export function OverviewTab({
 
           {/* Seção 6: o que o agente faz (FR-06/07). Resumo + ações curtas;
               configuração detalhada vive no chat ou na tab dona do recurso. */}
-          {readiness.builderState && (
+          {aiAgent && readiness.builderState && (
             <div className={stagger(6)}>
               <CapabilitiesSection
                 projectId={project.id}

@@ -12,6 +12,8 @@
  */
 import { createHash } from 'node:crypto';
 
+export const BUILDER_V2_OVERRIDE_COOKIE = 'builder-v2-override';
+
 type FlagValue = 'off' | `percentage:${number}` | 'on';
 
 function parseFlag(): FlagValue {

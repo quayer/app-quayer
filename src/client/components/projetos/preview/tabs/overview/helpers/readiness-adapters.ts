@@ -15,6 +15,8 @@ import type {
 } from "@/server/ai-module/builder/state/readiness.types"
 import type { JourneyPhaseView, ReadinessItem, Stage } from "../types"
 
+type ReadinessBlocker = Readiness["blockers"][number]
+
 /** Structural check — o suficiente para confiar no shape de `Readiness`. */
 function isReadiness(value: unknown): value is Readiness {
   if (value === null || typeof value !== "object") return false
@@ -91,7 +93,7 @@ export function journeyToPhases(readiness: Readiness): JourneyPhaseView[] | null
 }
 
 /**
- * Universo dos 6 pre-deploy checks (plan/byok/agent/prompt/version/channel) —
+ * Universo dos pre-deploy checks (plan/byok/agent/prompt/refinement/version/channel) —
  * o servidor só devolve os que FALHARAM (`blockers`), então o checklist "met"
  * é derivado por ausência. Labels voltados a leigo (NFR-07).
  */
@@ -105,6 +107,7 @@ const BLOCKER_CHECKLIST: ReadonlyArray<{
   { check: "byok", label: "Chave do provedor de IA conectada" },
   { check: "agent", label: "Agente criado" },
   { check: "prompt", label: "Prompt configurado" },
+  { check: "refinement", label: "Refinamento aprovado" },
   { check: "version", label: "Versão do prompt gerada", tab: "deploy" },
   { check: "channel", label: "Canal WhatsApp conectado", tab: "deploy" },
 ]
@@ -117,7 +120,9 @@ const BLOCKER_CHECKLIST: ReadonlyArray<{
  * quando mora fora (plano em /conta, BYOK em /integracoes).
  */
 export function blockersToChecklist(readiness: Readiness): ReadinessItem[] {
-  const byCheck = new Map(readiness.blockers.map((b) => [b.check, b]))
+  const byCheck = new Map<string, ReadinessBlocker>(
+    readiness.blockers.map((b) => [String(b.check), b]),
+  )
   return BLOCKER_CHECKLIST.map(({ check, label, tab }) => {
     const blocker = byCheck.get(check)
     return {

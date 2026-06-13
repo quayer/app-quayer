@@ -54,6 +54,7 @@ import { ChatPanel } from "./chat-panel"
 import { PreviewPanel } from "./preview-panel"
 import { getTabByValue } from "./preview/tab-registry"
 import type { ChatMessage, PreviewTab, WorkspaceProject } from "./types"
+import { shouldUseChatOnlyLayout } from "./workspace-layout"
 
 interface WorkspaceProps {
   project: WorkspaceProject
@@ -122,20 +123,39 @@ function useHoistedReadiness(projectId: string): HoistedReadiness {
   )
   const [lastValidReadiness, setLastValidReadiness] =
     React.useState<Readiness | undefined>(rawReadiness)
+  const queryMeta = query as typeof query & {
+    error?: unknown
+    isError?: boolean
+    isFetching?: boolean
+    isLoading?: boolean
+    isPending?: boolean
+    isSuccess?: boolean
+  }
+  const readinessError =
+    Boolean(queryMeta.error) || queryMeta.isError === true
+  const [hasReadinessResponse, setHasReadinessResponse] = React.useState(
+    () => rawReadiness !== undefined,
+  )
 
   React.useEffect(() => {
     if (!rawReadiness) return
     setLastValidReadiness(rawReadiness)
   }, [rawReadiness])
 
+  React.useEffect(() => {
+    if (rawReadiness !== undefined || readinessError || queryMeta.isSuccess) {
+      setHasReadinessResponse(true)
+    }
+  }, [rawReadiness, readinessError, queryMeta.isSuccess])
+
   const readiness = rawReadiness ?? lastValidReadiness
-  const queryMeta = query as typeof query & {
-    error?: unknown
-    isError?: boolean
-  }
-  const readinessError =
-    Boolean(queryMeta.error) || queryMeta.isError === true
-  const readinessLoading = readiness === undefined && Boolean(query.isLoading)
+  const readinessLoading =
+    readiness === undefined &&
+    !readinessError &&
+    (!hasReadinessResponse ||
+      queryMeta.isLoading === true ||
+      queryMeta.isPending === true ||
+      queryMeta.isFetching === true)
 
   const activeStepId = readiness?.step.id
   const isConnectionStep =
@@ -209,20 +229,22 @@ function useHoistedReadiness(projectId: string): HoistedReadiness {
 
 /**
  * Queda de conexão = AVISO, nunca regressão (T100, FR-30, plan §4.4): conectou
- * uma vez (`confirmations.whatsappConnectedOnce`) MAS o canal não está mais ativo
- * agora (`project.hasWhatsAppConnection === false`, snapshot SSR derivado do
- * deployment live + connectionId). O step permanece concluído (monotonicidade no
- * engine); aqui só exibimos o aviso de reconexão. NUNCA reabre a jornada.
+ * uma vez (`confirmations.whatsappConnectedOnce`) MAS o sinal vivo do readiness
+ * já não considera o canal ativo. O step permanece concluído pela regra de
+ * monotonicidade do engine; aqui só exibimos o aviso de reconexão. NUNCA reabre
+ * a jornada.
  */
 function isWhatsAppConnectionDown(
   readiness: Readiness | undefined,
-  project: WorkspaceProject,
 ): boolean {
   const connectedOnce =
     parseBuilderState(
       (readiness as { builderState?: unknown } | undefined)?.builderState,
     ).confirmations.whatsappConnectedOnce === true
-  return connectedOnce && !project.hasWhatsAppConnection
+  return (
+    connectedOnce &&
+    readiness?.liveSignals?.hasConnectedWhatsAppInstance === false
+  )
 }
 
 export function Workspace(props: WorkspaceProps) {
@@ -257,34 +279,48 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
 
   // ── Readiness içado (fonte única, FR-18) ────────────────────────────────────
   // Dono ÚNICO da query: o chat (via ReadinessContext) e o preview leem daqui.
-  const { readiness, refetchReadiness, readinessLoading, readinessError } =
-    useHoistedReadiness(project.id)
+  const {
+    readiness,
+    refetchReadiness,
+    readinessLoading,
+    readinessError,
+    pollingExhausted,
+    rearmPolling,
+  } = useHoistedReadiness(project.id)
   const readinessContextValue = React.useMemo(
     () => ({
       readiness,
       refetchReadiness,
       readinessLoading,
       readinessError,
+      pollingExhausted,
+      rearmPolling,
     }),
-    [readiness, refetchReadiness, readinessLoading, readinessError],
+    [
+      readiness,
+      refetchReadiness,
+      readinessLoading,
+      readinessError,
+      pollingExhausted,
+      rearmPolling,
+    ],
   )
   // T100 (FR-30): conexão caiu DEPOIS de ter conectado → aviso, sem regredir.
   // Memoizado: `isWhatsAppConnectionDown` roda um parse de Zod do builderState.
   const whatsAppConnectionDown = React.useMemo(
-    () => isWhatsAppConnectionDown(readiness, project),
-    [readiness, project],
+    () => isWhatsAppConnectionDown(readiness),
+    [readiness],
   )
 
   // ── T55 + T101a (FR-32): chat fullscreen na fase Conhecer ────────────────────
-  // Branch ESTRITAMENTE atrás de `readiness.journey !== undefined` (zero impacto
-  // v1): na 1ª fase o usuário só conversa; o split (preview à direita) só é
-  // revelado ao entrar em Revisar. A revelação anima em CSS puro — a coluna do
-  // chat encolhe de full→50% (`builder-chat-column`) e o painel entra da direita
-  // com fade (`builder-reveal-panel`); o `prefers-reduced-motion` global salta
-  // direto pro estado final.
+  // Para projetos v2 recém-criados, o server já sabe a versão congelada antes da
+  // query async de readiness. Enquanto o 1º snapshot não chega e ainda não há
+  // agente, mantemos chat-only: sem tab strip "fantasma" que aparece e some.
+  // Ao entrar em Revisar, a revelação anima em CSS puro — a coluna do chat
+  // encolhe de full→50% (`builder-chat-column`) e o painel entra da direita com
+  // fade (`builder-reveal-panel`); `prefers-reduced-motion` salta direto ao fim.
   const journeyActive = readiness?.journey !== undefined
-  const isConhecerPhase =
-    journeyActive && readiness?.journey?.activePhaseId === "conhecer"
+  const isChatOnlyLayout = shouldUseChatOnlyLayout({ project, readiness })
 
   const [name, setName] = React.useState(project.name)
   const [isEditingName, setIsEditingName] = React.useState(false)
@@ -733,13 +769,13 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         <main className="flex min-h-0 flex-1 overflow-hidden">
           <section
             className={`flex min-h-0 min-w-0 flex-1 flex-col ${
-              isConhecerPhase ? "md:max-w-full" : "md:max-w-[50%]"
+              isChatOnlyLayout ? "md:max-w-full" : "md:max-w-[50%]"
             } ${journeyActive ? "builder-chat-column" : ""} ${
               mobilePanel === "chat" ? "flex" : "hidden md:flex"
             }`}
             style={{
               // Sem painel à direita na fase Conhecer → sem divisória.
-              borderRight: isConhecerPhase
+              borderRight: isChatOnlyLayout
                 ? "1px solid transparent"
                 : `1px solid ${tokens.divider}`,
             }}
@@ -754,7 +790,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
           {/* T55: na fase Conhecer (v2) o preview NÃO monta — chat fullscreen.
               Ao entrar em Revisar, monta com a animação de entrada (T101a). Em
               v1 (`journeyActive === false`) monta sempre, sem animação. */}
-          {!isConhecerPhase && (
+          {!isChatOnlyLayout && (
             <section
               className={`flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[50%] ${
                 journeyActive ? "builder-reveal-panel" : ""

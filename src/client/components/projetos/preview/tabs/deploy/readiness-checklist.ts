@@ -3,8 +3,9 @@
  * (`GET /builder/projects/:id/readiness`) para o ChecklistItem da tab Publicar.
  *
  * FR-18: o gate de publicação usa a MESMA fonte da Overview (blockers
- * plan/byok/agent/prompt/version/channel), substituindo a heurística local
- * que ignorava plano/BYOK/versão e deixava o publish falhar só em produção.
+ * plan/byok/agent/prompt/refinement/version/channel), substituindo a
+ * heurística local que ignorava plano/BYOK/versão e deixava o publish falhar
+ * só em produção.
  */
 
 import type {
@@ -12,6 +13,8 @@ import type {
   ReadinessBlockerCheck,
 } from "@/server/ai-module/builder/state/readiness.types"
 import type { ChecklistItem } from "./connection-step"
+
+type ReadinessBlocker = Readiness["blockers"][number]
 
 const CHECKS: ReadonlyArray<{
   check: ReadinessBlockerCheck
@@ -39,6 +42,11 @@ const CHECKS: ReadonlyArray<{
     hint: "O prompt do agente ainda não está pronto.",
   },
   {
+    check: "refinement",
+    label: "Refinamento aprovado",
+    hint: "Aprove o refinamento do agente antes de publicar.",
+  },
+  {
     check: "version",
     label: "Versão do prompt gerada",
     hint: "Gere uma versão do prompt no Builder.",
@@ -56,7 +64,9 @@ const CHECKS: ReadonlyArray<{
  * blocker — a mesma copy do chat, sem contradição.
  */
 export function readinessToChecklist(readiness: Readiness): ChecklistItem[] {
-  const byCheck = new Map(readiness.blockers.map((b) => [b.check, b]))
+  const byCheck = new Map<string, ReadinessBlocker>(
+    readiness.blockers.map((b) => [String(b.check), b]),
+  )
   return CHECKS.map(({ check, label, hint }) => {
     const blocker = byCheck.get(check)
     return {

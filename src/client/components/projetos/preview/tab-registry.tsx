@@ -211,13 +211,19 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     // v2: Publicar segue o MESMO gate compartilhado do v1 (deploy-gate.ts) —
     // tab e CTAs nunca discordam.
     visibleWhen: ({ project }) => canOpenDeploy(project).allowed,
-    render: ({ project }) => <DeployTab project={project} />,
+    render: ({ project, readiness, refetchReadiness }) => (
+      <DeployTab
+        project={project}
+        readiness={readiness}
+        refetchReadiness={refetchReadiness}
+      />
+    ),
   },
   {
     value: "credentials",
     label: "Config",
     visibleFor: ["ai_agent"],
-    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
+    visibleWhen: ({ project }) => project.aiAgent !== null,
     render: ({ project }) => <CredentialsTab project={project} />,
   },
   {
@@ -225,7 +231,7 @@ export const TAB_REGISTRY: TabDescriptor[] = [
     label: "Avançado",
     visibleFor: ["ai_agent"],
     requiresAgent: true,
-    visibleWhen: ({ readiness }) => phaseAtLeast(readiness, "revisar"),
+    visibleWhen: ({ project }) => project.aiAgent !== null,
     render: ({ project, onTabChange }) => (
       <AdvancedTab project={project} onTabChange={onTabChange} />
     ),

@@ -30,6 +30,7 @@ import { ChannelSelectionCard } from "./channel-selection-card"
 import { WhatsAppQrCard } from "./whatsapp-qr-card"
 import { renderIntegrationToolCard } from "./cards/integration/integration-tool-cards"
 import { QuickReplyChipsCard } from "./cards/quick-reply-chips-card"
+import { renderRefinementToolCard } from "./cards/refinement-tool-card"
 
 export function ToolCallCard({
   toolName,
@@ -212,6 +213,18 @@ export function ToolCallCard({
       )
     }
   }
+
+  const refinementCard = renderRefinementToolCard({
+    toolName,
+    result,
+    streaming,
+    projectId,
+    value: builderState,
+    disabled: isStreaming,
+    tokens,
+    onDraft,
+  })
+  if (refinementCard) return refinementCard
 
   // Integration Builder (W2, T41) — mode-4 inline cards (NOT in CARD_REGISTRY).
   // Returns null for non-integration tools (falls through to the branches below).

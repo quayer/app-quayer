@@ -458,6 +458,20 @@
     border-radius: var(--radius-md);
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .builder-chat-column {
+      transition-duration: 0ms !important;
+      transition-delay: 0ms !important;
+    }
+
+    .builder-reveal-panel,
+    .builder-section-in,
+    .builder-tab-pulse {
+      animation-duration: 0ms !important;
+      animation-delay: 0ms !important;
+    }
+  }
+
   /* ========================================
      Auth page specific styles
      ======================================== */

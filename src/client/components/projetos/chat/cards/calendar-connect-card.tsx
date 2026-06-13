@@ -191,7 +191,7 @@ interface EventsPreviewQuery {
 
 /**
  * Resolve the events-preview query hook off the typed client with a defensive
- * guard, ONCE at module-eval. Mirrors chat-panel's READINESS_QUERY resolver: if
+ * guard, ONCE at module-eval. Mirrors the defensive generated-client resolver: if
  * the action is missing (client not regenerated yet) we fall back to a stable
  * no-op hook so the card renders WITHOUT the prova-social row instead of throwing.
  * Resolving once keeps the hook IDENTITY stable across renders (Rules of Hooks).

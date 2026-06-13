@@ -11,6 +11,7 @@ import * as React from "react"
 
 import { api } from "@/igniter.client"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
+import type { CapabilityRecommendation } from "@/server/ai-module/builder/capabilities/recommend-capabilities.pure"
 import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 
 // ── getCapabilities query (NFR-05) ─────────────────────────────────────────
@@ -28,6 +29,11 @@ export interface CapabilitiesEnvelope {
   sourceImagesPendingCount?: number
   knowledgeSourceCount?: number
   calendarConnected?: boolean
+  /**
+   * Capacidades PRÉ-marcadas pelo recomendador (FR-51/FR-52). Read-only — aceitar
+   * uma sugestão roteia para o card/toggle de domínio (nunca grava tool aqui).
+   */
+  recommendations?: CapabilityRecommendation[]
 }
 interface GetCapabilitiesQuery {
   useQuery: (opts: { params: { id: string } }) => {

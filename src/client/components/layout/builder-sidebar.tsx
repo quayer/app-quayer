@@ -6,8 +6,8 @@ import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
 import {
   FolderKanban,
-  Menu,
   Moon,
+  PanelLeftClose,
   Plus,
   Sun,
   ChevronRight,
@@ -57,7 +57,7 @@ interface BuilderSidebarProject {
 interface BuilderSidebarProps {
   recentProjects: BuilderSidebarProject[]
   onToggle?: () => void
-  shortcutLabel?: string
+  navigationId?: string
 }
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ function getInitials(name?: string | null, email?: string | null): string {
 export function BuilderSidebar({
   recentProjects,
   onToggle,
-  shortcutLabel = "Ctrl+B",
+  navigationId = "builder-sidebar-navigation",
 }: BuilderSidebarProps) {
   const pathname = usePathname()
   const { resolvedTheme } = useTheme()
@@ -151,6 +151,7 @@ export function BuilderSidebar({
 
   return (
     <aside
+      id={navigationId}
       className="hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-[252px] lg:shrink-0 lg:flex-col"
       aria-label="Navegação do Quayer"
       style={{
@@ -178,7 +179,7 @@ export function BuilderSidebar({
               <button
                 type="button"
                 onClick={onToggle}
-                className="bsb-focus-ring flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-[12px] font-semibold transition-colors"
+                className="bsb-focus-ring inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors"
                 style={{ color: tokens.textTertiary }}
                 onMouseEnter={(e) => {
                   if (!supportsHover) return
@@ -189,14 +190,15 @@ export function BuilderSidebar({
                   e.currentTarget.style.backgroundColor = "transparent"
                   e.currentTarget.style.color = tokens.textTertiary
                 }}
-                aria-label={`Recolher menu (${shortcutLabel})`}
+                aria-label="Recolher navegação lateral"
+                aria-controls={navigationId}
+                aria-expanded={true}
               >
-                <Menu className="h-4 w-4" aria-hidden="true" />
-                <span>Menu</span>
+                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              Recolher menu ({shortcutLabel})
+              Recolher navegação lateral
             </TooltipContent>
           </Tooltip>
         )}

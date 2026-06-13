@@ -34,7 +34,9 @@ export const AGENT_PROPOSAL_CAPABILITIES: readonly AgentCapabilityTile[] = [
 
 // Human-readable labels for builder tool names.
 const TOOL_LABELS: Record<string, string> = {
+  generate_conversation_blueprint: "Montando plano de atendimento",
   generate_prompt_anatomy:   "Gerando prompt",
+  run_agent_refinement:      "Refinando agente",
   propose_agent_creation:    "Propondo agente",
   propose_tool_selection:    "Escolhendo capacidades",
   quick_reply_chips:         "Preparando respostas",
@@ -66,6 +68,91 @@ export function toolResultSummary(result: unknown): string | null {
   if (typeof r.error === "string" && r.error) return `Erro: ${r.error}`
   if (r.success === false) return "Falha na operação"
   return null
+}
+
+export type RefinementRunStatus =
+  | "idle"
+  | "running"
+  | "passed"
+  | "failed"
+  | "needs_user_decision"
+
+export interface RefinementRunToolSummary {
+  success?: boolean
+  status?: RefinementRunStatus
+  score?: number
+  scenarioCount?: number
+  checkCount?: number
+  blockerCount?: number
+  failedCount?: number
+  warningCount?: number
+  message?: string
+  code?: string
+}
+
+function getFiniteNumberField(
+  value: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const raw = value[field]
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined
+}
+
+function getRefinementStatus(value: unknown): RefinementRunStatus | undefined {
+  return value === "idle" ||
+    value === "running" ||
+    value === "passed" ||
+    value === "failed" ||
+    value === "needs_user_decision"
+    ? value
+    : undefined
+}
+
+export function getRefinementRunSummary(
+  result: unknown,
+): RefinementRunToolSummary | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return null
+  }
+  const r = result as Record<string, unknown>
+  const success = typeof r.success === "boolean" ? r.success : undefined
+  const status = getRefinementStatus(r.status)
+  const score = getFiniteNumberField(r, "score")
+  const scenarioCount = getFiniteNumberField(r, "scenarioCount")
+  const checkCount = getFiniteNumberField(r, "checkCount")
+  const blockerCount = getFiniteNumberField(r, "blockerCount")
+  const failedCount = getFiniteNumberField(r, "failedCount")
+  const warningCount = getFiniteNumberField(r, "warningCount")
+  const message = getStringField(result, "message") ?? undefined
+  const code = getStringField(result, "code") ?? undefined
+
+  if (
+    success === undefined &&
+    status === undefined &&
+    score === undefined &&
+    scenarioCount === undefined &&
+    checkCount === undefined &&
+    blockerCount === undefined &&
+    failedCount === undefined &&
+    warningCount === undefined &&
+    message === undefined &&
+    code === undefined
+  ) {
+    return null
+  }
+
+  return {
+    success,
+    status,
+    score,
+    scenarioCount,
+    checkCount,
+    blockerCount,
+    failedCount,
+    warningCount,
+    message,
+    code,
+  }
 }
 
 export interface QuickReplyToolChip {

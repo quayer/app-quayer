@@ -30,6 +30,11 @@ export interface WorkspaceProject {
   name: string
   type: ProjectType
   status: ProjectStatus
+  /**
+   * Frozen when the project conversation is created. Lets the workspace choose
+   * the first paint layout before the async readiness snapshot returns.
+   */
+  journeyVersion: 1 | 2
   aiAgentId: string | null
   aiAgent: {
     id: string

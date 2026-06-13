@@ -10,7 +10,7 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, Check, Pencil, Sparkles } from "lucide-react"
+import { Check, Sparkles } from "lucide-react"
 
 import { CardShell } from "./card-shell"
 import type { CardComponentProps } from "./types"
@@ -29,16 +29,16 @@ import {
   DisclosureSection,
   type DisclosureValue,
 } from "./review/disclosure-section"
-import { SPEECH_MODES } from "./persona/speech-mode"
+import { ReviewBlock, type ReviewBlockId } from "./review/review-block"
+import { ReadOnlySummary } from "./review/read-only-summary"
 import {
-  DEFAULT_TIMEZONE,
-  build24x7,
-  buildCommercial,
-  coerceSchedule,
-  normalizePreset,
-  type HoursPreset,
-  type WeeklySchedule,
-} from "./business-hours/schedule-shape"
+  EMPTY_SCOPE,
+  buildInitialHoursPayload,
+  compactList,
+  disclosureSummary,
+  hoursSummary,
+  speechModeLabel,
+} from "./review/agent-review-utils"
 import {
   captureProposalSnapshot,
   detectLateProposals,
@@ -74,83 +74,7 @@ type AgentReviewCardProps = CardComponentProps<AgentReviewPayload> & {
   reviewErrors?: AgentReviewSectionErrors
 }
 
-type EditableSection = "voice" | "scope" | "team" | "presentation" | null
-
-const EMPTY_SCOPE = "Ainda sem escopo definido"
-
-function scheduleForPreset(
-  preset: HoursPreset,
-  custom: WeeklySchedule,
-): WeeklySchedule {
-  if (preset === "24_7") return build24x7()
-  if (preset === "commercial") return buildCommercial()
-  return custom
-}
-
-function buildInitialHoursPayload(
-  value: CardComponentProps["value"],
-): BusinessHoursPayload {
-  const ownedPreset =
-    typeof value.hours.preset === "string" && value.hours.preset.length > 0
-      ? value.hours.preset
-      : undefined
-  const proposedPreset =
-    typeof value.capturedProposals?.hours?.preset === "string" &&
-    value.capturedProposals.hours.preset.length > 0
-      ? value.capturedProposals.hours.preset
-      : undefined
-  const rawPreset =
-    ownedPreset ??
-    (value.confirmations.hours ? value.hours.preset : undefined) ??
-    proposedPreset
-  const preset = rawPreset ? normalizePreset(rawPreset) : "24_7"
-  const persisted = coerceSchedule(value.hours.schedule)
-  const custom = persisted ?? buildCommercial()
-
-  return {
-    preset,
-    schedule: scheduleForPreset(preset, custom),
-    timezone: value.hours.timezone?.trim() || DEFAULT_TIMEZONE,
-    outOfHours: value.hours.outOfHours === "silent" ? "silent" : "reply_notice",
-  }
-}
-
-function compactList(items: readonly string[], empty: string): string {
-  const clean = items.map((item) => item.trim()).filter(Boolean)
-  if (clean.length === 0) return empty
-  const head = clean.slice(0, 3).join(" · ")
-  return clean.length > 3 ? `${head} · +${clean.length - 3}` : head
-}
-
-function speechModeLabel(mode: AgentReviewPayload["persona"]["speechMode"]) {
-  return (
-    SPEECH_MODES.find((option) => option.key === mode)?.label ??
-    "Assistente virtual"
-  )
-}
-
-function hoursSummary(hours: BusinessHoursPayload): string[] {
-  const preset =
-    hours.preset === "24_7"
-      ? "Equipe humana sempre disponível"
-      : hours.preset === "commercial"
-        ? "Equipe humana em horário comercial"
-        : "Equipe humana com horário manual"
-  const outOfHours =
-    hours.outOfHours === "silent"
-      ? "Fora do horário: IA responde sem prometer retorno humano imediato"
-      : "Fora do horário: IA continua 24/7 e informa quando a equipe retorna"
-  return ["IA atende 24/7", preset, outOfHours]
-}
-
-function disclosureSummary(value: DisclosureValue | undefined): string {
-  if (!value) return "Padrão: IA transparente no atendimento"
-  if (value.mode === "human_passthrough") return "Apresentação humanizada"
-  if (value.mode === "custom") {
-    return value.customText?.trim() || "Texto próprio configurado"
-  }
-  return "IA transparente no atendimento"
-}
+type EditableSection = ReviewBlockId | null
 
 export function AgentReviewCard({
   value,
@@ -286,6 +210,8 @@ export function AgentReviewCard({
       ]}
     >
       <div className="flex flex-col gap-0">
+        <ReadOnlySummary value={value} tokens={tokens} />
+
         <ReviewBlock
           id="voice"
           title="Voz"
@@ -365,91 +291,6 @@ export function AgentReviewCard({
         </ReviewBlock>
       </div>
     </CardShell>
-  )
-}
-
-function ReviewBlock({
-  id,
-  title,
-  summary,
-  error,
-  editing,
-  disabled,
-  tokens,
-  onToggle,
-  children,
-}: {
-  id: Exclude<EditableSection, null>
-  title: string
-  summary: string[]
-  error?: string
-  editing: boolean
-  disabled: boolean
-  tokens: CardComponentProps["tokens"]
-  onToggle: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <section
-      className="border-t py-3 first:border-t-0 first:pt-0 last:pb-0"
-      style={{ borderColor: tokens.divider }}
-      aria-labelledby={`agent-review-${id}`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3
-            id={`agent-review-${id}`}
-            className="text-[12px] font-semibold uppercase tracking-wide"
-            style={{ color: tokens.textTertiary }}
-          >
-            {title}
-          </h3>
-          <div className="mt-1 flex flex-col gap-0.5">
-            {summary.map((line) => (
-              <p
-                key={line}
-                className="break-words text-[13px] leading-relaxed"
-                style={{ color: tokens.textPrimary }}
-              >
-                {line}
-              </p>
-            ))}
-          </div>
-        </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onToggle}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: editing ? tokens.brand : tokens.divider,
-            color: editing ? tokens.brandText : tokens.textSecondary,
-            backgroundColor: editing ? tokens.brandSubtle : tokens.bgBase,
-          }}
-        >
-          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-          {editing ? "Fechar" : "Editar"}
-        </button>
-      </div>
-
-      {error && (
-        <p
-          role="alert"
-          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed"
-          style={{ color: tokens.dangerText }}
-        >
-          <AlertTriangle
-            className="mt-0.5 h-3.5 w-3.5 shrink-0"
-            aria-hidden="true"
-          />
-          {error}
-        </p>
-      )}
-
-      <div className={editing ? "mt-3" : "hidden"} aria-hidden={!editing}>
-        {children}
-      </div>
-    </section>
   )
 }
 
