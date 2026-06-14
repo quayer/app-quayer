@@ -60,6 +60,7 @@ import {
   soldOutStrategyKnownLimit,
 } from '../../../playbook/designer-input'
 import { playbookDesignerSubAgent } from '../../../sub-agents'
+import { runResearchModeDiagnosisReal } from '../../../research/research-mode-diagnosis.service'
 
 /** Clamp a free-text field server-side (trim + max length). `undefined`/empty → undefined. */
 function sanitizeText(raw: string | undefined, max: number): string | undefined {
@@ -423,9 +424,9 @@ export async function applyMission(args: {
 
 /** Rótulo humano (linguagem de negócio, FR-49) de cada modo de construção. */
 const BUILD_MODE_LABELS: Record<BuildModePayload['mode'], string> = {
-  recomendado: 'Montar agora com boas práticas',
-  pesquisa: 'Pesquisar referências antes',
-  livre: 'Eu digo como quero',
+  recomendado: 'Montar direto com boas práticas',
+  pesquisa: 'Pesquisar antes de sugerir',
+  livre: 'Quero orientar a montagem',
 }
 
 /**
@@ -443,7 +444,7 @@ export async function applyBuildMode(args: {
   current: BuilderState
   payload: Pick<BuildModePayload, 'mode'>
 }): Promise<ApplyCardSubmitResult> {
-  const { conversationId, organizationId, current, payload } = args
+  const { conversationId, projectId, organizationId, current, payload } = args
   const mode = payload.mode
 
   // NFR-12 hardening: o passo Modo de construção só existe em projetos mission-first.
@@ -477,12 +478,40 @@ export async function applyBuildMode(args: {
     })
   })
 
+  // FR-46/FR-47 (F5+) — Modo Pesquisa DETERMINÍSTICO + Motor de Estratégia: ao
+  // escolher 'pesquisa', o PRODUTO dispara aqui (não a discrição do LLM) a pesquisa
+  // de nicho E o motor de estratégia, persistindo `diagnosisInsights` + `strategyDiagnosis`
+  // para o card `diagnosis` renderizar evidências E a estratégia (campos a qualificar,
+  // o que não perguntar, crítica). FAIL-OPEN (FR-47): NUNCA bloqueia o submit. A
+  // ESTRATÉGIA é determinística e persiste mesmo se a pesquisa de nicho falhar.
+  // Guard de idempotência por `strategyDiagnosis` (re-submit não re-paga Tavily+LLM).
+  let researchNote = ''
+  if (mode === 'pesquisa' && !current.strategyDiagnosis) {
+    try {
+      const research = await runResearchModeDiagnosisReal({
+        projectId,
+        organizationId,
+      })
+      if (research.ran && research.researchOk) {
+        researchNote = research.lite
+          ? ' Preparei um diagnóstico (pesquisa lite, sem fontes externas agora) e a estratégia de qualificação para o próximo passo.'
+          : ' Preparei um diagnóstico com referências e a estratégia de qualificação para o próximo passo.'
+      } else if (research.ran) {
+        researchNote =
+          ' Preparei a estratégia de qualificação do negócio para o próximo passo (pesquisa externa indisponível agora).'
+      }
+    } catch {
+      // Fail-open redundante: runResearchModeDiagnosisReal já nunca lança.
+    }
+  }
+
   return {
     ok: true,
     conversationId,
     cardInstruction:
-      `O usuário ESCOLHEU o modo de construção via card: "${BUILD_MODE_LABELS[mode]}". ` +
-      'Adapte sua abordagem nos próximos passos a essa preferência ' +
+      `O usuário ESCOLHEU o modo de construção via card: "${BUILD_MODE_LABELS[mode]}".` +
+      researchNote +
+      ' Adapte sua abordagem nos próximos passos a essa preferência ' +
       '(recomendado = montar direto com boas práticas; pesquisa = trazer referências antes; ' +
       'livre = deixar o usuário ditar como o agente trabalha) e siga para o próximo passo da jornada. ' +
       'Não reabra o card de modo de construção.',

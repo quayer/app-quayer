@@ -62,6 +62,19 @@ function cleanList(values: readonly string[] | undefined): string[] {
   return out
 }
 
+/** Rótulos amigáveis para as chaves de campo excluído ("não vou perguntar"). */
+const EXCLUDED_FIELD_LABELS: Record<string, string> = {
+  regiao: "região",
+  regiao_desejada: "região",
+  telefone: "telefone",
+  preco_final: "preço final",
+  diagnostico: "diagnóstico/sintomas",
+}
+
+function humanizeFieldKey(key: string): string {
+  return EXCLUDED_FIELD_LABELS[key] ?? key.replace(/_/g, " ")
+}
+
 /** Uma linha de fato detectado: rótulo + valor (texto ou chips). */
 interface FactRowProps {
   label: string
@@ -109,11 +122,44 @@ export function DiagnosisCard({
     clean(value.identity.address) ??
     clean(value.sourceIngestion.proposed?.address)
 
-  // FR-47 — "pesquisa externa indisponível" quando NENHUM sinal de pesquisa de
-  // mercado (serviços/diferenciais/endereço da fonte) chegou. Nome/objetivo são
-  // entrada do próprio usuário, então não contam como "pesquisa externa".
-  const hasExternalResearch =
-    services.length > 0 || differentiators.length > 0 || address !== undefined
+  // F5 (FR-46) — diagnóstico ESTRUTURADO da pesquisa de nicho (Modo Pesquisa).
+  // Persistido pelo serviço determinístico no submit do build_mode; aqui só RENDER.
+  const insights = value.diagnosisInsights
+  const risks = cleanList(insights?.risks)
+  const bestPractices = cleanList(insights?.bestPractices)
+  const recommendedCapabilities = cleanList(insights?.recommendedCapabilities)
+  const sources = (insights?.sources ?? []).filter(
+    (s) => clean(s.url) !== undefined,
+  )
+  // `lite` = pesquisa rodou sem Tavily (só LLM) — confiança reduzida, aviso honesto.
+  const isLite = insights?.lite === true
+
+  // F5+ (Motor de Estratégia) — decisão estratégica auditável: o que vou priorizar
+  // e o que NÃO vou perguntar (e por quê). Determinística, persistida no submit.
+  const strategy = value.strategyDiagnosis
+  const strategyReason = clean(strategy?.strategyReason)
+  const suggestedFields = (strategy?.suggestedFields ?? []).filter(
+    (f) => clean(f.label) !== undefined,
+  )
+  const excludedFields = (strategy?.excludedFields ?? []).filter(
+    (e) => clean(e.reason) !== undefined,
+  )
+  const hasStrategy = suggestedFields.length > 0 || excludedFields.length > 0
+
+  // FR-47 — degradação honesta. Há EVIDÊNCIA quando a pesquisa de nicho produziu
+  // riscos/boas práticas/capacidades/fontes OU a fonte capturou serviços/diferenciais/
+  // endereço. Nome/objetivo são entrada do próprio usuário, então não contam.
+  const hasResearchEvidence =
+    risks.length > 0 ||
+    bestPractices.length > 0 ||
+    recommendedCapabilities.length > 0 ||
+    sources.length > 0 ||
+    services.length > 0 ||
+    differentiators.length > 0 ||
+    address !== undefined
+  // O aviso "lite/indisponível" aparece quando a pesquisa rodou só com o LLM OU
+  // quando não há nenhum sinal de pesquisa externa (nem fontes nem dados da fonte).
+  const showDegradationNote = isLite || !hasResearchEvidence
 
   const handleAck = React.useCallback(() => {
     if (disabled) return
@@ -200,9 +246,148 @@ export function DiagnosisCard({
           </FactRow>
         )}
 
-        {/* FR-47 — degradação graciosa: sem sinal de pesquisa externa, avisa de
-            forma honesta e segue com o que há (nunca quebra). */}
-        {!hasExternalResearch && (
+        {/* F5+ (Motor de Estratégia) — o que vou priorizar e o que NÃO vou
+            perguntar (e por quê). É a decisão estratégica auditável. */}
+        {hasStrategy && (
+          <div
+            className="flex flex-col gap-2.5 rounded-md border p-3"
+            style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
+          >
+            {strategyReason !== undefined && (
+              <p
+                className="text-[13px] leading-relaxed"
+                style={{ color: tokens.textPrimary }}
+              >
+                {strategyReason}
+              </p>
+            )}
+
+            {suggestedFields.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span
+                  className="text-[11px] font-medium uppercase tracking-wide"
+                  style={{ color: tokens.textTertiary }}
+                >
+                  Por isso vou priorizar
+                </span>
+                <ul className="flex flex-col gap-1">
+                  {suggestedFields.map((f) => (
+                    <li
+                      key={f.key}
+                      className="flex items-start gap-1.5 text-[13px] leading-relaxed"
+                      style={{ color: tokens.textPrimary }}
+                    >
+                      <span aria-hidden="true" style={{ color: tokens.textTertiary }}>
+                        •
+                      </span>
+                      <span>
+                        <span className="font-medium">{f.label}</span>
+                        {clean(f.reason) !== undefined ? ` — ${f.reason}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {excludedFields.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span
+                  className="text-[11px] font-medium uppercase tracking-wide"
+                  style={{ color: tokens.textTertiary }}
+                >
+                  Não vou perguntar
+                </span>
+                <ul className="flex flex-col gap-1">
+                  {excludedFields.map((e) => (
+                    <li
+                      key={e.key}
+                      className="flex items-start gap-1.5 text-[12px] leading-relaxed"
+                      style={{ color: tokens.textSecondary }}
+                    >
+                      <span aria-hidden="true" style={{ color: tokens.textTertiary }}>
+                        •
+                      </span>
+                      <span>
+                        <span className="font-medium">{humanizeFieldKey(e.key)}</span>
+                        {` — ${e.reason}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* F5 (FR-46) — riscos/boas práticas/capacidades da pesquisa de nicho. */}
+        {risks.length > 0 && (
+          <FactRow label="Pontos de atenção" tokens={tokens}>
+            <ul className="flex flex-col gap-1">
+              {risks.map((risk) => (
+                <li
+                  key={risk}
+                  className="flex items-start gap-1.5 text-[13px] leading-relaxed"
+                  style={{ color: tokens.textPrimary }}
+                >
+                  <span aria-hidden="true" style={{ color: tokens.textTertiary }}>
+                    •
+                  </span>
+                  <span>{risk}</span>
+                </li>
+              ))}
+            </ul>
+          </FactRow>
+        )}
+
+        {bestPractices.length > 0 && (
+          <FactRow label="Boas práticas do setor" tokens={tokens}>
+            <ul className="flex flex-col gap-1">
+              {bestPractices.map((bp) => (
+                <li
+                  key={bp}
+                  className="flex items-start gap-1.5 text-[13px] leading-relaxed"
+                  style={{ color: tokens.textPrimary }}
+                >
+                  <span aria-hidden="true" style={{ color: tokens.textTertiary }}>
+                    •
+                  </span>
+                  <span>{bp}</span>
+                </li>
+              ))}
+            </ul>
+          </FactRow>
+        )}
+
+        {recommendedCapabilities.length > 0 && (
+          <FactRow label="Capacidades recomendadas" tokens={tokens}>
+            {renderChips(recommendedCapabilities)}
+          </FactRow>
+        )}
+
+        {sources.length > 0 && (
+          <FactRow label="Fontes" tokens={tokens}>
+            <ul className="flex flex-col gap-1">
+              {sources.map((s) => (
+                <li key={s.url} className="text-[12px] leading-relaxed">
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                    style={{ color: tokens.textSecondary }}
+                  >
+                    {clean(s.title) ?? s.url}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </FactRow>
+        )}
+
+        {/* FR-47 — degradação honesta: pesquisa lite (só LLM) OU sem nenhum sinal
+            de pesquisa externa. Nunca quebra: segue com o que há + aviso claro. */}
+        {showDegradationNote && (
           <div
             className="flex items-start gap-2 rounded-md border p-2.5"
             style={{ backgroundColor: tokens.bgBase, borderColor: tokens.divider }}
@@ -216,8 +401,9 @@ export function DiagnosisCard({
               className="text-[12px] leading-relaxed"
               style={{ color: tokens.textTertiary }}
             >
-              Pesquisa de mercado externa indisponível no momento — seguindo com o
-              que entendi do seu negócio.
+              {isLite
+                ? "Pesquisa externa indisponível agora — este diagnóstico vem do conhecimento do assistente. Você pode ajustar tudo nos próximos passos."
+                : "Pesquisa de mercado externa indisponível no momento — seguindo com o que entendi do seu negócio."}
             </p>
           </div>
         )}

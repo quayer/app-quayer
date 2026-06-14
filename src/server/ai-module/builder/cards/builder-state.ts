@@ -348,6 +348,112 @@ export const proactiveStateSchema = z.object({
 })
 
 /**
+ * FR-46/FR-47 (F5 — Modo Pesquisa, diagnóstico estruturado) — o RESULTADO da
+ * pesquisa de nicho que o Modo Pesquisa roda DETERMINISTICAMENTE quando o usuário
+ * escolhe `buildMode === 'pesquisa'`. Persistido para o card `diagnosis` RENDERIZAR
+ * EVIDÊNCIAS (negócio detectado, riscos, boas práticas, capacidades recomendadas,
+ * fontes) — não é mais só um ACK do que a fonte capturou.
+ *
+ * OPCIONAL e SEM default: states legados/v2 parseiam para `diagnosisInsights:
+ * undefined` (o card cai na degradação honesta). `lite=true` = pesquisa rodou SEM
+ * Tavily (só conhecimento do LLM, confiança reduzida — aviso honesto no card).
+ * Campos clampados (server nunca confia no LLM). 100% aditivo.
+ */
+export const diagnosisInsightsSchema = z.object({
+  /** Resumo do negócio detectado (nicho + descrição) — "Negócio detectado". */
+  detectedBusiness: z.string().max(400).default(''),
+  /** Riscos/alertas regulatórios e de compliance do nicho. */
+  risks: z.array(z.string().max(400)).max(20).default([]),
+  /** Boas práticas / fluxos típicos de atendimento do nicho. */
+  bestPractices: z.array(z.string().max(400)).max(20).default([]),
+  /** Capacidades sugeridas em linguagem de negócio (só sugestão, não aplica). */
+  recommendedCapabilities: z.array(z.string().max(200)).max(12).default([]),
+  /** Fontes/referências da pesquisa (título + url). Vazio quando `lite`. */
+  sources: z
+    .array(
+      z.object({
+        title: z.string().max(300),
+        url: z.string().max(2000),
+      }),
+    )
+    .max(12)
+    .default([]),
+  /** True quando a pesquisa rodou SEM Tavily (só LLM) — confiança reduzida. */
+  lite: z.boolean().default(false),
+  /** ISO do momento em que o diagnóstico foi gerado (idempotência/staleness). */
+  generatedAt: z.string().optional(),
+})
+
+/**
+ * F5+ (Motor de Estratégia) — a forma PERSISTIDA do `StrategyPlan` (o subset
+ * serializável que o card `diagnosis` lê). É a decisão ESTRATÉGICA auditável do
+ * Modo Pesquisa: qual estratégia comercial foi escolhida (e quais foram rejeitadas
+ * e POR QUÊ), quais campos qualificar (com justificativa/prioridade), o que NÃO
+ * perguntar (e por quê) e o resultado da crítica automática.
+ *
+ * Os tipos RICOS do motor vivem em `strategy/strategy.types.ts`; aqui só a forma
+ * persistida (campos clampados — server nunca confia em texto livre arbitrário).
+ * OPCIONAL e SEM default: legados/v2 parseiam para `strategyDiagnosis: undefined`.
+ * 100% aditivo.
+ */
+export const strategyDiagnosisSchema = z.object({
+  /** Vertical normalizada do negócio (ex.: 'imobiliario'). */
+  businessType: z.string().max(60).default('generico'),
+  /** Subtipo comercial quando detectável (ex.: 'empreendimento_especifico'). */
+  subtype: z.string().max(60).optional(),
+  /** Estratégia escolhida (ex.: 'financiamento_popular'). */
+  selectedStrategy: z.string().max(80).default(''),
+  /** Justificativa da estratégia, em linguagem de negócio. */
+  strategyReason: z.string().max(600).default(''),
+  /** Estratégias REJEITADAS + por quê (auditoria da decisão). */
+  rejectedStrategies: z
+    .array(
+      z.object({
+        strategy: z.string().max(80),
+        reason: z.string().max(400),
+      }),
+    )
+    .max(8)
+    .default([]),
+  /** Campos a qualificar (com justificativa/prioridade). */
+  suggestedFields: z
+    .array(
+      z.object({
+        key: z.string().max(60),
+        label: z.string().max(120),
+        reason: z.string().max(300),
+        priority: z.enum(['high', 'medium', 'optional']),
+        askWhen: z.string().max(160).optional(),
+      }),
+    )
+    .max(20)
+    .default([]),
+  /** Campos que NÃO se deve perguntar + por quê ("não sugeri X porque Y"). */
+  excludedFields: z
+    .array(
+      z.object({
+        key: z.string().max(60),
+        reason: z.string().max(300),
+      }),
+    )
+    .max(12)
+    .default([]),
+  /** Resultado da crítica automática (reprovações/alertas do plano). */
+  criticFindings: z
+    .array(
+      z.object({
+        kind: z.enum(['reject', 'warn', 'ok']),
+        target: z.string().max(120),
+        reason: z.string().max(300),
+      }),
+    )
+    .max(20)
+    .default([]),
+  /** ISO do momento em que a estratégia foi diagnosticada. */
+  generatedAt: z.string().optional(),
+})
+
+/**
  * Jornada v2 (T06, FR-02, plan §2.2 item 2) — `capturedProposals` é a generalização
  * do invariante de `sourceIngestion.proposed`: valores PROPOSTOS por captura de conversa
  * (tool `propose_field_values`) ou por nicho regulado (`research-niche`), que NUNCA
@@ -615,6 +721,16 @@ export const builderStateSchema = z.object({
   // desligada). NÃO tem sentinel em `confirmations` — é capacidade, não passo. F1
   // só recomenda+persiste; nenhum envio (runtime F2-F4 é épico próprio). 100% aditivo.
   proactive: proactiveStateSchema.optional(),
+  // FR-46/FR-47 (F5 — Modo Pesquisa) — diagnóstico ESTRUTURADO da pesquisa de nicho.
+  // OPCIONAL e SEM default: legados/v2 parseiam para `diagnosisInsights: undefined`
+  // (o card diagnosis degrada honestamente). Escrito DETERMINISTICAMENTE pelo serviço
+  // de Modo Pesquisa quando `buildMode === 'pesquisa'`; o card o RENDERIZA. 100% aditivo.
+  diagnosisInsights: diagnosisInsightsSchema.optional(),
+  // F5+ (Motor de Estratégia) — decisão ESTRATÉGICA auditável do Modo Pesquisa
+  // (estratégia escolhida/rejeitadas, campos a qualificar, o que não perguntar,
+  // crítica). OPCIONAL e SEM default: legados parseiam para `strategyDiagnosis:
+  // undefined`. Escrito DETERMINISTICAMENTE pelo motor junto do diagnóstico. Aditivo.
+  strategyDiagnosis: strategyDiagnosisSchema.optional(),
   // T06 — propostas capturadas da conversa (FR-02). OPCIONAL e SEM default: um state
   // vazio/legado parseia para `capturedProposals: undefined`. NUNCA flipa sentinels;
   // o prefill dos cards lê isto como fallback e o submit limpa via `clearCapturedProposals`.
@@ -658,6 +774,10 @@ export type QualificationState = z.infer<typeof qualificationStateSchema>
 export type RestrictionsState = z.infer<typeof restrictionsStateSchema>
 /** FR-PRO-01 (F1) — a CAPACIDADE "Mensagens proativas" (3 presets opt-in). */
 export type ProactiveState = z.infer<typeof proactiveStateSchema>
+/** FR-46/FR-47 (F5) — diagnóstico estruturado do Modo Pesquisa. */
+export type DiagnosisInsights = z.infer<typeof diagnosisInsightsSchema>
+/** F5+ — decisão estratégica persistida do motor de estratégia. */
+export type PersistedStrategyDiagnosis = z.infer<typeof strategyDiagnosisSchema>
 export type CapturedProposals = z.infer<typeof capturedProposalsSchema>
 export type RefinementMaterial = z.infer<typeof refinementMaterialSchema>
 export type RefinementCheckSummary = z.infer<typeof refinementCheckSummarySchema>

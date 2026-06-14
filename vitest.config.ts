@@ -72,6 +72,8 @@ export default defineConfig({
             'src/server/ai-module/builder/tools/**/*.test.ts',
             'src/server/ai-module/builder/templates/**/*.test.ts',
             'src/server/ai-module/builder/playbook/**/*.test.ts',
+            'src/server/ai-module/builder/research/**/*.test.ts',
+            'src/server/ai-module/builder/strategy/**/*.test.ts',
             'src/server/ai-module/builder/refinement/**/*.test.ts',
             'src/server/ai-module/builder/integrations/**/*.test.ts',
             'src/server/ai-module/builder/media/**/*.test.ts',
