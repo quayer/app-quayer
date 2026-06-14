@@ -50,9 +50,11 @@ vi.mock('@/server/services/database', () => ({
 import {
   CALENDAR_TOOL_KEYS,
   SCHEDULE_FALLBACK_TOOL_KEY,
+  PROACTIVE_FOLLOWUP_TOOL_KEY,
   deriveCalendarToolChanges,
   deriveHandoffToolChanges,
   derivePricingToolChanges,
+  deriveProactiveToolChanges,
   hasActiveCalendarConnection,
   reconcileEnabledTools,
 } from './enabled-tools-derivation'
@@ -199,6 +201,66 @@ describe('deriveCalendarToolChanges — FR-11 (agenda)', () => {
     const change = deriveCalendarToolChanges({ alsoSchedule: false, hasActiveConnection: true })
     expect(change.ensure).toEqual([])
     expect(change.remove).toEqual([...CALENDAR_TOOL_KEYS, SCHEDULE_FALLBACK_TOOL_KEY])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// deriveProactiveToolChanges
+// ---------------------------------------------------------------------------
+
+describe('deriveProactiveToolChanges — FR-PRO-01 (follow-up proativo)', () => {
+  it('followUp:true → ensure create_followup (sem remover nada)', () => {
+    const change = deriveProactiveToolChanges({
+      followUp: true,
+      reminders: false,
+      importantDates: false,
+    })
+    expect(change.ensure).toEqual([PROACTIVE_FOLLOWUP_TOOL_KEY])
+    expect(change.remove).toEqual([])
+  })
+
+  it('followUp:false → remove create_followup (não publica por acidente)', () => {
+    const change = deriveProactiveToolChanges({
+      followUp: false,
+      reminders: true,
+      importantDates: true,
+    })
+    expect(change.ensure).toEqual([])
+    expect(change.remove).toEqual([PROACTIVE_FOLLOWUP_TOOL_KEY])
+  })
+
+  it('proactive undefined (capacidade nunca configurada) → remove create_followup', () => {
+    const change = deriveProactiveToolChanges(undefined)
+    expect(change.ensure).toEqual([])
+    expect(change.remove).toEqual([PROACTIVE_FOLLOWUP_TOOL_KEY])
+  })
+
+  it('só followUp gateia a tool: reminders/importantDates ON mas followUp OFF → remove', () => {
+    const change = deriveProactiveToolChanges({
+      followUp: false,
+      reminders: true,
+      importantDates: false,
+    })
+    expect(change.ensure).toEqual([])
+    expect(change.remove).toEqual([PROACTIVE_FOLLOWUP_TOOL_KEY])
+  })
+
+  it('set-merge preserva tools custom: followUp ON anexa create_followup ao final', () => {
+    const plan = reconcileEnabledTools(['minha_tool_custom', 'transfer_to_human'], [
+      deriveProactiveToolChanges({ followUp: true, reminders: false, importantDates: false }),
+    ])
+    expect(plan.next).toEqual([
+      'minha_tool_custom',
+      'transfer_to_human',
+      PROACTIVE_FOLLOWUP_TOOL_KEY,
+    ])
+  })
+
+  it('set-merge remove APENAS create_followup quando followUp OFF — custom intactas', () => {
+    const plan = reconcileEnabledTools(['create_followup', 'webhook_crm'], [
+      deriveProactiveToolChanges({ followUp: false, reminders: false, importantDates: false }),
+    ])
+    expect(plan.next).toEqual(['webhook_crm'])
   })
 })
 

@@ -1,6 +1,6 @@
 ---
 Criado: 2026-03-01
-Atualizado: 2026-06-11
+Atualizado: 2026-06-13
 Revisar em: novo secret em .env.example ou mudança de workflow de deploy
 Relacionados:
   - .env.example
@@ -142,3 +142,7 @@ Both secrets are optional. If missing, the smoke-homol workflow still runs but s
 ## Google Calendar (connect-link — Wave 4b)
 
 - `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI` — OAuth **separado** do login Google (escopo calendar, `access_type=offline`). Redirect = `.../api/v1/calendar/oauth/callback`. O refresh_token é encriptado (`@/lib/crypto`/`ENCRYPTION_KEY`) e guardado em `OrganizationProvider` (provider `google-calendar`). Sem essas 3 envs, `/oauth/start` responde 503 e as tools de agenda degradam. **Verificação OAuth do Google** (escopos de Calendar) é externa — disparar no Google Cloud com antecedência.
+
+## Proatividade — HSM / template fora da janela 24h (2026-06-13)
+
+- `PROACTIVE_HSM_TEMPLATE_NAME` / `PROACTIVE_HSM_TEMPLATE_LANG` — **não são segredos / rotação N/A** (identificadores públicos do template aprovado na Meta). Config do follow-up proativo FORA da janela de 24h (FR-PRO-06). HSM é **exclusivo da WhatsApp Cloud API** (Meta): em conexões WhatsApp Web/UAZ o caminho HSM não existe e o follow-up fora da janela é **cancelado** (`outside_window_no_template`, fail-safe). `PROACTIVE_HSM_TEMPLATE_NAME` ausente/vazio = "não há template" → fora da janela cancela (nunca envia texto cru). `_LANG` default `pt_BR`. Lidos em `scheduled-message-send.deps.ts` (`loadEligibility` só popula `templateName` quando a Connection é `WHATSAPP_CLOUD_API` com credenciais + a env estiver setada). Documentados em `.env.example` (seção PROATIVIDADE). ⚠️ Validação ponta-a-ponta (conexão Cloud API real + HSM aprovado na Meta) é **harness local** — homol/prod hoje usam WhatsApp Web/UAZ.

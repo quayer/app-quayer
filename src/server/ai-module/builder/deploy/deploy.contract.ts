@@ -25,6 +25,7 @@ export type DeployStepName =
   | 'materialize_team'
   | 'materialize_media'
   | 'materialize_knowledge'
+  | 'materialize_proactive'
   | 'create_instance'
   | 'attach_connection'
 
@@ -86,6 +87,14 @@ export interface DeployContext {
      * create_agent backfill is the primary net, this step is the redundant one).
      */
     knowledge?: { collectionId: string | null }
+    /**
+     * Light bookkeeping written by `materialize_proactive`. Same semantics as the
+     * others: NOT persisted on the BuilderDeployment row — the compensation is a
+     * self-contained no-op (the ScheduledAutomation rules reflect the user opting
+     * into proactive messaging, re-derived from the 3 toggles on the next deploy,
+     * never undone). `count` = number of ACTIVE rules after reconciliation.
+     */
+    proactive?: { count: number }
   }
 }
 

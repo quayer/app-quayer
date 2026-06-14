@@ -61,6 +61,7 @@ import {
 } from '@/server/communication/webhooks/uazapi/dispatch-ai'
 import { extractConnectionRuntimeFields } from '@/server/communication/webhooks/uazapi/types'
 import { cancelPendingProactiveOnInbound } from '@/server/ai-module/ai-agents/proactive/cancel-on-inbound'
+import { handleOptOutOnInbound } from '@/server/ai-module/ai-agents/proactive/opt-out-inbound'
 import { database } from '@/server/services/database'
 
 export const dynamic = 'force-dynamic'
@@ -149,13 +150,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if ('response' in inbound) return inbound.response
   const { enrichedContent, pipelineResult } = inbound
 
-  // F2b: cancel-on-inbound. Aqui o inbound é GENUÍNO do cliente — pós-dedup
-  // (passo 3), não-echo (passo 5: IN ⇒ author=CUSTOMER), org + telefone
-  // resolvidos e o pipeline NÃO entrou em buffer (não houve short-circuit). Um
-  // follow-up proativo pendente perde o sentido quando o cliente responde →
-  // cancelamos os ScheduledMessage 'pending' do par (org, telefone). FAIL-OPEN:
-  // qualquer erro só loga — cancelar NUNCA pode quebrar o atendimento ao cliente.
+  // F1/F2b: opt-out + cancel-on-inbound. Aqui o inbound é GENUÍNO do cliente —
+  // pós-dedup (passo 3), não-echo (passo 5: IN ⇒ author=CUSTOMER), org + telefone
+  // resolvidos e o pipeline NÃO entrou em buffer (não houve short-circuit). Ambos
+  // FAIL-OPEN: qualquer erro só loga — NUNCA podem quebrar o atendimento ao cliente.
   if (direction === 'IN') {
+    // (a) OPT-OUT (FR-PRO-08/LGPD): se o texto for um pedido de descadastro
+    //     (detecção conservadora), grava ContactOptOut durável + cancela TODOS os
+    //     pendentes do contato. A linha de opt-out bloqueia envios proativos futuros.
+    try {
+      const optOut = await handleOptOutOnInbound(database, {
+        organizationId,
+        contactPhone,
+        text: enrichedContent,
+      })
+      if (optOut.optedOut) {
+        logger.info('[uazapi-webhook] opt-out de proatividade aplicado', {
+          traceId,
+          contactPhone: maskPhone(contactPhone),
+          cancelled: optOut.cancelled,
+        })
+      }
+    } catch (err) {
+      logger.warn('[uazapi-webhook] opt-out-inbound falhou (não-fatal)', {
+        traceId,
+        contactPhone: maskPhone(contactPhone),
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+
+    // (b) CANCEL-ON-INBOUND (reply-aware): um follow-up proativo pendente perde o
+    //     sentido quando o cliente responde → cancela os ScheduledMessage 'pending'
+    //     do par (org, telefone) marcados com cancelIfCustomerReplies. Subconjunto
+    //     do opt-out acima (que já cancelou TUDO se houve descadastro) — idempotente.
     try {
       await cancelPendingProactiveOnInbound(database, {
         organizationId,

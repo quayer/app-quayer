@@ -71,11 +71,30 @@ function makeDeps(overrides: Partial<ProactiveSendDeps> = {}): ProactiveSendDeps
     loadEligibility: vi.fn(async () => eligibleSnapshot()),
     resolveText: vi.fn(async () => 'Oi! Passando para retomar nosso contato.'),
     send: vi.fn(async () => ({ blocksSent: 1, errors: [] })),
+    sendTemplate: vi.fn(async () => ({ messageId: 'wamid.HSM123' })),
     markSent: vi.fn(async () => {}),
     markCancelled: vi.fn(async () => {}),
     markFailed: vi.fn(async () => {}),
     ...overrides,
   }
+}
+
+/** Snapshot fora da janela 24h COM HSM aprovado configurado (templateName resolvido). */
+function outsideWindowWithTemplate(
+  overrides: Partial<ProactiveEligibilitySnapshot> = {},
+): ProactiveEligibilitySnapshot {
+  return eligibleSnapshot({
+    session: {
+      whatsappWindowExpiresAt: new Date(NOW.getTime() - 3600_000), // expirou
+      aiEnabled: true,
+      aiBlockedUntil: null,
+      status: 'OPEN',
+    },
+    hasApprovedTemplate: true,
+    templateName: 'followup_proativo',
+    languageCode: 'pt_BR',
+    ...overrides,
+  })
 }
 
 // ── Testes ──────────────────────────────────────────────────────────────────
@@ -159,10 +178,11 @@ describe('runScheduledMessageSend', () => {
     expect(deps.send).not.toHaveBeenCalled()
   })
 
-  it('needsTemplate (fora da janela 24h) → cancelled outside_window_no_template SEM enviar', async () => {
-    // Fora da janela (expira no passado) MAS com template aprovado →
-    // canSendProactive devolve allowed:true + needsTemplate:true. Como não
-    // temos HSM real, o handler cancela 'outside_window_no_template'.
+  it('needsTemplate SEM templateName resolvido → cancelled outside_window_no_template SEM enviar', async () => {
+    // Fora da janela (expira no passado) MAS hasApprovedTemplate:true e SEM
+    // templateName (env não configurado / catálogo vazio) → canSendProactive
+    // devolve allowed:true + needsTemplate:true, mas sem HSM resolvido o handler
+    // cancela 'outside_window_no_template' (fail-safe). resolveText NUNCA é chamado.
     const deps = makeDeps({
       loadEligibility: vi.fn(async () =>
         eligibleSnapshot({
@@ -171,6 +191,7 @@ describe('runScheduledMessageSend', () => {
             aiEnabled: true,
           },
           hasApprovedTemplate: true,
+          // templateName ausente
         }),
       ),
     })
@@ -183,7 +204,102 @@ describe('runScheduledMessageSend', () => {
       ORG,
       'outside_window_no_template',
     )
+    expect(deps.sendTemplate).not.toHaveBeenCalled()
     expect(deps.resolveText).not.toHaveBeenCalled()
+    expect(deps.send).not.toHaveBeenCalled()
+  })
+
+  it('needsTemplate SEM deps.sendTemplate (provider ≠ Cloud API) → cancelled (fail-safe)', async () => {
+    // Mesmo com templateName resolvido, se a dep sendTemplate não existe (ex.:
+    // WhatsApp Web/UAZ, que não envia HSM) → cancela, nunca tenta texto cru.
+    const deps = makeDeps({
+      sendTemplate: undefined,
+      loadEligibility: vi.fn(async () => outsideWindowWithTemplate()),
+    })
+
+    const result = await runScheduledMessageSend(deps, PAYLOAD, { now: NOW })
+
+    expect(result).toEqual({ outcome: 'cancelled', reason: 'needs_template' })
+    expect(deps.markCancelled).toHaveBeenCalledWith(
+      SCHEDULED_ID,
+      ORG,
+      'outside_window_no_template',
+    )
+    expect(deps.resolveText).not.toHaveBeenCalled()
+    expect(deps.send).not.toHaveBeenCalled()
+  })
+
+  it('needsTemplate + HSM aprovado → sendTemplate enviado → markSent (sent/template)', async () => {
+    const deps = makeDeps({
+      loadEligibility: vi.fn(async () => outsideWindowWithTemplate()),
+    })
+
+    const result = await runScheduledMessageSend(deps, PAYLOAD, { now: NOW })
+
+    expect(result).toEqual({ outcome: 'sent', reason: 'template' })
+    expect(deps.sendTemplate).toHaveBeenCalledTimes(1)
+    expect(deps.sendTemplate).toHaveBeenCalledWith({
+      connectionId: 'conn-1',
+      organizationId: ORG,
+      contactPhone: '5511999999999',
+      templateName: 'followup_proativo',
+      languageCode: 'pt_BR',
+    })
+    expect(deps.markSent).toHaveBeenCalledWith(SCHEDULED_ID, ORG)
+    // NUNCA texto cru fora da janela: resolveText/send não são chamados.
+    expect(deps.resolveText).not.toHaveBeenCalled()
+    expect(deps.send).not.toHaveBeenCalled()
+    expect(deps.markCancelled).not.toHaveBeenCalled()
+    expect(deps.markFailed).not.toHaveBeenCalled()
+  })
+
+  it('needsTemplate + languageCode ausente → default pt_BR no sendTemplate', async () => {
+    const deps = makeDeps({
+      loadEligibility: vi.fn(async () =>
+        outsideWindowWithTemplate({ languageCode: null }),
+      ),
+    })
+
+    const result = await runScheduledMessageSend(deps, PAYLOAD, { now: NOW })
+
+    expect(result).toEqual({ outcome: 'sent', reason: 'template' })
+    expect(deps.sendTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({ languageCode: 'pt_BR' }),
+    )
+  })
+
+  it('needsTemplate + sendTemplate retorna null → markFailed template_send_failed', async () => {
+    const deps = makeDeps({
+      loadEligibility: vi.fn(async () => outsideWindowWithTemplate()),
+      sendTemplate: vi.fn(async () => null),
+    })
+
+    const result = await runScheduledMessageSend(deps, PAYLOAD, { now: NOW })
+
+    expect(result).toEqual({ outcome: 'failed', reason: 'template_send_failed' })
+    expect(deps.markFailed).toHaveBeenCalledWith(
+      SCHEDULED_ID,
+      ORG,
+      'template_send_failed',
+    )
+    expect(deps.markSent).not.toHaveBeenCalled()
+    expect(deps.send).not.toHaveBeenCalled()
+  })
+
+  it('needsTemplate + sendTemplate lança (erro do Graph) → markFailed (fail-safe, não relança)', async () => {
+    const deps = makeDeps({
+      loadEligibility: vi.fn(async () => outsideWindowWithTemplate()),
+      sendTemplate: vi.fn(async () => {
+        throw new Error('(#132001) Template name does not exist')
+      }),
+    })
+
+    const result = await runScheduledMessageSend(deps, PAYLOAD, { now: NOW })
+
+    expect(result.outcome).toBe('failed')
+    expect(result.reason).toContain('132001')
+    expect(deps.markFailed).toHaveBeenCalled()
+    expect(deps.markSent).not.toHaveBeenCalled()
     expect(deps.send).not.toHaveBeenCalled()
   })
 

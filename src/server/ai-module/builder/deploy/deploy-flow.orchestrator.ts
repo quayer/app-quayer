@@ -26,6 +26,7 @@ import { materializePricing } from './materialize-pricing.handler'
 import { materializeTeam } from './materialize-team.handler'
 import { materializeMedia } from './materialize-media.handler'
 import { materializeKnowledge } from './materialize-knowledge.handler'
+import { materializeProactive } from './materialize-proactive.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -274,6 +275,21 @@ export async function executeDeployFlow(
       () => materializeKnowledge(context),
     )
     context.state.knowledge = { collectionId: materializedKnowledge.collectionId }
+
+    // Materialize a CAPACIDADE proativa (F1, FR-PRO-01/FR-PRO-02): os 3 toggles de
+    // `builderState.proactive` → regras DECLARATIVAS `ScheduledAutomation` (que o motor
+    // de proatividade F2/F3/F4 dispara no runtime). Reconciliação por trigger (pausa,
+    // nunca apaga). Runs BEFORE provisioning the WhatsApp instance, for the SAME reason
+    // as materialize_pricing/team/media/knowledge: a materialization failure leaves no
+    // orphan UAZapi instance to compensate. Status reuses 'publishing' (still pre-infra
+    // "config" phase); the real step name 'materialize_proactive' lives in `activeStep`
+    // for failure attribution.
+    const materializedProactive = await runStep(
+      'materialize_proactive',
+      'publishing',
+      () => materializeProactive(context),
+    )
+    context.state.proactive = { count: materializedProactive.activeCount }
 
     const instance = await runStep(
       'create_instance',

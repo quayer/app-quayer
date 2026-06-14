@@ -14,8 +14,11 @@
  *
  * 🔒 INVARIANTES (NFR-PRO-2 / NFR-01 / LGPD):
  *   - FAIL-SAFE: em dúvida, NÃO envia. `canSendProactive` bloqueou → cancela.
- *   - NUNCA texto cru fora da janela 24h: `needsTemplate:true` exige HSM
- *     aprovado (que NÃO temos) → cancela 'outside_window_no_template'.
+ *   - NUNCA texto cru fora da janela 24h: `needsTemplate:true` ⇒ o handler tenta
+ *     o caminho HSM (template aprovado, via Cloud API). Sem HSM possível (provider
+ *     ≠ Cloud API, sem `deps.sendTemplate`, ou sem `templateName`) → cancela
+ *     'outside_window_no_template'. `resolveText` (texto livre) NUNCA é chamado
+ *     neste ramo — a invariante fica preservada por construção.
  *   - org-scoped: TODA query filtra por `organizationId`.
  *   - Idempotência em 2 camadas: (1) skip se o ScheduledMessage já não é
  *     'pending'; (2) o `dispatchKey` do `sendAgentResponse` (FSM durável)
@@ -78,6 +81,13 @@ export interface ProactiveScheduledRow {
  * Snapshot de elegibilidade carregado FRESCO no instante do envio. Alimenta
  * `canSendProactive`. `optOut` null = contato não optou por sair. Os campos da
  * sessão são o subset estrutural que os gates de supressão/janela usam.
+ *
+ * HSM (FR-PRO-06 / TPRO-50/51): `hasApprovedTemplate` decide o ramo "fora da
+ * janela" — true ⇒ `canSendProactive` libera com `needsTemplate:true`. Quando há
+ * template, `templateName` (e `languageCode`, default `pt_BR`) identificam o HSM
+ * aprovado a usar. A presença real de um HSM aprovado e a credencial Cloud API
+ * são responsabilidade do `loadEligibility` real (env + provider da Connection);
+ * o erro do Graph no envio é o gate de realidade final (markFailed, fail-safe).
  */
 export interface ProactiveEligibilitySnapshot {
   readonly optOut: { phone: string } | null
@@ -89,6 +99,10 @@ export interface ProactiveEligibilitySnapshot {
   }
   readonly consecutiveProactiveWithoutReply: number
   readonly hasApprovedTemplate?: boolean
+  /** Nome do HSM aprovado a usar fora da janela. Ausente ⇒ não há HSM → cancela. */
+  readonly templateName?: string | null
+  /** Idioma do HSM (BCP-47/Meta, ex.: `pt_BR`). Default `pt_BR` quando ausente. */
+  readonly languageCode?: string | null
 }
 
 /**
@@ -106,6 +120,7 @@ export interface ProactiveSendDeps {
     organizationId: string
     contactPhone: string
     sessionId: string | null
+    connectionId: string
     maxAttempts: number
   }) => Promise<ProactiveEligibilitySnapshot>
   /**
@@ -130,6 +145,21 @@ export interface ProactiveSendDeps {
     agentText: string
     dispatchKey: string
   }) => Promise<{ blocksSent: number; errors: string[] }>
+  /**
+   * Envia um HSM (template aprovado) FORA da janela de 24h — exclusivo da
+   * WhatsApp Cloud API (Meta). OPCIONAL: ausente ⇒ não há caminho HSM (ex.:
+   * provider WhatsApp Web/UAZ) → o handler cancela 'outside_window_no_template'
+   * (fail-safe). Resolve `{ messageId }` no sucesso; lança/retorna `null` em
+   * falha (template não aprovado, credencial inválida, provider errado) →
+   * markFailed. NUNCA envia texto cru: este caminho só carrega o HSM aprovado.
+   */
+  sendTemplate?: (req: {
+    connectionId: string
+    organizationId: string
+    contactPhone: string
+    templateName: string
+    languageCode: string
+  }) => Promise<{ messageId: string } | null>
   /** status='sent' + sentAt (org-scoped). */
   markSent: (id: string, organizationId: string) => Promise<void>
   /** status='cancelled' + cancelledReason (org-scoped). */
@@ -168,8 +198,12 @@ export interface RunScheduledMessageSendOptions {
  *      'skipped' (idempotência: já foi processado/cancelado).
  *   b. Carrega elegibilidade FRESCA e roda `canSendProactive`.
  *   c. Bloqueado (!allowed) → cancela com o reason do gate → 'cancelled'.
- *   d. allowed + needsTemplate → FORA da janela 24h, exige HSM aprovado (não
- *      temos) → cancela 'outside_window_no_template' SEM enviar → 'cancelled'.
+ *   d. allowed + needsTemplate → FORA da janela 24h: tenta o caminho HSM
+ *      (template aprovado via Cloud API). Há `deps.sendTemplate` + `templateName`
+ *      → envia o HSM. Sucesso → markSent → 'sent'. Falha/null → markFailed →
+ *      'failed'. Sem caminho HSM (provider ≠ Cloud API, sem dep ou sem
+ *      templateName) → cancela 'outside_window_no_template' → 'cancelled'.
+ *      `resolveText` (texto livre) NUNCA é chamado neste ramo.
  *   e. Resolve o texto. Vazio/null → markFailed 'no_text_resolved' → 'failed'.
  *   f. Sem sessão real → markFailed 'no_session' (Message.sessionId é FK). Senão
  *      envia com dispatchKey = sha256(sessionId:id). blocksSent>0 → markSent →
@@ -198,6 +232,7 @@ export async function runScheduledMessageSend(
       organizationId: org,
       contactPhone: row.contactPhone,
       sessionId: row.sessionId,
+      connectionId: row.connectionId,
       maxAttempts: row.maxAttempts,
     })
 
@@ -218,11 +253,42 @@ export async function runScheduledMessageSend(
       return { outcome: 'cancelled', reason }
     }
 
-    // d. Liberado MAS fora da janela 24h → EXIGE template HSM aprovado, que
-    //    ainda não temos. NUNCA enviar texto cru fora da janela (compliance).
+    // d. Liberado MAS fora da janela 24h → EXIGE template HSM aprovado. HSM é
+    //    exclusivo da WhatsApp Cloud API (Meta): o caminho real só existe quando
+    //    a Connection é Cloud API (`deps.sendTemplate` presente) E há um HSM
+    //    aprovado resolvido (`templateName`). NUNCA texto cru fora da janela:
+    //    `resolveText` NÃO é chamado neste ramo, por construção.
     if (decision.needsTemplate === true) {
-      await deps.markCancelled(id, org, 'outside_window_no_template')
-      return { outcome: 'cancelled', reason: 'needs_template' }
+      const templateName = elig.templateName?.trim()
+      if (!deps.sendTemplate || !templateName) {
+        // Sem caminho HSM (provider ≠ Cloud API / sem template aprovado) →
+        // cancela, exatamente como antes (fail-safe), agora justificado por
+        // ausência de capacidade real, não por flag hardcoded.
+        await deps.markCancelled(id, org, 'outside_window_no_template')
+        return { outcome: 'cancelled', reason: 'needs_template' }
+      }
+
+      const languageCode =
+        elig.languageCode && elig.languageCode.trim().length > 0
+          ? elig.languageCode.trim()
+          : 'pt_BR'
+
+      const tpl = await deps.sendTemplate({
+        connectionId: row.connectionId,
+        organizationId: org,
+        contactPhone: row.contactPhone,
+        templateName,
+        languageCode,
+      })
+
+      // null = transporte não conseguiu enviar com segurança (provider errado,
+      // credencial ausente) → falha sem enviar. messageId = HSM entregue.
+      if (tpl && tpl.messageId) {
+        await deps.markSent(id, org)
+        return { outcome: 'sent', reason: 'template' }
+      }
+      await deps.markFailed(id, org, 'template_send_failed')
+      return { outcome: 'failed', reason: 'template_send_failed' }
     }
 
     // e. Resolve o texto. null/vazio = não há texto seguro → falha (não envia).

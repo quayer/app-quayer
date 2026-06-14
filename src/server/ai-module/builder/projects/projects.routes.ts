@@ -18,6 +18,7 @@ import { promptRoutes } from './routes/prompt.routes'
 import { metricsRoutes } from './routes/metrics.routes'
 import { channelRoutes } from './routes/channel.routes'
 import { playgroundRoutes } from './routes/playground.routes'
+import { proactiveHistoryRoutes } from './routes/proactive-history.routes'
 
 export const projectsRoutes = {
   ...crudRoutes,
@@ -25,6 +26,7 @@ export const projectsRoutes = {
   ...metricsRoutes,
   ...channelRoutes,
   ...playgroundRoutes,
+  ...proactiveHistoryRoutes,
 }
 
 export type ProjectsRoutes = typeof projectsRoutes

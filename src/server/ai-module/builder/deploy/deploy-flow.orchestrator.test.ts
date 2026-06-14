@@ -59,6 +59,11 @@ vi.mock('./materialize-knowledge.handler', () => ({
   compensateMaterializeKnowledge: vi.fn(),
 }))
 
+vi.mock('./materialize-proactive.handler', () => ({
+  materializeProactive: vi.fn(),
+  compensateMaterializeProactive: vi.fn(),
+}))
+
 vi.mock('./create-instance.handler', () => ({
   createDeployInstance: vi.fn(),
   deleteDeployInstance: vi.fn(),
@@ -86,6 +91,7 @@ import { materializePricing } from './materialize-pricing.handler'
 import { materializeTeam } from './materialize-team.handler'
 import { materializeMedia } from './materialize-media.handler'
 import { materializeKnowledge } from './materialize-knowledge.handler'
+import { materializeProactive } from './materialize-proactive.handler'
 import { createDeployInstance } from './create-instance.handler'
 import { attachConnection } from './attach-connection.handler'
 import { rollbackDeployment } from './rollback.handler'
@@ -156,6 +162,12 @@ describe('executeDeployFlow', () => {
     vi.mocked(materializeKnowledge).mockResolvedValue({
       collectionId: 'knowledge-collection-1',
       linked: true,
+    })
+    vi.mocked(materializeProactive).mockResolvedValue({
+      activeCount: 0,
+      created: 0,
+      updated: 0,
+      paused: 0,
     })
     vi.mocked(createDeployInstance).mockResolvedValue({
       instanceId: 'connection-1',

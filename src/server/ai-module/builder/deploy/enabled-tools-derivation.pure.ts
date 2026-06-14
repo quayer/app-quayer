@@ -33,7 +33,7 @@
  * catálogo fixo. Remove APENAS as keys derivadas listadas explicitamente.
  */
 
-import type { HandoffMode } from '../cards/builder-state'
+import type { HandoffMode, ProactiveState } from '../cards/builder-state'
 import type { PricingDisclosureStyle } from './pricing-reconcile'
 
 // ==========================================
@@ -52,6 +52,9 @@ export const CALENDAR_TOOL_KEYS: readonly string[] = [
 
 /** Registro de intenção de agendamento — FALLBACK quando NÃO há conexão. */
 export const SCHEDULE_FALLBACK_TOOL_KEY = 'schedule_appointment'
+
+/** Tool de agendamento de follow-up proativo — derivada do toggle `followUp`. */
+export const PROACTIVE_FOLLOWUP_TOOL_KEY = 'create_followup'
 
 // ==========================================
 // Tipos do plano
@@ -195,4 +198,28 @@ export function deriveCalendarToolChanges(input: {
     }
   }
   return { ensure: [SCHEDULE_FALLBACK_TOOL_KEY], remove: [...CALENDAR_TOOL_KEYS] }
+}
+
+/**
+ * PROATIVIDADE (FR-PRO-01/FR-PRO-02): a tool `create_followup` (que agenda um
+ * envio proativo no runtime) DERIVA do toggle `proactive.followUp`:
+ *  - followUp === true → garante `create_followup` (o agente publicado consegue
+ *    agendar follow-ups). Sem isto, o card salva o toggle mas o agente nunca ganha
+ *    a capacidade — catálogo órfão, o MESMO bug de costura de get_pricing /
+ *    transfer_to_human que esta derivação fecha;
+ *  - followUp falso/ausente (ou `proactive` undefined) → REMOVE `create_followup`
+ *    (não publica a capacidade por acidente).
+ *
+ * Só `followUp` gateia a tool: `reminders`/`importantDates` são disparados pelo
+ * cron-scan do motor de proatividade (F3/F4), não pela tool `create_followup`.
+ * O set-merge de `reconcileEnabledTools` PRESERVA tools custom/desconhecidas —
+ * remove APENAS esta key. Pura: sem IO, sem `any`.
+ */
+export function deriveProactiveToolChanges(
+  proactive: ProactiveState | undefined,
+): EnabledToolsChange {
+  if (proactive?.followUp === true) {
+    return { ensure: [PROACTIVE_FOLLOWUP_TOOL_KEY], remove: [] }
+  }
+  return { ensure: [], remove: [PROACTIVE_FOLLOWUP_TOOL_KEY] }
 }

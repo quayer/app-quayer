@@ -35,10 +35,12 @@ import { GOOGLE_CALENDAR_PROVIDER } from '@/lib/calendar/types'
 export {
   CALENDAR_TOOL_KEYS,
   SCHEDULE_FALLBACK_TOOL_KEY,
+  PROACTIVE_FOLLOWUP_TOOL_KEY,
   reconcileEnabledTools,
   derivePricingToolChanges,
   deriveHandoffToolChanges,
   deriveCalendarToolChanges,
+  deriveProactiveToolChanges,
 } from './enabled-tools-derivation.pure'
 export type {
   EnabledToolsChange,

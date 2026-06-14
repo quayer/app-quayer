@@ -8,6 +8,18 @@
  * ⚠️ QUALIDADE DO TEXTO É VALIDADA NO TESTE LOCAL/LLM: `resolveText` tenta
  * resolver o agente da sessão e gerar texto via `processAgentMessage`. Em qualquer
  * incerteza retorna `null` (skip seguro → markFailed), NUNCA envia lixo.
+ *
+ * 📨 HSM / TEMPLATE FORA DA JANELA (FR-PRO-06 / TPRO-50/51): HSM é EXCLUSIVO da
+ * WhatsApp Cloud API (Meta) — WhatsApp Web/UAZapi arquiteturalmente NÃO envia
+ * template. Por isso o `sendTemplate` real só existe quando a Connection é
+ * `WHATSAPP_CLOUD_API` (com credenciais cloudApi*); caso contrário a dep é
+ * OMITIDA e o handler cancela 'outside_window_no_template' (fail-safe). O nome do
+ * HSM aprovado vem da config por env (`PROACTIVE_HSM_TEMPLATE_NAME`/`_LANG`) — o
+ * operador é responsável por tê-lo aprovado na Meta; o erro do Graph na hora do
+ * envio é o gate de realidade final (markFailed). ⚠️ Em homol/prod hoje as
+ * conexões são WhatsApp Web/UAZ, então NA PRÁTICA o ramo HSM cancela até existir
+ * uma conexão Cloud API real + HSM aprovado — comportamento correto e fail-safe.
+ * Validação ponta-a-ponta (credencial Cloud API + HSM aprovado) é HARNESS LOCAL.
  */
 
 import type { ProactiveSendDeps } from './scheduled-message-send'
@@ -25,6 +37,20 @@ function buildProactiveDirective(reason: string, messageGoal: string | null): st
     `Objetivo: ${goal}. Motivo: ${reason}. ` +
     'Não invente informações; seja breve e cordial.'
   )
+}
+
+/**
+ * Lê a config do HSM proativo por env (sem schema). Presença de
+ * `PROACTIVE_HSM_TEMPLATE_NAME` (não-vazio) = "há um template aprovado
+ * configurado" — o operador é responsável por tê-lo aprovado na Meta. Sem a var,
+ * NÃO há HSM conhecido → fora da janela bloqueia (fail-safe). `languageCode`
+ * default `pt_BR`. Retorna `null` quando não há template configurado.
+ */
+function readHsmConfig(): { templateName: string; languageCode: string } | null {
+  const name = process.env.PROACTIVE_HSM_TEMPLATE_NAME?.trim()
+  if (!name) return null
+  const lang = process.env.PROACTIVE_HSM_TEMPLATE_LANG?.trim()
+  return { templateName: name, languageCode: lang && lang.length > 0 ? lang : 'pt_BR' }
 }
 
 /**
@@ -115,6 +141,27 @@ export async function buildRealDeps(): Promise<ProactiveSendDeps> {
       },
     })
 
+    // HSM (FR-PRO-06 / TPRO-50/51): só há template aprovado utilizável quando
+    // (1) a Connection é WhatsApp Cloud API com credenciais (HSM é exclusivo da
+    // Cloud API da Meta — WhatsApp Web/UAZ não envia template) E (2) um HSM está
+    // configurado por env. Qualquer uma ausente → hasApprovedTemplate=false →
+    // fora da janela bloqueia (fail-safe). org-scoped.
+    const connection = await database.connection.findFirst({
+      where: { id: p.connectionId, organizationId: p.organizationId },
+      select: {
+        provider: true,
+        cloudApiAccessToken: true,
+        cloudApiPhoneNumberId: true,
+        cloudApiWabaId: true,
+      },
+    })
+    const isCloudApi =
+      connection?.provider === 'WHATSAPP_CLOUD_API' &&
+      !!connection.cloudApiAccessToken &&
+      !!connection.cloudApiPhoneNumberId &&
+      !!connection.cloudApiWabaId
+    const hsm = isCloudApi ? readHsmConfig() : null
+
     return {
       optOut: optOutRow ? { phone: optOutRow.phone } : null,
       session: {
@@ -124,8 +171,9 @@ export async function buildRealDeps(): Promise<ProactiveSendDeps> {
         status: session?.status,
       },
       consecutiveProactiveWithoutReply,
-      // Sem catálogo HSM ainda (FR-PRO-06 / TPRO-50): fora da janela bloqueia.
-      hasApprovedTemplate: false,
+      hasApprovedTemplate: hsm !== null,
+      templateName: hsm?.templateName ?? null,
+      languageCode: hsm?.languageCode ?? null,
     }
   }
 
@@ -198,6 +246,31 @@ export async function buildRealDeps(): Promise<ProactiveSendDeps> {
     return { blocksSent: result.blocksSent, errors: result.errors }
   }
 
+  // HSM real (FORA da janela 24h): exclusivo da Cloud API. O `loadEligibility`
+  // só popula `templateName` quando a Connection é Cloud API + env configurado,
+  // então este caminho só é exercido nesse caso. Idempotência: HSM é 1 mensagem
+  // única (não multi-bloco), então o dispatchKey/checkpoint do sendAgentResponse
+  // NÃO se aplica — a anti-duplicação fica na camada 1 (status pending→sent do
+  // ScheduledMessage, org-scoped). Falha do Graph (template não aprovado,
+  // credencial inválida) lança → o handler cai no markFailed (fail-safe).
+  const sendTemplate: ProactiveSendDeps['sendTemplate'] = async (req) => {
+    const { CloudAPIAdapter } = await import(
+      '@/lib/providers/adapters/cloudapi/cloudapi.adapter'
+    )
+    const adapter = new CloudAPIAdapter()
+    // O `instanceId` do adapter Cloud API é o próprio Connection.id (resolve
+    // credenciais cloudApi* daquela linha). `components` omitido: MVP usa HSM
+    // sem variáveis (texto fixo aprovado). org-scoping já foi feito no
+    // loadEligibility ao resolver a Connection da org antes de popular templateName.
+    const result = await adapter.sendTemplate(
+      req.connectionId,
+      req.contactPhone,
+      req.templateName,
+      req.languageCode,
+    )
+    return result.messageId ? { messageId: result.messageId } : null
+  }
+
   const markSent: ProactiveSendDeps['markSent'] = async (id, organizationId) => {
     await database.scheduledMessage.updateMany({
       where: { id, organizationId },
@@ -224,6 +297,7 @@ export async function buildRealDeps(): Promise<ProactiveSendDeps> {
     loadEligibility,
     resolveText,
     send,
+    sendTemplate,
     markSent,
     markCancelled,
     markFailed,
