@@ -204,7 +204,8 @@ const CONHECER_STEPS: readonly JourneyV2Step[] = [
   {
     id: 'build_mode',
     title: 'Modo de construção',
-    ask: 'Como você quer construir o agente? Escolha o modo no card.',
+    ask:
+      'Escolha no card quanto o Builder deve assumir antes de sugerir missão, capacidades e plano: montar direto com boas práticas, pesquisar antes de sugerir ou deixar você orientar a montagem.',
     requiredPaths: ['confirmations.buildMode'],
     // v3 (mission-first, FR-39): aplica SÓ em projetos mission-first. Projetos v2 sem
     // o marcador `missionFirst` → o passo NÃO aplica, some do checklist/denominador e
@@ -313,7 +314,7 @@ const REVISAR_STEPS: readonly JourneyV2Step[] = [
   {
     id: 'conversation_blueprint',
     title: 'Plano de atendimento',
-    ask: 'Vou montar o plano de atendimento do agente (consequência da missão, capacidades, qualificação e restrições). Revise e aprove o card antes de gerar o prompt final.',
+    ask: 'O card vai gerar automaticamente uma proposta de plano de atendimento a partir da missão, capacidades, qualificação e restrições. Quando a proposta aparecer, peça ao usuário para revisar, ajustar se quiser e aprovar antes de gerar o prompt final.',
     requiredPaths: ['conversationBlueprint.status'],
     isDone: (s) => s.conversationBlueprint?.status === 'approved',
     missing: (s) =>

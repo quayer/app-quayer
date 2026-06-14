@@ -1,5 +1,7 @@
 import type { BuilderState } from '../cards/builder-state'
+import { getToolDescription } from '../catalog/official-tools'
 import type { PlaybookDesignerInput } from '../sub-agents/playbook-designer'
+import { resolveAgentStrategy } from './agent-strategy'
 // FR-51/NFR-13 — inferência de nicho/risco extraída para o módulo puro
 // compartilhado; este arquivo re-usa SEM duplicar a lógica.
 import { compact, inferNiche, soldOutLimit } from './niche-inference.pure'
@@ -68,6 +70,12 @@ export function buildDesignerInput(
   const objective = compact(input.objective, 500) ?? compact(state.project.objective, 500)
   if (!objective) return null
 
+  const niche = inferNiche(state, input.niche)
+  const strategy = resolveAgentStrategy({
+    role: state.mission?.role,
+    objective: state.mission?.objective ?? objective,
+    niche,
+  })
   const proposed = state.sourceIngestion.proposed
   const differentiators = proposed?.differentiators ?? []
   const businessContext = unique([
@@ -114,6 +122,12 @@ export function buildDesignerInput(
   const capabilities = unique([
     ...state.selectedCapabilityKeys,
     ...state.selectedToolKeys,
+    ...strategy.recommendedTools.map((toolKey) => {
+      const description = getToolDescription(toolKey)
+      return description
+        ? `Ferramenta recomendada pelo playbook: ${toolKey} — ${description}`
+        : `Ferramenta recomendada pelo playbook: ${toolKey}`
+    }),
     state.handoff.mode && state.handoff.mode !== 'nenhum'
       ? `Transferir para humano: ${state.handoff.mode}`
       : undefined,
@@ -123,7 +137,7 @@ export function buildDesignerInput(
 
   return {
     objective,
-    niche: inferNiche(state, input.niche),
+    niche,
     businessContext,
     capabilities,
     knownServices,

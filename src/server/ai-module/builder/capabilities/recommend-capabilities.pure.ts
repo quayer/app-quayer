@@ -176,14 +176,14 @@ function strategyToRecommendations(
     if (!OFFICIAL_TOOL_NAMES.has(id)) continue
 
     if (CALENDAR_TOOL_IDS.has(id)) {
+      const calendarConnectionRisk =
+        'Conecte uma agenda (Google Calendar) antes de ligar esta capacidade — sem conexão o agente não consegue confirmar horários reais.'
       out.push({
         id,
         kind: kindForTool(id),
         reason: reasonForTool(id),
         requires: needsConnection ? ['calendar_connection'] : [],
-        risk: needsConnection
-          ? 'Conecte uma agenda (Google Calendar) antes de ligar esta capacidade — sem conexão o agente não consegue confirmar horários reais.'
-          : undefined,
+        risk: needsConnection ? calendarConnectionRisk : soldOutRisk,
       })
       continue
     }
@@ -401,7 +401,7 @@ export function recommendAgentCapabilities(
       requires: needsConnection ? ['calendar_connection'] : [],
       risk: needsConnection
         ? 'Conecte uma agenda (Google Calendar) antes de ligar esta capacidade — sem conexão o agente não consegue confirmar horários reais.'
-        : undefined,
+        : soldOutRisk,
     })
     recs.push({
       id: 'create_event',
@@ -410,7 +410,7 @@ export function recommendAgentCapabilities(
       requires: needsConnection ? ['calendar_connection'] : [],
       risk: needsConnection
         ? 'Conecte uma agenda (Google Calendar) antes de ligar esta capacidade.'
-        : undefined,
+        : soldOutRisk,
     })
   }
 

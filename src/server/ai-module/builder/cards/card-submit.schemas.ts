@@ -405,9 +405,9 @@ export const missionPayloadSchema = z.object({
  * quer construir o agente numa ÚNICA decisão (card de JORNADA com ACK conversacional,
  * igual a `mission`/`business_identity` — entra na união do entrypoint, NÃO é silent).
  * `mode` é uma escolha entre 3 valores em linguagem de negócio (FR-49):
- *   - 'recomendado' (default, pré-selecionado no card) → "Montar agora com boas práticas".
- *   - 'pesquisa' → "Pesquisar referências antes".
- *   - 'livre' → "Eu digo como quero".
+ *   - 'recomendado' (default, pré-selecionado no card) → "Montar direto com boas práticas".
+ *   - 'pesquisa' → "Pesquisar antes de sugerir".
+ *   - 'livre' → "Quero orientar a montagem".
  * Sem dado livre a confiar além do enum. → `builderState.buildMode` /
  * confirmation `buildMode`.
  */

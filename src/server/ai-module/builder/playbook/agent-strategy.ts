@@ -124,28 +124,50 @@ export const AGENT_STRATEGIES: readonly AgentStrategy[] = [
     objective: 'qualificar',
     framework: 'bant_lite',
     requiredFields: [
-      'Se a pessoa quer morar, investir ou só está pesquisando',
-      'Tipo de imóvel e região de interesse',
-      'Faixa de valor ou forma de pagamento',
-      'Próximo passo desejado (mais detalhes, visita ou falar com consultor)',
+      'Empreendimento ou imóvel de interesse, se ainda não estiver claro',
+      'Se a pessoa quer morar, investir, comprar, alugar ou apenas pesquisar',
+      'Para empreendimento específico: interesse principal (valores/condições, plantas, localização, visita ou consultor)',
+      'Para empreendimento com financiamento, subsídio ou Minha Casa Minha Vida: primeiro imóvel, renda familiar aproximada, entrada/FGTS e uso de financiamento',
+      'Para busca em carteira: região, tamanho/quartos e teto de valor quando esses dados estiverem faltando',
+      'E-mail apenas quando necessário para enviar material, simulação ou proposta; telefone já vem do WhatsApp',
+      'Próximo passo desejado: material, simulação, opções, visita ou falar com consultor',
     ],
-    recommendedTools: ['create_lead', 'transfer_to_human', 'create_followup'],
+    recommendedTools: [
+      'create_lead',
+      'calendar_list_slots',
+      'check_availability',
+      'create_event',
+      'transfer_to_human',
+      'create_followup',
+    ],
     guardrails: [
       'Não prometer disponibilidade de imóvel sem confirmação humana.',
       'Não inventar preço, condição de pagamento ou data de visita.',
+      'Não prometer aprovação de financiamento, subsídio, enquadramento no Minha Casa Minha Vida ou uso de FGTS sem validação humana/simulador.',
+      'Não fazer questionário genérico quando o lead já veio interessado em um empreendimento específico.',
+      'Não confirmar visita sem agenda conectada e horário disponível; se não houver agenda, coletar preferência e passar para consultor.',
       'Uma pergunta por vez; nunca despejar formulário.',
     ],
     handoffSummary: [
       'Passar para um consultor quando o lead pedir visita, proposta ou negociação.',
-      'Resumir intenção, tipo/região e faixa de valor antes de transferir.',
+      'Passar para consultor quando o lead pedir preço final, condição comercial, financiamento ou disponibilidade específica.',
+      'Para empreendimento específico, resumir objetivo do lead, interesse principal e dados financeiros mínimos quando financiamento/subsídio for relevante.',
+      'Para busca em carteira, resumir finalidade, região, tamanho/quartos e teto de valor antes de transferir.',
+      'Se não houver agenda conectada, coletar preferência de período antes de transferir.',
+      'Informar o endereço confirmado do empreendimento antes de visita ou handoff, quando a fonte tiver endereço.',
     ],
     exampleConversations: [
       'Cliente: "Tem apê de 2 quartos na zona sul?" → entender se é p/ morar ou investir, depois região e faixa de valor.',
-      'Cliente: "Quero agendar uma visita" → confirmar dados e transferir para o consultor.',
+      'Cliente: "Quero conhecer o Vibra Butantã" → confirmar se é moradia ou investimento e conduzir para valores, plantas, visita ou consultor.',
+      'Cliente: "Minha Casa Minha Vida" → entender se é primeiro imóvel, renda familiar aproximada e entrada/FGTS antes de passar para simulação com consultor.',
+      'Cliente: "Quero agendar uma visita" → listar horários disponíveis quando houver agenda conectada; se não houver, coletar preferência e transferir.',
     ],
     successCriteria: [
-      'Lead qualificado com intenção, tipo/região e faixa de valor.',
-      'Lead encaminhado ao consultor sem repetir perguntas já respondidas.',
+      'Lead de empreendimento específico conduzido com poucas perguntas e próximo passo claro.',
+      'Lead de financiamento/subsídio encaminhado com primeiro imóvel, renda aproximada, entrada/FGTS e interesse de simulação quando possível.',
+      'Lead de busca em carteira qualificado com finalidade, região, tamanho/quartos e teto de valor quando necessário.',
+      'Quando visita for aceita e houver agenda, horários reais foram oferecidos antes de marcar.',
+      'Lead encaminhado ao consultor sem prometer preço, disponibilidade ou condição não confirmada.',
     ],
   },
 
@@ -529,7 +551,7 @@ function resolveBusinessType(input: {
     return 'ecommerce'
   }
   if (/(clinica|consultorio|saude|medic|dent)/.test(text)) return 'clinica'
-  if (/(imovel|imobili|corretor)/.test(text)) return 'imobiliario'
+  if (/(imovel|imob|imobili|empreend|apartamento|corretor)/.test(text)) return 'imobiliario'
   if (/(servic|atendimento|local|oficina|salao|estetica)/.test(text)) {
     return 'servicos'
   }
@@ -556,10 +578,10 @@ function resolveRole(input: {
 
   // Sem papel explícito: inferir pelo objetivo macro.
   const objText = foldText([input.objective])
+  if (/(sdr|qualific|captar|lead|prospec)/.test(objText)) return 'sdr'
   if (/(agend|marcar)/.test(objText)) return 'secretaria'
   if (/(vend|fechar|compr)/.test(objText)) return 'vendas'
   if (/(suport|ajud|duvid)/.test(objText)) return 'suporte'
-  if (/(qualific|captar|lead)/.test(objText)) return 'sdr'
   return undefined
 }
 

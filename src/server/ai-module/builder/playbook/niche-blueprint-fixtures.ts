@@ -1,10 +1,302 @@
 import type { ConversationBlueprint } from './blueprint.schema'
 import { normalizeConversationBlueprint } from './blueprint-helpers'
 
-type FixtureKey = 'imobiliario' | 'b2b' | 'servico_local' | 'saude' | 'delivery'
+type FixtureKey =
+  | 'imobiliario_financiamento_popular'
+  | 'imobiliario_empreendimento'
+  | 'imobiliario'
+  | 'b2b'
+  | 'servico_local'
+  | 'saude'
+  | 'delivery'
 type RawFixture = Record<string, unknown>
 
 const FIXTURES: Record<FixtureKey, RawFixture> = {
+  imobiliario_financiamento_popular: {
+    objective:
+      'Qualificar interessado em empreendimento com financiamento popular e conduzir para simulação, consultor ou visita.',
+    niche: 'empreendimento imobiliário com financiamento',
+    stages: [
+      {
+        id: 'confirmar_interesse',
+        title: 'Confirmar interesse',
+        goal: 'Acolher o lead interessado no empreendimento e confirmar intenção de compra/moradia.',
+      },
+      {
+        id: 'qualificar_financiamento',
+        title: 'Qualificar financiamento',
+        goal: 'Coletar sinais mínimos para simulação sem prometer aprovação, subsídio ou condição.',
+      },
+      {
+        id: 'conduzir_simulacao_visita',
+        title: 'Conduzir próximo passo',
+        goal: 'Direcionar para simulação com consultor, envio de material ou visita com horário disponível.',
+      },
+    ],
+    questions: [
+      {
+        id: 'primeiro_imovel',
+        stageId: 'qualificar_financiamento',
+        text: 'Esse seria seu primeiro imóvel?',
+        purpose: 'Entender um sinal importante para financiamento/subsídio sem prometer enquadramento.',
+        variableKey: 'primeiro_imovel',
+        skipWhenKnown: 'Pular se o lead já informou que é ou não é primeiro imóvel.',
+      },
+      {
+        id: 'renda_familiar_aproximada',
+        stageId: 'qualificar_financiamento',
+        text: 'Qual é a renda familiar aproximada hoje?',
+        purpose: 'Coletar renda aproximada para o consultor validar possibilidades de financiamento.',
+        variableKey: 'renda_familiar_aproximada',
+        skipWhenKnown: 'Pular se renda familiar aproximada já estiver no contexto.',
+      },
+      {
+        id: 'entrada_fgts',
+        stageId: 'qualificar_financiamento',
+        text: 'Qual valor você tem disponível para entrada, incluindo FGTS se for usar?',
+        purpose: 'Entender recursos disponíveis para entrada e simulação.',
+        variableKey: 'entrada_fgts',
+        skipWhenKnown: 'Pular se valor de entrada ou uso de FGTS já estiver claro.',
+      },
+      {
+        id: 'proximo_passo_interesse',
+        stageId: 'conduzir_simulacao_visita',
+        text: 'Qual próximo passo faz mais sentido: simulação com consultor, material, visita?',
+        purpose: 'Definir o encaminhamento mais útil para o lead.',
+        variableKey: 'proximo_passo_interesse',
+        skipWhenKnown: 'Pular se o lead já pediu simulação, material, visita ou consultor.',
+      },
+      {
+        id: 'email_material',
+        stageId: 'conduzir_simulacao_visita',
+        text: 'Qual e-mail posso usar para enviar o material da simulação?',
+        purpose: 'Coletar e-mail quando o próximo passo exigir material, simulação ou proposta.',
+        variableKey: 'email_material',
+        skipWhenKnown: 'Pular se e-mail já estiver conhecido ou se o lead não quiser material/simulação.',
+        required: false,
+      },
+    ],
+    variables: [
+      {
+        key: 'email_material',
+        label: 'E-mail para material ou simulação',
+        type: 'email',
+        source: 'user',
+        reviewRequired: false,
+      },
+    ],
+    skipRules: [],
+    successCriteria: [
+      'Lead encaminhado com primeiro imóvel, renda aproximada, entrada/FGTS e próximo passo quando possível.',
+      'Endereço confirmado do empreendimento informado quando o lead pedir localização, visita ou handoff.',
+      'Simulação, aprovação, subsídio e condições foram prometidos apenas após validação humana/simulador.',
+      'Se o lead quiser visita e houver agenda conectada, horários disponíveis foram oferecidos antes do agendamento.',
+    ],
+    handoffTriggers: [
+      'Lead pede simulação, aprovação de financiamento, subsídio, Minha Casa Minha Vida, proposta ou condição comercial.',
+      'Lead quer falar com consultor ou confirmar disponibilidade/preço final.',
+      'Lead aceita visita e não há agenda conectada para confirmar horários reais.',
+    ],
+    toolTriggers: [
+      {
+        capability: 'Registrar lead para simulação imobiliária',
+        toolKey: 'create_lead',
+        when: 'Quando houver pelo menos renda aproximada, entrada/FGTS ou próximo passo claro.',
+        requiredVariables: [
+          'renda_familiar_aproximada',
+          'entrada_fgts',
+          'proximo_passo_interesse',
+        ],
+        fallback: 'Resumir dados financeiros mínimos na conversa antes de transferir.',
+        active: false,
+      },
+      {
+        capability: 'Listar horários disponíveis para visita',
+        toolKey: 'calendar_list_slots',
+        when: 'Assim que o lead escolher visita e houver agenda conectada.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Perguntar melhor período e transferir para consultor confirmar.',
+        active: false,
+      },
+      {
+        capability: 'Validar horário escolhido',
+        toolKey: 'check_availability',
+        when: 'Quando o lead escolher um horário entre os slots disponíveis.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Oferecer outro horário disponível ou transferir para consultor.',
+        active: false,
+      },
+      {
+        capability: 'Agendar visita no decorado ou stand',
+        toolKey: 'create_event',
+        when: 'Quando o lead confirmar um horário livre para visita.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Não confirmar visita; transferir para consultor com a preferência do lead.',
+        active: false,
+      },
+      {
+        capability: 'Transferir para consultor imobiliário',
+        toolKey: 'transfer_to_human',
+        when: 'Quando houver pedido de simulação, financiamento, condição comercial, consultor ou falta de agenda conectada.',
+        requiredVariables: ['renda_familiar_aproximada', 'proximo_passo_interesse'],
+        fallback: 'Avisar que o consultor valida as condições e confirma os detalhes.',
+        active: false,
+      },
+    ],
+    objectionRules: [
+      {
+        objection: 'Não sei minha renda exata',
+        responseGuidance:
+          'Pedir uma estimativa aproximada e explicar que o consultor valida a simulação depois.',
+      },
+      {
+        objection: 'Não tenho entrada',
+        responseGuidance:
+          'Acolher e encaminhar para consultor validar alternativas, sem prometer aprovação ou condição.',
+      },
+    ],
+    doRules: [
+      'Explicar que os dados servem para o consultor simular possibilidades.',
+      'Informar o endereço confirmado do empreendimento quando houver interesse em localização/visita.',
+      'Coletar e-mail somente se for enviar material, simulação ou proposta.',
+      'Ao transferir, resumir primeiro imóvel, renda aproximada, entrada/FGTS, próximo passo e melhor período de contato/visita.',
+    ],
+    dontRules: [
+      'Não prometer aprovação de financiamento, subsídio, enquadramento no Minha Casa Minha Vida ou uso de FGTS.',
+      'Não pedir CPF ou documentos sensíveis sem ferramenta, política ou necessidade explícita.',
+      'Não inventar faixas oficiais, regras do programa, preço, condição ou disponibilidade.',
+      'Não confirmar visita sem agenda conectada e horário livre.',
+    ],
+    sourceRefs: [
+      { type: 'default', label: 'Fixture empreendimento com financiamento popular' },
+    ],
+  },
+  imobiliario_empreendimento: {
+    objective: 'Atender interessado em empreendimento específico e conduzir para material, consultor ou visita.',
+    niche: 'empreendimento imobiliário',
+    stages: [
+      {
+        id: 'confirmar_interesse',
+        title: 'Confirmar interesse',
+        goal: 'Acolher o lead e confirmar a intenção sem repetir dados que já vieram da fonte.',
+      },
+      {
+        id: 'conduzir_proximo_passo',
+        title: 'Conduzir próximo passo',
+        goal: 'Direcionar para valores/condições, plantas/material, visita ou consultor.',
+      },
+      {
+        id: 'agendar_visita',
+        title: 'Agendar visita',
+        goal: 'Oferecer horários reais quando houver agenda conectada ou transferir para confirmação humana.',
+      },
+    ],
+    questions: [
+      {
+        id: 'objetivo_compra',
+        stageId: 'confirmar_interesse',
+        text: 'Você está olhando esse empreendimento para morar ou investir?',
+        purpose: 'Entender a motivação principal do lead sem abrir uma busca genérica.',
+        variableKey: 'objetivo_compra',
+        skipWhenKnown: 'Pular se o lead já informou que quer morar, investir ou apenas pesquisar.',
+      },
+      {
+        id: 'proximo_passo_interesse',
+        stageId: 'conduzir_proximo_passo',
+        text: 'O que você quer ver agora: valores e condições, plantas, visita ou falar com consultor?',
+        purpose: 'Identificar o próximo passo comercial mais útil para o lead.',
+        variableKey: 'proximo_passo_interesse',
+        skipWhenKnown: 'Pular se o lead já pediu valores, plantas, visita ou consultor.',
+      },
+      {
+        id: 'prazo_decisao',
+        stageId: 'conduzir_proximo_passo',
+        text: 'Você pretende decidir nos próximos meses ou está pesquisando com calma?',
+        purpose: 'Entender urgência sem pressionar o lead.',
+        variableKey: 'prazo_decisao',
+        skipWhenKnown: 'Pular se o prazo ou urgência já estiver claro.',
+      },
+    ],
+    variables: [],
+    skipRules: [],
+    successCriteria: [
+      'Lead interessado no empreendimento com objetivo e próximo passo definidos.',
+      'Se o lead quiser visita e houver agenda conectada, horários disponíveis foram oferecidos antes do agendamento.',
+      'Preço final, condição comercial, financiamento e disponibilidade específica foram respondidos apenas com fonte confirmada ou consultor.',
+    ],
+    handoffTriggers: [
+      'Lead pede consultor, proposta, financiamento, preço final, condição comercial ou disponibilidade específica.',
+      'Lead aceita visita e não há agenda conectada para confirmar horários reais.',
+      'Lead demonstra alto interesse e quer avançar com valores/condições.',
+    ],
+    toolTriggers: [
+      {
+        capability: 'Registrar lead interessado no empreendimento',
+        toolKey: 'create_lead',
+        when: 'Quando objetivo ou próximo passo estiver claro.',
+        requiredVariables: ['objetivo_compra', 'proximo_passo_interesse'],
+        fallback: 'Manter resumo do interesse na conversa antes de transferir.',
+        active: false,
+      },
+      {
+        capability: 'Listar horários disponíveis para visita',
+        toolKey: 'calendar_list_slots',
+        when: 'Assim que o lead aceitar visita e houver agenda conectada.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Perguntar melhor período e transferir para consultor confirmar.',
+        active: false,
+      },
+      {
+        capability: 'Validar horário escolhido',
+        toolKey: 'check_availability',
+        when: 'Quando o lead escolher um horário entre os slots disponíveis.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Oferecer outro horário disponível ou transferir para consultor.',
+        active: false,
+      },
+      {
+        capability: 'Agendar visita no decorado ou stand',
+        toolKey: 'create_event',
+        when: 'Quando o lead confirmar um horário livre para visita.',
+        requiredVariables: ['proximo_passo_interesse'],
+        fallback: 'Não confirmar visita; transferir para consultor com a preferência do lead.',
+        active: false,
+      },
+      {
+        capability: 'Transferir para consultor imobiliário',
+        toolKey: 'transfer_to_human',
+        when: 'Quando houver dúvida comercial específica, pedido de consultor ou falta de agenda conectada.',
+        requiredVariables: ['objetivo_compra', 'proximo_passo_interesse'],
+        fallback: 'Avisar que o consultor confirma os detalhes.',
+        active: false,
+      },
+    ],
+    objectionRules: [
+      {
+        objection: 'Só estou pesquisando',
+        responseGuidance:
+          'Acolher sem pressionar, oferecer material objetivo e perguntar se deseja valores/plantas ou falar com consultor.',
+      },
+      {
+        objection: 'Quero saber preço',
+        responseGuidance:
+          'Responder apenas se houver valor confirmado na fonte; senão explicar que o consultor confirma valores e condições atualizadas.',
+      },
+    ],
+    doRules: [
+      'Usar nome, localização e diferenciais confirmados do empreendimento como contexto.',
+      'Fazer poucas perguntas antes de oferecer o próximo passo.',
+      'Quando visita for aceita e agenda existir, oferecer horários disponíveis em vez de perguntar horário aberto.',
+      'Resumir objetivo, próximo passo e prazo antes de transferir.',
+    ],
+    dontRules: [
+      'Não perguntar região, tipo de imóvel ou quartos como checklist se o empreendimento já define isso.',
+      'Não inventar preço, financiamento, disponibilidade ou condição.',
+      'Não confirmar visita sem agenda conectada e horário livre.',
+      'Não transformar o atendimento em formulário longo.',
+    ],
+    sourceRefs: [{ type: 'default', label: 'Fixture empreendimento imobiliário' }],
+  },
   imobiliario: {
     objective: 'Qualificar interessados em imóveis e conduzir para visita ou atendimento humano.',
     niche: 'imobiliário',
@@ -15,14 +307,14 @@ const FIXTURES: Record<FixtureKey, RawFixture> = {
         goal: 'Descobrir se o lead quer morar, investir ou só tirar dúvidas.',
       },
       {
-        id: 'qualificar_busca',
-        title: 'Qualificar busca',
-        goal: 'Coletar preferências suficientes para sugerir o próximo passo.',
+        id: 'qualificar_fit',
+        title: 'Qualificar fit',
+        goal: 'Entender tipologia, aderência à localização e capacidade de seguir.',
       },
       {
-        id: 'proximo_passo',
-        title: 'Conduzir próximo passo',
-        goal: 'Oferecer detalhes, fotos, visita ou contato com consultor.',
+        id: 'conduzir_visita',
+        title: 'Conduzir visita',
+        goal: 'Definir se o próximo passo é material, consultor ou visita com horário disponível.',
       },
     ],
     questions: [
@@ -35,41 +327,92 @@ const FIXTURES: Record<FixtureKey, RawFixture> = {
         skipWhenKnown: 'Pular se o lead já disse que quer morar, investir ou pesquisar.',
       },
       {
-        id: 'tipologia_regiao',
-        stageId: 'qualificar_busca',
-        text: 'Qual tipo de imóvel e região fazem mais sentido para você?',
-        purpose: 'Identificar tipologia e localização desejadas.',
-        variableKey: 'tipologia_regiao',
-        skipWhenKnown: 'Pular se tipo de imóvel e região já estiverem claros.',
+        id: 'tipologia_interesse',
+        stageId: 'qualificar_fit',
+        text: 'Qual tipologia do empreendimento faz mais sentido para você?',
+        purpose: 'Identificar a tipologia de interesse sem abrir busca genérica fora do empreendimento.',
+        variableKey: 'tipologia_interesse',
+        skipWhenKnown: 'Pular se a tipologia de interesse já estiver clara.',
+      },
+      {
+        id: 'aderencia_localizacao',
+        stageId: 'qualificar_fit',
+        text: 'A região do empreendimento funciona para o que você procura?',
+        purpose: 'Validar se a localização do empreendimento combina com a necessidade do lead.',
+        variableKey: 'aderencia_localizacao',
+        skipWhenKnown: 'Pular se o lead já confirmou que a localização faz sentido.',
       },
       {
         id: 'faixa_valor',
-        stageId: 'qualificar_busca',
-        text: 'Você já tem uma faixa de valor ou forma de pagamento em mente?',
-        purpose: 'Entender orçamento e necessidade de financiamento.',
+        stageId: 'qualificar_fit',
+        text: 'Qual faixa de investimento você tem em mente?',
+        purpose: 'Entender compatibilidade financeira sem prometer preço ou condição.',
         variableKey: 'faixa_valor',
-        skipWhenKnown: 'Pular se orçamento ou financiamento já foram informados.',
+        skipWhenKnown: 'Pular se a faixa de investimento já foi informada.',
       },
       {
-        id: 'proximo_passo_preferido',
-        stageId: 'proximo_passo',
-        text: 'Quer receber mais detalhes, ver fotos ou falar com um consultor?',
-        purpose: 'Escolher o melhor próximo passo.',
-        variableKey: 'proximo_passo_preferido',
-        skipWhenKnown: 'Pular se o lead já pediu detalhes, fotos, visita ou consultor.',
+        id: 'tipo_visita_preferido',
+        stageId: 'conduzir_visita',
+        text: 'Para avançar, qual formato faz mais sentido: visita ao decorado, atendimento online, consultor primeiro?',
+        purpose: 'Definir o próximo passo operacional e o tipo de visita/atendimento desejado.',
+        variableKey: 'tipo_visita_preferido',
+        skipWhenKnown: 'Pular se o lead já escolheu visita, atendimento online ou consultor.',
       },
     ],
     variables: [],
     skipRules: [],
     successCriteria: [
-      'Lead qualificado com intenção, tipo/região, faixa de valor e próximo passo.',
-      'Lead encaminhado sem repetir perguntas já respondidas.',
+      'Lead qualificado com intenção, tipologia, aderência à localização, faixa de investimento e próximo passo.',
+      'Se houver agenda conectada, horários disponíveis foram oferecidos antes de marcar visita.',
+      'Lead encaminhado sem prometer preço, condição ou disponibilidade não confirmada.',
     ],
     handoffTriggers: [
       'Lead pede visita, proposta ou atendimento com consultor.',
-      'Lead demonstra urgência ou pergunta por negociação específica.',
+      'Lead demonstra urgência ou pergunta por preço final, financiamento, disponibilidade ou negociação específica.',
+      'Não há agenda conectada para confirmar horários reais de visita.',
     ],
-    toolTriggers: [],
+    toolTriggers: [
+      {
+        capability: 'Registrar lead imobiliário qualificado',
+        toolKey: 'create_lead',
+        when: 'Quando intenção, tipologia ou próximo passo estiverem claros o suficiente para continuidade comercial.',
+        requiredVariables: ['objetivo_compra', 'tipo_visita_preferido'],
+        fallback: 'Resumir o interesse na conversa antes de encaminhar.',
+        active: false,
+      },
+      {
+        capability: 'Listar horários disponíveis para visita',
+        toolKey: 'calendar_list_slots',
+        when: 'Quando o lead escolher visita ou atendimento com horário e houver agenda conectada.',
+        requiredVariables: ['tipo_visita_preferido'],
+        fallback: 'Coletar preferência de dia/horário e transferir para consultor confirmar.',
+        active: false,
+      },
+      {
+        capability: 'Validar horário escolhido',
+        toolKey: 'check_availability',
+        when: 'Quando o lead escolher um dia ou horário específico para visita.',
+        requiredVariables: ['tipo_visita_preferido'],
+        fallback: 'Oferecer outros horários disponíveis ou transferir para consultor.',
+        active: false,
+      },
+      {
+        capability: 'Agendar visita',
+        toolKey: 'create_event',
+        when: 'Quando o lead escolher um horário livre e confirmar o formato da visita.',
+        requiredVariables: ['tipo_visita_preferido'],
+        fallback: 'Não confirmar a visita; transferir para consultor com a preferência do lead.',
+        active: false,
+      },
+      {
+        capability: 'Transferir para consultor imobiliário',
+        toolKey: 'transfer_to_human',
+        when: 'Quando houver dúvida comercial específica, pedido de negociação ou falta de agenda conectada.',
+        requiredVariables: ['objetivo_compra', 'tipo_visita_preferido'],
+        fallback: 'Avisar que um consultor vai confirmar os detalhes.',
+        active: false,
+      },
+    ],
     objectionRules: [
       {
         objection: 'Ainda estou só pesquisando',
@@ -77,8 +420,17 @@ const FIXTURES: Record<FixtureKey, RawFixture> = {
           'Acolher, oferecer informação útil e perguntar o tipo/região para enviar opções relevantes.',
       },
     ],
-    doRules: ['Perguntar uma coisa por vez.', 'Resumir o interesse antes de encaminhar.'],
-    dontRules: ['Não prometer disponibilidade sem confirmação.', 'Não inventar preço ou condição.'],
+    doRules: [
+      'Perguntar uma coisa por vez.',
+      'Usar diferenciais e localização confirmados como contexto, não como pergunta solta.',
+      'Oferecer horários disponíveis quando houver agenda conectada.',
+      'Resumir o interesse antes de encaminhar.',
+    ],
+    dontRules: [
+      'Não prometer disponibilidade sem confirmação.',
+      'Não inventar preço, financiamento ou condição.',
+      'Não confirmar visita sem agenda conectada e horário livre.',
+    ],
     sourceRefs: [{ type: 'default', label: 'Fixture inicial imobiliário' }],
   },
   b2b: {
@@ -301,7 +653,13 @@ const FIXTURES: Record<FixtureKey, RawFixture> = {
 
 function fixtureKeyFor(niche: string): FixtureKey {
   const n = niche.toLowerCase()
-  if (/(im[oó]vel|imobili|corretor|apartamento|casa)/.test(n)) return 'imobiliario'
+  if (/(minha casa|minha\s+casa\s+minha\s+vida|mcmv|subs[ií]dio|financi|fgts|entrada facilitada|renda familiar|simula[cç][aã]o)/.test(n)) {
+    return 'imobiliario_financiamento_popular'
+  }
+  if (/(empreend|empred|incorporador|loteamento|lan[cç]amento|decorado|stand|produto imobili)/.test(n)) {
+    return 'imobiliario_empreendimento'
+  }
+  if (/(im[oó]vel|imob|imobili|empreend|empred|corretor|apartamento|casa)/.test(n)) return 'imobiliario'
   if (/(sa[uú]de|cl[ií]nica|m[eé]dic|dent|psico|consulta)/.test(n)) return 'saude'
   if (/(delivery|restaurante|lanch|pizza|comida|pedido)/.test(n)) return 'delivery'
   if (/(b2b|software|saas|empresa|crm|diagn[oó]stico)/.test(n)) return 'b2b'

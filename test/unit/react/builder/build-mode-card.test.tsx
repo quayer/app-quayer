@@ -67,12 +67,14 @@ describe('BuildModeCard', () => {
   it('renders the 3 build modes in business language', () => {
     renderCard()
 
-    expect(screen.getByText('Como você quer construir?')).toBeInTheDocument()
     expect(
-      screen.getByText('Montar agora com boas práticas'),
+      screen.getByText('Quanto você quer que eu assuma?'),
     ).toBeInTheDocument()
-    expect(screen.getByText('Pesquisar referências antes')).toBeInTheDocument()
-    expect(screen.getByText('Eu digo como quero')).toBeInTheDocument()
+    expect(
+      screen.getByText('Montar direto com boas práticas'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Pesquisar antes de sugerir')).toBeInTheDocument()
+    expect(screen.getByText('Quero orientar a montagem')).toBeInTheDocument()
   })
 
   it('pre-selects "recomendado" by default and submits it', async () => {
@@ -80,7 +82,7 @@ describe('BuildModeCard', () => {
     const { onSubmit } = renderCard()
 
     expect(
-      screen.getByRole('radio', { name: /Montar agora com boas práticas/i }),
+      screen.getByRole('radio', { name: /Montar direto com boas práticas/i }),
     ).toHaveAttribute('aria-checked', 'true')
 
     await user.click(screen.getByRole('button', { name: /^Confirmar$/i }))
@@ -96,7 +98,7 @@ describe('BuildModeCard', () => {
     const user = userEvent.setup()
     const { onSubmit } = renderCard()
 
-    await user.click(screen.getByText('Pesquisar referências antes'))
+    await user.click(screen.getByText('Pesquisar antes de sugerir'))
     await user.click(screen.getByRole('button', { name: /^Confirmar$/i }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -110,10 +112,10 @@ describe('BuildModeCard', () => {
     renderCard({ value: stateWithMode('livre') })
 
     expect(
-      screen.getByRole('radio', { name: /Eu digo como quero/i }),
+      screen.getByRole('radio', { name: /Quero orientar a montagem/i }),
     ).toHaveAttribute('aria-checked', 'true')
     expect(
-      screen.getByRole('radio', { name: /Montar agora com boas práticas/i }),
+      screen.getByRole('radio', { name: /Montar direto com boas práticas/i }),
     ).toHaveAttribute('aria-checked', 'false')
   })
 
@@ -121,7 +123,7 @@ describe('BuildModeCard', () => {
     renderCard({ disabled: true })
 
     expect(
-      screen.getByRole('radio', { name: /Pesquisar referências antes/i }),
+      screen.getByRole('radio', { name: /Pesquisar antes de sugerir/i }),
     ).toBeDisabled()
     expect(screen.getByRole('button', { name: /^Confirmar$/i })).toBeDisabled()
   })

@@ -279,7 +279,7 @@ export const CARD_REGISTRY: Record<RegisteredW3CardKey, CardDescriptor> = {
     // (recomendado/pesquisa/livre — recomendado pré-selecionado).
     cardKey: "build_mode",
     stepId: "build_mode",
-    title: "Como você quer construir?",
+    title: "Quanto você quer que eu assuma?",
     icon: <Hammer className="h-4 w-4" />,
     component: BuildModeCard as ComponentType<CardComponentProps>,
   },

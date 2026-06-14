@@ -12,7 +12,7 @@
  *
  * Covers:
  *   - SDR imobiliário/qualificar → strategy recomenda transfer_to_human +
- *     create_lead (sem blueprint de agenda, NÃO vêm tools de calendário);
+ *     create_lead + agenda de visita, com gate de conexão de calendário;
  *   - SDR SaaS/qualificar → a strategy (não o blueprint) é quem traz a agenda;
  *   - clínica/secretária + agendar → a strategy traz agenda+confirmar
  *     (check_availability/create_event/cancel_event), exige 'calendar_connection'
@@ -49,7 +49,7 @@ function byId(
 }
 
 describe('recommendAgentCapabilities', () => {
-  it('SDR imobiliário/qualificar: strategy recomenda transfer + create_lead, sem agenda', () => {
+  it('SDR imobiliário/qualificar: strategy recomenda lead, transfer e agenda com gate de conexão', () => {
     const state = baseState({
       mission: { key: 'sdr_qualificar', role: 'sdr', objective: 'qualificar', addons: [], custom: false },
       project: { objective: 'Captar e qualificar leads de imóveis' },
@@ -72,14 +72,21 @@ describe('recommendAgentCapabilities', () => {
 
     const recs = recommendAgentCapabilities(state, { calendarConnected: false })
 
-    // FONTE PRIMÁRIA = strategy SDR/imobiliário: create_lead + transfer + followup.
+    // FONTE PRIMÁRIA = strategy SDR/imobiliário: create_lead + agenda + transfer + followup.
     expect(byId(recs, 'transfer_to_human')?.kind).toBe('recommended')
     expect(byId(recs, 'create_lead')?.kind).toBe('recommended')
     expect(byId(recs, 'create_followup')).toBeDefined()
-    // Sem blueprint de agenda e a strategy SDR/imobiliário não tem agenda:
-    // NÃO devem aparecer tools de calendário (prova de que a fonte é a strategy).
-    expect(byId(recs, 'check_availability')).toBeUndefined()
-    expect(byId(recs, 'create_event')).toBeUndefined()
+    expect(byId(recs, 'calendar_list_slots')?.kind).toBe('recommended')
+    expect(byId(recs, 'check_availability')?.kind).toBe('recommended')
+    expect(byId(recs, 'create_event')?.kind).toBe('recommended')
+    expect(byId(recs, 'calendar_list_slots')?.requires).toContain(
+      'calendar_connection',
+    )
+    expect(byId(recs, 'check_availability')?.requires).toContain(
+      'calendar_connection',
+    )
+    expect(byId(recs, 'create_event')?.requires).toContain('calendar_connection')
+    expect(byId(recs, 'check_availability')?.risk).toBeTruthy()
   })
 
   it('SDR SaaS/qualificar: a strategy (não o blueprint) é quem traz a agenda', () => {

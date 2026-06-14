@@ -10,9 +10,9 @@
  * orienta o tom/abordagem do meta-agente nos próximos passos.
  *
  * Seleção ÚNICA (radio) entre 3 modos, com `recomendado` PRÉ-SELECIONADO:
- *   - recomendado : "Montar agora com boas práticas" (default).
- *   - pesquisa    : "Pesquisar referências antes".
- *   - livre       : "Eu digo como quero".
+ *   - recomendado : "Montar direto com boas práticas" (default).
+ *   - pesquisa    : "Pesquisar antes de sugerir".
+ *   - livre       : "Quero orientar a montagem".
  *
  * Presentational only: lê seu slice de `props.value` (value.buildMode) e dispara o
  * payload tipado via `props.onSubmit` (chat-panel owns POST + SSE — o card NUNCA
@@ -58,21 +58,21 @@ interface BuildModeOption {
 const BUILD_MODE_OPTIONS: readonly BuildModeOption[] = [
   {
     value: "recomendado",
-    label: "Montar agora com boas práticas",
+    label: "Montar direto com boas práticas",
     description:
-      "Sigo um caminho pronto e comprovado — o agente fica de pé rápido, do jeito que costuma funcionar melhor.",
+      "Uso o site, o objetivo e padrões que costumam funcionar para criar a primeira versão rapidamente.",
   },
   {
     value: "pesquisa",
-    label: "Pesquisar referências antes",
+    label: "Pesquisar antes de sugerir",
     description:
-      "Antes de montar, eu pesquiso referências do seu mercado para deixar o agente mais alinhado ao seu nicho.",
+      "Busco referências do mercado e do nicho antes de propor missão, capacidades e plano de atendimento.",
   },
   {
     value: "livre",
-    label: "Eu digo como quero",
+    label: "Quero orientar a montagem",
     description:
-      "Você conduz: descreve do seu jeito como o agente deve trabalhar e eu monto em cima disso.",
+      "Você me diz as regras, prioridades e jeito de atendimento; eu monto o agente em cima disso.",
   },
 ]
 
@@ -157,8 +157,8 @@ export function BuildModeCard({
     <CardShell
       tokens={tokens}
       icon={<Hammer className="h-4 w-4" />}
-      title="Como você quer construir?"
-      reason="Escolha o ritmo da montagem. Você pode mudar de ideia a qualquer momento."
+      title="Quanto você quer que eu assuma?"
+      reason="Essa escolha define como o Builder prepara a primeira versão. A missão do SDR vem no próximo card."
       actions={[
         {
           label: "Confirmar",

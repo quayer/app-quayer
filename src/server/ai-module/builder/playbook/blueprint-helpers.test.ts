@@ -117,19 +117,81 @@ describe('ConversationBlueprint helpers', () => {
     )
   })
 
-  it('fixture imobiliario gera blueprint proposto e valido para nicho imobiliario', () => {
+  it('fixture de empreendimento imobiliario gera plano curto com agenda e handoff', () => {
     const blueprint = buildNicheBlueprintFixture({
-      objective: 'Qualificar interessados em apartamentos e conduzir para visita.',
-      niche: 'imobiliaria de apartamentos',
+      objective: 'Criar SDR para empreendimento imobiliário e conduzir para visita.',
+      niche: 'empreendimento imob',
     })
 
     expect(blueprint.status).toBe('proposed')
-    expect(blueprint.niche).toBe('imobiliaria de apartamentos')
+    expect(blueprint.niche).toBe('empreendimento imob')
     expect(blueprint.stages.map((stage) => stage.id)).toContain(
-      'entender_interesse',
+      'confirmar_interesse',
+    )
+    expect(blueprint.stages.map((stage) => stage.id)).toContain(
+      'agendar_visita',
     )
     expect(blueprint.questions.map((question) => question.id)).toEqual(
-      expect.arrayContaining(['objetivo_compra', 'faixa_valor']),
+      expect.arrayContaining([
+        'objetivo_compra',
+        'proximo_passo_interesse',
+        'prazo_decisao',
+      ]),
+    )
+    expect(blueprint.questions.map((question) => question.id)).not.toEqual(
+      expect.arrayContaining(['tipologia_interesse', 'aderencia_localizacao']),
+    )
+    expect(blueprint.toolTriggers.map((trigger) => trigger.toolKey)).toEqual(
+      expect.arrayContaining([
+        'calendar_list_slots',
+        'check_availability',
+        'create_event',
+        'transfer_to_human',
+      ]),
+    )
+    expect(validateConversationBlueprint(blueprint)).not.toContainEqual(
+      expect.objectContaining({ severity: 'fail' }),
+    )
+  })
+
+  it('fixture de financiamento popular qualifica perfil financeiro sem prometer aprovação', () => {
+    const blueprint = buildNicheBlueprintFixture({
+      objective:
+        'Criar SDR para empreendimento Minha Casa Minha Vida com simulação e visita.',
+      niche: 'empreendimento MCMV com entrada facilitada',
+    })
+
+    expect(blueprint.status).toBe('proposed')
+    expect(blueprint.stages.map((stage) => stage.id)).toEqual(
+      expect.arrayContaining([
+        'qualificar_financiamento',
+        'conduzir_simulacao_visita',
+      ]),
+    )
+    expect(blueprint.questions.map((question) => question.id)).toEqual(
+      expect.arrayContaining([
+        'primeiro_imovel',
+        'renda_familiar_aproximada',
+        'entrada_fgts',
+        'proximo_passo_interesse',
+        'email_material',
+      ]),
+    )
+    expect(blueprint.variables).toContainEqual(
+      expect.objectContaining({
+        key: 'email_material',
+        type: 'email',
+      }),
+    )
+    expect(blueprint.dontRules.join(' ')).toMatch(/aprova[cç][aã]o/i)
+    expect(blueprint.toolTriggers.map((trigger) => trigger.toolKey)).toEqual(
+      expect.arrayContaining([
+        'create_lead',
+        'calendar_list_slots',
+        'check_availability',
+        'create_event',
+        'transfer_to_human',
+      ]),
     )
     expect(validateConversationBlueprint(blueprint)).not.toContainEqual(
       expect.objectContaining({ severity: 'fail' }),

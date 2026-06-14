@@ -346,7 +346,9 @@ describe('ConversationBlueprintCard (T58)', () => {
     expect(
       screen.queryByDisplayValue('Qual servico voce procura?'),
     ).not.toBeInTheDocument()
-    expect(screen.getByText(/O plano de atendimento ainda não foi criado/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/A proposta está sendo preparada automaticamente/i),
+    ).toBeInTheDocument()
 
     rerender(<Harness value={stateWithBlueprint(regenerated)} onSubmit={onSubmit} />)
 

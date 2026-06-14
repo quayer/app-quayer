@@ -83,6 +83,19 @@ describe('resolveAgentStrategy', () => {
     expect(strategy.role).toBe('sdr')
     expect(strategy.businessType).toBe('imobiliario')
     expect(strategy.recommendedTools).toContain('create_lead')
+    expect(strategy.recommendedTools).toContain('calendar_list_slots')
+    expect(strategy.recommendedTools).toContain('check_availability')
+    expect(strategy.recommendedTools).toContain('create_event')
+  })
+
+  it('reconhece objetivo livre de SDR para empredimento imob', () => {
+    const strategy = resolveAgentStrategy({
+      objective: 'Quero criar um SDR para empredimento imob',
+      niche: 'empredimento imob',
+    })
+    expect(strategy.role).toBe('sdr')
+    expect(strategy.businessType).toBe('imobiliario')
+    expect(strategy.recommendedTools).toContain('calendar_list_slots')
   })
 
   it('resolve secretária de clínica (nicho saúde → clinica) com tools de agenda', () => {

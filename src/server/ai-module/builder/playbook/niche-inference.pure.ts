@@ -49,7 +49,7 @@ export function inferKnownVertical(
   values: readonly (string | undefined)[],
 ): KnownVertical | undefined {
   const text = foldText(values)
-  if (/(imovel|imobili|apartamento|empreendimento|corretor|construtor)/.test(text)) {
+  if (/(imovel|imob|imobili|apartamento|empreend|empred|corretor|construtor)/.test(text)) {
     return 'imobiliário'
   }
   if (/(saude|clinica|medic|dent|psico|consulta|paciente)/.test(text)) {

@@ -26,6 +26,11 @@ import { BUILDER_RESERVED_NAME } from '../builder.constants'
 import { collectionNameFor, metaCollectionId } from '../knowledge/knowledge-helpers'
 import { parseBuilderState } from '../cards/builder-state'
 import {
+  validateBlueprintPreservation,
+  validatePrompt,
+  type ValidationIssue,
+} from '../validators'
+import {
   IDENTITY_CARD_METADATA_KEY,
   getIdentityCardFromMetadata,
   injectDisclosureIntoPrompt,
@@ -47,6 +52,14 @@ export interface BuilderToolExecutionContext {
   organizationId: string
   /** User.id of the Builder chat author — used as publishedBy/createdBy hint */
   userId: string
+}
+
+function formatBlockingPromptIssues(issues: readonly ValidationIssue[]): string {
+  const errors = issues.filter((issue) => issue.severity === 'error')
+  return errors
+    .slice(0, 6)
+    .map((issue) => issue.message)
+    .join(' | ')
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +147,45 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
           return {
             success: false,
             message: `This project already has an AI agent (${project.aiAgentId}). Use edit_agent to modify it instead.`,
+          }
+        }
+
+        const builderState = parseBuilderState(
+          project.conversation?.builderState ?? null,
+        )
+        const promptValidation = validatePrompt(
+          input.systemPrompt,
+          input.enabledTools,
+        )
+        if (!promptValidation.pass) {
+          return {
+            success: false,
+            code: 'PROMPT_VALIDATION_FAILED',
+            message:
+              'O prompt final não tem a anatomia técnica mínima para criar o agente. Gere novamente com generate_prompt_anatomy antes de criar. ' +
+              formatBlockingPromptIssues(promptValidation.issues),
+            issues: promptValidation.issues,
+          }
+        }
+
+        const approvedBlueprint =
+          builderState.journeyVersion === 2 &&
+          builderState.conversationBlueprint?.status === 'approved'
+            ? builderState.conversationBlueprint
+            : undefined
+        if (approvedBlueprint) {
+          const blueprintValidation = validateBlueprintPreservation({
+            prompt: input.systemPrompt,
+            blueprint: approvedBlueprint,
+          })
+          if (!blueprintValidation.pass) {
+            return {
+              success: false,
+              code: 'BLUEPRINT_PRESERVATION_FAILED',
+              message:
+                'O prompt final não preserva o Plano de atendimento aprovado. Gere novamente com generate_prompt_anatomy antes de criar.',
+              issues: blueprintValidation.issues,
+            }
           }
         }
 
@@ -231,9 +283,7 @@ export function createAgentTool(ctx: BuilderToolExecutionContext) {
         await trackJourneyEvent({
           organizationId: ctx.organizationId,
           projectId: ctx.projectId,
-          journeyVersion: parseBuilderState(
-            project.conversation?.builderState ?? null,
-          ).journeyVersion,
+          journeyVersion: builderState.journeyVersion,
           event: 'agent_created',
         })
 

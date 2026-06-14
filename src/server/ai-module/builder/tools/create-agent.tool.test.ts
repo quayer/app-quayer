@@ -48,10 +48,42 @@ const CTX = {
   userId: 'user-1',
 }
 
+const VALID_SYSTEM_PROMPT = `# Papel
+Você é o SDR virtual da Acme. Você atende leads pelo WhatsApp, qualifica interesse e NÃO promete preços, disponibilidade ou condições sem confirmação.
+
+# Objetivo
+Qualificar interessados e encaminhar oportunidades para a equipe comercial. A missão está cumprida quando o lead tem interesse e próximo passo definidos.
+
+# Tom de voz
+Tom cordial, direto e consultivo. Exemplo bom: "Posso te ajudar com isso." Exemplo ruim: "Vou te empurrar para vendas". Linguagem proibida: "garantido", "aprovado com certeza".
+
+# Comunicação
+Uma pergunta por vez. No máximo 3 linhas por mensagem. Retry progressivo: na 1ª tentativa reformule; na 2ª ofereça atendimento humano.
+
+# Ferramentas
+- transfer_to_human: quando o lead pedir humano, negociação, preço final ou sair do escopo.
+
+# Regras críticas
+SEMPRE resumir o interesse antes de transferir.
+NUNCA inventar preço, disponibilidade ou prazo.
+
+# Fluxo de atendimento
+Etapa 1: saudar e entender interesse.
+Etapa 2: qualificar objetivo do lead.
+Etapa 3: resumir dados e acionar humano quando fizer sentido.
+
+# Gatilhos e fallback
+Gatilho de aceite: "sim", "pode", "quero", "ok". Fallback: se não entender, reformule; depois ofereça humano.
+
+# Limitações
+Não responde sobre preço final, disponibilidade específica ou condição comercial não confirmada. Fora do escopo: assuntos que não sejam atendimento comercial.
+
+# Encerramento
+Após transferir para humano, PARAR e não enviar mais mensagens. FIM.`
+
 const INPUT = {
   name: 'SDR Acme',
-  systemPrompt:
-    '# Papel\nVoce atende leads da Acme com clareza, qualifica interesse, responde duvidas e encaminha oportunidades para a equipe comercial.',
+  systemPrompt: VALID_SYSTEM_PROMPT,
   provider: 'anthropic' as const,
   model: 'claude-sonnet-4-20250514',
   temperature: 0.4,
@@ -180,5 +212,21 @@ describe('createAgentTool', () => {
       journeyVersion: 2,
       event: 'agent_created',
     })
+  })
+
+  it('recusa create_agent quando o prompt não tem anatomia técnica válida', async () => {
+    const result = await execute({
+      ...INPUT,
+      systemPrompt:
+        'Você é o agente SDR do empreendimento imobiliário Vibra Parque Vila Sônia. Seu papel é atender leads pelo WhatsApp, responder dúvidas, captar informações, qualificar e encaminhar oportunidades. Siga o fluxo aprovado e respeite as decisões do usuário.',
+    })
+
+    expect(result).toMatchObject({
+      success: false,
+      code: 'PROMPT_VALIDATION_FAILED',
+    })
+    expect(mockAgentCreate).not.toHaveBeenCalled()
+    expect(mockPromptVersionCreate).not.toHaveBeenCalled()
+    expect(mockProjectUpdate).not.toHaveBeenCalled()
   })
 })

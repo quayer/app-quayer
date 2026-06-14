@@ -187,6 +187,7 @@ export function ConversationBlueprintCard({
     React.useState<ConversationBlueprint | undefined>()
   const [soldOutDecision, setSoldOutDecision] =
     React.useState<SoldOutStrategy | undefined>()
+  const autoGenerateRequestedRef = React.useRef(false)
 
   React.useEffect(() => {
     if (draft !== null) return
@@ -286,6 +287,14 @@ export function ConversationBlueprintCard({
     value.conversationBlueprint,
   ])
 
+  React.useEffect(() => {
+    if (autoGenerateRequestedRef.current) return
+    if (disabled || approved || hasBlueprint || needsSoldOutDecision) return
+
+    autoGenerateRequestedRef.current = true
+    handleGenerate()
+  }, [approved, disabled, handleGenerate, hasBlueprint, needsSoldOutDecision])
+
   const handlePrimaryAction = hasBlueprint ? handleApprove : handleGenerate
   const actions = [
     {
@@ -320,7 +329,9 @@ export function ConversationBlueprintCard({
       reason={
         hasBlueprint
           ? "Revise as perguntas que o agente vai conduzir. Ajuste só o que discordar."
-          : "Gere uma sugestão de plano de atendimento a partir do objetivo e do negócio."
+          : needsSoldOutDecision
+            ? "Defina a restrição comercial para eu gerar uma proposta segura."
+            : "Estou gerando uma sugestão de plano a partir do objetivo e do negócio."
       }
       actions={actions}
     >
@@ -340,7 +351,7 @@ export function ConversationBlueprintCard({
           >
             {needsSoldOutDecision
               ? "Escolha como tratar a restrição da fonte antes de gerar o plano."
-              : "O plano de atendimento ainda não foi criado. Use o botão para gerar a proposta e revisar as perguntas antes de montar o agente."}
+              : "A proposta está sendo preparada automaticamente. Assim que aparecer, revise as perguntas e aprove ou ajuste antes de montar o agente."}
           </p>
         </div>
       ) : (

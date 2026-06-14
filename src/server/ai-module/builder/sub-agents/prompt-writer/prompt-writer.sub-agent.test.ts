@@ -74,10 +74,10 @@ function approvedRealEstateBlueprint(): ConversationBlueprint {
         capability: 'enviar lista de imóveis',
         toolKey: 'search_properties',
         when:
-          'Quando objetivo_compra, tipologia_regiao e faixa_valor estiverem claros.',
+          'Quando objetivo_compra, tipologia_interesse e faixa_valor estiverem claros.',
         requiredVariables: [
           'objetivo_compra',
-          'tipologia_regiao',
+          'tipologia_interesse',
           'faixa_valor',
         ],
         fallback: 'Se faltar dado, pergunte antes de buscar opções.',
@@ -518,15 +518,15 @@ describe('buildUserMessage — conversation blueprint preservation', () => {
       'pular quando: Pular se o lead já disse que quer morar, investir ou pesquisar.',
     )
     expect(msg).toContain(
-      'enviar lista de imóveis: Quando objetivo_compra, tipologia_regiao e faixa_valor estiverem claros.',
+      'enviar lista de imóveis: Quando objetivo_compra, tipologia_interesse e faixa_valor estiverem claros.',
     )
     expect(msg).toContain(
-      '(dados: objetivo_compra, tipologia_regiao, faixa_valor)',
+      '(dados: objetivo_compra, tipologia_interesse, faixa_valor)',
     )
     expect(msg).toContain(
       'Lead pede visita, proposta ou atendimento com consultor.',
     )
-    expect(msg).toContain('Não inventar preço ou condição.')
+    expect(msg).toContain('Não inventar preço, financiamento ou condição.')
   })
 
   it('renders a simple B2B blueprint with its own route and guardrails', () => {
