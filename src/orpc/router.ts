@@ -13,8 +13,13 @@
  *   logs            7 actions  ✅ (a 8ª é o SSE /logs/stream — fica no
  *                                 Igniter até o cutover, vira route handler
  *                                 Next puro na mesma URL)
- *   auth           ✅ COMPLETO (8 subdomínios, 36 actions)
- *   builder        em lotes — B1 projects ✅ (19) · B2-B5 pendentes
+ *   auth           ✅ COMPLETO (8 subdomínios, 38 actions)
+ *   builder        ✅ COMPLETO (B1-B6, 69 actions; 3 SSE ficam no Igniter até
+ *                  a fase 4: playgroundStream, chat.sendMessage,
+ *                  cards.submitCard)
+ *
+ * TOTAL: 131/135 actions migradas — as 4 restantes são SSE (logs/stream + as
+ * 3 do builder) e viram route handlers Next puros no cutover (fase 4).
  */
 import { list, getById, listSessions } from './messages.router'
 import { deviceSessions } from './device-sessions.router'
