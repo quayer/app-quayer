@@ -334,8 +334,26 @@ export function mapMessageType(raw: string | undefined): MessageType {
 }
 
 /**
+ * Prisma unique-constraint violation (duck-typed, same pattern as
+ * runtime-decision.service.ts / ensure-builder-agent.ts).
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2002'
+  )
+}
+
+/**
  * Persists the Message row (using `enrichedContent` — e.g. Whisper
- * transcription). Returns the new message id.
+ * transcription). Returns the message id.
+ *
+ * IDEMPOTENT on `waMessageId` (@unique): when the Redis dedup layer fails
+ * open and the broker redelivers the same webhook, the bare create used to
+ * throw P2002 → 500 → broker retry → retry loop. A P2002 is now treated as
+ * a dedup hit (mirrors the upsert in src/lib/webhook/processor.ts): fetch
+ * and return the existing row's id, no error.
  */
 export async function persistMessage(input: {
   session: WebhookSession
@@ -347,20 +365,41 @@ export async function persistMessage(input: {
   enrichedContent: string
   data: UazapiData
 }): Promise<string> {
-  const created = await database.message.create({
-    data: {
-      sessionId: input.session.id,
-      contactPhone: input.contactPhone,
-      connectionId: input.connectionId,
-      waMessageId: input.externalMessageId,
-      direction: input.direction === 'IN' ? 'INBOUND' : 'OUTBOUND',
-      type: mapMessageType(input.data.type),
-      author: input.author,
-      content: input.enrichedContent,
-      mediaUrl: input.data.media_url ?? null,
-      mimeType: input.data.media_mimetype ?? null,
-    },
-  })
+  try {
+    const created = await database.message.create({
+      data: {
+        sessionId: input.session.id,
+        contactPhone: input.contactPhone,
+        connectionId: input.connectionId,
+        waMessageId: input.externalMessageId,
+        direction: input.direction === 'IN' ? 'INBOUND' : 'OUTBOUND',
+        type: mapMessageType(input.data.type),
+        author: input.author,
+        content: input.enrichedContent,
+        mediaUrl: input.data.media_url ?? null,
+        mimeType: input.data.media_mimetype ?? null,
+      },
+    })
 
-  return created.id
+    return created.id
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err
+
+    const existing = await database.message.findUnique({
+      where: { waMessageId: input.externalMessageId },
+      select: { id: true },
+    })
+    if (existing) {
+      logger.info('[process-inbound] duplicate waMessageId — idempotent dedup skip', {
+        waMessageId: input.externalMessageId,
+        sessionId: input.session.id,
+        connectionId: input.connectionId,
+      })
+      return existing.id
+    }
+
+    // P2002 but the row vanished (deleted between create and lookup) — this is
+    // no longer a plain dedup; surface the original error.
+    throw err
+  }
 }
