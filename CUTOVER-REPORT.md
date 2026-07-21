@@ -5,8 +5,9 @@ Data: 2026-07-21 · Branch: `spike/orpc-messages` · Base: `ab20ecc`
 Commits do cutover (nesta ordem):
 
 | Commit | Passo | Conteúdo |
-|---|---|---|
+| --- | --- | --- |
 | `ef34697` | 1 | Catch-all `/api/v1` roteando para o oRPC (exceto 4 SSE); mount de teste `/api/orpc` aposentado |
+| `e5d2e21` | 1b | `test:api` apontado para o catch-all de produção (snapshots de erro regenerados) — commit de sessão paralela, incluído no cutover |
 | `0d42539` | 2 | Client oRPC tipado (`src/orpc/client.ts` + contrato) e migração dos call-sites do front |
 | (este) | 4 | Este relatório |
 
@@ -60,7 +61,7 @@ Definidas em `src/app/api/v1/[[...all]]/route.ts` — TEMPORÁRIO até a fase 4
 #### Call-sites migrados (de `api.*` de `@/igniter.client` para o client oRPC)
 
 | Arquivo | Actions |
-|---|---|
+| --- | --- |
 | `src/client/components/auth/login-form-final.tsx` | auth.loginOTP, auth.loginOTPPhone, auth.googleAuth |
 | `src/client/components/auth/login-otp-form.tsx` | auth.checkMagicLinkStatus (polling), auth.loginOTP (resend) |
 | `src/client/components/auth/signup-form.tsx` | auth.signupOTP, auth.loginOTPPhone, auth.googleAuth |
@@ -121,7 +122,7 @@ ganharam um `.data` (`metrics-card`, `media-tab`, `version-history`,
 ## 2. Resultado de build + suites (local, 2026-07-21)
 
 | Verificação | Resultado |
-|---|---|
+| --- | --- |
 | `npx tsc --noEmit` | **0 erros** (igual ao baseline pré-cutover) |
 | `npm run build` (next build) | **OK** — compilou sem envs extras (tabela de rotas completa gerada) |
 | `npx vitest run --config src/orpc/vitest.config.orpc.ts` | **197/197** (28 arquivos) |
@@ -135,6 +136,7 @@ Reverter os commits do cutover (ordem inversa), na branch `spike/orpc-messages`:
 ```bash
 git revert <commit-deste-relatorio>   # passo 4 (opcional, só docs)
 git revert 0d42539                    # passo 2 — front volta ao client Igniter
+git revert e5d2e21                    # passo 1b — test:api volta ao adapter Igniter direto
 git revert ef34697                    # passo 1 — catch-all volta 100% Igniter
 git push origin spike/orpc-messages
 ```
