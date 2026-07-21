@@ -10,7 +10,8 @@
  *   B2 chat + cards ✅ chat (3) + sheetParse (1) = 4 actions
  *                  (sendMessage e submitCard são SSE — o ACK conversational do
  *                  card usa buildSseResponse — ficam no Igniter até a fase 4)
- *   B3 sources + media + knowledge — pendente
+ *   B3 sources + media + knowledge ✅ sources (3) + sourceImages (3) +
+ *                  media (2) + knowledge (3) + knowledgeSource (3) = 14 actions
  *   B4 channel + deploy — pendente
  *   B5 identity/calendar/connections/pricing/credential/capabilities/
  *      integrations — pendente
@@ -22,6 +23,11 @@ import { channelActions } from './projects/routes/channel.orpc'
 import { proactiveHistoryActions } from './projects/routes/proactive-history.orpc'
 import { chatActions } from './chat/chat.orpc'
 import { sheetParseActions } from './cards/sheet-parse.orpc'
+import { sourcesActions } from './sources/sources.orpc'
+import { sourceImagesActions } from './sources/source-images.orpc'
+import { mediaCurationActions } from './media/media-curation.orpc'
+import { knowledgeActions } from './knowledge/knowledge.orpc'
+import { knowledgeSourceActions } from './knowledge/knowledge-source.orpc'
 
 export const builder = {
   ...crudActions,
@@ -31,4 +37,9 @@ export const builder = {
   ...proactiveHistoryActions,
   ...chatActions,
   ...sheetParseActions,
+  ...sourcesActions,
+  ...sourceImagesActions,
+  ...mediaCurationActions,
+  ...knowledgeActions,
+  ...knowledgeSourceActions,
 }
