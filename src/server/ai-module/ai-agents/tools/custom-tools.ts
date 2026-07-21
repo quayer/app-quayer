@@ -23,7 +23,7 @@ import { database } from '@/server/services/database'
 import { decrypt } from '@/lib/crypto'
 import { logger } from '@/server/services/logger'
 import type { ToolExecutionContext } from './builtin-tools'
-import { runIntegrationCall } from './integration-executor'
+import { runIntegrationCall, areResolvedIpsSafe } from './integration-executor'
 import { sanitizeForLog } from '../../builder/integrations/request-spec'
 import { requestSpecSchema } from '../../builder/integrations/integration.schemas'
 
@@ -211,6 +211,18 @@ export async function getCustomTools(
           }
         }
 
+        // Post-DNS guard, re-run PER CALL (DNS-rebinding hardening): the
+        // hostname regex above cannot see what the name actually resolves to
+        // at call time. Reuses the integration executor's guard — ALL resolved
+        // IPs must be public; DNS failure is treated as unsafe (fail-closed).
+        const { hostname } = new URL(webhookUrl)
+        if (!(await areResolvedIpsSafe(hostname))) {
+          return {
+            success: false,
+            error: 'Webhook URL blocked by security policy',
+          }
+        }
+
         // --- Invoke webhook -------------------------------------------------
         try {
           const headers: Record<string, string> = {
@@ -232,6 +244,10 @@ export async function getCustomTools(
             headers,
             body: JSON.stringify(input ?? {}),
             signal: AbortSignal.timeout(row.webhookTimeout),
+            // Never follow redirects: a 3xx could re-point the request at an
+            // internal host AFTER the post-DNS guard passed. A redirect lands
+            // in the `!res.ok` branch below as a structured failure.
+            redirect: 'manual',
           })
 
           if (!res.ok) {

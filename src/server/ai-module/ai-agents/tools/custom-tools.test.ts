@@ -25,6 +25,9 @@ vi.mock('@/server/services/database', () => ({
 
 vi.mock('./integration-executor', () => ({
   runIntegrationCall: vi.fn(),
+  // Post-DNS SSRF guard (FASE A / FIX 2): o path v1 agora consulta o guard a
+  // cada chamada. Aqui os testes cobrem o header/delegação, então o guard passa.
+  areResolvedIpsSafe: vi.fn(async () => true),
 }))
 
 // Logger is mocked so the (sanitized) writeback-failure warning is observable in

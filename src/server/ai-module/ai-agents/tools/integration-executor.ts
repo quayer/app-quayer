@@ -188,8 +188,11 @@ function isPrivateAddress(address: string): boolean {
  * an attacker controlling DNS can't slip one internal A record past us). A DNS
  * failure is treated as UNSAFE (closed by default). Mirrors and tightens
  * `isResolvedIpSafe` in `create-custom-tool.tool.ts`.
+ *
+ * Exported so the v1 webhook path in `custom-tools.ts` reuses the SAME
+ * per-call post-DNS guard (FASE A / FIX 2 — DNS-rebinding hardening).
  */
-async function areResolvedIpsSafe(hostname: string): Promise<boolean> {
+export async function areResolvedIpsSafe(hostname: string): Promise<boolean> {
   try {
     const records = await dns.lookup(hostname, { all: true })
     if (records.length === 0) return false
