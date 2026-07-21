@@ -9,14 +9,15 @@
  *   messages        3 actions  ✅ (spike do gate)
  *   deviceSessions  3 actions  ✅
  *   departments     5 actions  ✅ (primeiro colocalizado)
- *   providers       6 actions  — próximo
- *   logs(+sse)      8 actions
+ *   providers       6 actions  ✅
+ *   logs(+sse)      8 actions  — próximo
  *   auth           38 actions
  *   builder        72 actions
  */
 import { list, getById, listSessions } from './messages.router'
 import { deviceSessions } from './device-sessions.router'
 import { departments } from '@/server/communication/departments/departments.orpc'
+import { providers } from '@/server/core/providers/providers.orpc'
 
 export const appRouter = {
   messages: {
@@ -26,4 +27,5 @@ export const appRouter = {
   },
   deviceSessions,
   departments,
+  providers,
 }
