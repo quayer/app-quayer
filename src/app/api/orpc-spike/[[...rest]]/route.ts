@@ -22,9 +22,9 @@
  */
 import { OpenAPIHandler } from '@orpc/openapi/fetch'
 import { ZodSmartCoercionPlugin } from '@orpc/zod'
-import { spikeRouter } from '@/orpc-spike/messages.router'
+import { appRouter } from '@/orpc-spike/router'
 
-const handler = new OpenAPIHandler(spikeRouter, {
+const handler = new OpenAPIHandler(appRouter, {
   // Coerção automática de query strings -> tipos do schema (equivale ao
   // comportamento do adapter do Igniter; os z.coerce dos schemas originais
   // continuam funcionando de qualquer forma).
