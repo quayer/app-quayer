@@ -17,6 +17,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { database } from '@/server/services/database';
 import { orchestrator } from '@/lib/providers';
+import { verifyWebhookSignature } from '@/lib/providers/adapters/cloudapi/cloudapi.normalizer';
+import { decrypt } from '@/lib/crypto';
 import { logger } from '@/server/services/logger';
 import { webhookRateLimiter } from '@/lib/rate-limit/rate-limiter';
 import { getClientIdentifier } from '@/server/core/auth/_shared/helpers';
@@ -49,7 +51,7 @@ export async function GET(
       id: instanceId,
       provider: 'WHATSAPP_CLOUD_API',
     },
-    select: { id: true, name: true },
+    select: { id: true, name: true, cloudApiVerifyToken: true },
   });
 
   if (!instance) {
@@ -70,8 +72,26 @@ export async function GET(
     hasChallenge: !!challenge,
   });
 
-  // Verify token should be configured in environment
-  const verifyToken = process.env.CLOUDAPI_WEBHOOK_VERIFY_TOKEN || 'quayer-cloudapi-verify';
+  // Verify token: per-connection (stored encrypted) first, env fallback.
+  // No hardcoded default — an unconfigured token means verification MUST fail,
+  // otherwise anyone knowing the default could subscribe a webhook.
+  let verifyToken: string | null = null;
+  if (instance.cloudApiVerifyToken) {
+    try {
+      verifyToken = decrypt(instance.cloudApiVerifyToken);
+    } catch {
+      // Legacy plaintext tolerance: value stored before encryption was added.
+      verifyToken = instance.cloudApiVerifyToken;
+    }
+  }
+  if (!verifyToken) {
+    verifyToken = process.env.CLOUDAPI_WEBHOOK_VERIFY_TOKEN || null;
+  }
+
+  if (!verifyToken) {
+    logger.warn('Cloud API verification rejected: no verify token configured', { instanceId });
+    return NextResponse.json({ error: 'Verification failed' }, { status: 403 });
+  }
 
   if (mode === 'subscribe' && token === verifyToken && challenge) {
     logger.info('Cloud API verification successful (per-instance)', { instanceId });
@@ -137,10 +157,43 @@ export async function POST(
     return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
   }
 
+  // Read the raw body ONCE (before any JSON.parse) — the HMAC signature from
+  // Meta is computed over the exact raw bytes, so verification must happen on
+  // this string, never on a re-serialized object.
+  let rawBodyText: string;
+  try {
+    rawBodyText = await request.text();
+  } catch (readError) {
+    logger.error('Failed to read request body (per-instance)', {
+      instanceId,
+      error: readError instanceof Error ? readError.message : 'Unknown error',
+    });
+    return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+  }
+
+  // Verify X-Hub-Signature-256 (HMAC-SHA256 with the Meta App secret).
+  // The app secret belongs to the platform-level Meta App (one per deployment),
+  // configured via CLOUDAPI_APP_SECRET. If it is not configured we accept the
+  // webhook but emit a structured warning — conservative choice to avoid
+  // dropping tenants on deployments that never set the secret (see FASE-A report).
+  const appSecret = process.env.CLOUDAPI_APP_SECRET;
+  if (appSecret) {
+    const signature = request.headers.get('x-hub-signature-256') || '';
+    if (!verifyWebhookSignature(rawBodyText, signature, appSecret)) {
+      logger.warn('Cloud API webhook rejected: invalid or missing signature', {
+        instanceId,
+        connectionId: instance.id,
+        hasSignature: !!signature,
+      });
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    }
+  } else {
+    logger.warn('Cloud API webhook accepted WITHOUT signature verification — CLOUDAPI_APP_SECRET not configured', { connectionId: instance.id });
+  }
+
   // Parse request body
   let rawBody: any;
   try {
-    const rawBodyText = await request.text();
     rawBody = JSON.parse(rawBodyText);
   } catch (parseError) {
     logger.error('Failed to parse JSON body (per-instance)', {
