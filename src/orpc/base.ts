@@ -13,6 +13,12 @@ import { os } from '@orpc/server'
 export type SpikeInitialContext = {
   /** Headers da request HTTP — necessário para o middleware de auth (Bearer/cookie). */
   headers: Headers
+  /**
+   * Headers de RESPOSTA — o ResponseHeadersPlugin faz o merge no response
+   * final. Handlers escrevem cookies via cookieWriter(resHeaders)
+   * (ver cookies.ts); o catch-all cria um Headers novo por request.
+   */
+  resHeaders: Headers
 }
 
 /** Builder base com o contexto inicial tipado (equivale ao `igniter` builder). */

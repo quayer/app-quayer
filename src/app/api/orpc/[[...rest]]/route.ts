@@ -21,6 +21,7 @@
  * src/app/api/v1/[[...all]]/route.ts.
  */
 import { OpenAPIHandler } from '@orpc/openapi/fetch'
+import { ResponseHeadersPlugin } from '@orpc/server/plugins'
 import { ZodSmartCoercionPlugin } from '@orpc/zod'
 import { appRouter } from '@/orpc/router'
 
@@ -28,7 +29,9 @@ const handler = new OpenAPIHandler(appRouter, {
   // Coerção automática de query strings -> tipos do schema (equivale ao
   // comportamento do adapter do Igniter; os z.coerce dos schemas originais
   // continuam funcionando de qualquer forma).
-  plugins: [new ZodSmartCoercionPlugin()],
+  // ResponseHeadersPlugin: faz o merge do context.resHeaders (cookies de
+  // auth/CSRF escritos pelos handlers via cookieWriter) no response final.
+  plugins: [new ZodSmartCoercionPlugin(), new ResponseHeadersPlugin()],
 })
 
 const ORPC_PREFIX = '/api/orpc' as const
@@ -38,6 +41,7 @@ async function handle(request: Request): Promise<Response> {
     prefix: ORPC_PREFIX,
     context: {
       headers: request.headers,
+      resHeaders: new Headers(),
     },
   })
 

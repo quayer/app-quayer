@@ -13,7 +13,7 @@
  *   logs            7 actions  ✅ (a 8ª é o SSE /logs/stream — fica no
  *                                 Igniter até o cutover, vira route handler
  *                                 Next puro na mesma URL)
- *   auth           38 actions  — próximo
+ *   auth           em lotes — session ✅ (4) · demais subdomínios pendentes
  *   builder        72 actions
  */
 import { list, getById, listSessions } from './messages.router'
@@ -21,6 +21,7 @@ import { deviceSessions } from './device-sessions.router'
 import { departments } from '@/server/communication/departments/departments.orpc'
 import { providers } from '@/server/core/providers/providers.orpc'
 import { logs } from '@/server/features-module/logs/controllers/logs.orpc'
+import { auth } from '@/server/core/auth/auth.orpc'
 
 export const appRouter = {
   messages: {
@@ -32,4 +33,5 @@ export const appRouter = {
   departments,
   providers,
   logs,
+  auth,
 }
