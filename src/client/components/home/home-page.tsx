@@ -13,7 +13,7 @@ import {
 } from "@/lib/project-status"
 import type { ProjectStatus } from "@/client/components/projetos/types"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
-import { api } from "@/igniter.client"
+import { client } from "@/orpc/client"
 
 interface Project {
   id: string
@@ -38,7 +38,6 @@ export function HomePage({
   const [prompt, setPrompt] = useState("")
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const createProject = api.builder.createProject as any
 
   // Auto-focus no mount — cobre navegação via ⌘K e clique em "Nova conversa"
   useEffect(() => {
@@ -55,27 +54,28 @@ export function HomePage({
     setError(null)
     startTransition(async () => {
       try {
-        const result = await createProject.mutate({
-          body: { prompt: trimmed, type: "ai_agent" },
-        })
+        // oRPC: envelope { data: { success, data: { projectId } } } (wire igual
+        // ao Igniter); erro de API agora é lançado como ORPCError.
+        const result = await client.builder.createProject({ prompt: trimmed, type: "ai_agent" })
         const projectId = result?.data?.data?.projectId
         if (!projectId) throw new Error("Projeto criado mas ID não retornado")
         router.push(`/projetos/${projectId}`)
       } catch (err) {
-        if (err && typeof err === "object" && "error" in err) {
-          const msg = String((err as { error: unknown }).error)
-          // Auth errors mean session expired — redirect to login
-          if (msg.toLowerCase().includes("token") || msg.includes("autenticad")) {
-            router.push("/login?redirect=/")
-            return
-          }
-          setError(msg)
-        } else {
-          setError(err instanceof Error ? err.message : "Erro desconhecido")
+        // Shape oRPC: mensagem em err.message; sessão expirada = UNAUTHORIZED.
+        const orpcErr = err as { code?: string; message?: string } | null
+        const msg = err instanceof Error ? err.message : "Erro desconhecido"
+        if (
+          orpcErr?.code === "UNAUTHORIZED" ||
+          msg.toLowerCase().includes("token") ||
+          msg.includes("autenticad")
+        ) {
+          router.push("/login?redirect=/")
+          return
         }
+        setError(msg)
       }
     })
-  }, [prompt, router, createProject])
+  }, [prompt, router])
 
 
   return (

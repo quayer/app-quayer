@@ -16,7 +16,7 @@ import {
 } from "@/client/components/ui/input-otp"
 import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { api } from "@/igniter.client"
+import { client, orpcErrorMessage } from "@/orpc/client"
 import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
 
@@ -59,13 +59,9 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
     setIsLoading(true)
 
     try {
-      const { data, error: apiError } = await api.auth.verifySignupOTP.mutate({
-        body: { email, code }
-      })
-
-      if (apiError) {
-        throw apiError
-      }
+      // oRPC: erro de API agora é lançado (ORPCError) — cai direto no catch.
+      // O client oRPC injeta x-csrf-token (verify-signup-otp exige CSRF).
+      const { data } = await client.auth.verifySignupOTP({ email, code })
 
       const result = data as { user?: { id: string; email: string; name: string; role: string; currentOrgId: string; organizationRole: string } } | null
       if (result?.user) {
@@ -81,23 +77,9 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
         }, 1500)
       }
     } catch (err: unknown) {
-      let errorMessage = "Não foi possível verificar. Tente novamente."
-
-      const e = err as Record<string, unknown> | undefined
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (errObj?.message) {
-        if (typeof errObj.message === 'object' && errObj.message !== null && (errObj.message as Record<string, unknown>).error) {
-          errorMessage = String((errObj.message as Record<string, unknown>).error)
-        } else if (typeof errObj.message === 'string') {
-          errorMessage = errObj.message
-        }
-      } else if (e?.message && typeof e.message === 'string') {
-        errorMessage = e.message
-      }
-
-      errorMessage = translateAuthError(errorMessage)
-
-      setError(errorMessage)
+      // Shape oRPC: ORPCError carrega a mensagem em .message.
+      const errorMessage = orpcErrorMessage(err, "Não foi possível verificar. Tente novamente.")
+      setError(translateAuthError(errorMessage))
     } finally {
       setIsLoading(false)
     }
@@ -117,7 +99,7 @@ export function SignupOTPForm({ email, name, className, ...props }: SignupOTPFor
     setCanResend(false)
 
     try {
-      await api.auth.signupOTP.mutate({ body: { email, name, 'cf-turnstile-response': turnstileToken } } as Parameters<typeof api.auth.signupOTP.mutate>[0])
+      await client.auth.signupOTP({ email, name, 'cf-turnstile-response': turnstileToken } as Parameters<typeof client.auth.signupOTP>[0])
     } catch (err: unknown) {
       setError("Erro ao reenviar código")
       setCanResend(true)

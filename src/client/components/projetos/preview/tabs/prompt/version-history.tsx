@@ -18,7 +18,8 @@ import { ptBR } from "date-fns/locale"
 import { GitCompare, History, RotateCcw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/igniter.client"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,26 +42,6 @@ import { Skeleton } from "@/client/components/ui/skeleton"
 import type { VersionHistoryProps, VersionListItem } from "./prompt-types"
 import { PromptDiff } from "../deploy/prompt-diff"
 
-type ListVersionsHook = {
-  useQuery: (args: { params: { id: string } }) => {
-    data?: { versions: VersionListItem[] } | { versions: VersionListItem[] }[]
-    isPending: boolean
-    error?: Error
-    refetch: () => Promise<unknown>
-  }
-}
-
-interface RollbackPromptClient {
-  mutate: (
-    args: { params: { id: string }; body: { targetVersionId: string } },
-    options: {
-      onSuccess: (data: { versionNumber: number; content: string }) => void
-      onError: (err: unknown) => void
-    },
-  ) => void
-  isPending: boolean
-}
-
 export function VersionHistory({
   tokens,
   projectId,
@@ -72,19 +53,14 @@ export function VersionHistory({
   const [rollbackTarget, setRollbackTarget] =
     useState<VersionListItem | null>(null)
 
-  const listVersions = (
-    api.builder as unknown as { listVersions: ListVersionsHook }
-  ).listVersions
-  const { data, isPending, error, refetch } = listVersions.useQuery({
-    params: { id: projectId },
-  })
-  const rollbackPrompt = api.builder.rollbackPrompt as unknown as RollbackPromptClient
+  const { data, isPending, error, refetch } = useQuery(
+    orpc.builder.listVersions.queryOptions({ input: { id: projectId } }),
+  )
+  const rollbackPrompt = useMutation(orpc.builder.rollbackPrompt.mutationOptions())
 
-  // Unwrap tolerant: Igniter pode devolver { versions } ou envoltorio.
+  // oRPC: data = envelope { data: { versions }, error: null }.
   const versions: VersionListItem[] = useMemo(() => {
-    const rows = Array.isArray(data)
-      ? (data[0]?.versions ?? [])
-      : (data?.versions ?? [])
+    const rows = data?.data?.versions ?? []
     return [...rows].sort((a, b) => b.versionNumber - a.versionNumber)
   }, [data])
 
@@ -94,20 +70,17 @@ export function VersionHistory({
   function handleRollbackConfirm() {
     if (!rollbackTarget) return
     rollbackPrompt.mutate(
-      {
-        params: { id: projectId },
-        body: { targetVersionId: rollbackTarget.id },
-      },
+      { id: projectId, targetVersionId: rollbackTarget.id },
       {
         onSuccess: (result) => {
           toast.success(
-            `Prompt restaurado para v${rollbackTarget.versionNumber} (nova v${result.versionNumber})`,
+            `Prompt restaurado para v${rollbackTarget.versionNumber} (nova v${result.data.versionNumber})`,
           )
           setRollbackTarget(null)
           void refetch()
           // Sincroniza o editor com o conteúdo restaurado — sem isso o editor
           // mantém o texto antigo e o próximo autosave desfaria o rollback.
-          onRestored?.(result.content)
+          onRestored?.(result.data.content)
         },
         onError: (err) => {
           const msg = err instanceof Error ? err.message : "Erro ao restaurar prompt"

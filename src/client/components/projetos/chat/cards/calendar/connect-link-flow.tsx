@@ -22,7 +22,9 @@
 import * as React from "react"
 import { ExternalLink, Loader2 } from "lucide-react"
 
-import { api } from "@/igniter.client"
+import { useMutation, useQuery } from "@tanstack/react-query"
+
+import { orpc } from "@/orpc/client"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 
 // ---------------------------------------------------------------------------
@@ -35,16 +37,6 @@ interface ConnectLinkResult {
   shareLink?: string
 }
 
-/** Shape mínimo do hook de mutation gerado (defensivo). */
-interface ConnectLinkMutation {
-  useMutation: (opts?: {
-    onSuccess?: (result: unknown) => void
-    onError?: (error: unknown) => void
-  }) => {
-    mutate: (input: { body: { projectId: string } }) => void
-  }
-}
-
 /** Slice do envelope de `status` (GET /calendar/status/:projectId). */
 interface CalendarStatusEnvelope {
   connected?: boolean
@@ -52,57 +44,11 @@ interface CalendarStatusEnvelope {
   connectionId?: string
 }
 
-/** Shape mínimo do hook de query gerado (defensivo, com refetch opcional). */
-interface CalendarStatusQuery {
-  useQuery: (opts: { params: { projectId: string }; enabled?: boolean }) => {
-    data:
-      | { data?: CalendarStatusEnvelope }
-      | CalendarStatusEnvelope
-      | undefined
-    isLoading?: boolean
-    isError?: boolean
-    refetch?: () => unknown
-  }
-}
-
-const CONNECT_LINK_MUTATION: ConnectLinkMutation | null = (() => {
-  const builderApi = (api as { builder?: { connectLink?: unknown } }).builder
-  const candidate = builderApi?.connectLink
-  if (
-    candidate &&
-    typeof (candidate as { useMutation?: unknown }).useMutation === "function"
-  ) {
-    return candidate as ConnectLinkMutation
-  }
-  return null
-})()
-
-const CALENDAR_STATUS_QUERY: CalendarStatusQuery | null = (() => {
-  const builderApi = (api as { builder?: { status?: unknown } }).builder
-  const candidate = builderApi?.status
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as CalendarStatusQuery
-  }
-  return null
-})()
-
-/** O fluxo só é acionável quando AMBAS as actions existem no client gerado. */
-const FLOW_AVAILABLE =
-  CONNECT_LINK_MUTATION !== null && CALENDAR_STATUS_QUERY !== null
-
-/** Fallbacks no-op para manter a IDENTIDADE dos hooks estável (Rules of Hooks). */
-const FALLBACK_MUTATION: ConnectLinkMutation = {
-  useMutation: () => ({ mutate: () => {} }),
-}
-const FALLBACK_STATUS_QUERY: CalendarStatusQuery = {
-  useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
-}
-
-const MUTATION = CONNECT_LINK_MUTATION ?? FALLBACK_MUTATION
-const STATUS_QUERY = CALENDAR_STATUS_QUERY ?? FALLBACK_STATUS_QUERY
+/**
+ * Actions garantidas pelo client oRPC tipado (o resolver defensivo do client
+ * gerado do Igniter foi aposentado no cutover).
+ */
+const FLOW_AVAILABLE = true
 
 /** Unwrap defensivo de envelopes ({ data: {...} } OU plano). */
 function readEnvelope<T extends object>(raw: unknown): T | undefined {
@@ -159,7 +105,7 @@ export function useCalendarConnectFlow({
   const [armed, setArmed] = React.useState(false)
   const [checkCount, setCheckCount] = React.useState(0)
 
-  const mutation = MUTATION.useMutation({
+  const mutation = useMutation(orpc.builder.connectLink.mutationOptions({
     onSuccess: (result) => {
       setRequesting(false)
       const envelope = readEnvelope<ConnectLinkResult>(result)
@@ -185,12 +131,14 @@ export function useCalendarConnectFlow({
         "Não foi possível gerar o link de conexão. Tente novamente.",
       )
     },
-  })
+  }))
 
-  const statusQuery = STATUS_QUERY.useQuery({
-    params: { projectId },
-    enabled: FLOW_AVAILABLE && armed && !disabled,
-  })
+  const statusQuery = useQuery(
+    orpc.builder.status.queryOptions({
+      input: { projectId },
+      enabled: FLOW_AVAILABLE && armed && !disabled,
+    }),
+  )
 
   const envelope = readEnvelope<CalendarStatusEnvelope>(statusQuery.data)
   const statusConnected = envelope?.connected === true
@@ -210,7 +158,7 @@ export function useCalendarConnectFlow({
     if (disabled || requesting || !FLOW_AVAILABLE) return
     setRequesting(true)
     setRequestError(null)
-    mutate({ body: { projectId } })
+    mutate({ projectId })
   }, [disabled, requesting, projectId, mutate])
 
   const refetchStatus = statusQuery.refetch

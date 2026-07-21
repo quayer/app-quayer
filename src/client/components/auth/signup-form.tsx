@@ -17,7 +17,7 @@ import { Loader2, ArrowRight, ArrowLeft, Mail, ChevronsUpDown, Check } from "luc
 import { GoogleIcon } from "@/client/components/ui/google-icon"
 import { WhatsAppIcon } from "@/client/components/auth/whatsapp-icon"
 import Link from "next/link"
-import { api } from "@/igniter.client"
+import { client, orpcErrorMessage } from "@/orpc/client"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
 import { SIGNUP_ENABLED, SIGNUP_DISABLED_MESSAGE } from "@/lib/config"
 import { defaultCountries, parseCountry } from "react-international-phone"
@@ -135,13 +135,10 @@ export function SignupForm({
 
     try {
       // Send OTP code to email (SIGNUP endpoint - creates TempUser)
-      const { error: apiError } = await api.auth.signupOTP.mutate({
-        body: { email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken } as { name: string; email: string; 'cf-turnstile-response'?: string }
-      })
-
-      if (apiError) {
-        throw apiError
-      }
+      // oRPC: erro de API agora é lançado (ORPCError) — cai direto no catch.
+      await client.auth.signupOTP({
+        email: trimmedEmail, name: trimmedName, 'cf-turnstile-response': turnstileToken
+      } as Parameters<typeof client.auth.signupOTP>[0])
 
       setSuccess(`Código enviado para ${trimmedEmail}. Verifique sua caixa de entrada.`)
 
@@ -154,24 +151,8 @@ export function SignupForm({
         router.push(`/signup/verify?email=${encodeURIComponent(trimmedEmail)}&name=${encodeURIComponent(trimmedName)}`)
       }, 1500)
     } catch (err: unknown) {
-      let errorMessage = "Erro ao enviar código. Tente novamente."
-
-      // Handle Igniter error structure
-      const e = err as Record<string, unknown>
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (errObj?.message) {
-        if (typeof errObj.message === 'object' && errObj.message !== null && (errObj.message as Record<string, unknown>).error) {
-          errorMessage = String((errObj.message as Record<string, unknown>).error)
-        } else if (typeof errObj.message === 'string') {
-          errorMessage = errObj.message
-        }
-      } else if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
-        errorMessage = String(errObj.details[0]?.message) || errorMessage
-      } else if (e?.message && typeof e.message === 'string') {
-        errorMessage = e.message
-      }
-
-      setError(errorMessage)
+      // Shape oRPC: ORPCError carrega a mensagem em .message.
+      setError(orpcErrorMessage(err, "Erro ao enviar código. Tente novamente."))
     } finally {
       setIsLoading(false)
     }
@@ -201,34 +182,18 @@ export function SignupForm({
     const normalized = normalizePhone(phone)
 
     try {
-      const { error: apiError } = await api.auth.loginOTPPhone.mutate({
-        body: { phone: normalized, 'cf-turnstile-response': turnstileToken }
-      } as Parameters<typeof api.auth.loginOTPPhone.mutate>[0])
-
-      if (apiError) {
-        throw apiError
-      }
+      // oRPC: erro de API agora é lançado (ORPCError) — cai direto no catch.
+      await client.auth.loginOTPPhone({
+        phone: normalized, 'cf-turnstile-response': turnstileToken
+      } as Parameters<typeof client.auth.loginOTPPhone>[0])
 
       sessionStorage.setItem('signup-phone', normalized)
       sessionStorage.setItem('signup-name', trimmedName)
 
       router.push(`/signup/verify?phone=${encodeURIComponent(normalized)}&name=${encodeURIComponent(trimmedName)}`)
     } catch (err: unknown) {
-      let errorMessage = "Erro ao enviar código. Tente novamente."
-
-      const e = err as Record<string, unknown>
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (errObj?.message) {
-        if (typeof errObj.message === 'string') {
-          errorMessage = errObj.message
-        }
-      } else if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
-        errorMessage = String(errObj.details[0]?.message) || errorMessage
-      } else if (e?.message && typeof e.message === 'string') {
-        errorMessage = e.message
-      }
-
-      setError(errorMessage)
+      // Shape oRPC: ORPCError carrega a mensagem em .message.
+      setError(orpcErrorMessage(err, "Erro ao enviar código. Tente novamente."))
     } finally {
       setIsLoading(false)
     }
@@ -239,13 +204,8 @@ export function SignupForm({
     setError('')
 
     try {
-      const { data, error: apiError } = await api.auth.googleAuth.query()
-
-      if (apiError) {
-        setError('Erro ao iniciar autenticação com Google')
-        setIsGoogleLoading(false)
-        return
-      }
+      // oRPC: erro de API agora é lançado — tratado no catch abaixo.
+      const { data } = await client.auth.googleAuth()
 
       const authUrl = (data as { authUrl?: string } | null)?.authUrl
       if (authUrl) {

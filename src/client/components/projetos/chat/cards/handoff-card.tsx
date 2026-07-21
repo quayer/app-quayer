@@ -38,7 +38,8 @@ import {
   X,
 } from "lucide-react"
 
-import { api } from "@/igniter.client"
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import { Input } from "@/client/components/ui/input"
 import { Switch } from "@/client/components/ui/switch"
 import { Textarea } from "@/client/components/ui/textarea"
@@ -128,37 +129,13 @@ interface ConnectionRow {
   status: string | null
 }
 
-/** Shape mínimo do hook de query (defensivo — client pode não ter a action ainda). */
-interface ListConnectionsQuery {
-  useQuery: (opts?: unknown) => {
-    data?:
-      | { connections?: ConnectionRow[] }
-      | { data?: { connections?: ConnectionRow[] } }
-      | undefined
-    isLoading?: boolean
-  }
-}
 
-/**
- * Resolve o hook `api.builder.listConnections` UMA vez (module-eval), com fallback
- * no-op se a action não existir no client gerado — mantém a IDENTIDADE do hook
- * estável (Rules of Hooks) e o card renderiza com lista vazia em vez de quebrar.
- */
-const LIST_CONNECTIONS_QUERY: ListConnectionsQuery = (() => {
-  const builderApi = (api as { builder?: { listConnections?: unknown } }).builder
-  const candidate = builderApi?.listConnections
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as ListConnectionsQuery
-  }
-  return { useQuery: () => ({ data: undefined, isLoading: false }) }
-})()
-
-/** Desembrulha o envelope ({ data: { connections } } OU { connections }). */
+/** Desembrulha o envelope oRPC ({ data: { connections } } OU { connections }). */
 function readConnections(
-  raw: ReturnType<ListConnectionsQuery["useQuery"]>["data"],
+  raw:
+    | { connections?: ConnectionRow[] }
+    | { data?: { connections?: ConnectionRow[] } }
+    | undefined,
 ): ConnectionRow[] {
   if (!raw || typeof raw !== "object") return []
   const inner = (raw as { data?: { connections?: ConnectionRow[] } }).data
@@ -298,8 +275,8 @@ export function HandoffCard({
   const needsRoster = modeNeedsRoster(mode)
 
   // ── Instâncias WhatsApp disponíveis (warm transfer) ──────────────────────
-  // Hook resolvido em module-eval (identidade estável). 1 leitura defensiva.
-  const connectionsQuery = LIST_CONNECTIONS_QUERY.useQuery({})
+  // oRPC + TanStack Query; leitura defensiva do envelope em readConnections.
+  const connectionsQuery = useQuery(orpc.builder.listConnections.queryOptions())
   const connections = readConnections(connectionsQuery.data)
 
   // ── Mutadores do roster ──────────────────────────────────────────────────

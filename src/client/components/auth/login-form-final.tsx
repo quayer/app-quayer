@@ -15,7 +15,7 @@ import { Loader2, ArrowRight, ArrowLeft, Mail, ChevronsUpDown, Check } from "luc
 import { GoogleIcon } from "@/client/components/ui/google-icon"
 import { WhatsAppIcon } from "@/client/components/auth/whatsapp-icon"
 import Link from "next/link"
-import { api } from "@/igniter.client"
+import { client, orpcErrorMessage } from "@/orpc/client"
 import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TurnstileWidget } from "@/client/components/auth/turnstile-widget"
 import { SIGNUP_ENABLED } from "@/lib/config"
@@ -147,13 +147,10 @@ export function LoginFormFinal({
     setIsLoading(true)
 
     try {
-      const { data, error: apiError } = await api.auth.loginOTP.mutate({
-        body: { email, 'cf-turnstile-response': turnstileToken }
-      } as Parameters<typeof api.auth.loginOTP.mutate>[0])
-
-      if (apiError) {
-        throw apiError
-      }
+      // oRPC: erro de API agora é lançado (ORPCError) — cai direto no catch.
+      const { data } = await client.auth.loginOTP({
+        email, 'cf-turnstile-response': turnstileToken
+      } as Parameters<typeof client.auth.loginOTP>[0])
 
       const isNewUser = (data as { isNewUser?: boolean; magicLinkSessionId?: string } | null)?.isNewUser
       const magicLinkSessionId = (data as { isNewUser?: boolean; magicLinkSessionId?: string } | null)?.magicLinkSessionId
@@ -162,18 +159,9 @@ export function LoginFormFinal({
       if (magicLinkSessionId) params.set('mlsid', magicLinkSessionId)
       router.push(`/login/verify?${params.toString()}`)
     } catch (err: unknown) {
-      let errorMessage = "Erro ao enviar código. Tente novamente."
-
-      const e = err as Record<string, unknown> | undefined
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
-        errorMessage = String(errObj.details[0]?.message) || errorMessage
-      } else if (typeof errObj?.message === 'string') {
-        errorMessage = errObj.message
-      } else if (typeof e?.message === 'string') {
-        errorMessage = e.message
-      }
-
+      // Shape oRPC: ORPCError carrega a mensagem em .message (o shape Igniter
+      // { error: { details, message } } não existe mais).
+      const errorMessage = orpcErrorMessage(err, "Erro ao enviar código. Tente novamente.")
       setError(translateAuthError(errorMessage))
     } finally {
       setIsLoading(false)
@@ -195,28 +183,14 @@ export function LoginFormFinal({
     const normalized = normalizePhone(phone)
 
     try {
-      const { error: apiError } = await api.auth.loginOTPPhone.mutate({
-        body: { phone: normalized, 'cf-turnstile-response': turnstileToken }
-      } as Parameters<typeof api.auth.loginOTPPhone.mutate>[0])
-
-      if (apiError) {
-        throw apiError
-      }
+      // oRPC: erro de API agora é lançado (ORPCError) — cai direto no catch.
+      await client.auth.loginOTPPhone({
+        phone: normalized, 'cf-turnstile-response': turnstileToken
+      } as Parameters<typeof client.auth.loginOTPPhone>[0])
 
       router.push('/login/verify?phone=' + encodeURIComponent(normalized))
     } catch (err: unknown) {
-      let errorMessage = "Erro ao enviar código. Tente novamente."
-
-      const e = err as Record<string, unknown> | undefined
-      const errObj = e?.error as Record<string, unknown> | undefined
-      if (errObj?.details && Array.isArray(errObj.details) && errObj.details.length > 0) {
-        errorMessage = String(errObj.details[0]?.message) || errorMessage
-      } else if (typeof errObj?.message === 'string') {
-        errorMessage = errObj.message
-      } else if (typeof e?.message === 'string') {
-        errorMessage = e.message
-      }
-
+      const errorMessage = orpcErrorMessage(err, "Erro ao enviar código. Tente novamente.")
       setError(translateAuthError(errorMessage))
     } finally {
       setIsLoading(false)
@@ -228,13 +202,8 @@ export function LoginFormFinal({
     setError("")
 
     try {
-      const { data, error: apiError } = await api.auth.googleAuth.query()
-
-      if (apiError) {
-        setError("Erro ao iniciar autenticação com Google")
-        setIsGoogleLoading(false)
-        return
-      }
+      // oRPC: erro de API agora é lançado — tratado no catch abaixo.
+      const { data } = await client.auth.googleAuth()
 
       const authUrl = (data as { authUrl?: string } | null)?.authUrl
       if (authUrl) {

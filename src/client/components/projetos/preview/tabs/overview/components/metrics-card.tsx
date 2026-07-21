@@ -2,23 +2,12 @@
 
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { api } from "@/igniter.client"
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import { Card, CardContent } from "@/client/components/ui/card"
 import { Skeleton } from "@/client/components/ui/skeleton"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
-import type { ProjectMetrics } from "@/server/ai-module/builder/projects/projects.routes"
-
-// ---------------------------------------------------------------------------
-// Cast type for the auto-generated client (not yet refreshed)
-// ---------------------------------------------------------------------------
-
-interface GetMetricsQuery {
-  useQuery: (opts: { params: { id: string } }) => {
-    data: ProjectMetrics | undefined
-    isLoading: boolean
-    isError: boolean
-  }
-}
+import type { ProjectMetrics } from "@/server/ai-module/builder/projects/routes/metrics.routes"
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -77,10 +66,13 @@ export function MetricsCard({
   tokens: AppTokens
   projectId: string
 }) {
-  const getMetrics = api.builder.getMetrics as unknown as GetMetricsQuery
-  const { data, isLoading, isError } = getMetrics.useQuery({
-    params: { id: projectId },
-  })
+  // oRPC/TanStack: o data do hook é o envelope { data, error } — o payload
+  // (ProjectMetrics jsonificado) fica em .data.
+  const query = useQuery(
+    orpc.builder.getMetrics.queryOptions({ input: { id: projectId } }),
+  )
+  const { isLoading, isError } = query
+  const data = query.data?.data as ProjectMetrics | undefined
 
   const fmt = (n: number) =>
     new Intl.NumberFormat("pt-BR", { notation: "compact" }).format(n)

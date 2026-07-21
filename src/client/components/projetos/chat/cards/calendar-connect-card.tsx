@@ -44,7 +44,8 @@ import {
   Loader2,
 } from "lucide-react"
 
-import { api } from "@/igniter.client"
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 
 import { CardShell, type CardShellAction } from "./card-shell"
 import type { CardComponentProps } from "./types"
@@ -171,52 +172,9 @@ interface EventsPreviewEnvelope {
   busyCount?: number
 }
 
-interface EventsPreviewQuery {
-  useQuery: (opts: {
-    params: { projectId: string }
-    enabled?: boolean
-  }) => {
-    data:
-      | {
-          success?: boolean
-          data?: EventsPreviewEnvelope
-        }
-      | EventsPreviewEnvelope
-      | undefined
-    isLoading?: boolean
-    isError?: boolean
-    error?: unknown
-  }
-}
-
-/**
- * Resolve the events-preview query hook off the typed client with a defensive
- * guard, ONCE at module-eval. Mirrors the defensive generated-client resolver: if
- * the action is missing (client not regenerated yet) we fall back to a stable
- * no-op hook so the card renders WITHOUT the prova-social row instead of throwing.
- * Resolving once keeps the hook IDENTITY stable across renders (Rules of Hooks).
- */
-const EVENTS_PREVIEW_QUERY: EventsPreviewQuery = (() => {
-  // A action é composta NO builderController, então o client a expõe sob
-  // `api.builder.eventsPreview` (o Igniter agrupa por NOME do controller), não
-  // sob um namespace `calendar` (que não existe).
-  const builderApi = (api as { builder?: { eventsPreview?: unknown } })
-    .builder
-  const candidate = builderApi?.eventsPreview
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as EventsPreviewQuery
-  }
-  return {
-    useQuery: () => ({ data: undefined, isLoading: false, isError: false }),
-  }
-})()
-
-/** Unwrap the events-preview envelope ({ success, data } OR raw) defensively. */
+/** Unwrap the events-preview envelope ({ data } OR raw) defensively. */
 function readEventsPreview(
-  raw: ReturnType<EventsPreviewQuery["useQuery"]>["data"],
+  raw: { data?: EventsPreviewEnvelope } | EventsPreviewEnvelope | undefined,
 ): EventsPreviewEnvelope | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const inner = (raw as { data?: EventsPreviewEnvelope }).data
@@ -411,10 +369,13 @@ function AgendaPreviewBlock({
     setArmedKey(connKey)
   }, [disabled, connKey])
 
-  const query = EVENTS_PREVIEW_QUERY.useQuery({
-    params: { projectId },
-    enabled: armedKey === connKey,
-  })
+  // oRPC + TanStack Query (resolver defensivo do client gerado aposentado).
+  const query = useQuery(
+    orpc.builder.eventsPreview.queryOptions({
+      input: { projectId },
+      enabled: armedKey === connKey,
+    }),
+  )
 
   const state = React.useMemo<AgendaPreviewState>(() => {
     if (armedKey !== connKey) return "idle"

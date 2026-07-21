@@ -37,7 +37,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/client/components/ui/dropdown-menu"
-import { api } from "@/igniter.client"
+import { useMutation } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
 import {
   PROJECT_STATUS_LABEL,
@@ -134,50 +135,50 @@ export function ProjetosList({ projects }: ProjetosListProps) {
   const [deleteTarget, setDeleteTarget] = useState<ProjetoItem | null>(null)
 
   // ── Lifecycle mutations ──────────────────────────────────────────────────────
-  const renameMutation = api.builder.renameProject.useMutation({
+  const renameMutation = useMutation(orpc.builder.renameProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto renomeado")
       router.refresh()
     },
     onError: (error: unknown) =>
       toast.error(errorMessage(error, "Erro ao renomear projeto")),
-  })
+  }))
 
-  const duplicateMutation = api.builder.duplicateProject.useMutation({
+  const duplicateMutation = useMutation(orpc.builder.duplicateProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto duplicado")
       router.refresh()
     },
     onError: (error: unknown) =>
       toast.error(errorMessage(error, "Erro ao duplicar projeto")),
-  })
+  }))
 
-  const archiveMutation = api.builder.archiveProject.useMutation({
+  const archiveMutation = useMutation(orpc.builder.archiveProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto arquivado")
       router.refresh()
     },
     onError: (error: unknown) =>
       toast.error(errorMessage(error, "Erro ao arquivar projeto")),
-  })
+  }))
 
-  const unarchiveMutation = api.builder.unarchiveProject.useMutation({
+  const unarchiveMutation = useMutation(orpc.builder.unarchiveProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto restaurado")
       router.refresh()
     },
     onError: (error: unknown) =>
       toast.error(errorMessage(error, "Erro ao restaurar projeto")),
-  })
+  }))
 
-  const deleteMutation = api.builder.deleteProject.useMutation({
+  const deleteMutation = useMutation(orpc.builder.deleteProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto excluído permanentemente")
       router.refresh()
     },
     onError: (error: unknown) =>
       toast.error(errorMessage(error, "Erro ao excluir projeto")),
-  })
+  }))
 
   const filtered = useMemo(() => {
     return projects
@@ -203,10 +204,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
       setRenameTarget(null)
       return
     }
-    renameMutation.mutate({
-      params: { id: renameTarget.id },
-      body: { name: trimmed },
-    })
+    renameMutation.mutate({ id: renameTarget.id, name: trimmed })
     setRenameTarget(null)
   }
 
@@ -477,10 +475,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                           {isArchived ? (
                             <DropdownMenuItem
                               onClick={() =>
-                                unarchiveMutation.mutate({
-                                  params: { id: project.id },
-                                  body: {},
-                                })
+                                unarchiveMutation.mutate({ id: project.id })
                               }
                             >
                               <ArchiveRestore className="mr-2 h-3.5 w-3.5" />
@@ -493,10 +488,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  duplicateMutation.mutate({
-                                    params: { id: project.id },
-                                    body: {},
-                                  })
+                                  duplicateMutation.mutate({ id: project.id })
                                 }
                               >
                                 Duplicar
@@ -578,10 +570,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
             <AlertDialogAction
               onClick={() => {
                 if (archiveTarget) {
-                  archiveMutation.mutate({
-                    params: { id: archiveTarget.id },
-                    body: {},
-                  })
+                  archiveMutation.mutate({ id: archiveTarget.id })
                 }
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -612,7 +601,7 @@ export function ProjetosList({ projects }: ProjetosListProps) {
             <AlertDialogAction
               onClick={() => {
                 if (deleteTarget) {
-                  deleteMutation.mutate({ params: { id: deleteTarget.id } })
+                  deleteMutation.mutate({ id: deleteTarget.id })
                 }
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

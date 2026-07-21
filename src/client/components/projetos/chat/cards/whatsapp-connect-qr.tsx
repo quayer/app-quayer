@@ -24,10 +24,11 @@
  */
 
 import * as React from "react"
+import { useMutation } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import Image from "next/image"
 import { CheckCircle2, Loader2, QrCode, RefreshCw } from "lucide-react"
 
-import { api } from "@/igniter.client"
 import { Button } from "@/client/components/ui/button"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 
@@ -48,37 +49,6 @@ interface ProvisionResult {
 interface RefreshResult {
   qrCode?: string | null
 }
-
-/** Shapes mínimos dos hooks gerados (defensivo). */
-interface ProvisionMutation {
-  useMutation: (opts?: {
-    onSuccess?: (result: unknown) => void
-    onError?: (error: unknown) => void
-  }) => { mutate: (input: { body: { projectId: string } }) => void }
-}
-interface RefreshMutation {
-  useMutation: (opts?: {
-    onSuccess?: (result: unknown) => void
-    onError?: (error: unknown) => void
-  }) => { mutate: (input: { body: { connectionId: string } }) => void }
-}
-
-const PROVISION_MUTATION: ProvisionMutation | null = (() => {
-  const c = (api as { builder?: { provisionWhatsApp?: unknown } }).builder
-    ?.provisionWhatsApp
-  return c && typeof (c as { useMutation?: unknown }).useMutation === "function"
-    ? (c as ProvisionMutation)
-    : null
-})()
-const REFRESH_MUTATION: RefreshMutation | null = (() => {
-  const c = (api as { builder?: { refreshQr?: unknown } }).builder?.refreshQr
-  return c && typeof (c as { useMutation?: unknown }).useMutation === "function"
-    ? (c as RefreshMutation)
-    : null
-})()
-
-const FALLBACK_PROVISION: ProvisionMutation = { useMutation: () => ({ mutate: () => {} }) }
-const FALLBACK_REFRESH: RefreshMutation = { useMutation: () => ({ mutate: () => {} }) }
 
 /** Unwrap defensivo de envelopes ({ data: {...} } OU plano). */
 function readEnvelope<T extends object>(raw: unknown): T | undefined {
@@ -125,7 +95,7 @@ export function WhatsAppQrConnect({
   const [waiting, setWaiting] = React.useState(false)
   const lastRefreshRef = React.useRef(0)
 
-  const provision = (PROVISION_MUTATION ?? FALLBACK_PROVISION).useMutation({
+  const provision = useMutation(orpc.builder.provisionWhatsApp.mutationOptions({
     onSuccess: (result) => {
       const env = readEnvelope<ProvisionResult>(result)
       setBusy(false)
@@ -138,8 +108,8 @@ export function WhatsAppQrConnect({
       setBusy(false)
       setError("Não foi possível gerar o QR Code. Tente novamente.")
     },
-  })
-  const refresh = (REFRESH_MUTATION ?? FALLBACK_REFRESH).useMutation({
+  }))
+  const refresh = useMutation(orpc.builder.refreshQr.mutationOptions({
     onSuccess: (result) => {
       setBusy(false)
       setError(null)
@@ -149,16 +119,16 @@ export function WhatsAppQrConnect({
       setBusy(false)
       setError("Não foi possível regenerar o QR Code. Tente novamente.")
     },
-  })
+  }))
 
   // Provision UMA única vez no mount (idempotente — reusa a Connection do projeto).
   const provisionedRef = React.useRef(false)
   const { mutate: provisionMutate } = provision
   React.useEffect(() => {
-    if (connected || provisionedRef.current || PROVISION_MUTATION === null) return
+    if (connected || provisionedRef.current) return
     provisionedRef.current = true
     setBusy(true)
-    provisionMutate({ body: { projectId } })
+    provisionMutate({ projectId })
   }, [connected, projectId, provisionMutate])
 
   // Teto local de fallback (FR-27): após 10min sem conexão, oferece o re-arme.
@@ -173,13 +143,13 @@ export function WhatsAppQrConnect({
 
   const { mutate: refreshMutate } = refresh
   const handleRegenerate = React.useCallback(() => {
-    if (disabled || !connectionId || REFRESH_MUTATION === null) return
+    if (disabled || !connectionId) return
     const now = Date.now()
     if (now - lastRefreshRef.current < REFRESH_THROTTLE_MS) return
     lastRefreshRef.current = now
     setBusy(true)
     setError(null)
-    refreshMutate({ body: { connectionId } })
+    refreshMutate({ connectionId })
   }, [disabled, connectionId, refreshMutate])
 
   // "Ainda esperando?" re-arma: re-zera o relógio E regenera o QR.

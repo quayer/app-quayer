@@ -1,0 +1,1513 @@
+{
+  "messages": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/messages",
+          "summary": "List Messages",
+          "description": "Lista mensagens de uma sessão de chat, filtradas pela organization do usuário."
+        }
+      }
+    },
+    "getById": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/messages/{id}",
+          "summary": "Get Message by ID",
+          "description": "Retorna uma mensagem pelo ID, isolada pela organization do usuário."
+        }
+      }
+    },
+    "listSessions": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/messages/sessions",
+          "summary": "List Chat Sessions",
+          "description": "Lista sessões de chat da organization do usuário, com filtro opcional de status."
+        }
+      }
+    }
+  },
+  "deviceSessions": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/device-sessions",
+          "summary": "List Device Sessions",
+          "description": "List non-revoked device sessions ordered by last activity"
+        }
+      }
+    },
+    "revoke": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/device-sessions/revoke",
+          "summary": "Revoke Device Session",
+          "description": "Revoke a specific device session (IDOR-guarded)"
+        }
+      }
+    },
+    "revokeAll": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/device-sessions/revoke-all",
+          "summary": "Revoke All Device Sessions",
+          "description": "Revoke all active device sessions, optionally preserving the current device"
+        }
+      }
+    }
+  },
+  "departments": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/departments",
+          "summary": "List Departments",
+          "description": "Lista departamentos da organização ativa (filtros opcionais por type/isActive)."
+        }
+      }
+    },
+    "create": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/departments",
+          "successStatus": 201,
+          "summary": "Create Department",
+          "description": "Cria um departamento na organização ativa (slug único por org)."
+        }
+      }
+    },
+    "listMembers": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/departments/{id}/members",
+          "summary": "List Department Members",
+          "description": "Lista os membros (atendentes) de um departamento, na ordem da roleta (position asc)."
+        }
+      }
+    },
+    "addMember": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/departments/{id}/members",
+          "successStatus": 201,
+          "summary": "Add Department Member",
+          "description": "Adiciona (ou atualiza position/isActive de) um atendente na roleta do departamento."
+        }
+      }
+    },
+    "removeMember": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/departments/{id}/members/{userId}",
+          "summary": "Remove Department Member",
+          "description": "Remove um atendente da roleta do departamento."
+        }
+      }
+    }
+  },
+  "providers": {
+    "listProviders": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/providers",
+          "summary": "List Providers",
+          "description": "Return BYOK configuration status for all supported AI providers"
+        }
+      }
+    },
+    "upsertProvider": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/providers/{provider}",
+          "summary": "Upsert Provider",
+          "description": "Store (or replace) an API key for the given AI provider"
+        }
+      }
+    },
+    "deleteProvider": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/providers/{provider}",
+          "summary": "Delete Provider",
+          "description": "Remove a stored API key so the org falls back to the env-level key"
+        }
+      }
+    },
+    "listProviderKeys": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/providers/{provider}/keys",
+          "summary": "List Provider Keys",
+          "description": "Lista todas as chaves BYOK (rotuladas) de um provider para a org"
+        }
+      }
+    },
+    "createProviderKey": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/providers/{provider}/keys",
+          "summary": "Create Provider Key",
+          "description": "Cria uma nova chave BYOK rotulada para o provider (múltiplas chaves)"
+        }
+      }
+    },
+    "deleteProviderKey": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/providers/keys/{id}",
+          "summary": "Delete Provider Key",
+          "description": "Remove uma chave BYOK específica por id (org-scoped)"
+        }
+      }
+    }
+  },
+  "logs": {
+    "list": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/logs",
+          "summary": "List Logs",
+          "description": "List logs with filters"
+        }
+      }
+    },
+    "stats": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/logs/stats",
+          "summary": "Get Log Stats",
+          "description": "Get log statistics"
+        }
+      }
+    },
+    "sources": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/logs/sources",
+          "summary": "Get Log Sources",
+          "description": "Get list of log sources"
+        }
+      }
+    },
+    "create": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/logs",
+          "summary": "Create Log",
+          "description": "Create a log entry manually"
+        }
+      }
+    },
+    "analyze": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/logs/analyze",
+          "summary": "AI Analyze Logs",
+          "description": "Analyze logs using AI"
+        }
+      }
+    },
+    "analyzeError": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/logs/analyze/{id}",
+          "summary": "Analyze Error",
+          "description": "AI analysis of a specific error"
+        }
+      }
+    },
+    "recentAnalyses": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/logs/analyses",
+          "summary": "Get Recent Analyses",
+          "description": "Get recent AI analyses"
+        }
+      }
+    }
+  },
+  "auth": {
+    "csrf": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/csrf",
+          "summary": "Get CSRF Token",
+          "description": "Generate a new CSRF token and set it as a cookie"
+        }
+      }
+    },
+    "refresh": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/refresh",
+          "summary": "Refresh Token",
+          "description": "Refresh access token"
+        }
+      }
+    },
+    "logout": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/logout",
+          "summary": "Logout",
+          "description": "Logout user"
+        }
+      }
+    },
+    "switchOrganization": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/switch-organization",
+          "summary": "Switch Organization",
+          "description": "Switch current organization"
+        }
+      }
+    },
+    "loginOTP": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/login-otp",
+          "summary": "Login OTP",
+          "description": "Request passwordless login code via email"
+        }
+      }
+    },
+    "verifyLoginOTP": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/verify-login-otp",
+          "summary": "Verify Login OTP",
+          "description": "Verify passwordless OTP code"
+        }
+      }
+    },
+    "signupOTP": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/signup-otp",
+          "summary": "Signup OTP",
+          "description": "Request signup code via email"
+        }
+      }
+    },
+    "verifySignupOTP": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/verify-signup-otp",
+          "summary": "Verify Signup OTP",
+          "description": "Verify signup OTP and create user"
+        }
+      }
+    },
+    "verifyEmail": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/verify-email",
+          "summary": "Verify Email",
+          "description": "Verify email with code"
+        }
+      }
+    },
+    "checkMagicLinkStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/check-magic-link-status",
+          "summary": "Check Magic Link Status",
+          "description": "Poll to check if magic link was verified (for cross-tab login)"
+        }
+      }
+    },
+    "verifyMagicLink": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/verify-magic-link",
+          "summary": "Verify Magic Link",
+          "description": "Verify magic link token (login or signup)"
+        }
+      }
+    },
+    "googleAuth": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/google",
+          "summary": "Google Auth",
+          "description": "Initiate Google OAuth flow"
+        }
+      }
+    },
+    "googleCallback": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/google/callback",
+          "summary": "Google Callback",
+          "description": "Process Google OAuth callback"
+        }
+      }
+    },
+    "listUsers": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/users",
+          "summary": "List Users",
+          "description": "List all users (admin only)"
+        }
+      }
+    },
+    "listLinkedAccounts": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/me/linked-accounts",
+          "summary": "List Linked Accounts",
+          "description": "List external identity providers linked to the authenticated user"
+        }
+      }
+    },
+    "unlinkAccount": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/auth/me/linked-accounts/{provider}",
+          "summary": "Unlink Account",
+          "description": "Remove an external identity provider from the authenticated user"
+        }
+      }
+    },
+    "getOtpPreferences": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/me/otp-preferences",
+          "summary": "Get OTP Preferences",
+          "description": "Get user OTP method preferences"
+        }
+      }
+    },
+    "updateOtpPreferences": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/auth/me/otp-preferences",
+          "summary": "Update OTP Preferences",
+          "description": "Enable or disable OTP login methods (requires active 2FA)"
+        }
+      }
+    },
+    "me": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/me",
+          "summary": "Get Current User",
+          "description": "Get authenticated user data"
+        }
+      }
+    },
+    "updateMe": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/auth/me",
+          "summary": "Update Current User",
+          "description": "Update authenticated user profile fields"
+        }
+      }
+    },
+    "uploadAvatar": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/me/avatar",
+          "summary": "Upload User Avatar",
+          "description": "Upload a new avatar for the authenticated user"
+        }
+      }
+    },
+    "loginOTPPhone": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/login-otp-phone",
+          "summary": "Login OTP Phone",
+          "description": "Request WhatsApp OTP code"
+        }
+      }
+    },
+    "verifyLoginOTPPhone": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/verify-login-otp-phone",
+          "summary": "Verify Login OTP Phone",
+          "description": "Verify WhatsApp OTP code and issue session"
+        }
+      }
+    },
+    "totpSetup": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/totp/setup",
+          "summary": "TOTP Setup",
+          "description": "Generate TOTP secret and QR code, create a pending TotpDevice"
+        }
+      }
+    },
+    "totpVerify": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/totp/verify",
+          "summary": "TOTP Verify",
+          "description": "Verify TOTP code and activate the pending device"
+        }
+      }
+    },
+    "totpDevices": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/totp/devices",
+          "summary": "TOTP Devices",
+          "description": "List active TOTP devices for the current user"
+        }
+      }
+    },
+    "twoFactorLoginVerify": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/2fa/verify",
+          "summary": "2FA Login Verify",
+          "description": "Complete login after first factor by verifying TOTP code or recovery code (H-5)"
+        }
+      }
+    },
+    "totpDisableRequest": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/totp/disable-request",
+          "summary": "TOTP Disable Request",
+          "description": "Send email verification code to initiate 2FA disablement"
+        }
+      }
+    },
+    "totpDisable": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/totp/disable",
+          "summary": "TOTP Disable",
+          "description": "Disable 2FA after verifying both email code and TOTP code"
+        }
+      }
+    },
+    "totpRegenerateCodes": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/totp/regenerate-codes",
+          "summary": "TOTP Regenerate Recovery Codes",
+          "description": "Regenerate recovery codes (requires valid TOTP code)"
+        }
+      }
+    },
+    "passkeyRegisterOptions": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/register/options",
+          "summary": "Passkey Register Options"
+        }
+      }
+    },
+    "passkeyRegisterVerify": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/register/verify",
+          "summary": "Passkey Register Verify"
+        }
+      }
+    },
+    "passkeyList": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/auth/passkey/list",
+          "summary": "Passkey List"
+        }
+      }
+    },
+    "passkeyDelete": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/auth/passkey/{passkeyId}",
+          "summary": "Passkey Delete"
+        }
+      }
+    },
+    "passkeyLoginOptions": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/login/options",
+          "summary": "Passkey Login Options"
+        }
+      }
+    },
+    "passkeyLoginVerify": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/login/verify",
+          "summary": "Passkey Login Verify"
+        }
+      }
+    },
+    "passkeyConditionalChallenge": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/login/challenge",
+          "summary": "Passkey Conditional Challenge"
+        }
+      }
+    },
+    "passkeyConditionalVerify": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/auth/passkey/login/verify-conditional",
+          "summary": "Passkey Conditional Verify"
+        }
+      }
+    }
+  },
+  "builder": {
+    "listProjects": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects",
+          "summary": "List Builder Projects"
+        }
+      }
+    },
+    "getProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}",
+          "summary": "Get Builder Project"
+        }
+      }
+    },
+    "createProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/create",
+          "summary": "Create Builder Project"
+        }
+      }
+    },
+    "deleteProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/projects/{id}",
+          "summary": "Delete Builder Project"
+        }
+      }
+    },
+    "renameProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/projects/{id}/rename",
+          "summary": "Rename Builder Project"
+        }
+      }
+    },
+    "archiveProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/projects/{id}/archive",
+          "summary": "Archive Builder Project"
+        }
+      }
+    },
+    "unarchiveProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/projects/{id}/unarchive",
+          "summary": "Unarchive Builder Project"
+        }
+      }
+    },
+    "duplicateProject": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/duplicate",
+          "summary": "Duplicate Builder Project"
+        }
+      }
+    },
+    "updateAgentSettings": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/projects/{id}/agent-settings",
+          "summary": "Update Agent Runtime Settings"
+        }
+      }
+    },
+    "updatePrompt": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/projects/{id}/prompt",
+          "summary": "Update Agent System Prompt"
+        }
+      }
+    },
+    "listVersions": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/versions",
+          "summary": "List Builder Prompt Versions"
+        }
+      }
+    },
+    "rollbackPrompt": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/prompt/rollback",
+          "summary": "Rollback Agent Prompt"
+        }
+      }
+    },
+    "getSidebar": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/sidebar",
+          "summary": "Get Builder Sidebar Data"
+        }
+      }
+    },
+    "getMetrics": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/metrics",
+          "summary": "Get Builder Project Metrics"
+        }
+      }
+    },
+    "listProjectChannelOptions": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/channel/options",
+          "summary": "List Project Channel Options"
+        }
+      }
+    },
+    "getProjectChannel": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/channel",
+          "summary": "Get Project Channel"
+        }
+      }
+    },
+    "attachChannel": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/channel",
+          "summary": "Attach Channel to Project"
+        }
+      }
+    },
+    "detachChannel": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/projects/{id}/channel",
+          "summary": "Detach Channel from Project"
+        }
+      }
+    },
+    "getProactiveHistory": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/proactive/history",
+          "summary": "Get Builder Project Proactive History"
+        }
+      }
+    },
+    "listMessages": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/chat/messages",
+          "summary": "List Builder Chat Messages"
+        }
+      }
+    },
+    "getReadiness": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/readiness",
+          "summary": "Get Builder Project Readiness"
+        }
+      }
+    },
+    "compact": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/chat/compact",
+          "summary": "Compact Builder Chat History"
+        }
+      }
+    },
+    "parseSheet": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/sheet/parse",
+          "summary": "Parse Google Sheet (Pricing Import)"
+        }
+      }
+    },
+    "ingestSources": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/sources/ingest",
+          "summary": "Ingest Builder Project Sources"
+        }
+      }
+    },
+    "sourcesStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/sources/status",
+          "summary": "Get Builder Project Sources Status"
+        }
+      }
+    },
+    "retrySourceSynthesis": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/sources/{sourceId}/synthesis/retry",
+          "summary": "Retry Builder Source Synthesis"
+        }
+      }
+    },
+    "listSourceImages": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/sources/images",
+          "summary": "List Builder Project Source Images"
+        }
+      }
+    },
+    "patchSourceImage": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/sources/images/{imageId}",
+          "summary": "Patch Builder Source Image"
+        }
+      }
+    },
+    "bulkSourceImages": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/projects/{id}/sources/images/bulk",
+          "summary": "Bulk Curate Builder Source Images"
+        }
+      }
+    },
+    "listProjectMedia": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/media",
+          "summary": "List Builder Project Media"
+        }
+      }
+    },
+    "patchMediaAsset": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/media/{mediaId}",
+          "summary": "Patch Builder Media Asset"
+        }
+      }
+    },
+    "getKnowledge": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/knowledge/{projectId}",
+          "summary": "Get Knowledge Base"
+        }
+      }
+    },
+    "ensureCollection": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/knowledge/{projectId}/collection",
+          "summary": "Ensure Knowledge Collection"
+        }
+      }
+    },
+    "toggleRAG": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/knowledge/{projectId}",
+          "summary": "Toggle RAG"
+        }
+      }
+    },
+    "addUrlSource": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/knowledge/{projectId}/source/url",
+          "summary": "Add URL Knowledge Source"
+        }
+      }
+    },
+    "addTextSource": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/knowledge/{projectId}/source/text",
+          "summary": "Add Text Knowledge Source"
+        }
+      }
+    },
+    "deleteSource": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/knowledge/{projectId}/source/{sourceId}",
+          "summary": "Delete Knowledge Source"
+        }
+      }
+    },
+    "save": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/channel/credentials",
+          "summary": "Save Channel Credentials"
+        }
+      }
+    },
+    "getStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/channel/credentials/{connectionId}",
+          "summary": "Get Channel Credentials Status"
+        }
+      }
+    },
+    "provisionWhatsApp": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/channel/provision-whatsapp",
+          "summary": "Provision WhatsApp Business Instance"
+        }
+      }
+    },
+    "refreshQr": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/channel/refresh-qr",
+          "summary": "Refresh WhatsApp QR Code"
+        }
+      }
+    },
+    "publish": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/deploy/publish",
+          "summary": "Publish Builder Deployment"
+        }
+      }
+    },
+    "publishVersion": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/deploy/publish-version",
+          "summary": "Publish Builder Prompt Version"
+        }
+      }
+    },
+    "deployStatus": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/deploy/{projectId}/status",
+          "summary": "Get Deploy Status"
+        }
+      }
+    },
+    "rollback": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/deploy/{deploymentId}/rollback",
+          "summary": "Rollback Deployment"
+        }
+      }
+    },
+    "getIdentity": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/identity/{projectId}",
+          "summary": "Get Agent Identity Card"
+        }
+      }
+    },
+    "updateIdentity": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/identity/{projectId}",
+          "summary": "Update Agent Identity Card"
+        }
+      }
+    },
+    "connectLink": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/calendar/connect-link",
+          "summary": "Create Google Calendar Connect Link"
+        }
+      }
+    },
+    "status": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/calendar/status/{projectId}",
+          "summary": "Get Google Calendar Connection Status"
+        }
+      }
+    },
+    "disconnect": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/calendar/{projectId}",
+          "summary": "Disconnect Google Calendar"
+        }
+      }
+    },
+    "eventsPreview": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/calendar/events-preview/{projectId}",
+          "summary": "Get Calendar Events Preview"
+        }
+      }
+    },
+    "listConnections": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/connections/list",
+          "summary": "List WhatsApp Connections"
+        }
+      }
+    },
+    "getPricing": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/pricing/{projectId}",
+          "summary": "Get Pricing Catalog"
+        }
+      }
+    },
+    "ensureList": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/pricing/{projectId}/list",
+          "summary": "Ensure Price List"
+        }
+      }
+    },
+    "addItem": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/pricing/{projectId}/item",
+          "summary": "Add Price Item"
+        }
+      }
+    },
+    "deleteItem": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/pricing/{projectId}/item/{itemId}",
+          "summary": "Delete Price Item"
+        }
+      }
+    },
+    "getCredential": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/credential/{projectId}",
+          "summary": "Get Agent Credential"
+        }
+      }
+    },
+    "updateCredential": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/credential/{projectId}",
+          "summary": "Set Agent Credential"
+        }
+      }
+    },
+    "updateCredentialKey": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/credential/keys/{id}",
+          "summary": "Update Provider Key"
+        }
+      }
+    },
+    "getCapabilities": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/projects/{id}/capabilities",
+          "summary": "Get Project Capabilities"
+        }
+      }
+    },
+    "listProjectIntegrations": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/integrations",
+          "summary": "List Integrations"
+        }
+      }
+    },
+    "listTemplates": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "GET",
+          "path": "/builder/integrations/templates",
+          "summary": "List Integration Templates"
+        }
+      }
+    },
+    "createIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/integrations",
+          "summary": "Create Integration"
+        }
+      }
+    },
+    "updateIntegrationCredentials": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "PATCH",
+          "path": "/builder/integrations/{id}/credentials",
+          "summary": "Update Integration Credentials"
+        }
+      }
+    },
+    "testIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/integrations/{id}/test",
+          "summary": "Test Integration"
+        }
+      }
+    },
+    "activateIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/integrations/{id}/activate",
+          "summary": "Activate Integration"
+        }
+      }
+    },
+    "pauseIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/integrations/{id}/pause",
+          "summary": "Pause Integration"
+        }
+      }
+    },
+    "resumeIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "POST",
+          "path": "/builder/integrations/{id}/resume",
+          "summary": "Resume Integration"
+        }
+      }
+    },
+    "removeIntegration": {
+      "~orpc": {
+        "errorMap": {},
+        "meta": {},
+        "route": {
+          "method": "DELETE",
+          "path": "/builder/integrations/{id}",
+          "summary": "Delete Integration"
+        }
+      }
+    }
+  }
+}

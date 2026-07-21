@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "orpc:contract": "tsx scripts/generate-orpc-contract.ts",
     "start": "next start",
     "start:workers": "tsx scripts/start-workers.ts",
     "build:workers": "node scripts/build-workers.mjs",

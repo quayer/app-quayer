@@ -1,30 +1,27 @@
 "use client"
 
 /**
- * useIntegrations — React Query + Igniter client wrapper para o Integration
- * Builder (Wave 1, T34). Dono dos dois `useQuery` (lista do projeto + catálogo
- * de templates) e dos seis `useMutation` do ciclo de vida da integração.
+ * useIntegrations — client oRPC + TanStack Query para o Integration Builder
+ * (Wave 1, T34). Dono dos dois `useQuery` (lista do projeto + catálogo de
+ * templates) e dos seis `useMutation` do ciclo de vida da integração.
  *
- * Espelha o idioma do repo (ex.: `use-project-readiness.ts` para o
- * `useQuery`/refetch e `media-grid.tsx` para o `useMutation` com `mutate({
- * params, body })` retornando Promise de `{ data, error }`):
+ *   - QUERY  → `useQuery(orpc.builder.<action>.queryOptions({ input }))` →
+ *              `{ data, isLoading, error, refetch }` (data = envelope { data }).
+ *   - MUTATION → `useMutation(orpc.builder.<action>.mutationOptions())`;
+ *              `mutateAsync(input)` devolve Promise do envelope. Cada wrapper
+ *              aguarda o `mutateAsync` e SÓ ENTÃO `refetch()` da lista —
+ *              assim a lista canônica reflete o novo status sem F5.
  *
- *   - QUERY  → `api.builder.<action>.useQuery({ query | params })` →
- *              `{ data, isLoading, error, refetch }`.
- *   - MUTATION → `api.builder.<action>.useMutation()` → `{ mutate }`, onde
- *              `mutate({ params, body })` devolve Promise da resposta. Cada
- *              wrapper de mutação aguarda o `mutate` e SÓ ENTÃO `refetch()` da
- *              lista — assim a lista canônica reflete o novo status sem F5.
- *
- * Wrapper FINO e tipado: zero lógica de negócio, zero `any`. Os tipos de
- * `api.builder.*` fluem automaticamente do controller (que já espalha
- * `integrationsRoutes`) — sem codegen.
+ * Pós-cutover: os adapters defensivos (client gerado do Igniter + fallback
+ * REST via fetchWithAuthRetry) foram aposentados — as actions são garantidas
+ * pelo client tipado. Erro de API agora é REJEIÇÃO da Promise (ORPCError).
  */
 
 import * as React from "react"
 
-import { api } from "@/igniter.client"
-import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
+import { useMutation, useQuery } from "@tanstack/react-query"
+
+import { orpc } from "@/orpc/client"
 
 // ── View-models desembrulhados (o payload do envelope Igniter) ──────────────
 
@@ -139,242 +136,27 @@ function asTestResult(raw: unknown): IntegrationTestResult | null {
   }
 }
 
-// ── Adapters: client gerado quando existe, REST nativo quando não existe ─────
-
-interface QueryResult {
-  data: unknown
-  isLoading?: boolean
-  error?: unknown
-  refetch?: () => unknown
-}
-
-interface GeneratedQuery {
-  useQuery: (opts?: unknown) => QueryResult
-}
-
-interface MutationResult {
-  mutate: (args?: unknown) => Promise<unknown>
-  isLoading?: boolean
-}
-
-interface GeneratedMutation {
-  useMutation: () => MutationResult
-}
-
-type MutationArgs = {
-  params?: { id?: string }
-  body?: unknown
-}
-
-function getBuilderQuery(name: string, fallback: GeneratedQuery): GeneratedQuery {
-  const candidate = (api.builder as Record<string, unknown>)[name]
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as GeneratedQuery
-  }
-  return fallback
-}
-
-function getBuilderMutation(
-  name: string,
-  fallback: GeneratedMutation,
-): GeneratedMutation {
-  const candidate = (api.builder as Record<string, unknown>)[name]
-  if (
-    candidate &&
-    typeof (candidate as { useMutation?: unknown }).useMutation === "function"
-  ) {
-    return candidate as GeneratedMutation
-  }
-  return fallback
-}
-
-function useNativeJsonQuery(url: string | null): QueryResult {
-  const mounted = React.useRef(false)
-  const [state, setState] = React.useState<{
-    data: unknown
-    isLoading: boolean
-    error: unknown
-  }>({ data: undefined, isLoading: Boolean(url), error: null })
-
-  const refetch = React.useCallback(async () => {
-    if (!url) {
-      setState({ data: undefined, isLoading: false, error: null })
-      return
-    }
-    setState((cur) => ({ ...cur, isLoading: cur.data == null, error: null }))
-    try {
-      const res = await fetchWithAuthRetry(
-        url,
-        { method: "GET", headers: { Accept: "application/json" } },
-        { notifyOnAuthFailure: true },
-      )
-      if (!res.ok) throw new Error(`query ${res.status}`)
-      const data = await res.json()
-      if (mounted.current) setState({ data, isLoading: false, error: null })
-    } catch (error) {
-      if (mounted.current) setState((cur) => ({ ...cur, isLoading: false, error }))
-    }
-  }, [url])
-
-  React.useEffect(() => {
-    mounted.current = true
-    void refetch()
-    return () => {
-      mounted.current = false
-    }
-  }, [refetch])
-
-  return {
-    data: state.data,
-    isLoading: state.isLoading,
-    error: state.error,
-    refetch,
-  }
-}
-
-function createNativeMutation(
-  buildRequest: (args: MutationArgs) => { method: string; url: string; body?: unknown },
-): GeneratedMutation {
-  return {
-    useMutation: () => {
-      const [isLoading, setIsLoading] = React.useState(false)
-      const mutate = React.useCallback(
-        async (rawArgs?: unknown) => {
-          const args = (rawArgs ?? {}) as MutationArgs
-          const request = buildRequest(args)
-          setIsLoading(true)
-          try {
-            const hasBody = request.body !== undefined
-            const res = await fetchWithAuthRetry(
-              request.url,
-              {
-                method: request.method,
-                headers: {
-                  Accept: "application/json",
-                  ...(hasBody ? { "Content-Type": "application/json" } : {}),
-                },
-                body: hasBody ? JSON.stringify(request.body) : undefined,
-              },
-              { notifyOnAuthFailure: true },
-            )
-            const data = await res.json().catch(() => null)
-            if (!res.ok) throw new Error(`mutation ${res.status}`)
-            return data
-          } finally {
-            setIsLoading(false)
-          }
-        },
-        [],
-      )
-      return { mutate, isLoading }
-    },
-  }
-}
-
-function requiredId(args: MutationArgs): string {
-  const id = args.params?.id
-  if (!id) throw new Error("integration id obrigatório")
-  return encodeURIComponent(id)
-}
-
-const LIST_PROJECT_INTEGRATIONS_QUERY = getBuilderQuery("listProjectIntegrations", {
-  useQuery: (opts?: unknown) => {
-    const query = (opts as { query?: { projectId?: unknown } } | undefined)
-      ?.query
-    const projectId =
-      typeof query?.projectId === "string" ? query.projectId : ""
-    const url = projectId
-      ? `/api/v1/builder/integrations?projectId=${encodeURIComponent(projectId)}`
-      : null
-    return useNativeJsonQuery(url)
-  },
-})
-
-const LIST_TEMPLATES_QUERY = getBuilderQuery("listTemplates", {
-  useQuery: () => useNativeJsonQuery("/api/v1/builder/integrations/templates"),
-})
-
-const CREATE_INTEGRATION_MUTATION = getBuilderMutation(
-  "createIntegration",
-  createNativeMutation((args) => ({
-    method: "POST",
-    url: "/api/v1/builder/integrations",
-    body: args.body,
-  })),
-)
-
-const UPDATE_CREDENTIALS_MUTATION = getBuilderMutation(
-  "updateIntegrationCredentials",
-  createNativeMutation((args) => ({
-    method: "PATCH",
-    url: `/api/v1/builder/integrations/${requiredId(args)}/credentials`,
-    body: args.body,
-  })),
-)
-
-const TEST_INTEGRATION_MUTATION = getBuilderMutation(
-  "testIntegration",
-  createNativeMutation((args) => ({
-    method: "POST",
-    url: `/api/v1/builder/integrations/${requiredId(args)}/test`,
-  })),
-)
-
-const ACTIVATE_INTEGRATION_MUTATION = getBuilderMutation(
-  "activateIntegration",
-  createNativeMutation((args) => ({
-    method: "POST",
-    url: `/api/v1/builder/integrations/${requiredId(args)}/activate`,
-  })),
-)
-
-const PAUSE_INTEGRATION_MUTATION = getBuilderMutation(
-  "pauseIntegration",
-  createNativeMutation((args) => ({
-    method: "POST",
-    url: `/api/v1/builder/integrations/${requiredId(args)}/pause`,
-  })),
-)
-
-const RESUME_INTEGRATION_MUTATION = getBuilderMutation(
-  "resumeIntegration",
-  createNativeMutation((args) => ({
-    method: "POST",
-    url: `/api/v1/builder/integrations/${requiredId(args)}/resume`,
-  })),
-)
-
-const REMOVE_INTEGRATION_MUTATION = getBuilderMutation(
-  "removeIntegration",
-  createNativeMutation((args) => ({
-    method: "DELETE",
-    url: `/api/v1/builder/integrations/${requiredId(args)}`,
-  })),
-)
-
 export function useIntegrations(projectId: string): UseIntegrations {
-  // ── Lista do projeto (QUERY com `query: { projectId }`) ───────────────────
-  const listQuery = LIST_PROJECT_INTEGRATIONS_QUERY.useQuery({
-    query: { projectId },
-  })
+  // ── Lista do projeto ──────────────────────────────────────────────────────
+  const listQuery = useQuery(
+    orpc.builder.listProjectIntegrations.queryOptions({ input: { projectId } }),
+  )
 
   // ── Catálogo de templates (QUERY sem input) ───────────────────────────────
-  const templatesQuery = LIST_TEMPLATES_QUERY.useQuery()
+  const templatesQuery = useQuery(orpc.builder.listTemplates.queryOptions())
 
   // ── Mutations do ciclo de vida ────────────────────────────────────────────
-  const createMutation = CREATE_INTEGRATION_MUTATION.useMutation()
-  const updateCredsMutation = UPDATE_CREDENTIALS_MUTATION.useMutation()
-  const testMutation = TEST_INTEGRATION_MUTATION.useMutation()
-  const activateMutation = ACTIVATE_INTEGRATION_MUTATION.useMutation()
-  const pauseMutation = PAUSE_INTEGRATION_MUTATION.useMutation()
-  const resumeMutation = RESUME_INTEGRATION_MUTATION.useMutation()
-  const removeMutation = REMOVE_INTEGRATION_MUTATION.useMutation()
+  const createMutation = useMutation(orpc.builder.createIntegration.mutationOptions())
+  const updateCredsMutation = useMutation(
+    orpc.builder.updateIntegrationCredentials.mutationOptions(),
+  )
+  const testMutation = useMutation(orpc.builder.testIntegration.mutationOptions())
+  const activateMutation = useMutation(orpc.builder.activateIntegration.mutationOptions())
+  const pauseMutation = useMutation(orpc.builder.pauseIntegration.mutationOptions())
+  const resumeMutation = useMutation(orpc.builder.resumeIntegration.mutationOptions())
+  const removeMutation = useMutation(orpc.builder.removeIntegration.mutationOptions())
 
-  // Identidade estável do `refetch` para os wrappers (o hook gerado pode trocar
-  // a identidade a cada render — mesmo guard de `use-project-readiness.ts`).
+  // Identidade estável do `refetch` para os wrappers.
   const refetchRef = React.useRef(listQuery.refetch)
   React.useEffect(() => {
     refetchRef.current = listQuery.refetch
@@ -395,7 +177,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const createIntegration = React.useCallback(
     async (input: CreateIntegrationInput) => {
-      const res = await createMutation.mutate({ body: input })
+      const res = await createMutation.mutateAsync(input)
       refetch()
       return res
     },
@@ -404,10 +186,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const updateCredentials = React.useCallback(
     async (id: string, values: Record<string, string>) => {
-      const res = await updateCredsMutation.mutate({
-        params: { id },
-        body: { values },
-      })
+      const res = await updateCredsMutation.mutateAsync({ id, values })
       refetch()
       return res
     },
@@ -416,7 +195,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const testIntegration = React.useCallback(
     async (id: string) => {
-      const res = await testMutation.mutate({ params: { id } })
+      const res = await testMutation.mutateAsync({ id })
       // O teste muda `lastTest*`/status (draft → validated) — repuxa a lista.
       refetch()
       return asTestResult(res)
@@ -426,7 +205,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const activate = React.useCallback(
     async (id: string) => {
-      const res = await activateMutation.mutate({ params: { id } })
+      const res = await activateMutation.mutateAsync({ id })
       refetch()
       return res
     },
@@ -435,7 +214,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const pause = React.useCallback(
     async (id: string) => {
-      const res = await pauseMutation.mutate({ params: { id } })
+      const res = await pauseMutation.mutateAsync({ id })
       refetch()
       return res
     },
@@ -444,7 +223,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const resume = React.useCallback(
     async (id: string) => {
-      const res = await resumeMutation.mutate({ params: { id } })
+      const res = await resumeMutation.mutateAsync({ id })
       refetch()
       return res
     },
@@ -453,7 +232,7 @@ export function useIntegrations(projectId: string): UseIntegrations {
 
   const remove = React.useCallback(
     async (id: string) => {
-      const res = await removeMutation.mutate({ params: { id } })
+      const res = await removeMutation.mutateAsync({ id })
       refetch()
       return res
     },
@@ -461,21 +240,21 @@ export function useIntegrations(projectId: string): UseIntegrations {
   )
 
   const isMutating =
-    Boolean(createMutation.isLoading) ||
-    Boolean(updateCredsMutation.isLoading) ||
-    Boolean(testMutation.isLoading) ||
-    Boolean(activateMutation.isLoading) ||
-    Boolean(pauseMutation.isLoading) ||
-    Boolean(resumeMutation.isLoading) ||
-    Boolean(removeMutation.isLoading)
+    createMutation.isPending ||
+    updateCredsMutation.isPending ||
+    testMutation.isPending ||
+    activateMutation.isPending ||
+    pauseMutation.isPending ||
+    resumeMutation.isPending ||
+    removeMutation.isPending
 
   return {
     integrations,
-    isLoading: Boolean(listQuery.isLoading),
+    isLoading: listQuery.isLoading,
     error: listQuery.error,
     refetch,
     templates,
-    templatesLoading: Boolean(templatesQuery.isLoading),
+    templatesLoading: templatesQuery.isLoading,
     createIntegration,
     updateCredentials,
     testIntegration,

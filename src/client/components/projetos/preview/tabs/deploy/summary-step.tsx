@@ -15,7 +15,8 @@
 import { ChevronDown, Circle, GitCompare, RotateCcw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/igniter.client"
+import { useMutation } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import { Card, CardContent } from "@/client/components/ui/card"
 import {
   Collapsible,
@@ -44,17 +45,6 @@ import { TimelineDot, VersionStatusCards } from "./deploy-status-card"
 import type { PromptVersion, Tokens } from "./deploy-status-card"
 import { PromptDiff } from "./prompt-diff"
 import type { VersionListItem } from "./version-utils"
-
-interface RollbackPromptClient {
-  mutate: (
-    args: { params: { id: string }; body: { targetVersionId: string } },
-    options: {
-      onSuccess: (data: { versionNumber: number }) => void
-      onError: (err: unknown) => void
-    },
-  ) => void
-  isPending: boolean
-}
 
 function VersionTimelineEntry({
   version,
@@ -147,7 +137,8 @@ export function SummaryStep({
   const [diffOpen, setDiffOpen] = useState(false)
   const [rollbackOpen, setRollbackOpen] = useState(false)
 
-  const rollbackPrompt = api.builder.rollbackPrompt as unknown as RollbackPromptClient
+  // oRPC: mutation TanStack; resposta = envelope { data: { versionNumber, ... } }
+  const rollbackPrompt = useMutation(orpc.builder.rollbackPrompt.mutationOptions())
 
   const fullVersions = useMemo<VersionListItem[]>(
     () => [...versions].sort((a, b) => b.versionNumber - a.versionNumber),
@@ -178,11 +169,11 @@ export function SummaryStep({
   function handleRollbackConfirm() {
     if (!prevProdVersion || rollbackPrompt.isPending) return
     rollbackPrompt.mutate(
-      { params: { id: projectId }, body: { targetVersionId: prevProdVersion.id } },
+      { id: projectId, targetVersionId: prevProdVersion.id },
       {
-        onSuccess: (data) => {
+        onSuccess: (res) => {
           toast.success(
-            `Revertido para v${prevProdVersion.versionNumber} (nova versão v${data.versionNumber})`,
+            `Revertido para v${prevProdVersion.versionNumber} (nova versão v${res.data.versionNumber})`,
           )
           setRollbackOpen(false)
           void onVersionsChanged()

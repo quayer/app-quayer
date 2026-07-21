@@ -31,7 +31,8 @@ import * as React from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 
 import { useAppTokens } from "@/client/hooks/use-app-tokens"
-import { api } from "@/igniter.client"
+import { useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import type { WorkspaceProject } from "@/client/components/projetos/types"
 
 import { MediaUpload } from "./media-upload"
@@ -111,19 +112,14 @@ export function MediaTab({ project }: MediaTabProps): React.JSX.Element {
   // ── Lista canônica (este componente é o dono do data) ──────────────────────
   // `isError` é consumido de propósito (audit médio): sem ele, uma falha de API
   // virava lista vazia e a aba mentia "Nenhuma mídia no catálogo ainda".
-  const { data, isLoading, isError, refetch } = api.builder.listProjectMedia.useQuery({
-    params: { id: project.id },
-  })
+  const { data, isLoading, isError, refetch } = useQuery(
+    orpc.builder.listProjectMedia.queryOptions({ input: { id: project.id } }),
+  )
 
-  // O client Igniter pode devolver o payload PLANO ({ media }) OU embrulhado num
-  // array ([{ media }]) dependendo do envelope — os outros consumidores deste
-  // módulo (source-progress-card, prompt/version-history) se defendem do mesmo
-  // jeito. Desembrulha tolerante e defaulta para [] (a UI nunca vê undefined).
+  // oRPC: data = envelope { data: { media }, error: null } (wire idêntico ao
+  // Igniter). Desembrulha tolerante e defaulta para [] (a UI nunca vê undefined).
   const media: MediaAssetItem[] = React.useMemo(() => {
-    const raw = data as unknown
-    const env = (Array.isArray(raw) ? raw[0] : raw) as
-      | { media?: MediaAssetItem[] }
-      | undefined
+    const env = data?.data as { media?: MediaAssetItem[] } | undefined
     return Array.isArray(env?.media) ? env.media : []
   }, [data])
 

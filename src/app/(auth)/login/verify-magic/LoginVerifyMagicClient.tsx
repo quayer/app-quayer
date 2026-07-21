@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { api } from "@/igniter.client"
+import { client } from "@/orpc/client"
 import { Loader2, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/client/components/ui/button"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
@@ -29,11 +29,10 @@ export function LoginVerifyMagicClient() {
 
     const verifyMagicLink = async () => {
       try {
-        const { data, error: apiError } = await api.auth.verifyMagicLink.mutate({
-          body: { token }
-        })
+        // Client oRPC: erro lança e cai no catch (fluxo original preservado)
+        const { data } = await client.auth.verifyMagicLink({ token })
 
-        if (apiError || !data) {
+        if (!data) {
           throw new Error('Magic link inválido ou expirado')
         }
 

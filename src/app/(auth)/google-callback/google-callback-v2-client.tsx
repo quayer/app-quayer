@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Loader2, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/client/components/ui/alert'
-import { api } from '@/igniter.client'
+import { client } from '@/orpc/client'
 import { TwoFactorChallenge } from '@/client/components/auth/two-factor-challenge'
 
 function GoogleCallbackContent() {
@@ -19,15 +19,8 @@ function GoogleCallbackContent() {
 
   const handleGoogleCallback = useCallback(async (code: string, state: string) => {
     try {
-      const { data, error: apiError } = await api.auth.googleCallback.mutate({
-        body: { code, state }
-      })
-
-      if (apiError) {
-        setError('Código de autorização expirado ou inválido')
-        setTimeout(() => router.push('/login'), 3000)
-        return
-      }
+      // Client oRPC: erro agora LANÇA (tratado no catch abaixo, que já existia)
+      const { data } = await client.auth.googleCallback({ code, state })
 
       const responseData = data as { user?: { currentOrgId?: string; role: string }; needsOnboarding?: boolean; requiresTwoFactor?: boolean; challengeId?: string } | null
       if (responseData?.requiresTwoFactor && responseData?.challengeId) {

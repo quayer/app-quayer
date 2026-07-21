@@ -32,7 +32,8 @@
 import * as React from "react"
 
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
-import { api } from "@/igniter.client"
+import { useMutation } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 
 import { MediaCard } from "./media-card"
 
@@ -109,14 +110,15 @@ export function MediaGrid({
   disabled = false,
   onRefetch,
 }: MediaGridProps): React.JSX.Element {
-  // ── Mutation (client tipado Igniter, agrupado por controller → api.builder.*)
-  // `onSuccess` (refetch da lista canônica) vive no hook — nesta versão do
-  // client o `.mutate({ params, body })` NÃO aceita callbacks por chamada; ele
-  // devolve uma Promise da resposta, então o error-handling pontual (rollback do
-  // fade-out no delete) é feito no `.catch`/inspeção da resposta no handler.
-  const patchMedia = api.builder.patchMediaAsset.useMutation({
-    onSuccess: () => onRefetch(),
-  })
+  // ── Mutation (client oRPC + TanStack Query) ────────────────────────────
+  // `onSuccess` (refetch da lista canônica) vive no hook; o error-handling
+  // pontual (rollback do fade-out no delete) usa `mutateAsync().catch` — no
+  // oRPC erro de API é REJEIÇÃO da Promise (não mais `{ error }` no corpo).
+  const patchMedia = useMutation(
+    orpc.builder.patchMediaAsset.mutationOptions({
+      onSuccess: () => onRefetch(),
+    }),
+  )
 
   // ── Estado local de curadoria ───────────────────────────────────────────
   // Legendas em edição (controladas pelo card via drafts[id]).
@@ -172,10 +174,7 @@ export function MediaGrid({
         return next
       })
       void patchMedia
-        .mutate({ params: { mediaId }, body: { deleted: true } })
-        .then((res) => {
-          if (res?.error != null) clearDeleting(mediaId)
-        })
+        .mutateAsync({ mediaId, deleted: true })
         .catch(() => clearDeleting(mediaId))
     },
     [clearDeleting, disabled, patchMedia],
@@ -189,7 +188,7 @@ export function MediaGrid({
   const handleConfirm = React.useCallback(
     (mediaId: string) => {
       if (disabled) return
-      void patchMedia.mutate({ params: { mediaId }, body: { confirmed: true } })
+      patchMedia.mutate({ mediaId, confirmed: true })
     },
     [disabled, patchMedia],
   )
@@ -203,10 +202,7 @@ export function MediaGrid({
       timers[mediaId] = setTimeout(() => {
         delete timers[mediaId]
         if (disabled) return
-        void patchMedia.mutate({
-          params: { mediaId },
-          body: { caption: next.trim() },
-        })
+        patchMedia.mutate({ mediaId, caption: next.trim() })
       }, CAPTION_DEBOUNCE_MS)
     },
     [disabled, patchMedia],

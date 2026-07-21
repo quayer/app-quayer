@@ -9,10 +9,11 @@
 
 import * as React from "react"
 
-import { api } from "@/igniter.client"
+import { useQuery } from "@tanstack/react-query"
+
+import { orpc } from "@/orpc/client"
 import type { AppTokens } from "@/client/hooks/use-app-tokens"
 import type { CapabilityRecommendation } from "@/server/ai-module/builder/capabilities/recommend-capabilities.pure"
-import { fetchWithAuthRetry } from "@/lib/auth/client-refresh"
 
 // ── getCapabilities query (NFR-05) ─────────────────────────────────────────
 
@@ -35,90 +36,29 @@ export interface CapabilitiesEnvelope {
    */
   recommendations?: CapabilityRecommendation[]
 }
-interface GetCapabilitiesQuery {
-  useQuery: (opts: { params: { id: string } }) => {
-    data:
-      | { success?: boolean; data?: CapabilitiesEnvelope }
-      | CapabilitiesEnvelope
-      | undefined
-    refetch?: () => unknown
-  }
-}
-
-/**
- * Fetch nativo usado quando o schema/client Igniter ainda não expõe a action
- * gerada. Mantém a identidade do hook estável e evita que a Overview degrade para
- * counts vazios só porque o client gerado ficou atrasado no dev.
- */
-const NATIVE_GET_CAPABILITIES_QUERY: GetCapabilitiesQuery = {
-  useQuery: ({ params }) => {
-    const mounted = React.useRef(false)
-    const [data, setData] = React.useState<
-      { success?: boolean; data?: CapabilitiesEnvelope } | undefined
-    >(undefined)
-
-    const refetch = React.useCallback(async () => {
-      try {
-        const res = await fetchWithAuthRetry(
-          `/api/v1/builder/projects/${params.id}/capabilities`,
-          { method: "GET", headers: { Accept: "application/json" } },
-          { notifyOnAuthFailure: true },
-        )
-        if (!res.ok) throw new Error(`getCapabilities ${res.status}`)
-        const body = (await res.json()) as {
-          success?: boolean
-          data?: CapabilitiesEnvelope
-        }
-        if (mounted.current) setData(body)
-      } catch {
-        if (mounted.current) setData(undefined)
-      }
-    }, [params.id])
-
-    React.useEffect(() => {
-      mounted.current = true
-      void refetch()
-      return () => {
-        mounted.current = false
-      }
-    }, [refetch])
-
-    return { data, refetch }
-  },
-}
-
-/**
- * Resolve `api.builder.getCapabilities` UMA vez (module-eval), com fallback
- * nativo se o client gerado ainda não expõe a action.
- */
-const GET_CAPABILITIES_QUERY: GetCapabilitiesQuery = (() => {
-  const candidate = (api.builder as { getCapabilities?: unknown }).getCapabilities
-  if (
-    candidate &&
-    typeof (candidate as { useQuery?: unknown }).useQuery === "function"
-  ) {
-    return candidate as GetCapabilitiesQuery
-  }
-  return NATIVE_GET_CAPABILITIES_QUERY
-})()
-
 export function useCapabilities(projectId: string): {
   data: CapabilitiesEnvelope | undefined
   refetch: () => void
 } {
-  const query = GET_CAPABILITIES_QUERY.useQuery({ params: { id: projectId } })
+  // oRPC + TanStack: data do hook = envelope { data: CapabilitiesEnvelope,
+  // error: null } (wire idêntico ao Igniter); o payload fica em .data.
+  const query = useQuery(
+    orpc.builder.getCapabilities.queryOptions({ input: { id: projectId } }),
+  )
   const refetchRef = React.useRef(query.refetch)
   React.useEffect(() => {
     refetchRef.current = query.refetch
   }, [query.refetch])
   const raw = query.data
-  const data = React.useMemo<CapabilitiesEnvelope | undefined>(() => {
-    if (!raw || typeof raw !== "object") return undefined
-    const inner = (raw as { data?: CapabilitiesEnvelope }).data
-    return inner && typeof inner === "object"
-      ? inner
-      : (raw as CapabilitiesEnvelope)
-  }, [raw])
+  const data = React.useMemo<CapabilitiesEnvelope | undefined>(
+    // Cast: o handler devolve recommendations tipadas como unknown[] no wire
+    // (jsonificação) — o shape real é CapabilityRecommendation[].
+    () =>
+      raw && typeof raw === "object"
+        ? (raw.data as CapabilitiesEnvelope)
+        : undefined,
+    [raw],
+  )
   return { data, refetch: () => void refetchRef.current?.() }
 }
 

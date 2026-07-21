@@ -17,7 +17,7 @@ import {
 } from "@/client/components/ui/input-otp"
 import { Loader2, ArrowLeft } from "lucide-react"
 import Link from "next/link"
-import { api } from "@/igniter.client"
+import { client } from "@/orpc/client"
 import { translateAuthError } from "@/lib/utils/translate-auth-error"
 import { TwoFactorChallenge } from "@/client/components/auth/two-factor-challenge"
 import { getCsrfHeaders, ensureCsrfHeaders } from "@/client/hooks/use-csrf-token"
@@ -119,11 +119,12 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
       }
 
       try {
-        const { data, error: apiError } = await api.auth.checkMagicLinkStatus.mutate({
-          body: { sessionId: magicLinkSessionId }
+        // oRPC: erro de API agora é lançado — o catch do poll segue tentando.
+        const { data } = await client.auth.checkMagicLinkStatus({
+          sessionId: magicLinkSessionId
         })
 
-        if (apiError || !data) {
+        if (!data) {
           // Non-fatal — continue polling
           if (active) setTimeout(poll, POLL_INTERVAL)
           return
@@ -305,7 +306,7 @@ export function LoginOTPForm({ email, phone, magicLinkSessionId, className, ...p
           setCountdown(0)
           return
         }
-        await api.auth.loginOTP.mutate({ body: { email } })
+        await client.auth.loginOTP({ email })
       } else {
         setError("Para reenviar o código de cadastro, volte à página anterior")
         setCanResend(true)

@@ -13,7 +13,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { api } from "@/igniter.client"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { orpc } from "@/orpc/client"
 import { parseBuilderState } from "@/server/ai-module/builder/cards/builder-state"
 import type {
   Readiness,
@@ -109,13 +110,15 @@ function useHoistedReadiness(projectId: string): HoistedReadiness {
     setArmedAt(Date.now())
   }, [])
 
-  // 1ª passada sem polling (refetchInterval não é reativo a cada render no
-  // client gerado — ele lê `optionsRef.current`); por isso lemos a resposta e
-  // só então decidimos o intervalo na PRÓXIMA montagem do efeito de polling.
-  const query = api.builder.getReadiness.useQuery({
-    params: { id: projectId },
-    refetchInterval: undefined,
-  })
+  // 1ª passada sem polling; a resposta decide o intervalo na PRÓXIMA montagem
+  // do efeito de polling. oRPC: data = envelope { data: { success, data } } —
+  // unwrapReadiness desembrulha recursivamente.
+  const query = useQuery(
+    orpc.builder.getReadiness.queryOptions({
+      input: { id: projectId },
+      refetchInterval: undefined,
+    }),
+  )
 
   const rawReadiness = React.useMemo(
     () => unwrapReadiness(query.data) ?? undefined,
@@ -393,7 +396,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
 
   // ── Lifecycle mutations ─────────────────────────────────────────────────────
   // Rename: optimistic UI update, revert on error
-  const renameMutation = api.builder.renameProject.useMutation({
+  const renameMutation = useMutation(orpc.builder.renameProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto renomeado")
     },
@@ -404,10 +407,10 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         error instanceof Error ? error.message : "Erro ao renomear projeto"
       toast.error(message)
     },
-  })
+  }))
 
   // Archive: navigate back to /projetos on success
-  const archiveMutation = api.builder.archiveProject.useMutation({
+  const archiveMutation = useMutation(orpc.builder.archiveProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto arquivado")
       router.push("/projetos")
@@ -417,12 +420,12 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         error instanceof Error ? error.message : "Erro ao arquivar projeto"
       toast.error(message)
     },
-  })
+  }))
 
   // Duplicate: redirect to the new project on success
-  const duplicateMutation = api.builder.duplicateProject.useMutation({
+  const duplicateMutation = useMutation(orpc.builder.duplicateProject.mutationOptions({
     onSuccess: (result) => {
-      const newId = result?.data?.id
+      const newId = result?.data?.data?.id
       toast.success("Projeto duplicado")
       if (newId) {
         router.push(`/projetos/${newId}?tab=overview`)
@@ -435,10 +438,10 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         error instanceof Error ? error.message : "Erro ao duplicar projeto"
       toast.error(message)
     },
-  })
+  }))
 
   // Restore: archived → draft, refresh to update the status badge in place
-  const unarchiveMutation = api.builder.unarchiveProject.useMutation({
+  const unarchiveMutation = useMutation(orpc.builder.unarchiveProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto restaurado")
       router.refresh()
@@ -448,10 +451,10 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         error instanceof Error ? error.message : "Erro ao restaurar projeto"
       toast.error(message)
     },
-  })
+  }))
 
   // Delete: PERMANENT — navigate back to /projetos on success
-  const deleteMutation = api.builder.deleteProject.useMutation({
+  const deleteMutation = useMutation(orpc.builder.deleteProject.mutationOptions({
     onSuccess: () => {
       toast.success("Projeto excluído permanentemente")
       router.push("/projetos")
@@ -461,7 +464,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         error instanceof Error ? error.message : "Erro ao excluir projeto"
       toast.error(message)
     },
-  })
+  }))
 
   const handleTabChange = React.useCallback((tab: PreviewTab) => {
     setActiveTab(tab)
@@ -488,7 +491,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         // Optimistic update: reflect change immediately in the UI
         setName(trimmed)
         setIsEditingName(false)
-        renameMutation.mutate({ params: { id: project.id }, body: { name: trimmed } })
+        renameMutation.mutate({ id: project.id, name: trimmed })
       } else {
         setName(project.name)
         setIsEditingName(false)
@@ -508,7 +511,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
         return
       }
       if (action === "duplicate") {
-        duplicateMutation.mutate({ params: { id: project.id }, body: {} })
+        duplicateMutation.mutate({ id: project.id })
         return
       }
     },
@@ -545,7 +548,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <AlertDialogAction
             onClick={() =>
-              archiveMutation.mutate({ params: { id: project.id }, body: {} })
+              archiveMutation.mutate({ id: project.id })
             }
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
@@ -570,7 +573,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <AlertDialogAction
             onClick={() =>
-              deleteMutation.mutate({ params: { id: project.id } })
+              deleteMutation.mutate({ id: project.id })
             }
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
@@ -704,10 +707,7 @@ function WorkspaceContent({ project, initialMessages }: WorkspaceProps) {
               {project.status === "archived" ? (
                 <DropdownMenuItem
                   onClick={() =>
-                    unarchiveMutation.mutate({
-                      params: { id: project.id },
-                      body: {},
-                    })
+                    unarchiveMutation.mutate({ id: project.id })
                   }
                 >
                   Restaurar
