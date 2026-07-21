@@ -12,7 +12,7 @@
  * além do banco (padrão dos testes existentes do módulo messages).
  *
  * Rodar:
- *   npx vitest run --config src/orpc-spike/vitest.config.spike.ts
+ *   npx vitest run --config src/orpc/vitest.config.orpc.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -33,7 +33,7 @@ vi.mock('@/server/services/database', () => ({
 
 import { database } from '@/server/services/database'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET } from '@/app/api/orpc-spike/[[...rest]]/route'
+import { GET } from '@/app/api/orpc/[[...rest]]/route'
 
 const db = database as unknown as {
   user: { findUnique: ReturnType<typeof vi.fn> }
@@ -42,7 +42,7 @@ const db = database as unknown as {
   chatSession: { findMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> }
 }
 
-const BASE = 'http://localhost:3000/api/orpc-spike'
+const BASE = 'http://localhost:3000/api/orpc'
 
 function authedUser() {
   return {

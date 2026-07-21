@@ -13,7 +13,7 @@
  * _shared/helpers (só o Prisma é mockado — padrão dos testes do spike).
  *
  * Rodar:
- *   npx vitest run --config src/orpc-spike/vitest.config.spike.ts
+ *   npx vitest run --config src/orpc/vitest.config.orpc.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -44,7 +44,7 @@ vi.mock('@/lib/geocoding/ip-geolocation', () => ({ getIpGeolocation: vi.fn() }))
 
 import { database } from '@/server/services/database'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc-spike/[[...rest]]/route'
+import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
 
 const db = database as unknown as {
   user: { findUnique: ReturnType<typeof vi.fn> }
@@ -57,7 +57,7 @@ const db = database as unknown as {
   auditLog: { create: ReturnType<typeof vi.fn> }
 }
 
-const BASE = 'http://localhost:3000/api/orpc-spike'
+const BASE = 'http://localhost:3000/api/orpc'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 function authedUser() {

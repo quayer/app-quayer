@@ -14,7 +14,7 @@
  *   Na migração real este arquivo vive em src/app/api/v1/[[...all]]/route.ts
  *   (substituindo o catch-all do Igniter) com prefix: '/api/v1', e os paths
  *   declarados nas procedures são exatamente os paths hoje servidos pelo
- *   Igniter. No spike o mount usa /api/orpc-spike apenas para NÃO conflitar
+ *   Igniter. No spike o mount usa /api/orpc apenas para NÃO conflitar
  *   com o Igniter ainda ativo em /api/v1 — a tabela de rotas é idêntica.
  *
  * Equivalente Igniter substituído: nextRouteHandlerAdapter(AppRouter) em
@@ -22,7 +22,7 @@
  */
 import { OpenAPIHandler } from '@orpc/openapi/fetch'
 import { ZodSmartCoercionPlugin } from '@orpc/zod'
-import { appRouter } from '@/orpc-spike/router'
+import { appRouter } from '@/orpc/router'
 
 const handler = new OpenAPIHandler(appRouter, {
   // Coerção automática de query strings -> tipos do schema (equivale ao
@@ -31,11 +31,11 @@ const handler = new OpenAPIHandler(appRouter, {
   plugins: [new ZodSmartCoercionPlugin()],
 })
 
-const SPIKE_PREFIX = '/api/orpc-spike' as const
+const ORPC_PREFIX = '/api/orpc' as const
 
 async function handle(request: Request): Promise<Response> {
   const { response } = await handler.handle(request, {
-    prefix: SPIKE_PREFIX,
+    prefix: ORPC_PREFIX,
     context: {
       headers: request.headers,
     },
