@@ -7,16 +7,19 @@
  *   email-otp    ✅ loginOTP, verifyLoginOTP, signupOTP, verifySignupOTP, verifyEmail
  *   magic-link   ✅ checkMagicLinkStatus, verifyMagicLink
  *   oauth-google ✅ googleAuth, googleCallback
- *   passkey, phone-otp, totp, identity — pendentes
+ *   identity     ✅ listUsers, linked-accounts, otp-preferences, me, avatar
+ *   passkey, phone-otp, totp — pendentes
  */
 import { sessionActions } from './session/session.orpc'
 import { emailOtpActions } from './email-otp/email-otp.orpc'
 import { magicLinkActions } from './magic-link/magic-link.orpc'
 import { oauthGoogleActions } from './oauth-google/oauth-google.orpc'
+import { identityActions } from './identity/identity.orpc'
 
 export const auth = {
   ...sessionActions,
   ...emailOtpActions,
   ...magicLinkActions,
   ...oauthGoogleActions,
+  ...identityActions,
 }
