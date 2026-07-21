@@ -14,8 +14,9 @@
  *                  media (2) + knowledge (3) + knowledgeSource (3) = 14 actions
  *   B4 channel + deploy ✅ channelCredentials (2) + provisionWhatsApp (1) +
  *                  refreshQr (1) + deploy (4) = 8 actions
- *   B5 identity/calendar/connections/pricing/credential/capabilities/
- *      integrations — pendente
+ *   B5 identity (2) + calendar (3) + eventsPreview (1) + connections (1) +
+ *      pricing (4) + credential (3) + capabilities (1) ✅ = 15 actions
+ *   B6 integrations — pendente
  */
 import { crudActions } from './projects/routes/crud.orpc'
 import { promptActions } from './projects/routes/prompt.orpc'
@@ -33,6 +34,13 @@ import { channelCredentialsActions } from './channel/channel-credentials.orpc'
 import { provisionWhatsAppActions } from './channel/provision-whatsapp.orpc'
 import { refreshQrActions } from './channel/refresh-qr.orpc'
 import { deployActions } from './deploy/deploy.orpc'
+import { identityActions } from './identity/identity.orpc'
+import { calendarActions } from './calendar/calendar.orpc'
+import { calendarEventsPreviewActions } from './calendar/calendar-events-preview.orpc'
+import { connectionsListActions } from './connections/connections-list.orpc'
+import { pricingActions } from './pricing/pricing.orpc'
+import { credentialActions } from './credential/credential.orpc'
+import { capabilitiesActions } from './capabilities/capabilities.orpc'
 
 export const builder = {
   ...crudActions,
@@ -51,4 +59,11 @@ export const builder = {
   ...provisionWhatsAppActions,
   ...refreshQrActions,
   ...deployActions,
+  ...identityActions,
+  ...calendarActions,
+  ...calendarEventsPreviewActions,
+  ...connectionsListActions,
+  ...pricingActions,
+  ...credentialActions,
+  ...capabilitiesActions,
 }

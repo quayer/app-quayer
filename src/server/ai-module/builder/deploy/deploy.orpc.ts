@@ -296,4 +296,7 @@ export const publishVersion = authed
     }
   })
 
-export const deployActions = { publish, publishVersion, status, rollback }
+// NOTA: chave `deployStatus` (não `status`) — no controller Igniter o spread
+// de calendarRoutes SOMBREAVA deployRoutes.status no client (api.builder.status
+// = calendar), mas as URLs são distintas; aqui as duas rotas ficam vivas.
+export const deployActions = { publish, publishVersion, deployStatus: status, rollback }
