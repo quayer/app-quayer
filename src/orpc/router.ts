@@ -10,14 +10,17 @@
  *   deviceSessions  3 actions  ✅
  *   departments     5 actions  ✅ (primeiro colocalizado)
  *   providers       6 actions  ✅
- *   logs(+sse)      8 actions  — próximo
- *   auth           38 actions
+ *   logs            7 actions  ✅ (a 8ª é o SSE /logs/stream — fica no
+ *                                 Igniter até o cutover, vira route handler
+ *                                 Next puro na mesma URL)
+ *   auth           38 actions  — próximo
  *   builder        72 actions
  */
 import { list, getById, listSessions } from './messages.router'
 import { deviceSessions } from './device-sessions.router'
 import { departments } from '@/server/communication/departments/departments.orpc'
 import { providers } from '@/server/core/providers/providers.orpc'
+import { logs } from '@/server/features-module/logs/controllers/logs.orpc'
 
 export const appRouter = {
   messages: {
@@ -28,4 +31,5 @@ export const appRouter = {
   deviceSessions,
   departments,
   providers,
+  logs,
 }
