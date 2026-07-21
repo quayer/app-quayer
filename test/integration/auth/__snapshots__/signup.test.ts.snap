@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /api/v1/auth/signup-otp (auth.signupOTP) > snapshot of signup-otp response shape 1`] = `
+{
+  "hasData": true,
+  "status": 200,
+  "success": true,
+}
+`;
+
+exports[`POST /api/v1/auth/verify-signup-otp (auth.verifySignupOTP) > snapshot of verify-signup-otp error shape 1`] = `
+{
+  "hasError": true,
+  "status": 400,
+  "success": false,
+}
+`;

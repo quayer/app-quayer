@@ -1,0 +1,15 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /api/v1/auth/login-otp (auth.loginOTP) > snapshot of success response shape 1`] = `
+{
+  "hasData": true,
+  "keys": [
+    "isNewUser",
+    "magicLinkSessionId",
+    "message",
+    "sent",
+  ],
+  "status": 200,
+  "success": true,
+}
+`;

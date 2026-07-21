@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`POST /api/v1/auth/verify-login-otp (auth.verifyLoginOTP) > snapshot of error response shape (wrong OTP) 1`] = `
+{
+  "hasError": true,
+  "status": 400,
+  "success": false,
+}
+`;
