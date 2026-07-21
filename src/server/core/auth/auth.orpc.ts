@@ -9,7 +9,8 @@
  *   oauth-google ✅ googleAuth, googleCallback
  *   identity     ✅ listUsers, linked-accounts, otp-preferences, me, avatar
  *   phone-otp    ✅ loginOTPPhone, verifyLoginOTPPhone (WhatsApp via UAZAPI)
- *   passkey, totp — pendentes
+ *   totp         ✅ setup/verify/devices, 2fa/verify, disable*, regenerate
+ *   passkey — pendente
  */
 import { sessionActions } from './session/session.orpc'
 import { emailOtpActions } from './email-otp/email-otp.orpc'
@@ -17,6 +18,7 @@ import { magicLinkActions } from './magic-link/magic-link.orpc'
 import { oauthGoogleActions } from './oauth-google/oauth-google.orpc'
 import { identityActions } from './identity/identity.orpc'
 import { phoneOtpActions } from './phone-otp/phone-otp.orpc'
+import { totpActions } from './totp/totp.orpc'
 
 export const auth = {
   ...sessionActions,
@@ -25,4 +27,5 @@ export const auth = {
   ...oauthGoogleActions,
   ...identityActions,
   ...phoneOtpActions,
+  ...totpActions,
 }
