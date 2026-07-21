@@ -1,0 +1,28 @@
+/**
+ * Builder — agregador do namespace (espelho do builder.controller.ts).
+ *
+ * Mantém o contrato do client (api.builder.*) unificando os lotes migrados.
+ * Cresce lote a lote:
+ *   B1 projects ✅ crud (9) + prompt (3) + metrics (2) + channel (4) +
+ *                  proactive-history (1) = 19 actions
+ *                  (playgroundStream é SSE — fica no Igniter até o cutover,
+ *                  vira route handler Next puro, como /logs/stream)
+ *   B2 chat + cards — próximo (sendMessage é SSE, idem)
+ *   B3 sources + media + knowledge — pendente
+ *   B4 channel + deploy — pendente
+ *   B5 identity/calendar/connections/pricing/credential/capabilities/
+ *      integrations — pendente
+ */
+import { crudActions } from './projects/routes/crud.orpc'
+import { promptActions } from './projects/routes/prompt.orpc'
+import { metricsActions } from './projects/routes/metrics.orpc'
+import { channelActions } from './projects/routes/channel.orpc'
+import { proactiveHistoryActions } from './projects/routes/proactive-history.orpc'
+
+export const builder = {
+  ...crudActions,
+  ...promptActions,
+  ...metricsActions,
+  ...channelActions,
+  ...proactiveHistoryActions,
+}
