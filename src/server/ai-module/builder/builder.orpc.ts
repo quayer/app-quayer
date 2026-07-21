@@ -16,7 +16,10 @@
  *                  refreshQr (1) + deploy (4) = 8 actions
  *   B5 identity (2) + calendar (3) + eventsPreview (1) + connections (1) +
  *      pricing (4) + credential (3) + capabilities (1) ✅ = 15 actions
- *   B6 integrations — pendente
+ *   B6 integrations ✅ listCreate/creds/test (5) + lifecycle (4) = 9 actions
+ *
+ * TOTAL builder: 72 actions — 69 migradas + 3 SSE que ficam no Igniter até a
+ * fase 4 (playgroundStream, chat.sendMessage, cards.submitCard).
  */
 import { crudActions } from './projects/routes/crud.orpc'
 import { promptActions } from './projects/routes/prompt.orpc'
@@ -41,6 +44,8 @@ import { connectionsListActions } from './connections/connections-list.orpc'
 import { pricingActions } from './pricing/pricing.orpc'
 import { credentialActions } from './credential/credential.orpc'
 import { capabilitiesActions } from './capabilities/capabilities.orpc'
+import { integrationsListCreateActions } from './integrations/integrations.orpc'
+import { integrationLifecycleActions } from './integrations/integration-lifecycle.orpc'
 
 export const builder = {
   ...crudActions,
@@ -66,4 +71,6 @@ export const builder = {
   ...pricingActions,
   ...credentialActions,
   ...capabilitiesActions,
+  ...integrationsListCreateActions,
+  ...integrationLifecycleActions,
 }
