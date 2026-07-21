@@ -53,7 +53,7 @@ vi.mock('@/lib/email', () => ({
 
 import { database } from '@/server/services/database'
 import { emailService } from '@/lib/email'
-import { POST } from '@/app/api/orpc/[[...rest]]/route'
+import { POST } from '@/orpc/serve'
 
 const db = database as unknown as Record<
   string,
@@ -61,7 +61,7 @@ const db = database as unknown as Record<
 >
 const email = emailService as unknown as Record<string, ReturnType<typeof vi.fn>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 function knownUser(overrides: Record<string, unknown> = {}) {

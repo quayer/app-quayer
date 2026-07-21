@@ -60,13 +60,13 @@ import { builderProjectRepository } from '@/server/ai-module/builder/projects/pr
 import { listRecentProjects } from '@/server/ai-module/builder/queries'
 import { attachConnectionToProjectAgent } from '@/server/ai-module/builder/channel/attach-to-agent'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST, PATCH, DELETE } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST, PATCH, DELETE } from '@/orpc/serve'
 
 const repo = builderProjectRepository as unknown as Record<string, ReturnType<typeof vi.fn>>
 const recentProjects = listRecentProjects as unknown as ReturnType<typeof vi.fn>
 const attachFn = attachConnectionToProjectAgent as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const PROJECT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b51'
 const CONNECTION_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b52'
 

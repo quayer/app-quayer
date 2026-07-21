@@ -60,12 +60,12 @@ import { encrypt } from '@/lib/crypto'
 import { hashPassword } from '@/lib/auth/bcrypt'
 import { sign2faChallenge } from '@/server/core/auth/_shared/helpers'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 const email = emailService as unknown as Record<string, ReturnType<typeof vi.fn>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 // Secret TOTP compartilhado pelos testes; no "banco" fica criptografado.

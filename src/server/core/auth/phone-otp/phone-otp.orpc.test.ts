@@ -37,12 +37,12 @@ vi.mock('@/lib/uaz/whatsapp-otp', () => ({
 
 import { database } from '@/server/services/database'
 import { sendWhatsAppOTP } from '@/lib/uaz/whatsapp-otp'
-import { POST } from '@/app/api/orpc/[[...rest]]/route'
+import { POST } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 const sendOtp = sendWhatsAppOTP as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 const PHONE = '+55 (11) 91234-5678'
 const NORMALIZED = '5511912345678'

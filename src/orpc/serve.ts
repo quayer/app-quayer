@@ -1,5 +1,8 @@
 /**
- * oRPC SPIKE — catch-all Next.js (App Router) para o router do spike.
+ * oRPC — handler HTTP compartilhado (produção + testes).
+ *
+ * Extraído do antigo mount de teste `src/app/api/v1/[[...rest]]/route.ts`
+ * (aposentado no cutover). O prefixo agora é o de produção: `/api/v1`.
  *
  * COMO O PREFIXO/MOUNT FUNCIONA NO oRPC:
  *   - Cada procedure declara seu path ABSOLUTO relativo ao prefixo via
@@ -10,15 +13,10 @@
  *     estáticos têm precedência sobre params — coberto por teste).
  *   - URL final = prefix + route.path.
  *
- * PROVA DE PRESERVAÇÃO DE /api/v1/*:
- *   Na migração real este arquivo vive em src/app/api/v1/[[...all]]/route.ts
- *   (substituindo o catch-all do Igniter) com prefix: '/api/v1', e os paths
- *   declarados nas procedures são exatamente os paths hoje servidos pelo
- *   Igniter. No spike o mount usa /api/orpc apenas para NÃO conflitar
- *   com o Igniter ainda ativo em /api/v1 — a tabela de rotas é idêntica.
- *
- * Equivalente Igniter substituído: nextRouteHandlerAdapter(AppRouter) em
- * src/app/api/v1/[[...all]]/route.ts.
+ * Usado por:
+ *   - `src/app/api/v1/[[...all]]/route.ts` (catch-all de produção) para tudo
+ *     que NÃO for uma das 4 rotas SSE que permanecem no Igniter.
+ *   - Suites `*.orpc.test.ts` (importam GET/POST/... daqui diretamente).
  */
 import { OpenAPIHandler } from '@orpc/openapi/fetch'
 import { ResponseHeadersPlugin } from '@orpc/server/plugins'
@@ -34,9 +32,13 @@ const handler = new OpenAPIHandler(appRouter, {
   plugins: [new ZodSmartCoercionPlugin(), new ResponseHeadersPlugin()],
 })
 
-const ORPC_PREFIX = '/api/orpc' as const
+export const ORPC_PREFIX = '/api/v1' as const
 
-async function handle(request: Request): Promise<Response> {
+/**
+ * Delegado ao OpenAPIHandler preservando o Request cru (body/headers não são
+ * lidos antes da delegação — o handler consome o stream original).
+ */
+export async function handleOrpcRequest(request: Request): Promise<Response> {
   const { response } = await handler.handle(request, {
     prefix: ORPC_PREFIX,
     context: {
@@ -48,8 +50,10 @@ async function handle(request: Request): Promise<Response> {
   return response ?? Response.json({ error: 'Not Found' }, { status: 404 })
 }
 
-export const GET = handle
-export const POST = handle
-export const PUT = handle
-export const PATCH = handle
-export const DELETE = handle
+// Exports com nomes de método HTTP para as suites de teste, que importam
+// `{ GET, POST, ... }` e chamam como um route handler do Next.
+export const GET = handleOrpcRequest
+export const POST = handleOrpcRequest
+export const PUT = handleOrpcRequest
+export const PATCH = handleOrpcRequest
+export const DELETE = handleOrpcRequest

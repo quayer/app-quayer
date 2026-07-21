@@ -44,7 +44,7 @@ vi.mock('@/lib/geocoding/ip-geolocation', () => ({ getIpGeolocation: vi.fn() }))
 
 import { database } from '@/server/services/database'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const db = database as unknown as {
   user: { findUnique: ReturnType<typeof vi.fn> }
@@ -57,7 +57,7 @@ const db = database as unknown as {
   auditLog: { create: ReturnType<typeof vi.fn> }
 }
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 function authedUser() {

@@ -50,14 +50,14 @@ vi.mock('@/lib/auth/google-oauth', () => ({
 import { database } from '@/server/services/database'
 import { getGoogleTokens, getGoogleUserInfo } from '@/lib/auth/google-oauth'
 import { emailService } from '@/lib/email'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 const googleTokens = getGoogleTokens as unknown as ReturnType<typeof vi.fn>
 const googleUserInfo = getGoogleUserInfo as unknown as ReturnType<typeof vi.fn>
 const email = emailService as unknown as Record<string, ReturnType<typeof vi.fn>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const STATE = 'a'.repeat(64)
 
 function knownUser(overrides: Record<string, unknown> = {}) {

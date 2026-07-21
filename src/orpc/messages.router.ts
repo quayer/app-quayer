@@ -11,7 +11,7 @@
  *   oRPC declara o path COMPLETO relativo ao prefixo do handler via
  *   `.route({ method, path })` — o prefixo é dado no mount (route handler).
  *   Com prefix '/api/v1' os paths finais são idênticos aos originais.
- *   (No spike o mount usa prefix '/api/orpc' para não conflitar com o
+ *   (No spike o mount usa prefix '/api/v1' para não conflitar com o
  *   Igniter que ainda serve /api/v1 — a tabela de rotas é a mesma.)
  *   Diferença sintática: path param é `{id}` (OpenAPI) em vez de `:id`.
  *

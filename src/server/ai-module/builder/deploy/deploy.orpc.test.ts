@@ -43,13 +43,13 @@ import {
 import { publishVersion as publishVersionStep } from '@/server/ai-module/builder/deploy/publish-version.handler'
 import { rollbackDeployment } from '@/server/ai-module/builder/deploy/rollback.handler'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const publishStepFn = publishVersionStep as unknown as ReturnType<typeof vi.fn>
 const blockerFn = assertNoCriticalRefinementPublishBlocker as unknown as ReturnType<typeof vi.fn>
 const rollbackFn = rollbackDeployment as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const PROJECT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b51'
 const VERSION_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b56'
 const DEPLOYMENT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b57'

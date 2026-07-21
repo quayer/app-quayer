@@ -64,12 +64,12 @@ import {
   setStatus,
 } from '@/server/ai-module/builder/integrations/integration.repository'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const listFn = listIntegrations as unknown as ReturnType<typeof vi.fn>
 const setStatusFn = setStatus as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const PROJECT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b51'
 const INTEGRATION_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b60'
 

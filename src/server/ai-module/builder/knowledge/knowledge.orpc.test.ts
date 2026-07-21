@@ -50,14 +50,14 @@ import {
 } from '@/server/ai-module/builder/knowledge/knowledge-helpers'
 import { ingestSource } from '@/server/ai-module/ai-agents/knowledge/knowledge-ingestion.service'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST, PATCH, DELETE } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST, PATCH, DELETE } from '@/orpc/serve'
 
 const loadProjectFn = loadProject as unknown as ReturnType<typeof vi.fn>
 const resolveCollectionFn = resolveCollectionId as unknown as ReturnType<typeof vi.fn>
 const ensureCollectionIdFn = ensureCollectionIdOrThrow as unknown as ReturnType<typeof vi.fn>
 const ingestFn = ingestSource as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const PROJECT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b51'
 const SOURCE_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b55'
 

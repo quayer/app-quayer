@@ -32,7 +32,7 @@ import { database } from '@/server/services/database'
 import { loggerService } from '@/lib/logs/logger.service'
 import { aiLogAnalyzer } from '@/lib/logs/ai-analyzer.service'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST } from '@/orpc/serve'
 
 const db = database as unknown as { user: { findUnique: ReturnType<typeof vi.fn> } }
 const logger = loggerService as unknown as {
@@ -46,7 +46,7 @@ const analyzer = aiLogAnalyzer as unknown as {
   getRecentAnalyses: ReturnType<typeof vi.fn>
 }
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 
 function userWithRole(role: string) {
   return {

@@ -50,14 +50,14 @@ import {
 } from '@/server/ai-module/builder/knowledge/knowledge-helpers'
 import { mediaCurationRepository } from '@/server/ai-module/builder/media/media-curation.repository'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, PATCH } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, PATCH } from '@/orpc/serve'
 
 const loadProjectFn = loadProject as unknown as ReturnType<typeof vi.fn>
 const resolveCollectionFn = resolveCollectionId as unknown as ReturnType<typeof vi.fn>
 const signFn = storage.getSignedUrl as unknown as ReturnType<typeof vi.fn>
 const repo = mediaCurationRepository as unknown as Record<string, ReturnType<typeof vi.fn>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const PROJECT_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b51'
 const MEDIA_ID = '3c6f0f6e-8db1-4bfb-9c86-0e6c9f6f2b54'
 

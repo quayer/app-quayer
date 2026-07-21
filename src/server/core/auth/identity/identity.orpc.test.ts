@@ -36,12 +36,12 @@ vi.mock('@/server/services/storage', () => ({
 import { database } from '@/server/services/database'
 import { storage } from '@/server/services/storage'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST, PATCH, DELETE } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST, PATCH, DELETE } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 const storageMock = storage as unknown as Record<string, ReturnType<typeof vi.fn>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 // PNG 1x1 válido (magic bytes 89 50 4E 47 0D 0A 1A 0A)

@@ -29,7 +29,7 @@ import { spikeRouter } from './messages.router'
 // O link aponta para o mount do spike; na migração real seria '/api/v1' e as
 // URLs chamadas pelo browser seriam exatamente as de hoje (GET /api/v1/messages?...).
 const link = new OpenAPILink(spikeRouter, {
-  url: 'http://localhost:3000/api/orpc',
+  url: 'http://localhost:3000/api/v1',
 })
 
 // JsonifiedClient reflete a serialização JSON (Date -> string etc.) — mais

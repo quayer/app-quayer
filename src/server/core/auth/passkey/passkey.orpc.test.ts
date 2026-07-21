@@ -58,7 +58,7 @@ import {
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { POST, DELETE } from '@/app/api/orpc/[[...rest]]/route'
+import { POST, DELETE } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 const genRegOpts = generateRegistrationOptions as unknown as ReturnType<typeof vi.fn>
@@ -66,7 +66,7 @@ const verifyReg = verifyRegistrationResponse as unknown as ReturnType<typeof vi.
 const genAuthOpts = generateAuthenticationOptions as unknown as ReturnType<typeof vi.fn>
 const verifyAuth = verifyAuthenticationResponse as unknown as ReturnType<typeof vi.fn>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const CSRF = 'csrf-token-de-teste-0123456789'
 
 const AUTH_RESPONSE = {

@@ -44,11 +44,11 @@ vi.mock('@/lib/email', () => ({
 
 import { database } from '@/server/services/database'
 import { signMagicLinkToken } from '@/lib/auth/jwt'
-import { POST } from '@/app/api/orpc/[[...rest]]/route'
+import { POST } from '@/orpc/serve'
 
 const db = database as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 const MLPOLL_SECRET = 'segredo-polling-0123456789abcdef'
 const MLPOLL_HASH = crypto.createHash('sha256').update(MLPOLL_SECRET).digest('hex')
 

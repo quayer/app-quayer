@@ -41,7 +41,7 @@ vi.mock('@/server/core/api-keys/api-keys.repository', () => ({
 import { database } from '@/server/services/database'
 import { apiKeysRepository } from '@/server/core/api-keys/api-keys.repository'
 import { signAccessToken } from '@/lib/auth/jwt'
-import { GET, POST, DELETE } from '@/app/api/orpc/[[...rest]]/route'
+import { GET, POST, DELETE } from '@/orpc/serve'
 
 const db = database as unknown as {
   user: { findUnique: ReturnType<typeof vi.fn> }
@@ -64,7 +64,7 @@ const apiKeys = apiKeysRepository as unknown as {
   updateLastUsed: ReturnType<typeof vi.fn>
 }
 
-const BASE = 'http://localhost:3000/api/orpc'
+const BASE = 'http://localhost:3000/api/v1'
 
 function authedUser() {
   return {
