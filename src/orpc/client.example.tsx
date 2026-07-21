@@ -52,7 +52,9 @@ export function MessagesListExample({ sessionId }: { sessionId: string }) {
   //  - m.content: string, m.createdAt: string (Date jsonificado), m.author:
   //    enum MessageAuthor — se o schema do Prisma mudar, isto quebra em
   //    compile-time.
-  const messages = data?.data ?? []
+  // data = { data: { data: Message[] }, error: null } — o envelope Igniter
+  // (ver envelope.ts) também flui tipado até o client.
+  const messages = data?.data.data ?? []
 
   if (isLoading) return <p>Carregando…</p>
   if (error) return <p>Erro: {error.message}</p>
@@ -75,5 +77,5 @@ export function SessionsListExample() {
     }),
   )
 
-  return <p>{data?.data.length ?? 0} sessões ativas</p>
+  return <p>{data?.data.data.length ?? 0} sessões ativas</p>
 }

@@ -26,6 +26,7 @@
 import { ORPCError } from '@orpc/server'
 import { z } from 'zod'
 import { database } from '@/server/services/database'
+import { ok } from './envelope'
 import { requireAuth } from './auth.middleware'
 import { base } from './base'
 
@@ -89,7 +90,7 @@ export const list = authed
       orderBy: { createdAt: 'asc' },
     })
 
-    return { data: messages }
+    return ok({ data: messages })
   })
 
 // ==========================================
@@ -120,7 +121,7 @@ export const getById = authed
       throw new ORPCError('NOT_FOUND', { message: 'Mensagem não encontrada' })
     }
 
-    return { data: message }
+    return ok({ data: message })
   })
 
 // ==========================================
@@ -161,7 +162,7 @@ export const listSessions = authed
       orderBy: { lastMessageAt: 'desc' },
     })
 
-    return { data: sessions }
+    return ok({ data: sessions })
   })
 
 /**

@@ -108,12 +108,14 @@ describe('oRPC — GET /device-sessions (list)', () => {
 
     expect(res.status).toBe(200)
     const body = await res.json()
-    // response.success(sessions) enviava o array SEM envelope { data }
-    expect(Array.isArray(body)).toBe(true)
-    expect(body).toEqual([
-      { id: 'ds-2', userId: 'user-1', isRevoked: false },
-      { id: 'ds-1', userId: 'user-1', isRevoked: false },
-    ])
+    // Envelope Igniter: response.success(sessions) -> { data: [...], error: null }
+    expect(body).toEqual({
+      data: [
+        { id: 'ds-2', userId: 'user-1', isRevoked: false },
+        { id: 'ds-1', userId: 'user-1', isRevoked: false },
+      ],
+      error: null,
+    })
 
     // Mesma query Prisma do handler original
     expect(db.deviceSession.findMany).toHaveBeenCalledWith({
@@ -187,7 +189,7 @@ describe('oRPC — POST /device-sessions/revoke (CSRF + IDOR + idempotência)', 
     )
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ message: 'Device session revoked' })
+    expect(await res.json()).toEqual({ data: { message: 'Device session revoked' }, error: null })
 
     // IDOR guard: busca restrita ao userId do requisitante
     expect(db.deviceSession.findFirst).toHaveBeenCalledWith({
@@ -241,7 +243,7 @@ describe('oRPC — POST /device-sessions/revoke (CSRF + IDOR + idempotência)', 
     )
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ message: 'Already revoked' })
+    expect(await res.json()).toEqual({ data: { message: 'Already revoked' }, error: null })
     expect(db.deviceSession.update).not.toHaveBeenCalled()
     expect(db.auditLog.create).not.toHaveBeenCalled()
   })
@@ -276,7 +278,7 @@ describe('oRPC — POST /device-sessions/revoke-all', () => {
     )
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ revokedCount: 3 })
+    expect(await res.json()).toEqual({ data: { revokedCount: 3 }, error: null })
     expect(db.deviceSession.updateMany).toHaveBeenCalledWith({
       where: { userId: 'user-1', isRevoked: false },
       data: { isRevoked: true, revokedAt: expect.any(Date) },
@@ -296,7 +298,7 @@ describe('oRPC — POST /device-sessions/revoke-all', () => {
     )
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ revokedCount: 2 })
+    expect(await res.json()).toEqual({ data: { revokedCount: 2 }, error: null })
     expect(db.deviceSession.updateMany).toHaveBeenCalledWith({
       where: { userId: 'user-1', isRevoked: false, NOT: { id: 'ds-atual' } },
       data: { isRevoked: true, revokedAt: expect.any(Date) },

@@ -84,12 +84,17 @@ describe('oRPC spike — GET /messages (list)', () => {
     )
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { data: Array<{ id: string }> }
+    // Envelope Igniter { data, error: null } preservado (ver envelope.ts);
+    // o payload do handler ({ data: messages }) fica dentro de data.
+    const body = (await res.json()) as { data: { data: Array<{ id: string }> }; error: null }
     expect(body).toEqual({
-      data: [
-        { id: 'msg-1', sessionId: 'sess-1', content: 'olá' },
-        { id: 'msg-2', sessionId: 'sess-1', content: 'oi' },
-      ],
+      data: {
+        data: [
+          { id: 'msg-1', sessionId: 'sess-1', content: 'olá' },
+          { id: 'msg-2', sessionId: 'sess-1', content: 'oi' },
+        ],
+      },
+      error: null,
     })
 
     // Mesmas queries Prisma do handler original (isolamento por org preservado)
@@ -148,8 +153,8 @@ describe('oRPC spike — tabela de rotas (precedência e paths)', () => {
     )
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { data: Array<{ id: string }> }
-    expect(body.data[0].id).toBe('sess-1')
+    const body = (await res.json()) as { data: { data: Array<{ id: string }> } }
+    expect(body.data.data[0].id).toBe('sess-1')
     // Se tivesse casado /messages/{id}, teria consultado message.findFirst.
     expect(db.message.findFirst).not.toHaveBeenCalled()
     expect(db.chatSession.findMany).toHaveBeenCalledWith({
@@ -169,8 +174,8 @@ describe('oRPC spike — tabela de rotas (precedência e paths)', () => {
     )
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { data: { id: string } }
-    expect(body.data.id).toBe('msg-9')
+    const body = (await res.json()) as { data: { data: { id: string } } }
+    expect(body.data.data.id).toBe('msg-9')
     expect(db.message.findFirst).toHaveBeenCalledWith({
       where: { id: 'msg-9', session: { organizationId: 'org-1' } },
     })

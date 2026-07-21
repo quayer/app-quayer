@@ -11,11 +11,12 @@
  *   revoke     POST /api/v1/device-sessions/revoke
  *   revokeAll  POST /api/v1/device-sessions/revoke-all
  *
- * Shapes de resposta preservados 1:1 (o frontend sessoes-tab.tsx consome
- * essas URLs com fetch cru):
- *   list       -> array puro de DeviceSession (response.success(sessions))
- *   revoke     -> { message: 'Device session revoked' } | { message: 'Already revoked' }
- *   revokeAll  -> { revokedCount: number }
+ * Shapes de resposta preservados 1:1 via ok() — envelope Igniter
+ * { data, error: null } (o frontend sessoes-tab.tsx consome essas URLs com
+ * fetch cru; ver envelope.ts):
+ *   list       -> { data: DeviceSession[], error: null }
+ *   revoke     -> { data: { message: ... }, error: null }
+ *   revokeAll  -> { data: { revokedCount: number }, error: null }
  *
  * Middlewares: authProcedure({required:true}) -> requireAuth;
  * csrfProcedure() -> requireCsrf (só nas mutations, como no original).
@@ -30,6 +31,7 @@ import { ORPCError } from '@orpc/server'
 import { z } from 'zod'
 import { database as db } from '@/server/services/database'
 import { createAuditLog } from '@/server/core/auth/_shared/helpers'
+import { ok } from './envelope'
 import { requireAuth } from './auth.middleware'
 import { requireCsrf } from './csrf.middleware'
 import { base } from './base'
@@ -69,8 +71,8 @@ export const list = authed
       orderBy: { lastActiveAt: 'desc' },
     })
 
-    // response.success(sessions) — array puro, sem envelope
-    return sessions
+    // response.success(sessions) -> { data: sessions, error: null }
+    return ok(sessions)
   })
 
 // ==========================================
@@ -103,7 +105,7 @@ export const revoke = authedCsrf
 
     // Idempotent: already revoked
     if (session.isRevoked) {
-      return { message: 'Already revoked' }
+      return ok({ message: 'Already revoked' })
     }
 
     await db.deviceSession.update({
@@ -118,7 +120,7 @@ export const revoke = authedCsrf
       { deviceSessionId },
     )
 
-    return { message: 'Device session revoked' }
+    return ok({ message: 'Device session revoked' })
   })
 
 // ==========================================
@@ -158,7 +160,7 @@ export const revokeAll = authedCsrf
       { count: result.count, excludedDeviceSessionId: currentDeviceSessionId ?? null },
     )
 
-    return { revokedCount: result.count }
+    return ok({ revokedCount: result.count })
   })
 
 /** Namespace espelhando o controller (api.deviceSessions.* no client Igniter). */
