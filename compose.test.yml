@@ -2,7 +2,10 @@
 # Not for dev, not for prod. Port 5433 to avoid dev DB conflict.
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector = postgres oficial + extensão vector (exigida pela
+    # migration 20260603040000_add_knowledge_rag; produção = Supabase, que já
+    # tem a extensão). postgres:16-alpine puro quebra o migrate deploy.
+    image: pgvector/pgvector:pg16
     container_name: quayer-test-postgres
     restart: "no"
     environment:
