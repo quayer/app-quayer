@@ -18,6 +18,8 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     testTimeout: 30000,
-    include: ['src/orpc/**/*.test.ts'],
+    // src/orpc = infra compartilhada; *.orpc.test.ts = testes colocalizados
+    // dos routers migrados (padrão a partir do departments).
+    include: ['src/orpc/**/*.test.ts', 'src/**/*.orpc.test.ts'],
   },
 })
