@@ -1,38 +1,33 @@
 /**
  * Integration test setup for auth endpoints (US-106B).
  *
- * Strategy: DIRECT INVOCATION via Igniter's `nextRouteHandlerAdapter`.
+ * Strategy: DIRECT INVOCATION do catch-all de PRODUÇÃO
+ * `src/app/api/v1/[[...all]]/route.ts` — desde o cutover Quayer→oRPC, é ele
+ * quem roteia /api/v1/* (oRPC para tudo; Igniter só para as 4 rotas SSE).
+ * A suíte exercita exatamente o pipeline que produção serve: roteamento
+ * oRPC, middlewares (auth/CSRF/turnstile), validação de input e envelope.
  *
- * Why direct invocation:
- *   `nextRouteHandlerAdapter(AppRouter)` returns plain async functions
- *   `(request: Request) => Promise<Response>`. We can construct a standard
- *   Fetch `Request` in-process and call `POST(request)` without booting a
- *   real Next.js server. This is the lightest-weight option, has no port
- *   coordination, and exercises the actual router/controller stack including
- *   Zod validation, procedures, and response shaping.
- *
- * Alternatives considered:
- *   - HTTP fetch against `next dev` (used by `test/api/auth.test.ts`): heavier,
- *     requires `npm run dev` running on port 3000.
- *   - Importing the controller and calling `handler()` directly: bypasses
- *     Igniter's request parsing / Zod validation, defeats integration purpose.
- *
- * Path resolution: Igniter is configured with `basePath: '/api/v1'` (see
- * `src/igniter.ts`). Auth controller has `path: '/auth'`. Each action declares
- * its own `path`, e.g. `/login-otp`. Final URL: `/api/v1/auth/login-otp`.
+ * Por que invocação direta: os exports do route handler são funções
+ * `(request: Request) => Promise<Response>` — construímos um Request padrão
+ * in-process, sem servidor Next, sem coordenação de porta.
  *
  * This file is imported by individual test files; it does not register vitest
  * hooks itself. Migrations are applied by `npm run test:db:up` before the
  * suite runs (see `scripts/test/db-up.sh`).
  */
-import { nextRouteHandlerAdapter } from '@igniter-js/core/adapters';
-import { AppRouter } from '@/igniter.router';
+import * as v1CatchAll from '@/app/api/v1/[[...all]]/route';
 
 /**
- * Cached adapter handlers. Built once per process. The same `AppRouter` is
- * reused across every test file (Igniter is stateless beyond DB/store).
+ * Handlers do catch-all de produção (oRPC + fallback SSE Igniter), um por
+ * método HTTP. Mesmo objeto para todos os test files do processo.
  */
-const handlers = nextRouteHandlerAdapter(AppRouter);
+const handlers: Record<string, (req: Request) => Promise<Response> | Response> = {
+  GET: v1CatchAll.GET,
+  POST: v1CatchAll.POST,
+  PUT: v1CatchAll.PUT,
+  PATCH: v1CatchAll.PATCH,
+  DELETE: v1CatchAll.DELETE,
+};
 
 /**
  * Base URL used purely so the constructed `Request` is well-formed. The host
@@ -141,6 +136,22 @@ export async function callAction<T = unknown>(
       } else {
         envelope = { success: true, data: b.data as T };
       }
+    } else if (!response.ok) {
+      // Shape de ERRO do oRPC pós-cutover: { defined, code, status, message,
+      // data? } (ORPCError serializado). Delta de wire aceito e documentado
+      // em src/orpc/envelope.ts — status codes preservados.
+      envelope = {
+        success: false,
+        error: {
+          code: typeof b.code === 'string' ? b.code : undefined,
+          message:
+            typeof b.message === 'string'
+              ? b.message
+              : typeof b.error === 'string'
+                ? b.error
+                : `HTTP ${response.status}`,
+        },
+      };
     }
   }
 
