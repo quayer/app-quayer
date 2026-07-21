@@ -12,7 +12,8 @@
  *                  card usa buildSseResponse — ficam no Igniter até a fase 4)
  *   B3 sources + media + knowledge ✅ sources (3) + sourceImages (3) +
  *                  media (2) + knowledge (3) + knowledgeSource (3) = 14 actions
- *   B4 channel + deploy — pendente
+ *   B4 channel + deploy ✅ channelCredentials (2) + provisionWhatsApp (1) +
+ *                  refreshQr (1) + deploy (4) = 8 actions
  *   B5 identity/calendar/connections/pricing/credential/capabilities/
  *      integrations — pendente
  */
@@ -28,6 +29,10 @@ import { sourceImagesActions } from './sources/source-images.orpc'
 import { mediaCurationActions } from './media/media-curation.orpc'
 import { knowledgeActions } from './knowledge/knowledge.orpc'
 import { knowledgeSourceActions } from './knowledge/knowledge-source.orpc'
+import { channelCredentialsActions } from './channel/channel-credentials.orpc'
+import { provisionWhatsAppActions } from './channel/provision-whatsapp.orpc'
+import { refreshQrActions } from './channel/refresh-qr.orpc'
+import { deployActions } from './deploy/deploy.orpc'
 
 export const builder = {
   ...crudActions,
@@ -42,4 +47,8 @@ export const builder = {
   ...mediaCurationActions,
   ...knowledgeActions,
   ...knowledgeSourceActions,
+  ...channelCredentialsActions,
+  ...provisionWhatsAppActions,
+  ...refreshQrActions,
+  ...deployActions,
 }
