@@ -10,7 +10,9 @@
  *   identity     ✅ listUsers, linked-accounts, otp-preferences, me, avatar
  *   phone-otp    ✅ loginOTPPhone, verifyLoginOTPPhone (WhatsApp via UAZAPI)
  *   totp         ✅ setup/verify/devices, 2fa/verify, disable*, regenerate
- *   passkey — pendente
+ *   passkey      ✅ register*, list, delete, login*, conditional*
+ *
+ * COMPLETO: os 8 subdomínios do auth.controller.ts estão migrados (36 actions).
  */
 import { sessionActions } from './session/session.orpc'
 import { emailOtpActions } from './email-otp/email-otp.orpc'
@@ -19,6 +21,7 @@ import { oauthGoogleActions } from './oauth-google/oauth-google.orpc'
 import { identityActions } from './identity/identity.orpc'
 import { phoneOtpActions } from './phone-otp/phone-otp.orpc'
 import { totpActions } from './totp/totp.orpc'
+import { passkeyActions } from './passkey/passkey.orpc'
 
 export const auth = {
   ...sessionActions,
@@ -28,4 +31,5 @@ export const auth = {
   ...identityActions,
   ...phoneOtpActions,
   ...totpActions,
+  ...passkeyActions,
 }
