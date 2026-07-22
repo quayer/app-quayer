@@ -9,6 +9,10 @@ import path from 'path'
 
 export default defineConfig({
   resolve: {
+    // Dual-package hazard do link file: do @caravela/core — força UMA cópia
+    // dos pacotes @orpc (a do app) para procedures Caravela e handler
+    // compartilharem a mesma instância.
+    dedupe: ['@orpc/server', '@orpc/client', '@orpc/contract', '@orpc/openapi', '@orpc/openapi-client', '@orpc/zod'],
     alias: {
       '@': path.resolve(__dirname, '../'),
     },

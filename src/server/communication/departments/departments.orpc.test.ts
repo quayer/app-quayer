@@ -29,6 +29,7 @@ vi.mock('@/server/services/database', () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
+    auditLog: { create: vi.fn() },
   },
 }))
 vi.mock('@/server/core/api-keys/api-keys.repository', () => ({

@@ -23,7 +23,9 @@
  */
 import { list, getById, listSessions } from './messages.router'
 import { deviceSessions } from './device-sessions.router'
-import { departments } from '@/server/communication/departments/departments.orpc'
+// DOGFOOD @caravela/core (SPEC-CORE §9): departments roda em caravela.* —
+// procedures Caravela SÃO procedures oRPC, o mount não muda.
+import { departments } from '@/server/communication/departments/departments.caravela'
 import { providers } from '@/server/core/providers/providers.orpc'
 import { logs } from '@/server/features-module/logs/controllers/logs.orpc'
 import { auth } from '@/server/core/auth/auth.orpc'

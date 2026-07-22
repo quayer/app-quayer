@@ -22,15 +22,25 @@ import { OpenAPIHandler } from '@orpc/openapi/fetch'
 import { ResponseHeadersPlugin } from '@orpc/server/plugins'
 import { ZodSmartCoercionPlugin } from '@orpc/zod'
 import { appRouter } from '@/orpc/router'
+import type { SpikeInitialContext } from '@/orpc/base'
 
-const handler = new OpenAPIHandler(appRouter, {
-  // Coerção automática de query strings -> tipos do schema (equivale ao
-  // comportamento do adapter do Igniter; os z.coerce dos schemas originais
-  // continuam funcionando de qualquer forma).
-  // ResponseHeadersPlugin: faz o merge do context.resHeaders (cookies de
-  // auth/CSRF escritos pelos handlers via cookieWriter) no response final.
-  plugins: [new ZodSmartCoercionPlugin(), new ResponseHeadersPlugin()],
-})
+// Cast de TRANSIÇÃO: o router mistura procedures oRPC cruas do app e
+// procedures @caravela/core (instaladas via link file:, com árvore de tipos
+// própria) — runtime-compatíveis ({ headers, resHeaders } + marcador
+// '~orpc'), mas nominalmente distintas para o tsc (dual-package do link).
+// O vitest deduplica os pacotes @orpc em runtime (resolve.dedupe). Morre
+// quando @caravela/core for dependência publicada (uma árvore só).
+const handler = new OpenAPIHandler<SpikeInitialContext>(
+  appRouter as never,
+  {
+    // Coerção automática de query strings -> tipos do schema (equivale ao
+    // comportamento do adapter do Igniter; os z.coerce dos schemas originais
+    // continuam funcionando de qualquer forma).
+    // ResponseHeadersPlugin: faz o merge do context.resHeaders (cookies de
+    // auth/CSRF escritos pelos handlers via cookieWriter) no response final.
+    plugins: [new ZodSmartCoercionPlugin(), new ResponseHeadersPlugin()],
+  } as never,
+)
 
 export const ORPC_PREFIX = '/api/v1' as const
 
