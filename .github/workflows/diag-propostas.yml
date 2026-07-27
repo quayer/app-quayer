@@ -1,0 +1,70 @@
+name: Diag Propostas Host
+
+# ============================================
+# Read-only: levanta o estado do host de producao antes de publicar
+# propostas.quayer.com. Nao altera nada.
+# ============================================
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Inspecionar host de producao
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coletar estado do host
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 5m
+          script: |
+            echo "=== IDENTIDADE ==="
+            whoami; hostname; echo "HOME=$HOME"; uname -sr
+
+            echo; echo "=== DISCO / MEMORIA ==="
+            df -h / | tail -2
+            free -m | head -2
+
+            echo; echo "=== DOCKER ==="
+            docker version --format '{{.Server.Version}}' 2>/dev/null || echo "docker indisponivel para este usuario"
+            docker compose version 2>/dev/null || echo "compose plugin ausente"
+            echo "-- containers --"
+            docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}' 2>/dev/null || true
+
+            echo; echo "=== PORTAS EM USO (3000-3300) ==="
+            (ss -lntp 2>/dev/null || netstat -lntp 2>/dev/null) | grep -E ':(3[0-2][0-9][0-9])\s' || echo "nenhuma porta 3000-3299 escutando"
+
+            echo; echo "=== REVERSE PROXY ==="
+            for svc in caddy nginx traefik cloudflared; do
+              if command -v $svc >/dev/null 2>&1; then echo "binario presente: $svc ($($svc version 2>/dev/null | head -1))"; fi
+              systemctl is-active $svc 2>/dev/null | sed "s/^/systemd $svc: /" || true
+            done
+            echo "-- arquivos de config candidatos --"
+            for f in /etc/caddy/Caddyfile /etc/nginx/nginx.conf /etc/cloudflared/config.yml; do
+              [ -e "$f" ] && echo "existe: $f" || echo "ausente: $f"
+            done
+            echo "-- vhosts declarados no Caddyfile (se legivel) --"
+            grep -oE '^[a-z0-9.-]+\.quayer\.com' /etc/caddy/Caddyfile 2>/dev/null || echo "(nao legivel por este usuario)"
+
+            echo; echo "=== SUDO ==="
+            sudo -n true 2>/dev/null && echo "sudo SEM senha: SIM" || echo "sudo SEM senha: NAO"
+            sudo -n -l 2>/dev/null | tail -5 || true
+
+            echo; echo "=== CERTIFICADO ORIGIN CLOUDFLARE ==="
+            ls -l /etc/ssl/cloudflare/ 2>/dev/null || echo "(sem acesso a /etc/ssl/cloudflare)"
+
+            echo; echo "=== DIRETORIOS DE APP ==="
+            ls -1 "$HOME" 2>/dev/null | head -20
+            ls -d /opt/* 2>/dev/null | head -10
+
+            echo; echo "=== NODE / RSYNC ==="
+            (node -v 2>/dev/null || echo "node ausente no host")
+            (command -v rsync >/dev/null && echo "rsync presente" || echo "rsync ausente")
+
+            echo; echo "=== TESTE LOCAL DO DOMINIO ==="
+            curl -sS -o /dev/null -w "app.quayer.com local: %{http_code}\n" --max-time 8 -H 'Host: app.quayer.com' http://127.0.0.1/ || true
+            curl -sS -o /dev/null -w "propostas.quayer.com local: %{http_code}\n" --max-time 8 -H 'Host: propostas.quayer.com' http://127.0.0.1/ || true
